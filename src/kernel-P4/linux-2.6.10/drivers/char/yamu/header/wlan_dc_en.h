@@ -1,0 +1,1 @@
+#define	CONFIG_WLAN_DC_EN 1

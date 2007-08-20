@@ -1,0 +1,23 @@
+#!/bin/sh
+
+DRIVER=usb-smlinux
+ARCH=${ARCH-i586}
+CC=${CC-gcc}
+if [ "$ARCH" = "i586" -o "$ARCH" = "i686" ]; then
+	ARCH_CFLAGS="-Wall -Wstrict-prototypes -Wno-trigraphs -O2 -fno-strict-aliasing -fno-common -fomit-frame-pointer -pipe -mpreferred-stack-boundary=2 -march=$ARCH"
+else
+	echo "Unsupported machine architecture: $ARCH !!"
+	exit 1
+fi
+CFLAGS=${CFLAGS-$ARCH_CFLAGS}
+
+echo "Building $DRIVER..."
+echo "$CC -D__KERNEL__ -DMODULE -I/lib/modules/`uname -r`/build/include $CFLAGS -c $DRIVER.c -o $DRIVER.o"
+$CC -D__KERNEL__ -DMODULE -I/lib/modules/`uname -r`/build/include $CFLAGS -c $DRIVER.c -o $DRIVER.o
+if [ "$?" = 0 ]; then
+	echo "Successfully done."
+	exit 0
+else
+	echo "Failed to build $DRIVER !!"
+	exit 1
+fi

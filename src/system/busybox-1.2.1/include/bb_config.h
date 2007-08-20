@@ -1,0 +1,2688 @@
+#ifndef BB_CONFIG_H
+#define BB_CONFIG_H
+/*
+ * Automatically generated header file: don't edit
+ */
+
+/* Version Number */
+#define BB_VER "1.2.1"
+#define BB_BT "2007.08.20-15:50+0000"
+
+#define HAVE_DOT_CONFIG 1
+#define ENABLE_DOT_CONFIG 1
+#define USE_DOT_CONFIG(...)  __VA_ARGS__
+#define SKIP_DOT_CONFIG(...)
+
+
+/*
+ * Busybox Settings
+ */
+
+/*
+ * General Configuration
+ */
+#define CONFIG_NITPICK 1
+#define ENABLE_NITPICK 1
+#define USE_NITPICK(...)  __VA_ARGS__
+#define SKIP_NITPICK(...)
+
+#define CONFIG_FEATURE_BUFFERS_USE_MALLOC 1
+#define ENABLE_FEATURE_BUFFERS_USE_MALLOC 1
+#define USE_FEATURE_BUFFERS_USE_MALLOC(...)  __VA_ARGS__
+#define SKIP_FEATURE_BUFFERS_USE_MALLOC(...)
+
+#undef CONFIG_FEATURE_BUFFERS_GO_ON_STACK
+#define ENABLE_FEATURE_BUFFERS_GO_ON_STACK 0
+#define USE_FEATURE_BUFFERS_GO_ON_STACK(...)
+#define SKIP_FEATURE_BUFFERS_GO_ON_STACK(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_BUFFERS_GO_IN_BSS
+#define ENABLE_FEATURE_BUFFERS_GO_IN_BSS 0
+#define USE_FEATURE_BUFFERS_GO_IN_BSS(...)
+#define SKIP_FEATURE_BUFFERS_GO_IN_BSS(...)  __VA_ARGS__
+
+#define CONFIG_SHOW_USAGE 1
+#define ENABLE_SHOW_USAGE 1
+#define USE_SHOW_USAGE(...)  __VA_ARGS__
+#define SKIP_SHOW_USAGE(...)
+
+#define CONFIG_FEATURE_VERBOSE_USAGE 1
+#define ENABLE_FEATURE_VERBOSE_USAGE 1
+#define USE_FEATURE_VERBOSE_USAGE(...)  __VA_ARGS__
+#define SKIP_FEATURE_VERBOSE_USAGE(...)
+
+#define CONFIG_FEATURE_COMPRESS_USAGE 1
+#define ENABLE_FEATURE_COMPRESS_USAGE 1
+#define USE_FEATURE_COMPRESS_USAGE(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMPRESS_USAGE(...)
+
+#define CONFIG_FEATURE_INSTALLER 1
+#define ENABLE_FEATURE_INSTALLER 1
+#define USE_FEATURE_INSTALLER(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSTALLER(...)
+
+#define CONFIG_LOCALE_SUPPORT 1
+#define ENABLE_LOCALE_SUPPORT 1
+#define USE_LOCALE_SUPPORT(...)  __VA_ARGS__
+#define SKIP_LOCALE_SUPPORT(...)
+
+#define CONFIG_GETOPT_LONG 1
+#define ENABLE_GETOPT_LONG 1
+#define USE_GETOPT_LONG(...)  __VA_ARGS__
+#define SKIP_GETOPT_LONG(...)
+
+#define CONFIG_FEATURE_DEVPTS 1
+#define ENABLE_FEATURE_DEVPTS 1
+#define USE_FEATURE_DEVPTS(...)  __VA_ARGS__
+#define SKIP_FEATURE_DEVPTS(...)
+
+#undef CONFIG_FEATURE_CLEAN_UP
+#define ENABLE_FEATURE_CLEAN_UP 0
+#define USE_FEATURE_CLEAN_UP(...)
+#define SKIP_FEATURE_CLEAN_UP(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_SUID 1
+#define ENABLE_FEATURE_SUID 1
+#define USE_FEATURE_SUID(...)  __VA_ARGS__
+#define SKIP_FEATURE_SUID(...)
+
+#define CONFIG_FEATURE_SUID_CONFIG 1
+#define ENABLE_FEATURE_SUID_CONFIG 1
+#define USE_FEATURE_SUID_CONFIG(...)  __VA_ARGS__
+#define SKIP_FEATURE_SUID_CONFIG(...)
+
+#define CONFIG_FEATURE_SUID_CONFIG_QUIET 1
+#define ENABLE_FEATURE_SUID_CONFIG_QUIET 1
+#define USE_FEATURE_SUID_CONFIG_QUIET(...)  __VA_ARGS__
+#define SKIP_FEATURE_SUID_CONFIG_QUIET(...)
+
+#undef CONFIG_SELINUX
+#define ENABLE_SELINUX 0
+#define USE_SELINUX(...)
+#define SKIP_SELINUX(...)  __VA_ARGS__
+
+#define CONFIG_BUSYBOX_EXEC_PATH "/proc/self/exe"
+#define ENABLE_BUSYBOX_EXEC_PATH 1
+#define USE_BUSYBOX_EXEC_PATH(...)  __VA_ARGS__
+#define SKIP_BUSYBOX_EXEC_PATH(...)
+
+
+/*
+ * Build Options
+ */
+#define CONFIG_STATIC 1
+#define ENABLE_STATIC 1
+#define USE_STATIC(...)  __VA_ARGS__
+#define SKIP_STATIC(...)
+
+#undef CONFIG_BUILD_LIBBUSYBOX
+#define ENABLE_BUILD_LIBBUSYBOX 0
+#define USE_BUILD_LIBBUSYBOX(...)
+#define SKIP_BUILD_LIBBUSYBOX(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_FULL_LIBBUSYBOX
+#define ENABLE_FEATURE_FULL_LIBBUSYBOX 0
+#define USE_FEATURE_FULL_LIBBUSYBOX(...)
+#define SKIP_FEATURE_FULL_LIBBUSYBOX(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SHARED_BUSYBOX
+#define ENABLE_FEATURE_SHARED_BUSYBOX 0
+#define USE_FEATURE_SHARED_BUSYBOX(...)
+#define SKIP_FEATURE_SHARED_BUSYBOX(...)  __VA_ARGS__
+
+#define CONFIG_LFS 1
+#define ENABLE_LFS 1
+#define USE_LFS(...)  __VA_ARGS__
+#define SKIP_LFS(...)
+
+#define USING_CROSS_COMPILER 1
+#define ENABLE_CROSS_COMPILER 1
+#define USE_CROSS_COMPILER(...)  __VA_ARGS__
+#define SKIP_CROSS_COMPILER(...)
+
+#define CROSS_COMPILER_PREFIX "../../../tools/gcc-4.1.1-glibc-2.3.2/arm-9tdmi-linux-gnu/bin/arm-9tdmi-linux-gnu-"
+#define ENABLE_COMPILER_PREFIX 1
+#define USE_COMPILER_PREFIX(...)  __VA_ARGS__
+#define SKIP_COMPILER_PREFIX(...)
+
+#undef CONFIG_BUILD_AT_ONCE
+#define ENABLE_BUILD_AT_ONCE 0
+#define USE_BUILD_AT_ONCE(...)
+#define SKIP_BUILD_AT_ONCE(...)  __VA_ARGS__
+
+
+/*
+ * Debugging Options
+ */
+#undef CONFIG_DEBUG
+#define ENABLE_DEBUG 0
+#define USE_DEBUG(...)
+#define SKIP_DEBUG(...)  __VA_ARGS__
+
+#undef CONFIG_DEBUG_PESSIMIZE
+#define ENABLE_DEBUG_PESSIMIZE 0
+#define USE_DEBUG_PESSIMIZE(...)
+#define SKIP_DEBUG_PESSIMIZE(...)  __VA_ARGS__
+
+#undef CONFIG_NO_DEBUG_LIB
+#define ENABLE_NO_DEBUG_LIB 0
+#define USE_NO_DEBUG_LIB(...)
+#define SKIP_NO_DEBUG_LIB(...)  __VA_ARGS__
+
+#undef CONFIG_DMALLOC
+#define ENABLE_DMALLOC 0
+#define USE_DMALLOC(...)
+#define SKIP_DMALLOC(...)  __VA_ARGS__
+
+#undef CONFIG_EFENCE
+#define ENABLE_EFENCE 0
+#define USE_EFENCE(...)
+#define SKIP_EFENCE(...)  __VA_ARGS__
+
+#undef CONFIG_DEBUG_YANK_SUSv2
+#define ENABLE_DEBUG_YANK_SUSv2 0
+#define USE_DEBUG_YANK_SUSv2(...)
+#define SKIP_DEBUG_YANK_SUSv2(...)  __VA_ARGS__
+
+
+/*
+ * Installation Options
+ */
+#undef CONFIG_INSTALL_NO_USR
+#define ENABLE_INSTALL_NO_USR 0
+#define USE_INSTALL_NO_USR(...)
+#define SKIP_INSTALL_NO_USR(...)  __VA_ARGS__
+
+#define CONFIG_INSTALL_APPLET_SYMLINKS 1
+#define ENABLE_INSTALL_APPLET_SYMLINKS 1
+#define USE_INSTALL_APPLET_SYMLINKS(...)  __VA_ARGS__
+#define SKIP_INSTALL_APPLET_SYMLINKS(...)
+
+#undef CONFIG_INSTALL_APPLET_HARDLINKS
+#define ENABLE_INSTALL_APPLET_HARDLINKS 0
+#define USE_INSTALL_APPLET_HARDLINKS(...)
+#define SKIP_INSTALL_APPLET_HARDLINKS(...)  __VA_ARGS__
+
+#undef CONFIG_INSTALL_APPLET_DONT
+#define ENABLE_INSTALL_APPLET_DONT 0
+#define USE_INSTALL_APPLET_DONT(...)
+#define SKIP_INSTALL_APPLET_DONT(...)  __VA_ARGS__
+
+#define PREFIX "./_install"
+#define ENABLE_PREFIX 1
+#define USE_PREFIX(...)  __VA_ARGS__
+#define SKIP_PREFIX(...)
+
+
+/*
+ * Busybox Library Tuning
+ */
+#define CONFIG_MD5_SIZE_VS_SPEED 2
+#define ENABLE_MD5_SIZE_VS_SPEED 1
+#define USE_MD5_SIZE_VS_SPEED(...)  __VA_ARGS__
+#define SKIP_MD5_SIZE_VS_SPEED(...)
+
+
+/*
+ * Applets
+ */
+
+/*
+ * Archival Utilities
+ */
+#undef CONFIG_AR
+#define ENABLE_AR 0
+#define USE_AR(...)
+#define SKIP_AR(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_AR_LONG_FILENAMES
+#define ENABLE_FEATURE_AR_LONG_FILENAMES 0
+#define USE_FEATURE_AR_LONG_FILENAMES(...)
+#define SKIP_FEATURE_AR_LONG_FILENAMES(...)  __VA_ARGS__
+
+#define CONFIG_BUNZIP2 1
+#define ENABLE_BUNZIP2 1
+#define USE_BUNZIP2(...)  __VA_ARGS__
+#define SKIP_BUNZIP2(...)
+
+#define CONFIG_CPIO 1
+#define ENABLE_CPIO 1
+#define USE_CPIO(...)  __VA_ARGS__
+#define SKIP_CPIO(...)
+
+#undef CONFIG_DPKG
+#define ENABLE_DPKG 0
+#define USE_DPKG(...)
+#define SKIP_DPKG(...)  __VA_ARGS__
+
+#undef CONFIG_DPKG_DEB
+#define ENABLE_DPKG_DEB 0
+#define USE_DPKG_DEB(...)
+#define SKIP_DPKG_DEB(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_DPKG_DEB_EXTRACT_ONLY
+#define ENABLE_FEATURE_DPKG_DEB_EXTRACT_ONLY 0
+#define USE_FEATURE_DPKG_DEB_EXTRACT_ONLY(...)
+#define SKIP_FEATURE_DPKG_DEB_EXTRACT_ONLY(...)  __VA_ARGS__
+
+#define CONFIG_GUNZIP 1
+#define ENABLE_GUNZIP 1
+#define USE_GUNZIP(...)  __VA_ARGS__
+#define SKIP_GUNZIP(...)
+
+#define CONFIG_FEATURE_GUNZIP_UNCOMPRESS 1
+#define ENABLE_FEATURE_GUNZIP_UNCOMPRESS 1
+#define USE_FEATURE_GUNZIP_UNCOMPRESS(...)  __VA_ARGS__
+#define SKIP_FEATURE_GUNZIP_UNCOMPRESS(...)
+
+#define CONFIG_GZIP 1
+#define ENABLE_GZIP 1
+#define USE_GZIP(...)  __VA_ARGS__
+#define SKIP_GZIP(...)
+
+#undef CONFIG_RPM2CPIO
+#define ENABLE_RPM2CPIO 0
+#define USE_RPM2CPIO(...)
+#define SKIP_RPM2CPIO(...)  __VA_ARGS__
+
+#undef CONFIG_RPM
+#define ENABLE_RPM 0
+#define USE_RPM(...)
+#define SKIP_RPM(...)  __VA_ARGS__
+
+#define CONFIG_TAR 1
+#define ENABLE_TAR 1
+#define USE_TAR(...)  __VA_ARGS__
+#define SKIP_TAR(...)
+
+#define CONFIG_FEATURE_TAR_CREATE 1
+#define ENABLE_FEATURE_TAR_CREATE 1
+#define USE_FEATURE_TAR_CREATE(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_CREATE(...)
+
+#define CONFIG_FEATURE_TAR_BZIP2 1
+#define ENABLE_FEATURE_TAR_BZIP2 1
+#define USE_FEATURE_TAR_BZIP2(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_BZIP2(...)
+
+#define CONFIG_FEATURE_TAR_LZMA 1
+#define ENABLE_FEATURE_TAR_LZMA 1
+#define USE_FEATURE_TAR_LZMA(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_LZMA(...)
+
+#define CONFIG_FEATURE_TAR_FROM 1
+#define ENABLE_FEATURE_TAR_FROM 1
+#define USE_FEATURE_TAR_FROM(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_FROM(...)
+
+#define CONFIG_FEATURE_TAR_GZIP 1
+#define ENABLE_FEATURE_TAR_GZIP 1
+#define USE_FEATURE_TAR_GZIP(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_GZIP(...)
+
+#define CONFIG_FEATURE_TAR_COMPRESS 1
+#define ENABLE_FEATURE_TAR_COMPRESS 1
+#define USE_FEATURE_TAR_COMPRESS(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_COMPRESS(...)
+
+#define CONFIG_FEATURE_TAR_OLDGNU_COMPATIBILITY 1
+#define ENABLE_FEATURE_TAR_OLDGNU_COMPATIBILITY 1
+#define USE_FEATURE_TAR_OLDGNU_COMPATIBILITY(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_OLDGNU_COMPATIBILITY(...)
+
+#define CONFIG_FEATURE_TAR_GNU_EXTENSIONS 1
+#define ENABLE_FEATURE_TAR_GNU_EXTENSIONS 1
+#define USE_FEATURE_TAR_GNU_EXTENSIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_GNU_EXTENSIONS(...)
+
+#define CONFIG_FEATURE_TAR_LONG_OPTIONS 1
+#define ENABLE_FEATURE_TAR_LONG_OPTIONS 1
+#define USE_FEATURE_TAR_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_TAR_LONG_OPTIONS(...)
+
+#undef CONFIG_UNCOMPRESS
+#define ENABLE_UNCOMPRESS 0
+#define USE_UNCOMPRESS(...)
+#define SKIP_UNCOMPRESS(...)  __VA_ARGS__
+
+#undef CONFIG_UNLZMA
+#define ENABLE_UNLZMA 0
+#define USE_UNLZMA(...)
+#define SKIP_UNLZMA(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_LZMA_FAST
+#define ENABLE_FEATURE_LZMA_FAST 0
+#define USE_FEATURE_LZMA_FAST(...)
+#define SKIP_FEATURE_LZMA_FAST(...)  __VA_ARGS__
+
+#define CONFIG_UNZIP 1
+#define ENABLE_UNZIP 1
+#define USE_UNZIP(...)  __VA_ARGS__
+#define SKIP_UNZIP(...)
+
+
+/*
+ * Common options for cpio and tar
+ */
+#undef CONFIG_FEATURE_UNARCHIVE_TAPE
+#define ENABLE_FEATURE_UNARCHIVE_TAPE 0
+#define USE_FEATURE_UNARCHIVE_TAPE(...)
+#define SKIP_FEATURE_UNARCHIVE_TAPE(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_DEB_TAR_GZ
+#define ENABLE_FEATURE_DEB_TAR_GZ 0
+#define USE_FEATURE_DEB_TAR_GZ(...)
+#define SKIP_FEATURE_DEB_TAR_GZ(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_DEB_TAR_BZ2
+#define ENABLE_FEATURE_DEB_TAR_BZ2 0
+#define USE_FEATURE_DEB_TAR_BZ2(...)
+#define SKIP_FEATURE_DEB_TAR_BZ2(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_DEB_TAR_LZMA
+#define ENABLE_FEATURE_DEB_TAR_LZMA 0
+#define USE_FEATURE_DEB_TAR_LZMA(...)
+#define SKIP_FEATURE_DEB_TAR_LZMA(...)  __VA_ARGS__
+
+
+/*
+ * Coreutils
+ */
+#define CONFIG_BASENAME 1
+#define ENABLE_BASENAME 1
+#define USE_BASENAME(...)  __VA_ARGS__
+#define SKIP_BASENAME(...)
+
+#define CONFIG_CAL 1
+#define ENABLE_CAL 1
+#define USE_CAL(...)  __VA_ARGS__
+#define SKIP_CAL(...)
+
+#define CONFIG_CAT 1
+#define ENABLE_CAT 1
+#define USE_CAT(...)  __VA_ARGS__
+#define SKIP_CAT(...)
+
+#define CONFIG_CATV 1
+#define ENABLE_CATV 1
+#define USE_CATV(...)  __VA_ARGS__
+#define SKIP_CATV(...)
+
+#define CONFIG_CHGRP 1
+#define ENABLE_CHGRP 1
+#define USE_CHGRP(...)  __VA_ARGS__
+#define SKIP_CHGRP(...)
+
+#define CONFIG_CHMOD 1
+#define ENABLE_CHMOD 1
+#define USE_CHMOD(...)  __VA_ARGS__
+#define SKIP_CHMOD(...)
+
+#define CONFIG_CHOWN 1
+#define ENABLE_CHOWN 1
+#define USE_CHOWN(...)  __VA_ARGS__
+#define SKIP_CHOWN(...)
+
+#define CONFIG_CHROOT 1
+#define ENABLE_CHROOT 1
+#define USE_CHROOT(...)  __VA_ARGS__
+#define SKIP_CHROOT(...)
+
+#define CONFIG_CKSUM 1
+#define ENABLE_CKSUM 1
+#define USE_CKSUM(...)  __VA_ARGS__
+#define SKIP_CKSUM(...)
+
+#define CONFIG_CMP 1
+#define ENABLE_CMP 1
+#define USE_CMP(...)  __VA_ARGS__
+#define SKIP_CMP(...)
+
+#define CONFIG_COMM 1
+#define ENABLE_COMM 1
+#define USE_COMM(...)  __VA_ARGS__
+#define SKIP_COMM(...)
+
+#define CONFIG_CP 1
+#define ENABLE_CP 1
+#define USE_CP(...)  __VA_ARGS__
+#define SKIP_CP(...)
+
+#define CONFIG_CUT 1
+#define ENABLE_CUT 1
+#define USE_CUT(...)  __VA_ARGS__
+#define SKIP_CUT(...)
+
+#define CONFIG_DATE 1
+#define ENABLE_DATE 1
+#define USE_DATE(...)  __VA_ARGS__
+#define SKIP_DATE(...)
+
+#define CONFIG_FEATURE_DATE_ISOFMT 1
+#define ENABLE_FEATURE_DATE_ISOFMT 1
+#define USE_FEATURE_DATE_ISOFMT(...)  __VA_ARGS__
+#define SKIP_FEATURE_DATE_ISOFMT(...)
+
+#define CONFIG_DD 1
+#define ENABLE_DD 1
+#define USE_DD(...)  __VA_ARGS__
+#define SKIP_DD(...)
+
+#define CONFIG_FEATURE_DD_SIGNAL_HANDLING 1
+#define ENABLE_FEATURE_DD_SIGNAL_HANDLING 1
+#define USE_FEATURE_DD_SIGNAL_HANDLING(...)  __VA_ARGS__
+#define SKIP_FEATURE_DD_SIGNAL_HANDLING(...)
+
+#define CONFIG_FEATURE_DD_IBS_OBS 1
+#define ENABLE_FEATURE_DD_IBS_OBS 1
+#define USE_FEATURE_DD_IBS_OBS(...)  __VA_ARGS__
+#define SKIP_FEATURE_DD_IBS_OBS(...)
+
+#define CONFIG_DF 1
+#define ENABLE_DF 1
+#define USE_DF(...)  __VA_ARGS__
+#define SKIP_DF(...)
+
+#define CONFIG_DIFF 1
+#define ENABLE_DIFF 1
+#define USE_DIFF(...)  __VA_ARGS__
+#define SKIP_DIFF(...)
+
+#define CONFIG_FEATURE_DIFF_BINARY 1
+#define ENABLE_FEATURE_DIFF_BINARY 1
+#define USE_FEATURE_DIFF_BINARY(...)  __VA_ARGS__
+#define SKIP_FEATURE_DIFF_BINARY(...)
+
+#define CONFIG_FEATURE_DIFF_DIR 1
+#define ENABLE_FEATURE_DIFF_DIR 1
+#define USE_FEATURE_DIFF_DIR(...)  __VA_ARGS__
+#define SKIP_FEATURE_DIFF_DIR(...)
+
+#define CONFIG_FEATURE_DIFF_MINIMAL 1
+#define ENABLE_FEATURE_DIFF_MINIMAL 1
+#define USE_FEATURE_DIFF_MINIMAL(...)  __VA_ARGS__
+#define SKIP_FEATURE_DIFF_MINIMAL(...)
+
+#define CONFIG_DIRNAME 1
+#define ENABLE_DIRNAME 1
+#define USE_DIRNAME(...)  __VA_ARGS__
+#define SKIP_DIRNAME(...)
+
+#define CONFIG_DOS2UNIX 1
+#define ENABLE_DOS2UNIX 1
+#define USE_DOS2UNIX(...)  __VA_ARGS__
+#define SKIP_DOS2UNIX(...)
+
+#define CONFIG_UNIX2DOS 1
+#define ENABLE_UNIX2DOS 1
+#define USE_UNIX2DOS(...)  __VA_ARGS__
+#define SKIP_UNIX2DOS(...)
+
+#define CONFIG_DU 1
+#define ENABLE_DU 1
+#define USE_DU(...)  __VA_ARGS__
+#define SKIP_DU(...)
+
+#define CONFIG_FEATURE_DU_DEFAULT_BLOCKSIZE_1K 1
+#define ENABLE_FEATURE_DU_DEFAULT_BLOCKSIZE_1K 1
+#define USE_FEATURE_DU_DEFAULT_BLOCKSIZE_1K(...)  __VA_ARGS__
+#define SKIP_FEATURE_DU_DEFAULT_BLOCKSIZE_1K(...)
+
+#define CONFIG_ECHO 1
+#define ENABLE_ECHO 1
+#define USE_ECHO(...)  __VA_ARGS__
+#define SKIP_ECHO(...)
+
+#define CONFIG_FEATURE_FANCY_ECHO 1
+#define ENABLE_FEATURE_FANCY_ECHO 1
+#define USE_FEATURE_FANCY_ECHO(...)  __VA_ARGS__
+#define SKIP_FEATURE_FANCY_ECHO(...)
+
+#define CONFIG_ENV 1
+#define ENABLE_ENV 1
+#define USE_ENV(...)  __VA_ARGS__
+#define SKIP_ENV(...)
+
+#define CONFIG_FEATURE_ENV_LONG_OPTIONS 1
+#define ENABLE_FEATURE_ENV_LONG_OPTIONS 1
+#define USE_FEATURE_ENV_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_ENV_LONG_OPTIONS(...)
+
+#define CONFIG_EXPR 1
+#define ENABLE_EXPR 1
+#define USE_EXPR(...)  __VA_ARGS__
+#define SKIP_EXPR(...)
+
+#define CONFIG_EXPR_MATH_SUPPORT_64 1
+#define ENABLE_EXPR_MATH_SUPPORT_64 1
+#define USE_EXPR_MATH_SUPPORT_64(...)  __VA_ARGS__
+#define SKIP_EXPR_MATH_SUPPORT_64(...)
+
+#define CONFIG_FALSE 1
+#define ENABLE_FALSE 1
+#define USE_FALSE(...)  __VA_ARGS__
+#define SKIP_FALSE(...)
+
+#define CONFIG_FOLD 1
+#define ENABLE_FOLD 1
+#define USE_FOLD(...)  __VA_ARGS__
+#define SKIP_FOLD(...)
+
+#define CONFIG_HEAD 1
+#define ENABLE_HEAD 1
+#define USE_HEAD(...)  __VA_ARGS__
+#define SKIP_HEAD(...)
+
+#define CONFIG_FEATURE_FANCY_HEAD 1
+#define ENABLE_FEATURE_FANCY_HEAD 1
+#define USE_FEATURE_FANCY_HEAD(...)  __VA_ARGS__
+#define SKIP_FEATURE_FANCY_HEAD(...)
+
+#define CONFIG_HOSTID 1
+#define ENABLE_HOSTID 1
+#define USE_HOSTID(...)  __VA_ARGS__
+#define SKIP_HOSTID(...)
+
+#define CONFIG_ID 1
+#define ENABLE_ID 1
+#define USE_ID(...)  __VA_ARGS__
+#define SKIP_ID(...)
+
+#define CONFIG_INSTALL 1
+#define ENABLE_INSTALL 1
+#define USE_INSTALL(...)  __VA_ARGS__
+#define SKIP_INSTALL(...)
+
+#define CONFIG_FEATURE_INSTALL_LONG_OPTIONS 1
+#define ENABLE_FEATURE_INSTALL_LONG_OPTIONS 1
+#define USE_FEATURE_INSTALL_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSTALL_LONG_OPTIONS(...)
+
+#define CONFIG_LENGTH 1
+#define ENABLE_LENGTH 1
+#define USE_LENGTH(...)  __VA_ARGS__
+#define SKIP_LENGTH(...)
+
+#define CONFIG_LN 1
+#define ENABLE_LN 1
+#define USE_LN(...)  __VA_ARGS__
+#define SKIP_LN(...)
+
+#define CONFIG_LOGNAME 1
+#define ENABLE_LOGNAME 1
+#define USE_LOGNAME(...)  __VA_ARGS__
+#define SKIP_LOGNAME(...)
+
+#define CONFIG_LS 1
+#define ENABLE_LS 1
+#define USE_LS(...)  __VA_ARGS__
+#define SKIP_LS(...)
+
+#define CONFIG_FEATURE_LS_FILETYPES 1
+#define ENABLE_FEATURE_LS_FILETYPES 1
+#define USE_FEATURE_LS_FILETYPES(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_FILETYPES(...)
+
+#define CONFIG_FEATURE_LS_FOLLOWLINKS 1
+#define ENABLE_FEATURE_LS_FOLLOWLINKS 1
+#define USE_FEATURE_LS_FOLLOWLINKS(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_FOLLOWLINKS(...)
+
+#define CONFIG_FEATURE_LS_RECURSIVE 1
+#define ENABLE_FEATURE_LS_RECURSIVE 1
+#define USE_FEATURE_LS_RECURSIVE(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_RECURSIVE(...)
+
+#define CONFIG_FEATURE_LS_SORTFILES 1
+#define ENABLE_FEATURE_LS_SORTFILES 1
+#define USE_FEATURE_LS_SORTFILES(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_SORTFILES(...)
+
+#define CONFIG_FEATURE_LS_TIMESTAMPS 1
+#define ENABLE_FEATURE_LS_TIMESTAMPS 1
+#define USE_FEATURE_LS_TIMESTAMPS(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_TIMESTAMPS(...)
+
+#define CONFIG_FEATURE_LS_USERNAME 1
+#define ENABLE_FEATURE_LS_USERNAME 1
+#define USE_FEATURE_LS_USERNAME(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_USERNAME(...)
+
+#define CONFIG_FEATURE_LS_COLOR 1
+#define ENABLE_FEATURE_LS_COLOR 1
+#define USE_FEATURE_LS_COLOR(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_COLOR(...)
+
+#define CONFIG_FEATURE_LS_COLOR_IS_DEFAULT 1
+#define ENABLE_FEATURE_LS_COLOR_IS_DEFAULT 1
+#define USE_FEATURE_LS_COLOR_IS_DEFAULT(...)  __VA_ARGS__
+#define SKIP_FEATURE_LS_COLOR_IS_DEFAULT(...)
+
+#define CONFIG_MD5SUM 1
+#define ENABLE_MD5SUM 1
+#define USE_MD5SUM(...)  __VA_ARGS__
+#define SKIP_MD5SUM(...)
+
+#define CONFIG_MKDIR 1
+#define ENABLE_MKDIR 1
+#define USE_MKDIR(...)  __VA_ARGS__
+#define SKIP_MKDIR(...)
+
+#define CONFIG_FEATURE_MKDIR_LONG_OPTIONS 1
+#define ENABLE_FEATURE_MKDIR_LONG_OPTIONS 1
+#define USE_FEATURE_MKDIR_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_MKDIR_LONG_OPTIONS(...)
+
+#define CONFIG_MKFIFO 1
+#define ENABLE_MKFIFO 1
+#define USE_MKFIFO(...)  __VA_ARGS__
+#define SKIP_MKFIFO(...)
+
+#define CONFIG_MKNOD 1
+#define ENABLE_MKNOD 1
+#define USE_MKNOD(...)  __VA_ARGS__
+#define SKIP_MKNOD(...)
+
+#define CONFIG_MV 1
+#define ENABLE_MV 1
+#define USE_MV(...)  __VA_ARGS__
+#define SKIP_MV(...)
+
+#define CONFIG_FEATURE_MV_LONG_OPTIONS 1
+#define ENABLE_FEATURE_MV_LONG_OPTIONS 1
+#define USE_FEATURE_MV_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_MV_LONG_OPTIONS(...)
+
+#define CONFIG_NICE 1
+#define ENABLE_NICE 1
+#define USE_NICE(...)  __VA_ARGS__
+#define SKIP_NICE(...)
+
+#define CONFIG_NOHUP 1
+#define ENABLE_NOHUP 1
+#define USE_NOHUP(...)  __VA_ARGS__
+#define SKIP_NOHUP(...)
+
+#define CONFIG_OD 1
+#define ENABLE_OD 1
+#define USE_OD(...)  __VA_ARGS__
+#define SKIP_OD(...)
+
+#define CONFIG_PRINTENV 1
+#define ENABLE_PRINTENV 1
+#define USE_PRINTENV(...)  __VA_ARGS__
+#define SKIP_PRINTENV(...)
+
+#define CONFIG_PRINTF 1
+#define ENABLE_PRINTF 1
+#define USE_PRINTF(...)  __VA_ARGS__
+#define SKIP_PRINTF(...)
+
+#define CONFIG_PWD 1
+#define ENABLE_PWD 1
+#define USE_PWD(...)  __VA_ARGS__
+#define SKIP_PWD(...)
+
+#define CONFIG_REALPATH 1
+#define ENABLE_REALPATH 1
+#define USE_REALPATH(...)  __VA_ARGS__
+#define SKIP_REALPATH(...)
+
+#define CONFIG_RM 1
+#define ENABLE_RM 1
+#define USE_RM(...)  __VA_ARGS__
+#define SKIP_RM(...)
+
+#define CONFIG_RMDIR 1
+#define ENABLE_RMDIR 1
+#define USE_RMDIR(...)  __VA_ARGS__
+#define SKIP_RMDIR(...)
+
+#define CONFIG_SEQ 1
+#define ENABLE_SEQ 1
+#define USE_SEQ(...)  __VA_ARGS__
+#define SKIP_SEQ(...)
+
+#define CONFIG_SHA1SUM 1
+#define ENABLE_SHA1SUM 1
+#define USE_SHA1SUM(...)  __VA_ARGS__
+#define SKIP_SHA1SUM(...)
+
+#define CONFIG_SLEEP 1
+#define ENABLE_SLEEP 1
+#define USE_SLEEP(...)  __VA_ARGS__
+#define SKIP_SLEEP(...)
+
+#define CONFIG_FEATURE_FANCY_SLEEP 1
+#define ENABLE_FEATURE_FANCY_SLEEP 1
+#define USE_FEATURE_FANCY_SLEEP(...)  __VA_ARGS__
+#define SKIP_FEATURE_FANCY_SLEEP(...)
+
+#define CONFIG_SORT 1
+#define ENABLE_SORT 1
+#define USE_SORT(...)  __VA_ARGS__
+#define SKIP_SORT(...)
+
+#define CONFIG_FEATURE_SORT_BIG 1
+#define ENABLE_FEATURE_SORT_BIG 1
+#define USE_FEATURE_SORT_BIG(...)  __VA_ARGS__
+#define SKIP_FEATURE_SORT_BIG(...)
+
+#define CONFIG_STAT 1
+#define ENABLE_STAT 1
+#define USE_STAT(...)  __VA_ARGS__
+#define SKIP_STAT(...)
+
+#define CONFIG_FEATURE_STAT_FORMAT 1
+#define ENABLE_FEATURE_STAT_FORMAT 1
+#define USE_FEATURE_STAT_FORMAT(...)  __VA_ARGS__
+#define SKIP_FEATURE_STAT_FORMAT(...)
+
+#define CONFIG_STTY 1
+#define ENABLE_STTY 1
+#define USE_STTY(...)  __VA_ARGS__
+#define SKIP_STTY(...)
+
+#define CONFIG_SUM 1
+#define ENABLE_SUM 1
+#define USE_SUM(...)  __VA_ARGS__
+#define SKIP_SUM(...)
+
+#define CONFIG_SYNC 1
+#define ENABLE_SYNC 1
+#define USE_SYNC(...)  __VA_ARGS__
+#define SKIP_SYNC(...)
+
+#define CONFIG_TAIL 1
+#define ENABLE_TAIL 1
+#define USE_TAIL(...)  __VA_ARGS__
+#define SKIP_TAIL(...)
+
+#define CONFIG_FEATURE_FANCY_TAIL 1
+#define ENABLE_FEATURE_FANCY_TAIL 1
+#define USE_FEATURE_FANCY_TAIL(...)  __VA_ARGS__
+#define SKIP_FEATURE_FANCY_TAIL(...)
+
+#define CONFIG_TEE 1
+#define ENABLE_TEE 1
+#define USE_TEE(...)  __VA_ARGS__
+#define SKIP_TEE(...)
+
+#define CONFIG_FEATURE_TEE_USE_BLOCK_IO 1
+#define ENABLE_FEATURE_TEE_USE_BLOCK_IO 1
+#define USE_FEATURE_TEE_USE_BLOCK_IO(...)  __VA_ARGS__
+#define SKIP_FEATURE_TEE_USE_BLOCK_IO(...)
+
+#define CONFIG_TEST 1
+#define ENABLE_TEST 1
+#define USE_TEST(...)  __VA_ARGS__
+#define SKIP_TEST(...)
+
+#define CONFIG_FEATURE_TEST_64 1
+#define ENABLE_FEATURE_TEST_64 1
+#define USE_FEATURE_TEST_64(...)  __VA_ARGS__
+#define SKIP_FEATURE_TEST_64(...)
+
+#define CONFIG_TOUCH 1
+#define ENABLE_TOUCH 1
+#define USE_TOUCH(...)  __VA_ARGS__
+#define SKIP_TOUCH(...)
+
+#define CONFIG_TR 1
+#define ENABLE_TR 1
+#define USE_TR(...)  __VA_ARGS__
+#define SKIP_TR(...)
+
+#define CONFIG_FEATURE_TR_CLASSES 1
+#define ENABLE_FEATURE_TR_CLASSES 1
+#define USE_FEATURE_TR_CLASSES(...)  __VA_ARGS__
+#define SKIP_FEATURE_TR_CLASSES(...)
+
+#define CONFIG_FEATURE_TR_EQUIV 1
+#define ENABLE_FEATURE_TR_EQUIV 1
+#define USE_FEATURE_TR_EQUIV(...)  __VA_ARGS__
+#define SKIP_FEATURE_TR_EQUIV(...)
+
+#define CONFIG_TRUE 1
+#define ENABLE_TRUE 1
+#define USE_TRUE(...)  __VA_ARGS__
+#define SKIP_TRUE(...)
+
+#define CONFIG_TTY 1
+#define ENABLE_TTY 1
+#define USE_TTY(...)  __VA_ARGS__
+#define SKIP_TTY(...)
+
+#define CONFIG_UNAME 1
+#define ENABLE_UNAME 1
+#define USE_UNAME(...)  __VA_ARGS__
+#define SKIP_UNAME(...)
+
+#define CONFIG_UNIQ 1
+#define ENABLE_UNIQ 1
+#define USE_UNIQ(...)  __VA_ARGS__
+#define SKIP_UNIQ(...)
+
+#define CONFIG_USLEEP 1
+#define ENABLE_USLEEP 1
+#define USE_USLEEP(...)  __VA_ARGS__
+#define SKIP_USLEEP(...)
+
+#define CONFIG_UUDECODE 1
+#define ENABLE_UUDECODE 1
+#define USE_UUDECODE(...)  __VA_ARGS__
+#define SKIP_UUDECODE(...)
+
+#define CONFIG_UUENCODE 1
+#define ENABLE_UUENCODE 1
+#define USE_UUENCODE(...)  __VA_ARGS__
+#define SKIP_UUENCODE(...)
+
+#define CONFIG_WATCH 1
+#define ENABLE_WATCH 1
+#define USE_WATCH(...)  __VA_ARGS__
+#define SKIP_WATCH(...)
+
+#define CONFIG_WC 1
+#define ENABLE_WC 1
+#define USE_WC(...)  __VA_ARGS__
+#define SKIP_WC(...)
+
+#define CONFIG_WHO 1
+#define ENABLE_WHO 1
+#define USE_WHO(...)  __VA_ARGS__
+#define SKIP_WHO(...)
+
+#define CONFIG_WHOAMI 1
+#define ENABLE_WHOAMI 1
+#define USE_WHOAMI(...)  __VA_ARGS__
+#define SKIP_WHOAMI(...)
+
+#define CONFIG_YES 1
+#define ENABLE_YES 1
+#define USE_YES(...)  __VA_ARGS__
+#define SKIP_YES(...)
+
+
+/*
+ * Common options for cp and mv
+ */
+#define CONFIG_FEATURE_PRESERVE_HARDLINKS 1
+#define ENABLE_FEATURE_PRESERVE_HARDLINKS 1
+#define USE_FEATURE_PRESERVE_HARDLINKS(...)  __VA_ARGS__
+#define SKIP_FEATURE_PRESERVE_HARDLINKS(...)
+
+
+/*
+ * Common options for ls, more and telnet
+ */
+#define CONFIG_FEATURE_AUTOWIDTH 1
+#define ENABLE_FEATURE_AUTOWIDTH 1
+#define USE_FEATURE_AUTOWIDTH(...)  __VA_ARGS__
+#define SKIP_FEATURE_AUTOWIDTH(...)
+
+
+/*
+ * Common options for df, du, ls
+ */
+#define CONFIG_FEATURE_HUMAN_READABLE 1
+#define ENABLE_FEATURE_HUMAN_READABLE 1
+#define USE_FEATURE_HUMAN_READABLE(...)  __VA_ARGS__
+#define SKIP_FEATURE_HUMAN_READABLE(...)
+
+
+/*
+ * Common options for md5sum, sha1sum
+ */
+#define CONFIG_FEATURE_MD5_SHA1_SUM_CHECK 1
+#define ENABLE_FEATURE_MD5_SHA1_SUM_CHECK 1
+#define USE_FEATURE_MD5_SHA1_SUM_CHECK(...)  __VA_ARGS__
+#define SKIP_FEATURE_MD5_SHA1_SUM_CHECK(...)
+
+
+/*
+ * Console Utilities
+ */
+#undef CONFIG_CHVT
+#define ENABLE_CHVT 0
+#define USE_CHVT(...)
+#define SKIP_CHVT(...)  __VA_ARGS__
+
+#define CONFIG_CLEAR 1
+#define ENABLE_CLEAR 1
+#define USE_CLEAR(...)  __VA_ARGS__
+#define SKIP_CLEAR(...)
+
+#undef CONFIG_DEALLOCVT
+#define ENABLE_DEALLOCVT 0
+#define USE_DEALLOCVT(...)
+#define SKIP_DEALLOCVT(...)  __VA_ARGS__
+
+#undef CONFIG_DUMPKMAP
+#define ENABLE_DUMPKMAP 0
+#define USE_DUMPKMAP(...)
+#define SKIP_DUMPKMAP(...)  __VA_ARGS__
+
+#undef CONFIG_LOADFONT
+#define ENABLE_LOADFONT 0
+#define USE_LOADFONT(...)
+#define SKIP_LOADFONT(...)  __VA_ARGS__
+
+#undef CONFIG_LOADKMAP
+#define ENABLE_LOADKMAP 0
+#define USE_LOADKMAP(...)
+#define SKIP_LOADKMAP(...)  __VA_ARGS__
+
+#undef CONFIG_OPENVT
+#define ENABLE_OPENVT 0
+#define USE_OPENVT(...)
+#define SKIP_OPENVT(...)  __VA_ARGS__
+
+#undef CONFIG_RESET
+#define ENABLE_RESET 0
+#define USE_RESET(...)
+#define SKIP_RESET(...)  __VA_ARGS__
+
+#undef CONFIG_SETCONSOLE
+#define ENABLE_SETCONSOLE 0
+#define USE_SETCONSOLE(...)
+#define SKIP_SETCONSOLE(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SETCONSOLE_LONG_OPTIONS
+#define ENABLE_FEATURE_SETCONSOLE_LONG_OPTIONS 0
+#define USE_FEATURE_SETCONSOLE_LONG_OPTIONS(...)
+#define SKIP_FEATURE_SETCONSOLE_LONG_OPTIONS(...)  __VA_ARGS__
+
+#undef CONFIG_SETKEYCODES
+#define ENABLE_SETKEYCODES 0
+#define USE_SETKEYCODES(...)
+#define SKIP_SETKEYCODES(...)  __VA_ARGS__
+
+#undef CONFIG_SETLOGCONS
+#define ENABLE_SETLOGCONS 0
+#define USE_SETLOGCONS(...)
+#define SKIP_SETLOGCONS(...)  __VA_ARGS__
+
+
+/*
+ * Debian Utilities
+ */
+#define CONFIG_MKTEMP 1
+#define ENABLE_MKTEMP 1
+#define USE_MKTEMP(...)  __VA_ARGS__
+#define SKIP_MKTEMP(...)
+
+#undef CONFIG_PIPE_PROGRESS
+#define ENABLE_PIPE_PROGRESS 0
+#define USE_PIPE_PROGRESS(...)
+#define SKIP_PIPE_PROGRESS(...)  __VA_ARGS__
+
+#undef CONFIG_READLINK
+#define ENABLE_READLINK 0
+#define USE_READLINK(...)
+#define SKIP_READLINK(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_READLINK_FOLLOW
+#define ENABLE_FEATURE_READLINK_FOLLOW 0
+#define USE_FEATURE_READLINK_FOLLOW(...)
+#define SKIP_FEATURE_READLINK_FOLLOW(...)  __VA_ARGS__
+
+#define CONFIG_RUN_PARTS 1
+#define ENABLE_RUN_PARTS 1
+#define USE_RUN_PARTS(...)  __VA_ARGS__
+#define SKIP_RUN_PARTS(...)
+
+#define CONFIG_FEATURE_RUN_PARTS_LONG_OPTIONS 1
+#define ENABLE_FEATURE_RUN_PARTS_LONG_OPTIONS 1
+#define USE_FEATURE_RUN_PARTS_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_RUN_PARTS_LONG_OPTIONS(...)
+
+#undef CONFIG_START_STOP_DAEMON
+#define ENABLE_START_STOP_DAEMON 0
+#define USE_START_STOP_DAEMON(...)
+#define SKIP_START_STOP_DAEMON(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_START_STOP_DAEMON_FANCY
+#define ENABLE_FEATURE_START_STOP_DAEMON_FANCY 0
+#define USE_FEATURE_START_STOP_DAEMON_FANCY(...)
+#define SKIP_FEATURE_START_STOP_DAEMON_FANCY(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_START_STOP_DAEMON_LONG_OPTIONS
+#define ENABLE_FEATURE_START_STOP_DAEMON_LONG_OPTIONS 0
+#define USE_FEATURE_START_STOP_DAEMON_LONG_OPTIONS(...)
+#define SKIP_FEATURE_START_STOP_DAEMON_LONG_OPTIONS(...)  __VA_ARGS__
+
+#define CONFIG_WHICH 1
+#define ENABLE_WHICH 1
+#define USE_WHICH(...)  __VA_ARGS__
+#define SKIP_WHICH(...)
+
+
+/*
+ * Editors
+ */
+#define CONFIG_AWK 1
+#define ENABLE_AWK 1
+#define USE_AWK(...)  __VA_ARGS__
+#define SKIP_AWK(...)
+
+#define CONFIG_FEATURE_AWK_MATH 1
+#define ENABLE_FEATURE_AWK_MATH 1
+#define USE_FEATURE_AWK_MATH(...)  __VA_ARGS__
+#define SKIP_FEATURE_AWK_MATH(...)
+
+#define CONFIG_ED 1
+#define ENABLE_ED 1
+#define USE_ED(...)  __VA_ARGS__
+#define SKIP_ED(...)
+
+#define CONFIG_PATCH 1
+#define ENABLE_PATCH 1
+#define USE_PATCH(...)  __VA_ARGS__
+#define SKIP_PATCH(...)
+
+#define CONFIG_SED 1
+#define ENABLE_SED 1
+#define USE_SED(...)  __VA_ARGS__
+#define SKIP_SED(...)
+
+#define CONFIG_VI 1
+#define ENABLE_VI 1
+#define USE_VI(...)  __VA_ARGS__
+#define SKIP_VI(...)
+
+#define CONFIG_FEATURE_VI_COLON 1
+#define ENABLE_FEATURE_VI_COLON 1
+#define USE_FEATURE_VI_COLON(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_COLON(...)
+
+#define CONFIG_FEATURE_VI_YANKMARK 1
+#define ENABLE_FEATURE_VI_YANKMARK 1
+#define USE_FEATURE_VI_YANKMARK(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_YANKMARK(...)
+
+#define CONFIG_FEATURE_VI_SEARCH 1
+#define ENABLE_FEATURE_VI_SEARCH 1
+#define USE_FEATURE_VI_SEARCH(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_SEARCH(...)
+
+#define CONFIG_FEATURE_VI_USE_SIGNALS 1
+#define ENABLE_FEATURE_VI_USE_SIGNALS 1
+#define USE_FEATURE_VI_USE_SIGNALS(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_USE_SIGNALS(...)
+
+#define CONFIG_FEATURE_VI_DOT_CMD 1
+#define ENABLE_FEATURE_VI_DOT_CMD 1
+#define USE_FEATURE_VI_DOT_CMD(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_DOT_CMD(...)
+
+#define CONFIG_FEATURE_VI_READONLY 1
+#define ENABLE_FEATURE_VI_READONLY 1
+#define USE_FEATURE_VI_READONLY(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_READONLY(...)
+
+#define CONFIG_FEATURE_VI_SETOPTS 1
+#define ENABLE_FEATURE_VI_SETOPTS 1
+#define USE_FEATURE_VI_SETOPTS(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_SETOPTS(...)
+
+#define CONFIG_FEATURE_VI_SET 1
+#define ENABLE_FEATURE_VI_SET 1
+#define USE_FEATURE_VI_SET(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_SET(...)
+
+#define CONFIG_FEATURE_VI_WIN_RESIZE 1
+#define ENABLE_FEATURE_VI_WIN_RESIZE 1
+#define USE_FEATURE_VI_WIN_RESIZE(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_WIN_RESIZE(...)
+
+#define CONFIG_FEATURE_VI_OPTIMIZE_CURSOR 1
+#define ENABLE_FEATURE_VI_OPTIMIZE_CURSOR 1
+#define USE_FEATURE_VI_OPTIMIZE_CURSOR(...)  __VA_ARGS__
+#define SKIP_FEATURE_VI_OPTIMIZE_CURSOR(...)
+
+
+/*
+ * Finding Utilities
+ */
+#define CONFIG_FIND 1
+#define ENABLE_FIND 1
+#define USE_FIND(...)  __VA_ARGS__
+#define SKIP_FIND(...)
+
+#define CONFIG_FEATURE_FIND_PRINT0 1
+#define ENABLE_FEATURE_FIND_PRINT0 1
+#define USE_FEATURE_FIND_PRINT0(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_PRINT0(...)
+
+#define CONFIG_FEATURE_FIND_MTIME 1
+#define ENABLE_FEATURE_FIND_MTIME 1
+#define USE_FEATURE_FIND_MTIME(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_MTIME(...)
+
+#define CONFIG_FEATURE_FIND_MMIN 1
+#define ENABLE_FEATURE_FIND_MMIN 1
+#define USE_FEATURE_FIND_MMIN(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_MMIN(...)
+
+#define CONFIG_FEATURE_FIND_PERM 1
+#define ENABLE_FEATURE_FIND_PERM 1
+#define USE_FEATURE_FIND_PERM(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_PERM(...)
+
+#define CONFIG_FEATURE_FIND_TYPE 1
+#define ENABLE_FEATURE_FIND_TYPE 1
+#define USE_FEATURE_FIND_TYPE(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_TYPE(...)
+
+#define CONFIG_FEATURE_FIND_XDEV 1
+#define ENABLE_FEATURE_FIND_XDEV 1
+#define USE_FEATURE_FIND_XDEV(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_XDEV(...)
+
+#define CONFIG_FEATURE_FIND_NEWER 1
+#define ENABLE_FEATURE_FIND_NEWER 1
+#define USE_FEATURE_FIND_NEWER(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_NEWER(...)
+
+#define CONFIG_FEATURE_FIND_INUM 1
+#define ENABLE_FEATURE_FIND_INUM 1
+#define USE_FEATURE_FIND_INUM(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_INUM(...)
+
+#define CONFIG_FEATURE_FIND_EXEC 1
+#define ENABLE_FEATURE_FIND_EXEC 1
+#define USE_FEATURE_FIND_EXEC(...)  __VA_ARGS__
+#define SKIP_FEATURE_FIND_EXEC(...)
+
+#define CONFIG_GREP 1
+#define ENABLE_GREP 1
+#define USE_GREP(...)  __VA_ARGS__
+#define SKIP_GREP(...)
+
+#define CONFIG_FEATURE_GREP_EGREP_ALIAS 1
+#define ENABLE_FEATURE_GREP_EGREP_ALIAS 1
+#define USE_FEATURE_GREP_EGREP_ALIAS(...)  __VA_ARGS__
+#define SKIP_FEATURE_GREP_EGREP_ALIAS(...)
+
+#define CONFIG_FEATURE_GREP_FGREP_ALIAS 1
+#define ENABLE_FEATURE_GREP_FGREP_ALIAS 1
+#define USE_FEATURE_GREP_FGREP_ALIAS(...)  __VA_ARGS__
+#define SKIP_FEATURE_GREP_FGREP_ALIAS(...)
+
+#define CONFIG_FEATURE_GREP_CONTEXT 1
+#define ENABLE_FEATURE_GREP_CONTEXT 1
+#define USE_FEATURE_GREP_CONTEXT(...)  __VA_ARGS__
+#define SKIP_FEATURE_GREP_CONTEXT(...)
+
+#undef CONFIG_XARGS
+#define ENABLE_XARGS 0
+#define USE_XARGS(...)
+#define SKIP_XARGS(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_XARGS_SUPPORT_CONFIRMATION
+#define ENABLE_FEATURE_XARGS_SUPPORT_CONFIRMATION 0
+#define USE_FEATURE_XARGS_SUPPORT_CONFIRMATION(...)
+#define SKIP_FEATURE_XARGS_SUPPORT_CONFIRMATION(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_XARGS_SUPPORT_QUOTES
+#define ENABLE_FEATURE_XARGS_SUPPORT_QUOTES 0
+#define USE_FEATURE_XARGS_SUPPORT_QUOTES(...)
+#define SKIP_FEATURE_XARGS_SUPPORT_QUOTES(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_XARGS_SUPPORT_TERMOPT
+#define ENABLE_FEATURE_XARGS_SUPPORT_TERMOPT 0
+#define USE_FEATURE_XARGS_SUPPORT_TERMOPT(...)
+#define SKIP_FEATURE_XARGS_SUPPORT_TERMOPT(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_XARGS_SUPPORT_ZERO_TERM
+#define ENABLE_FEATURE_XARGS_SUPPORT_ZERO_TERM 0
+#define USE_FEATURE_XARGS_SUPPORT_ZERO_TERM(...)
+#define SKIP_FEATURE_XARGS_SUPPORT_ZERO_TERM(...)  __VA_ARGS__
+
+
+/*
+ * Init Utilities
+ */
+#define CONFIG_INIT 1
+#define ENABLE_INIT 1
+#define USE_INIT(...)  __VA_ARGS__
+#define SKIP_INIT(...)
+
+#undef CONFIG_DEBUG_INIT
+#define ENABLE_DEBUG_INIT 0
+#define USE_DEBUG_INIT(...)
+#define SKIP_DEBUG_INIT(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_USE_INITTAB 1
+#define ENABLE_FEATURE_USE_INITTAB 1
+#define USE_FEATURE_USE_INITTAB(...)  __VA_ARGS__
+#define SKIP_FEATURE_USE_INITTAB(...)
+
+#define CONFIG_FEATURE_INIT_SCTTY 1
+#define ENABLE_FEATURE_INIT_SCTTY 1
+#define USE_FEATURE_INIT_SCTTY(...)  __VA_ARGS__
+#define SKIP_FEATURE_INIT_SCTTY(...)
+
+#define CONFIG_FEATURE_EXTRA_QUIET 1
+#define ENABLE_FEATURE_EXTRA_QUIET 1
+#define USE_FEATURE_EXTRA_QUIET(...)  __VA_ARGS__
+#define SKIP_FEATURE_EXTRA_QUIET(...)
+
+#define CONFIG_FEATURE_INIT_COREDUMPS 1
+#define ENABLE_FEATURE_INIT_COREDUMPS 1
+#define USE_FEATURE_INIT_COREDUMPS(...)  __VA_ARGS__
+#define SKIP_FEATURE_INIT_COREDUMPS(...)
+
+#define CONFIG_FEATURE_INITRD 1
+#define ENABLE_FEATURE_INITRD 1
+#define USE_FEATURE_INITRD(...)  __VA_ARGS__
+#define SKIP_FEATURE_INITRD(...)
+
+#define CONFIG_HALT 1
+#define ENABLE_HALT 1
+#define USE_HALT(...)  __VA_ARGS__
+#define SKIP_HALT(...)
+
+#define CONFIG_MESG 1
+#define ENABLE_MESG 1
+#define USE_MESG(...)  __VA_ARGS__
+#define SKIP_MESG(...)
+
+
+/*
+ * Login/Password Management Utilities
+ */
+#define CONFIG_FEATURE_SHADOWPASSWDS 1
+#define ENABLE_FEATURE_SHADOWPASSWDS 1
+#define USE_FEATURE_SHADOWPASSWDS(...)  __VA_ARGS__
+#define SKIP_FEATURE_SHADOWPASSWDS(...)
+
+#define CONFIG_USE_BB_SHADOW 1
+#define ENABLE_USE_BB_SHADOW 1
+#define USE_USE_BB_SHADOW(...)  __VA_ARGS__
+#define SKIP_USE_BB_SHADOW(...)
+
+#define CONFIG_USE_BB_PWD_GRP 1
+#define ENABLE_USE_BB_PWD_GRP 1
+#define USE_USE_BB_PWD_GRP(...)  __VA_ARGS__
+#define SKIP_USE_BB_PWD_GRP(...)
+
+#undef CONFIG_ADDGROUP
+#define ENABLE_ADDGROUP 0
+#define USE_ADDGROUP(...)
+#define SKIP_ADDGROUP(...)  __VA_ARGS__
+
+#undef CONFIG_DELGROUP
+#define ENABLE_DELGROUP 0
+#define USE_DELGROUP(...)
+#define SKIP_DELGROUP(...)  __VA_ARGS__
+
+#undef CONFIG_ADDUSER
+#define ENABLE_ADDUSER 0
+#define USE_ADDUSER(...)
+#define SKIP_ADDUSER(...)  __VA_ARGS__
+
+#undef CONFIG_DELUSER
+#define ENABLE_DELUSER 0
+#define USE_DELUSER(...)
+#define SKIP_DELUSER(...)  __VA_ARGS__
+
+#undef CONFIG_GETTY
+#define ENABLE_GETTY 0
+#define USE_GETTY(...)
+#define SKIP_GETTY(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_UTMP 1
+#define ENABLE_FEATURE_UTMP 1
+#define USE_FEATURE_UTMP(...)  __VA_ARGS__
+#define SKIP_FEATURE_UTMP(...)
+
+#define CONFIG_FEATURE_WTMP 1
+#define ENABLE_FEATURE_WTMP 1
+#define USE_FEATURE_WTMP(...)  __VA_ARGS__
+#define SKIP_FEATURE_WTMP(...)
+
+#define CONFIG_LOGIN 1
+#define ENABLE_LOGIN 1
+#define USE_LOGIN(...)  __VA_ARGS__
+#define SKIP_LOGIN(...)
+
+#undef CONFIG_FEATURE_SECURETTY
+#define ENABLE_FEATURE_SECURETTY 0
+#define USE_FEATURE_SECURETTY(...)
+#define SKIP_FEATURE_SECURETTY(...)  __VA_ARGS__
+
+#define CONFIG_PASSWD 1
+#define ENABLE_PASSWD 1
+#define USE_PASSWD(...)  __VA_ARGS__
+#define SKIP_PASSWD(...)
+
+#undef CONFIG_SU
+#define ENABLE_SU 0
+#define USE_SU(...)
+#define SKIP_SU(...)  __VA_ARGS__
+
+#undef CONFIG_SULOGIN
+#define ENABLE_SULOGIN 0
+#define USE_SULOGIN(...)
+#define SKIP_SULOGIN(...)  __VA_ARGS__
+
+#undef CONFIG_VLOCK
+#define ENABLE_VLOCK 0
+#define USE_VLOCK(...)
+#define SKIP_VLOCK(...)  __VA_ARGS__
+
+
+/*
+ * Linux Ext2 FS Progs
+ */
+#undef CONFIG_CHATTR
+#define ENABLE_CHATTR 0
+#define USE_CHATTR(...)
+#define SKIP_CHATTR(...)  __VA_ARGS__
+
+#undef CONFIG_E2FSCK
+#define ENABLE_E2FSCK 0
+#define USE_E2FSCK(...)
+#define SKIP_E2FSCK(...)  __VA_ARGS__
+
+#undef CONFIG_FSCK
+#define ENABLE_FSCK 0
+#define USE_FSCK(...)
+#define SKIP_FSCK(...)  __VA_ARGS__
+
+#undef CONFIG_LSATTR
+#define ENABLE_LSATTR 0
+#define USE_LSATTR(...)
+#define SKIP_LSATTR(...)  __VA_ARGS__
+
+#undef CONFIG_MKE2FS
+#define ENABLE_MKE2FS 0
+#define USE_MKE2FS(...)
+#define SKIP_MKE2FS(...)  __VA_ARGS__
+
+#undef CONFIG_TUNE2FS
+#define ENABLE_TUNE2FS 0
+#define USE_TUNE2FS(...)
+#define SKIP_TUNE2FS(...)  __VA_ARGS__
+
+#undef CONFIG_E2LABEL
+#define ENABLE_E2LABEL 0
+#define USE_E2LABEL(...)
+#define SKIP_E2LABEL(...)  __VA_ARGS__
+
+#undef CONFIG_FINDFS
+#define ENABLE_FINDFS 0
+#define USE_FINDFS(...)
+#define SKIP_FINDFS(...)  __VA_ARGS__
+
+
+/*
+ * Linux Module Utilities
+ */
+#define CONFIG_INSMOD 1
+#define ENABLE_INSMOD 1
+#define USE_INSMOD(...)  __VA_ARGS__
+#define SKIP_INSMOD(...)
+
+#define CONFIG_FEATURE_INSMOD_VERSION_CHECKING 1
+#define ENABLE_FEATURE_INSMOD_VERSION_CHECKING 1
+#define USE_FEATURE_INSMOD_VERSION_CHECKING(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSMOD_VERSION_CHECKING(...)
+
+#define CONFIG_FEATURE_INSMOD_KSYMOOPS_SYMBOLS 1
+#define ENABLE_FEATURE_INSMOD_KSYMOOPS_SYMBOLS 1
+#define USE_FEATURE_INSMOD_KSYMOOPS_SYMBOLS(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSMOD_KSYMOOPS_SYMBOLS(...)
+
+#define CONFIG_FEATURE_INSMOD_LOADINKMEM 1
+#define ENABLE_FEATURE_INSMOD_LOADINKMEM 1
+#define USE_FEATURE_INSMOD_LOADINKMEM(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSMOD_LOADINKMEM(...)
+
+#define CONFIG_FEATURE_INSMOD_LOAD_MAP 1
+#define ENABLE_FEATURE_INSMOD_LOAD_MAP 1
+#define USE_FEATURE_INSMOD_LOAD_MAP(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSMOD_LOAD_MAP(...)
+
+#define CONFIG_FEATURE_INSMOD_LOAD_MAP_FULL 1
+#define ENABLE_FEATURE_INSMOD_LOAD_MAP_FULL 1
+#define USE_FEATURE_INSMOD_LOAD_MAP_FULL(...)  __VA_ARGS__
+#define SKIP_FEATURE_INSMOD_LOAD_MAP_FULL(...)
+
+#define CONFIG_RMMOD 1
+#define ENABLE_RMMOD 1
+#define USE_RMMOD(...)  __VA_ARGS__
+#define SKIP_RMMOD(...)
+
+#define CONFIG_LSMOD 1
+#define ENABLE_LSMOD 1
+#define USE_LSMOD(...)  __VA_ARGS__
+#define SKIP_LSMOD(...)
+
+#define CONFIG_FEATURE_LSMOD_PRETTY_2_6_OUTPUT 1
+#define ENABLE_FEATURE_LSMOD_PRETTY_2_6_OUTPUT 1
+#define USE_FEATURE_LSMOD_PRETTY_2_6_OUTPUT(...)  __VA_ARGS__
+#define SKIP_FEATURE_LSMOD_PRETTY_2_6_OUTPUT(...)
+
+#define CONFIG_MODPROBE 1
+#define ENABLE_MODPROBE 1
+#define USE_MODPROBE(...)  __VA_ARGS__
+#define SKIP_MODPROBE(...)
+
+#define CONFIG_FEATURE_MODPROBE_MULTIPLE_OPTIONS 1
+#define ENABLE_FEATURE_MODPROBE_MULTIPLE_OPTIONS 1
+#define USE_FEATURE_MODPROBE_MULTIPLE_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_MODPROBE_MULTIPLE_OPTIONS(...)
+
+
+/*
+ * Options common to multiple modutils
+ */
+#define CONFIG_FEATURE_CHECK_TAINTED_MODULE 1
+#define ENABLE_FEATURE_CHECK_TAINTED_MODULE 1
+#define USE_FEATURE_CHECK_TAINTED_MODULE(...)  __VA_ARGS__
+#define SKIP_FEATURE_CHECK_TAINTED_MODULE(...)
+
+#define CONFIG_FEATURE_2_4_MODULES 1
+#define ENABLE_FEATURE_2_4_MODULES 1
+#define USE_FEATURE_2_4_MODULES(...)  __VA_ARGS__
+#define SKIP_FEATURE_2_4_MODULES(...)
+
+#define CONFIG_FEATURE_2_6_MODULES 1
+#define ENABLE_FEATURE_2_6_MODULES 1
+#define USE_FEATURE_2_6_MODULES(...)  __VA_ARGS__
+#define SKIP_FEATURE_2_6_MODULES(...)
+
+#undef CONFIG_FEATURE_QUERY_MODULE_INTERFACE
+#define ENABLE_FEATURE_QUERY_MODULE_INTERFACE 0
+#define USE_FEATURE_QUERY_MODULE_INTERFACE(...)
+#define SKIP_FEATURE_QUERY_MODULE_INTERFACE(...)  __VA_ARGS__
+
+
+/*
+ * Linux System Utilities
+ */
+#define CONFIG_DMESG 1
+#define ENABLE_DMESG 1
+#define USE_DMESG(...)  __VA_ARGS__
+#define SKIP_DMESG(...)
+
+#undef CONFIG_FBSET
+#define ENABLE_FBSET 0
+#define USE_FBSET(...)
+#define SKIP_FBSET(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_FBSET_FANCY
+#define ENABLE_FEATURE_FBSET_FANCY 0
+#define USE_FEATURE_FBSET_FANCY(...)
+#define SKIP_FEATURE_FBSET_FANCY(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_FBSET_READMODE
+#define ENABLE_FEATURE_FBSET_READMODE 0
+#define USE_FEATURE_FBSET_READMODE(...)
+#define SKIP_FEATURE_FBSET_READMODE(...)  __VA_ARGS__
+
+#define CONFIG_FDFLUSH 1
+#define ENABLE_FDFLUSH 1
+#define USE_FDFLUSH(...)  __VA_ARGS__
+#define SKIP_FDFLUSH(...)
+
+#undef CONFIG_FDFORMAT
+#define ENABLE_FDFORMAT 0
+#define USE_FDFORMAT(...)
+#define SKIP_FDFORMAT(...)  __VA_ARGS__
+
+#undef CONFIG_FDISK
+#define ENABLE_FDISK 0
+#define USE_FDISK(...)
+#define SKIP_FDISK(...)  __VA_ARGS__
+
+#define FDISK_SUPPORT_LARGE_DISKS 1
+#define ENABLE_SUPPORT_LARGE_DISKS 1
+#define USE_SUPPORT_LARGE_DISKS(...)  __VA_ARGS__
+#define SKIP_SUPPORT_LARGE_DISKS(...)
+
+#undef CONFIG_FEATURE_FDISK_WRITABLE
+#define ENABLE_FEATURE_FDISK_WRITABLE 0
+#define USE_FEATURE_FDISK_WRITABLE(...)
+#define SKIP_FEATURE_FDISK_WRITABLE(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_AIX_LABEL
+#define ENABLE_FEATURE_AIX_LABEL 0
+#define USE_FEATURE_AIX_LABEL(...)
+#define SKIP_FEATURE_AIX_LABEL(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SGI_LABEL
+#define ENABLE_FEATURE_SGI_LABEL 0
+#define USE_FEATURE_SGI_LABEL(...)
+#define SKIP_FEATURE_SGI_LABEL(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SUN_LABEL
+#define ENABLE_FEATURE_SUN_LABEL 0
+#define USE_FEATURE_SUN_LABEL(...)
+#define SKIP_FEATURE_SUN_LABEL(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_OSF_LABEL
+#define ENABLE_FEATURE_OSF_LABEL 0
+#define USE_FEATURE_OSF_LABEL(...)
+#define SKIP_FEATURE_OSF_LABEL(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_FDISK_ADVANCED
+#define ENABLE_FEATURE_FDISK_ADVANCED 0
+#define USE_FEATURE_FDISK_ADVANCED(...)
+#define SKIP_FEATURE_FDISK_ADVANCED(...)  __VA_ARGS__
+
+#define CONFIG_FREERAMDISK 1
+#define ENABLE_FREERAMDISK 1
+#define USE_FREERAMDISK(...)  __VA_ARGS__
+#define SKIP_FREERAMDISK(...)
+
+#undef CONFIG_FSCK_MINIX
+#define ENABLE_FSCK_MINIX 0
+#define USE_FSCK_MINIX(...)
+#define SKIP_FSCK_MINIX(...)  __VA_ARGS__
+
+#undef CONFIG_MKFS_MINIX
+#define ENABLE_MKFS_MINIX 0
+#define USE_MKFS_MINIX(...)
+#define SKIP_MKFS_MINIX(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_MINIX2
+#define ENABLE_FEATURE_MINIX2 0
+#define USE_FEATURE_MINIX2(...)
+#define SKIP_FEATURE_MINIX2(...)  __VA_ARGS__
+
+#define CONFIG_GETOPT 1
+#define ENABLE_GETOPT 1
+#define USE_GETOPT(...)  __VA_ARGS__
+#define SKIP_GETOPT(...)
+
+#define CONFIG_HEXDUMP 1
+#define ENABLE_HEXDUMP 1
+#define USE_HEXDUMP(...)  __VA_ARGS__
+#define SKIP_HEXDUMP(...)
+
+#define CONFIG_HWCLOCK 1
+#define ENABLE_HWCLOCK 1
+#define USE_HWCLOCK(...)  __VA_ARGS__
+#define SKIP_HWCLOCK(...)
+
+#define CONFIG_FEATURE_HWCLOCK_LONG_OPTIONS 1
+#define ENABLE_FEATURE_HWCLOCK_LONG_OPTIONS 1
+#define USE_FEATURE_HWCLOCK_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_HWCLOCK_LONG_OPTIONS(...)
+
+#define CONFIG_FEATURE_HWCLOCK_ADJTIME_FHS 1
+#define ENABLE_FEATURE_HWCLOCK_ADJTIME_FHS 1
+#define USE_FEATURE_HWCLOCK_ADJTIME_FHS(...)  __VA_ARGS__
+#define SKIP_FEATURE_HWCLOCK_ADJTIME_FHS(...)
+
+#undef CONFIG_IPCRM
+#define ENABLE_IPCRM 0
+#define USE_IPCRM(...)
+#define SKIP_IPCRM(...)  __VA_ARGS__
+
+#undef CONFIG_IPCS
+#define ENABLE_IPCS 0
+#define USE_IPCS(...)
+#define SKIP_IPCS(...)  __VA_ARGS__
+
+#undef CONFIG_LOSETUP
+#define ENABLE_LOSETUP 0
+#define USE_LOSETUP(...)
+#define SKIP_LOSETUP(...)  __VA_ARGS__
+
+#undef CONFIG_MDEV
+#define ENABLE_MDEV 0
+#define USE_MDEV(...)
+#define SKIP_MDEV(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_MDEV_CONF
+#define ENABLE_FEATURE_MDEV_CONF 0
+#define USE_FEATURE_MDEV_CONF(...)
+#define SKIP_FEATURE_MDEV_CONF(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_MDEV_EXEC
+#define ENABLE_FEATURE_MDEV_EXEC 0
+#define USE_FEATURE_MDEV_EXEC(...)
+#define SKIP_FEATURE_MDEV_EXEC(...)  __VA_ARGS__
+
+#define CONFIG_MKSWAP 1
+#define ENABLE_MKSWAP 1
+#define USE_MKSWAP(...)  __VA_ARGS__
+#define SKIP_MKSWAP(...)
+
+#define CONFIG_FEATURE_MKSWAP_V0 1
+#define ENABLE_FEATURE_MKSWAP_V0 1
+#define USE_FEATURE_MKSWAP_V0(...)  __VA_ARGS__
+#define SKIP_FEATURE_MKSWAP_V0(...)
+
+#define CONFIG_MORE 1
+#define ENABLE_MORE 1
+#define USE_MORE(...)  __VA_ARGS__
+#define SKIP_MORE(...)
+
+#define CONFIG_FEATURE_USE_TERMIOS 1
+#define ENABLE_FEATURE_USE_TERMIOS 1
+#define USE_FEATURE_USE_TERMIOS(...)  __VA_ARGS__
+#define SKIP_FEATURE_USE_TERMIOS(...)
+
+#define CONFIG_MOUNT 1
+#define ENABLE_MOUNT 1
+#define USE_MOUNT(...)  __VA_ARGS__
+#define SKIP_MOUNT(...)
+
+#define CONFIG_FEATURE_MOUNT_NFS 1
+#define ENABLE_FEATURE_MOUNT_NFS 1
+#define USE_FEATURE_MOUNT_NFS(...)  __VA_ARGS__
+#define SKIP_FEATURE_MOUNT_NFS(...)
+
+#define CONFIG_PIVOT_ROOT 1
+#define ENABLE_PIVOT_ROOT 1
+#define USE_PIVOT_ROOT(...)  __VA_ARGS__
+#define SKIP_PIVOT_ROOT(...)
+
+#define CONFIG_RDATE 1
+#define ENABLE_RDATE 1
+#define USE_RDATE(...)  __VA_ARGS__
+#define SKIP_RDATE(...)
+
+#define CONFIG_READPROFILE 1
+#define ENABLE_READPROFILE 1
+#define USE_READPROFILE(...)  __VA_ARGS__
+#define SKIP_READPROFILE(...)
+
+#undef CONFIG_SETARCH
+#define ENABLE_SETARCH 0
+#define USE_SETARCH(...)
+#define SKIP_SETARCH(...)  __VA_ARGS__
+
+#define CONFIG_SWAPONOFF 1
+#define ENABLE_SWAPONOFF 1
+#define USE_SWAPONOFF(...)  __VA_ARGS__
+#define SKIP_SWAPONOFF(...)
+
+#define CONFIG_SWITCH_ROOT 1
+#define ENABLE_SWITCH_ROOT 1
+#define USE_SWITCH_ROOT(...)  __VA_ARGS__
+#define SKIP_SWITCH_ROOT(...)
+
+#define CONFIG_UMOUNT 1
+#define ENABLE_UMOUNT 1
+#define USE_UMOUNT(...)  __VA_ARGS__
+#define SKIP_UMOUNT(...)
+
+#define CONFIG_FEATURE_UMOUNT_ALL 1
+#define ENABLE_FEATURE_UMOUNT_ALL 1
+#define USE_FEATURE_UMOUNT_ALL(...)  __VA_ARGS__
+#define SKIP_FEATURE_UMOUNT_ALL(...)
+
+
+/*
+ * Common options for mount/umount
+ */
+#define CONFIG_FEATURE_MOUNT_LOOP 1
+#define ENABLE_FEATURE_MOUNT_LOOP 1
+#define USE_FEATURE_MOUNT_LOOP(...)  __VA_ARGS__
+#define SKIP_FEATURE_MOUNT_LOOP(...)
+
+#undef CONFIG_FEATURE_MTAB_SUPPORT
+#define ENABLE_FEATURE_MTAB_SUPPORT 0
+#define USE_FEATURE_MTAB_SUPPORT(...)
+#define SKIP_FEATURE_MTAB_SUPPORT(...)  __VA_ARGS__
+
+
+/*
+ * Miscellaneous Utilities
+ */
+#undef CONFIG_ADJTIMEX
+#define ENABLE_ADJTIMEX 0
+#define USE_ADJTIMEX(...)
+#define SKIP_ADJTIMEX(...)  __VA_ARGS__
+
+#undef CONFIG_BBCONFIG
+#define ENABLE_BBCONFIG 0
+#define USE_BBCONFIG(...)
+#define SKIP_BBCONFIG(...)  __VA_ARGS__
+
+#define CONFIG_CROND 1
+#define ENABLE_CROND 1
+#define USE_CROND(...)  __VA_ARGS__
+#define SKIP_CROND(...)
+
+#undef CONFIG_DEBUG_CROND_OPTION
+#define ENABLE_DEBUG_CROND_OPTION 0
+#define USE_DEBUG_CROND_OPTION(...)
+#define SKIP_DEBUG_CROND_OPTION(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_CROND_CALL_SENDMAIL 1
+#define ENABLE_FEATURE_CROND_CALL_SENDMAIL 1
+#define USE_FEATURE_CROND_CALL_SENDMAIL(...)  __VA_ARGS__
+#define SKIP_FEATURE_CROND_CALL_SENDMAIL(...)
+
+#define CONFIG_CRONTAB 1
+#define ENABLE_CRONTAB 1
+#define USE_CRONTAB(...)  __VA_ARGS__
+#define SKIP_CRONTAB(...)
+
+#undef CONFIG_DC
+#define ENABLE_DC 0
+#define USE_DC(...)
+#define SKIP_DC(...)  __VA_ARGS__
+
+#undef CONFIG_DEVFSD
+#define ENABLE_DEVFSD 0
+#define USE_DEVFSD(...)
+#define SKIP_DEVFSD(...)  __VA_ARGS__
+
+#undef CONFIG_DEVFSD_MODLOAD
+#define ENABLE_DEVFSD_MODLOAD 0
+#define USE_DEVFSD_MODLOAD(...)
+#define SKIP_DEVFSD_MODLOAD(...)  __VA_ARGS__
+
+#undef CONFIG_DEVFSD_FG_NP
+#define ENABLE_DEVFSD_FG_NP 0
+#define USE_DEVFSD_FG_NP(...)
+#define SKIP_DEVFSD_FG_NP(...)  __VA_ARGS__
+
+#undef CONFIG_DEVFSD_VERBOSE
+#define ENABLE_DEVFSD_VERBOSE 0
+#define USE_DEVFSD_VERBOSE(...)
+#define SKIP_DEVFSD_VERBOSE(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_DEVFS
+#define ENABLE_FEATURE_DEVFS 0
+#define USE_FEATURE_DEVFS(...)
+#define SKIP_FEATURE_DEVFS(...)  __VA_ARGS__
+
+#undef CONFIG_EJECT
+#define ENABLE_EJECT 0
+#define USE_EJECT(...)
+#define SKIP_EJECT(...)  __VA_ARGS__
+
+#define CONFIG_LAST 1
+#define ENABLE_LAST 1
+#define USE_LAST(...)  __VA_ARGS__
+#define SKIP_LAST(...)
+
+#define CONFIG_LESS 1
+#define ENABLE_LESS 1
+#define USE_LESS(...)  __VA_ARGS__
+#define SKIP_LESS(...)
+
+#define CONFIG_FEATURE_LESS_BRACKETS 1
+#define ENABLE_FEATURE_LESS_BRACKETS 1
+#define USE_FEATURE_LESS_BRACKETS(...)  __VA_ARGS__
+#define SKIP_FEATURE_LESS_BRACKETS(...)
+
+#define CONFIG_FEATURE_LESS_FLAGS 1
+#define ENABLE_FEATURE_LESS_FLAGS 1
+#define USE_FEATURE_LESS_FLAGS(...)  __VA_ARGS__
+#define SKIP_FEATURE_LESS_FLAGS(...)
+
+#define CONFIG_FEATURE_LESS_FLAGCS 1
+#define ENABLE_FEATURE_LESS_FLAGCS 1
+#define USE_FEATURE_LESS_FLAGCS(...)  __VA_ARGS__
+#define SKIP_FEATURE_LESS_FLAGCS(...)
+
+#define CONFIG_FEATURE_LESS_MARKS 1
+#define ENABLE_FEATURE_LESS_MARKS 1
+#define USE_FEATURE_LESS_MARKS(...)  __VA_ARGS__
+#define SKIP_FEATURE_LESS_MARKS(...)
+
+#define CONFIG_FEATURE_LESS_REGEXP 1
+#define ENABLE_FEATURE_LESS_REGEXP 1
+#define USE_FEATURE_LESS_REGEXP(...)  __VA_ARGS__
+#define SKIP_FEATURE_LESS_REGEXP(...)
+
+#undef CONFIG_HDPARM
+#define ENABLE_HDPARM 0
+#define USE_HDPARM(...)
+#define SKIP_HDPARM(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HDPARM_GET_IDENTITY
+#define ENABLE_FEATURE_HDPARM_GET_IDENTITY 0
+#define USE_FEATURE_HDPARM_GET_IDENTITY(...)
+#define SKIP_FEATURE_HDPARM_GET_IDENTITY(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HDPARM_HDIO_SCAN_HWIF
+#define ENABLE_FEATURE_HDPARM_HDIO_SCAN_HWIF 0
+#define USE_FEATURE_HDPARM_HDIO_SCAN_HWIF(...)
+#define SKIP_FEATURE_HDPARM_HDIO_SCAN_HWIF(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HDPARM_HDIO_UNREGISTER_HWIF
+#define ENABLE_FEATURE_HDPARM_HDIO_UNREGISTER_HWIF 0
+#define USE_FEATURE_HDPARM_HDIO_UNREGISTER_HWIF(...)
+#define SKIP_FEATURE_HDPARM_HDIO_UNREGISTER_HWIF(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HDPARM_HDIO_DRIVE_RESET
+#define ENABLE_FEATURE_HDPARM_HDIO_DRIVE_RESET 0
+#define USE_FEATURE_HDPARM_HDIO_DRIVE_RESET(...)
+#define SKIP_FEATURE_HDPARM_HDIO_DRIVE_RESET(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HDPARM_HDIO_TRISTATE_HWIF
+#define ENABLE_FEATURE_HDPARM_HDIO_TRISTATE_HWIF 0
+#define USE_FEATURE_HDPARM_HDIO_TRISTATE_HWIF(...)
+#define SKIP_FEATURE_HDPARM_HDIO_TRISTATE_HWIF(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HDPARM_HDIO_GETSET_DMA
+#define ENABLE_FEATURE_HDPARM_HDIO_GETSET_DMA 0
+#define USE_FEATURE_HDPARM_HDIO_GETSET_DMA(...)
+#define SKIP_FEATURE_HDPARM_HDIO_GETSET_DMA(...)  __VA_ARGS__
+
+#undef CONFIG_MAKEDEVS
+#define ENABLE_MAKEDEVS 0
+#define USE_MAKEDEVS(...)
+#define SKIP_MAKEDEVS(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_MAKEDEVS_LEAF
+#define ENABLE_FEATURE_MAKEDEVS_LEAF 0
+#define USE_FEATURE_MAKEDEVS_LEAF(...)
+#define SKIP_FEATURE_MAKEDEVS_LEAF(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_MAKEDEVS_TABLE
+#define ENABLE_FEATURE_MAKEDEVS_TABLE 0
+#define USE_FEATURE_MAKEDEVS_TABLE(...)
+#define SKIP_FEATURE_MAKEDEVS_TABLE(...)  __VA_ARGS__
+
+#define CONFIG_MOUNTPOINT 1
+#define ENABLE_MOUNTPOINT 1
+#define USE_MOUNTPOINT(...)  __VA_ARGS__
+#define SKIP_MOUNTPOINT(...)
+
+#undef CONFIG_MT
+#define ENABLE_MT 0
+#define USE_MT(...)
+#define SKIP_MT(...)  __VA_ARGS__
+
+#undef CONFIG_RUNLEVEL
+#define ENABLE_RUNLEVEL 0
+#define USE_RUNLEVEL(...)
+#define SKIP_RUNLEVEL(...)  __VA_ARGS__
+
+#undef CONFIG_RX
+#define ENABLE_RX 0
+#define USE_RX(...)
+#define SKIP_RX(...)  __VA_ARGS__
+
+#define CONFIG_STRINGS 1
+#define ENABLE_STRINGS 1
+#define USE_STRINGS(...)  __VA_ARGS__
+#define SKIP_STRINGS(...)
+
+#undef CONFIG_SETSID
+#define ENABLE_SETSID 0
+#define USE_SETSID(...)
+#define SKIP_SETSID(...)  __VA_ARGS__
+
+#define CONFIG_TASKSET 1
+#define ENABLE_TASKSET 1
+#define USE_TASKSET(...)  __VA_ARGS__
+#define SKIP_TASKSET(...)
+
+#define CONFIG_TIME 1
+#define ENABLE_TIME 1
+#define USE_TIME(...)  __VA_ARGS__
+#define SKIP_TIME(...)
+
+#define CONFIG_WATCHDOG 1
+#define ENABLE_WATCHDOG 1
+#define USE_WATCHDOG(...)  __VA_ARGS__
+#define SKIP_WATCHDOG(...)
+
+
+/*
+ * Networking Utilities
+ */
+#undef CONFIG_FEATURE_IPV6
+#define ENABLE_FEATURE_IPV6 0
+#define USE_FEATURE_IPV6(...)
+#define SKIP_FEATURE_IPV6(...)  __VA_ARGS__
+
+#define CONFIG_ARPING 1
+#define ENABLE_ARPING 1
+#define USE_ARPING(...)  __VA_ARGS__
+#define SKIP_ARPING(...)
+
+#undef CONFIG_DNSD
+#define ENABLE_DNSD 0
+#define USE_DNSD(...)
+#define SKIP_DNSD(...)  __VA_ARGS__
+
+#define CONFIG_ETHER_WAKE 1
+#define ENABLE_ETHER_WAKE 1
+#define USE_ETHER_WAKE(...)  __VA_ARGS__
+#define SKIP_ETHER_WAKE(...)
+
+#undef CONFIG_FAKEIDENTD
+#define ENABLE_FAKEIDENTD 0
+#define USE_FAKEIDENTD(...)
+#define SKIP_FAKEIDENTD(...)  __VA_ARGS__
+
+#define CONFIG_FTPGET 1
+#define ENABLE_FTPGET 1
+#define USE_FTPGET(...)  __VA_ARGS__
+#define SKIP_FTPGET(...)
+
+#define CONFIG_FTPPUT 1
+#define ENABLE_FTPPUT 1
+#define USE_FTPPUT(...)  __VA_ARGS__
+#define SKIP_FTPPUT(...)
+
+#define CONFIG_FEATURE_FTPGETPUT_LONG_OPTIONS 1
+#define ENABLE_FEATURE_FTPGETPUT_LONG_OPTIONS 1
+#define USE_FEATURE_FTPGETPUT_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_FTPGETPUT_LONG_OPTIONS(...)
+
+#define CONFIG_HOSTNAME 1
+#define ENABLE_HOSTNAME 1
+#define USE_HOSTNAME(...)  __VA_ARGS__
+#define SKIP_HOSTNAME(...)
+
+#undef CONFIG_HTTPD
+#define ENABLE_HTTPD 0
+#define USE_HTTPD(...)
+#define SKIP_HTTPD(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_WITHOUT_INETD
+#define ENABLE_FEATURE_HTTPD_WITHOUT_INETD 0
+#define USE_FEATURE_HTTPD_WITHOUT_INETD(...)
+#define SKIP_FEATURE_HTTPD_WITHOUT_INETD(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_RELOAD_CONFIG_SIGHUP
+#define ENABLE_FEATURE_HTTPD_RELOAD_CONFIG_SIGHUP 0
+#define USE_FEATURE_HTTPD_RELOAD_CONFIG_SIGHUP(...)
+#define SKIP_FEATURE_HTTPD_RELOAD_CONFIG_SIGHUP(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_SETUID
+#define ENABLE_FEATURE_HTTPD_SETUID 0
+#define USE_FEATURE_HTTPD_SETUID(...)
+#define SKIP_FEATURE_HTTPD_SETUID(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_BASIC_AUTH
+#define ENABLE_FEATURE_HTTPD_BASIC_AUTH 0
+#define USE_FEATURE_HTTPD_BASIC_AUTH(...)
+#define SKIP_FEATURE_HTTPD_BASIC_AUTH(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_AUTH_MD5
+#define ENABLE_FEATURE_HTTPD_AUTH_MD5 0
+#define USE_FEATURE_HTTPD_AUTH_MD5(...)
+#define SKIP_FEATURE_HTTPD_AUTH_MD5(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_CONFIG_WITH_MIME_TYPES
+#define ENABLE_FEATURE_HTTPD_CONFIG_WITH_MIME_TYPES 0
+#define USE_FEATURE_HTTPD_CONFIG_WITH_MIME_TYPES(...)
+#define SKIP_FEATURE_HTTPD_CONFIG_WITH_MIME_TYPES(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_CGI
+#define ENABLE_FEATURE_HTTPD_CGI 0
+#define USE_FEATURE_HTTPD_CGI(...)
+#define SKIP_FEATURE_HTTPD_CGI(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR
+#define ENABLE_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR 0
+#define USE_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR(...)
+#define SKIP_FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_SET_REMOTE_PORT_TO_ENV
+#define ENABLE_FEATURE_HTTPD_SET_REMOTE_PORT_TO_ENV 0
+#define USE_FEATURE_HTTPD_SET_REMOTE_PORT_TO_ENV(...)
+#define SKIP_FEATURE_HTTPD_SET_REMOTE_PORT_TO_ENV(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_HTTPD_ENCODE_URL_STR
+#define ENABLE_FEATURE_HTTPD_ENCODE_URL_STR 0
+#define USE_FEATURE_HTTPD_ENCODE_URL_STR(...)
+#define SKIP_FEATURE_HTTPD_ENCODE_URL_STR(...)  __VA_ARGS__
+
+#define CONFIG_IFCONFIG 1
+#define ENABLE_IFCONFIG 1
+#define USE_IFCONFIG(...)  __VA_ARGS__
+#define SKIP_IFCONFIG(...)
+
+#define CONFIG_FEATURE_IFCONFIG_STATUS 1
+#define ENABLE_FEATURE_IFCONFIG_STATUS 1
+#define USE_FEATURE_IFCONFIG_STATUS(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFCONFIG_STATUS(...)
+
+#define CONFIG_FEATURE_IFCONFIG_SLIP 1
+#define ENABLE_FEATURE_IFCONFIG_SLIP 1
+#define USE_FEATURE_IFCONFIG_SLIP(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFCONFIG_SLIP(...)
+
+#define CONFIG_FEATURE_IFCONFIG_MEMSTART_IOADDR_IRQ 1
+#define ENABLE_FEATURE_IFCONFIG_MEMSTART_IOADDR_IRQ 1
+#define USE_FEATURE_IFCONFIG_MEMSTART_IOADDR_IRQ(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFCONFIG_MEMSTART_IOADDR_IRQ(...)
+
+#define CONFIG_FEATURE_IFCONFIG_HW 1
+#define ENABLE_FEATURE_IFCONFIG_HW 1
+#define USE_FEATURE_IFCONFIG_HW(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFCONFIG_HW(...)
+
+#define CONFIG_FEATURE_IFCONFIG_BROADCAST_PLUS 1
+#define ENABLE_FEATURE_IFCONFIG_BROADCAST_PLUS 1
+#define USE_FEATURE_IFCONFIG_BROADCAST_PLUS(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFCONFIG_BROADCAST_PLUS(...)
+
+#define CONFIG_IFUPDOWN 1
+#define ENABLE_IFUPDOWN 1
+#define USE_IFUPDOWN(...)  __VA_ARGS__
+#define SKIP_IFUPDOWN(...)
+
+#undef CONFIG_FEATURE_IFUPDOWN_IP
+#define ENABLE_FEATURE_IFUPDOWN_IP 0
+#define USE_FEATURE_IFUPDOWN_IP(...)
+#define SKIP_FEATURE_IFUPDOWN_IP(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_IFUPDOWN_IP_BUILTIN 1
+#define ENABLE_FEATURE_IFUPDOWN_IP_BUILTIN 1
+#define USE_FEATURE_IFUPDOWN_IP_BUILTIN(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFUPDOWN_IP_BUILTIN(...)
+
+#define CONFIG_FEATURE_IFUPDOWN_IPV4 1
+#define ENABLE_FEATURE_IFUPDOWN_IPV4 1
+#define USE_FEATURE_IFUPDOWN_IPV4(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFUPDOWN_IPV4(...)
+
+#undef CONFIG_FEATURE_IFUPDOWN_IPV6
+#define ENABLE_FEATURE_IFUPDOWN_IPV6 0
+#define USE_FEATURE_IFUPDOWN_IPV6(...)
+#define SKIP_FEATURE_IFUPDOWN_IPV6(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IFUPDOWN_IPX
+#define ENABLE_FEATURE_IFUPDOWN_IPX 0
+#define USE_FEATURE_IFUPDOWN_IPX(...)
+#define SKIP_FEATURE_IFUPDOWN_IPX(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_IFUPDOWN_MAPPING 1
+#define ENABLE_FEATURE_IFUPDOWN_MAPPING 1
+#define USE_FEATURE_IFUPDOWN_MAPPING(...)  __VA_ARGS__
+#define SKIP_FEATURE_IFUPDOWN_MAPPING(...)
+
+#define CONFIG_INETD 1
+#define ENABLE_INETD 1
+#define USE_INETD(...)  __VA_ARGS__
+#define SKIP_INETD(...)
+
+#define CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_ECHO 1
+#define ENABLE_FEATURE_INETD_SUPPORT_BUILTIN_ECHO 1
+#define USE_FEATURE_INETD_SUPPORT_BUILTIN_ECHO(...)  __VA_ARGS__
+#define SKIP_FEATURE_INETD_SUPPORT_BUILTIN_ECHO(...)
+
+#define CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_DISCARD 1
+#define ENABLE_FEATURE_INETD_SUPPORT_BUILTIN_DISCARD 1
+#define USE_FEATURE_INETD_SUPPORT_BUILTIN_DISCARD(...)  __VA_ARGS__
+#define SKIP_FEATURE_INETD_SUPPORT_BUILTIN_DISCARD(...)
+
+#define CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_TIME 1
+#define ENABLE_FEATURE_INETD_SUPPORT_BUILTIN_TIME 1
+#define USE_FEATURE_INETD_SUPPORT_BUILTIN_TIME(...)  __VA_ARGS__
+#define SKIP_FEATURE_INETD_SUPPORT_BUILTIN_TIME(...)
+
+#define CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_DAYTIME 1
+#define ENABLE_FEATURE_INETD_SUPPORT_BUILTIN_DAYTIME 1
+#define USE_FEATURE_INETD_SUPPORT_BUILTIN_DAYTIME(...)  __VA_ARGS__
+#define SKIP_FEATURE_INETD_SUPPORT_BUILTIN_DAYTIME(...)
+
+#define CONFIG_FEATURE_INETD_SUPPORT_BUILTIN_CHARGEN 1
+#define ENABLE_FEATURE_INETD_SUPPORT_BUILTIN_CHARGEN 1
+#define USE_FEATURE_INETD_SUPPORT_BUILTIN_CHARGEN(...)  __VA_ARGS__
+#define SKIP_FEATURE_INETD_SUPPORT_BUILTIN_CHARGEN(...)
+
+#define CONFIG_FEATURE_INETD_RPC 1
+#define ENABLE_FEATURE_INETD_RPC 1
+#define USE_FEATURE_INETD_RPC(...)  __VA_ARGS__
+#define SKIP_FEATURE_INETD_RPC(...)
+
+#undef CONFIG_IP
+#define ENABLE_IP 0
+#define USE_IP(...)
+#define SKIP_IP(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IP_ADDRESS
+#define ENABLE_FEATURE_IP_ADDRESS 0
+#define USE_FEATURE_IP_ADDRESS(...)
+#define SKIP_FEATURE_IP_ADDRESS(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IP_LINK
+#define ENABLE_FEATURE_IP_LINK 0
+#define USE_FEATURE_IP_LINK(...)
+#define SKIP_FEATURE_IP_LINK(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IP_ROUTE
+#define ENABLE_FEATURE_IP_ROUTE 0
+#define USE_FEATURE_IP_ROUTE(...)
+#define SKIP_FEATURE_IP_ROUTE(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IP_TUNNEL
+#define ENABLE_FEATURE_IP_TUNNEL 0
+#define USE_FEATURE_IP_TUNNEL(...)
+#define SKIP_FEATURE_IP_TUNNEL(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IP_SHORT_FORMS
+#define ENABLE_FEATURE_IP_SHORT_FORMS 0
+#define USE_FEATURE_IP_SHORT_FORMS(...)
+#define SKIP_FEATURE_IP_SHORT_FORMS(...)  __VA_ARGS__
+
+#undef CONFIG_IPADDR
+#define ENABLE_IPADDR 0
+#define USE_IPADDR(...)
+#define SKIP_IPADDR(...)  __VA_ARGS__
+
+#undef CONFIG_IPLINK
+#define ENABLE_IPLINK 0
+#define USE_IPLINK(...)
+#define SKIP_IPLINK(...)  __VA_ARGS__
+
+#undef CONFIG_IPROUTE
+#define ENABLE_IPROUTE 0
+#define USE_IPROUTE(...)
+#define SKIP_IPROUTE(...)  __VA_ARGS__
+
+#undef CONFIG_IPTUNNEL
+#define ENABLE_IPTUNNEL 0
+#define USE_IPTUNNEL(...)
+#define SKIP_IPTUNNEL(...)  __VA_ARGS__
+
+#undef CONFIG_IPCALC
+#define ENABLE_IPCALC 0
+#define USE_IPCALC(...)
+#define SKIP_IPCALC(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IPCALC_FANCY
+#define ENABLE_FEATURE_IPCALC_FANCY 0
+#define USE_FEATURE_IPCALC_FANCY(...)
+#define SKIP_FEATURE_IPCALC_FANCY(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_IPCALC_LONG_OPTIONS
+#define ENABLE_FEATURE_IPCALC_LONG_OPTIONS 0
+#define USE_FEATURE_IPCALC_LONG_OPTIONS(...)
+#define SKIP_FEATURE_IPCALC_LONG_OPTIONS(...)  __VA_ARGS__
+
+#undef CONFIG_NAMEIF
+#define ENABLE_NAMEIF 0
+#define USE_NAMEIF(...)
+#define SKIP_NAMEIF(...)  __VA_ARGS__
+
+#undef CONFIG_NC
+#define ENABLE_NC 0
+#define USE_NC(...)
+#define SKIP_NC(...)  __VA_ARGS__
+
+#undef CONFIG_NC_GAPING_SECURITY_HOLE
+#define ENABLE_NC_GAPING_SECURITY_HOLE 0
+#define USE_NC_GAPING_SECURITY_HOLE(...)
+#define SKIP_NC_GAPING_SECURITY_HOLE(...)  __VA_ARGS__
+
+#define CONFIG_NETSTAT 1
+#define ENABLE_NETSTAT 1
+#define USE_NETSTAT(...)  __VA_ARGS__
+#define SKIP_NETSTAT(...)
+
+#define CONFIG_NSLOOKUP 1
+#define ENABLE_NSLOOKUP 1
+#define USE_NSLOOKUP(...)  __VA_ARGS__
+#define SKIP_NSLOOKUP(...)
+
+#define CONFIG_PING 1
+#define ENABLE_PING 1
+#define USE_PING(...)  __VA_ARGS__
+#define SKIP_PING(...)
+
+#define CONFIG_FEATURE_FANCY_PING 1
+#define ENABLE_FEATURE_FANCY_PING 1
+#define USE_FEATURE_FANCY_PING(...)  __VA_ARGS__
+#define SKIP_FEATURE_FANCY_PING(...)
+
+#undef CONFIG_PING6
+#define ENABLE_PING6 0
+#define USE_PING6(...)
+#define SKIP_PING6(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_FANCY_PING6
+#define ENABLE_FEATURE_FANCY_PING6 0
+#define USE_FEATURE_FANCY_PING6(...)
+#define SKIP_FEATURE_FANCY_PING6(...)  __VA_ARGS__
+
+#define CONFIG_ROUTE 1
+#define ENABLE_ROUTE 1
+#define USE_ROUTE(...)  __VA_ARGS__
+#define SKIP_ROUTE(...)
+
+#undef CONFIG_TELNET
+#define ENABLE_TELNET 0
+#define USE_TELNET(...)
+#define SKIP_TELNET(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_TELNET_TTYPE
+#define ENABLE_FEATURE_TELNET_TTYPE 0
+#define USE_FEATURE_TELNET_TTYPE(...)
+#define SKIP_FEATURE_TELNET_TTYPE(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_TELNET_AUTOLOGIN
+#define ENABLE_FEATURE_TELNET_AUTOLOGIN 0
+#define USE_FEATURE_TELNET_AUTOLOGIN(...)
+#define SKIP_FEATURE_TELNET_AUTOLOGIN(...)  __VA_ARGS__
+
+#undef CONFIG_TELNETD
+#define ENABLE_TELNETD 0
+#define USE_TELNETD(...)
+#define SKIP_TELNETD(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_TELNETD_INETD
+#define ENABLE_FEATURE_TELNETD_INETD 0
+#define USE_FEATURE_TELNETD_INETD(...)
+#define SKIP_FEATURE_TELNETD_INETD(...)  __VA_ARGS__
+
+#define CONFIG_TFTP 1
+#define ENABLE_TFTP 1
+#define USE_TFTP(...)  __VA_ARGS__
+#define SKIP_TFTP(...)
+
+#define CONFIG_FEATURE_TFTP_GET 1
+#define ENABLE_FEATURE_TFTP_GET 1
+#define USE_FEATURE_TFTP_GET(...)  __VA_ARGS__
+#define SKIP_FEATURE_TFTP_GET(...)
+
+#define CONFIG_FEATURE_TFTP_PUT 1
+#define ENABLE_FEATURE_TFTP_PUT 1
+#define USE_FEATURE_TFTP_PUT(...)  __VA_ARGS__
+#define SKIP_FEATURE_TFTP_PUT(...)
+
+#define CONFIG_FEATURE_TFTP_BLOCKSIZE 1
+#define ENABLE_FEATURE_TFTP_BLOCKSIZE 1
+#define USE_FEATURE_TFTP_BLOCKSIZE(...)  __VA_ARGS__
+#define SKIP_FEATURE_TFTP_BLOCKSIZE(...)
+
+#undef CONFIG_DEBUG_TFTP
+#define ENABLE_DEBUG_TFTP 0
+#define USE_DEBUG_TFTP(...)
+#define SKIP_DEBUG_TFTP(...)  __VA_ARGS__
+
+#define CONFIG_TRACEROUTE 1
+#define ENABLE_TRACEROUTE 1
+#define USE_TRACEROUTE(...)  __VA_ARGS__
+#define SKIP_TRACEROUTE(...)
+
+#define CONFIG_FEATURE_TRACEROUTE_VERBOSE 1
+#define ENABLE_FEATURE_TRACEROUTE_VERBOSE 1
+#define USE_FEATURE_TRACEROUTE_VERBOSE(...)  __VA_ARGS__
+#define SKIP_FEATURE_TRACEROUTE_VERBOSE(...)
+
+#define CONFIG_FEATURE_TRACEROUTE_SOURCE_ROUTE 1
+#define ENABLE_FEATURE_TRACEROUTE_SOURCE_ROUTE 1
+#define USE_FEATURE_TRACEROUTE_SOURCE_ROUTE(...)  __VA_ARGS__
+#define SKIP_FEATURE_TRACEROUTE_SOURCE_ROUTE(...)
+
+#define CONFIG_FEATURE_TRACEROUTE_USE_ICMP 1
+#define ENABLE_FEATURE_TRACEROUTE_USE_ICMP 1
+#define USE_FEATURE_TRACEROUTE_USE_ICMP(...)  __VA_ARGS__
+#define SKIP_FEATURE_TRACEROUTE_USE_ICMP(...)
+
+
+/*
+ * udhcp Server/Client
+ */
+#undef CONFIG_APP_UDHCPD
+#define ENABLE_APP_UDHCPD 0
+#define USE_APP_UDHCPD(...)
+#define SKIP_APP_UDHCPD(...)  __VA_ARGS__
+
+#define CONFIG_APP_UDHCPC 1
+#define ENABLE_APP_UDHCPC 1
+#define USE_APP_UDHCPC(...)  __VA_ARGS__
+#define SKIP_APP_UDHCPC(...)
+
+#undef CONFIG_APP_DUMPLEASES
+#define ENABLE_APP_DUMPLEASES 0
+#define USE_APP_DUMPLEASES(...)
+#define SKIP_APP_DUMPLEASES(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_UDHCP_SYSLOG 1
+#define ENABLE_FEATURE_UDHCP_SYSLOG 1
+#define USE_FEATURE_UDHCP_SYSLOG(...)  __VA_ARGS__
+#define SKIP_FEATURE_UDHCP_SYSLOG(...)
+
+#define CONFIG_FEATURE_UDHCP_DEBUG 1
+#define ENABLE_FEATURE_UDHCP_DEBUG 1
+#define USE_FEATURE_UDHCP_DEBUG(...)  __VA_ARGS__
+#define SKIP_FEATURE_UDHCP_DEBUG(...)
+
+#define CONFIG_FEATURE_UDHCP_ZEROCONF 1
+#define ENABLE_FEATURE_UDHCP_ZEROCONF 1
+#define USE_FEATURE_UDHCP_ZEROCONF(...)  __VA_ARGS__
+#define SKIP_FEATURE_UDHCP_ZEROCONF(...)
+
+#undef CONFIG_VCONFIG
+#define ENABLE_VCONFIG 0
+#define USE_VCONFIG(...)
+#define SKIP_VCONFIG(...)  __VA_ARGS__
+
+#define CONFIG_WGET 1
+#define ENABLE_WGET 1
+#define USE_WGET(...)  __VA_ARGS__
+#define SKIP_WGET(...)
+
+#define CONFIG_FEATURE_WGET_STATUSBAR 1
+#define ENABLE_FEATURE_WGET_STATUSBAR 1
+#define USE_FEATURE_WGET_STATUSBAR(...)  __VA_ARGS__
+#define SKIP_FEATURE_WGET_STATUSBAR(...)
+
+#define CONFIG_FEATURE_WGET_AUTHENTICATION 1
+#define ENABLE_FEATURE_WGET_AUTHENTICATION 1
+#define USE_FEATURE_WGET_AUTHENTICATION(...)  __VA_ARGS__
+#define SKIP_FEATURE_WGET_AUTHENTICATION(...)
+
+#undef CONFIG_FEATURE_WGET_IP6_LITERAL
+#define ENABLE_FEATURE_WGET_IP6_LITERAL 0
+#define USE_FEATURE_WGET_IP6_LITERAL(...)
+#define SKIP_FEATURE_WGET_IP6_LITERAL(...)  __VA_ARGS__
+
+#define CONFIG_FEATURE_WGET_LONG_OPTIONS 1
+#define ENABLE_FEATURE_WGET_LONG_OPTIONS 1
+#define USE_FEATURE_WGET_LONG_OPTIONS(...)  __VA_ARGS__
+#define SKIP_FEATURE_WGET_LONG_OPTIONS(...)
+
+#undef CONFIG_ZCIP
+#define ENABLE_ZCIP 0
+#define USE_ZCIP(...)
+#define SKIP_ZCIP(...)  __VA_ARGS__
+
+
+/*
+ * Process Utilities
+ */
+#define CONFIG_FREE 1
+#define ENABLE_FREE 1
+#define USE_FREE(...)  __VA_ARGS__
+#define SKIP_FREE(...)
+
+#define CONFIG_FUSER 1
+#define ENABLE_FUSER 1
+#define USE_FUSER(...)  __VA_ARGS__
+#define SKIP_FUSER(...)
+
+#define CONFIG_KILL 1
+#define ENABLE_KILL 1
+#define USE_KILL(...)  __VA_ARGS__
+#define SKIP_KILL(...)
+
+#define CONFIG_KILLALL 1
+#define ENABLE_KILLALL 1
+#define USE_KILLALL(...)  __VA_ARGS__
+#define SKIP_KILLALL(...)
+
+#define CONFIG_PIDOF 1
+#define ENABLE_PIDOF 1
+#define USE_PIDOF(...)  __VA_ARGS__
+#define SKIP_PIDOF(...)
+
+#define CONFIG_FEATURE_PIDOF_SINGLE 1
+#define ENABLE_FEATURE_PIDOF_SINGLE 1
+#define USE_FEATURE_PIDOF_SINGLE(...)  __VA_ARGS__
+#define SKIP_FEATURE_PIDOF_SINGLE(...)
+
+#define CONFIG_FEATURE_PIDOF_OMIT 1
+#define ENABLE_FEATURE_PIDOF_OMIT 1
+#define USE_FEATURE_PIDOF_OMIT(...)  __VA_ARGS__
+#define SKIP_FEATURE_PIDOF_OMIT(...)
+
+#define CONFIG_PS 1
+#define ENABLE_PS 1
+#define USE_PS(...)  __VA_ARGS__
+#define SKIP_PS(...)
+
+#define CONFIG_FEATURE_PS_WIDE 1
+#define ENABLE_FEATURE_PS_WIDE 1
+#define USE_FEATURE_PS_WIDE(...)  __VA_ARGS__
+#define SKIP_FEATURE_PS_WIDE(...)
+
+#define CONFIG_RENICE 1
+#define ENABLE_RENICE 1
+#define USE_RENICE(...)  __VA_ARGS__
+#define SKIP_RENICE(...)
+
+#define CONFIG_BB_SYSCTL 1
+#define ENABLE_BB_SYSCTL 1
+#define USE_BB_SYSCTL(...)  __VA_ARGS__
+#define SKIP_BB_SYSCTL(...)
+
+#define CONFIG_TOP 1
+#define ENABLE_TOP 1
+#define USE_TOP(...)  __VA_ARGS__
+#define SKIP_TOP(...)
+
+#define CONFIG_FEATURE_TOP_CPU_USAGE_PERCENTAGE 1
+#define ENABLE_FEATURE_TOP_CPU_USAGE_PERCENTAGE 1
+#define USE_FEATURE_TOP_CPU_USAGE_PERCENTAGE(...)  __VA_ARGS__
+#define SKIP_FEATURE_TOP_CPU_USAGE_PERCENTAGE(...)
+
+#define CONFIG_UPTIME 1
+#define ENABLE_UPTIME 1
+#define USE_UPTIME(...)  __VA_ARGS__
+#define SKIP_UPTIME(...)
+
+
+/*
+ * Shells
+ */
+#define CONFIG_FEATURE_SH_IS_ASH 1
+#define ENABLE_FEATURE_SH_IS_ASH 1
+#define USE_FEATURE_SH_IS_ASH(...)  __VA_ARGS__
+#define SKIP_FEATURE_SH_IS_ASH(...)
+
+#undef CONFIG_FEATURE_SH_IS_HUSH
+#define ENABLE_FEATURE_SH_IS_HUSH 0
+#define USE_FEATURE_SH_IS_HUSH(...)
+#define SKIP_FEATURE_SH_IS_HUSH(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SH_IS_LASH
+#define ENABLE_FEATURE_SH_IS_LASH 0
+#define USE_FEATURE_SH_IS_LASH(...)
+#define SKIP_FEATURE_SH_IS_LASH(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SH_IS_MSH
+#define ENABLE_FEATURE_SH_IS_MSH 0
+#define USE_FEATURE_SH_IS_MSH(...)
+#define SKIP_FEATURE_SH_IS_MSH(...)  __VA_ARGS__
+
+#undef CONFIG_FEATURE_SH_IS_NONE
+#define ENABLE_FEATURE_SH_IS_NONE 0
+#define USE_FEATURE_SH_IS_NONE(...)
+#define SKIP_FEATURE_SH_IS_NONE(...)  __VA_ARGS__
+
+#define CONFIG_ASH 1
+#define ENABLE_ASH 1
+#define USE_ASH(...)  __VA_ARGS__
+#define SKIP_ASH(...)
+
+
+/*
+ * Ash Shell Options
+ */
+#define CONFIG_ASH_JOB_CONTROL 1
+#define ENABLE_ASH_JOB_CONTROL 1
+#define USE_ASH_JOB_CONTROL(...)  __VA_ARGS__
+#define SKIP_ASH_JOB_CONTROL(...)
+
+#define CONFIG_ASH_READ_NCHARS 1
+#define ENABLE_ASH_READ_NCHARS 1
+#define USE_ASH_READ_NCHARS(...)  __VA_ARGS__
+#define SKIP_ASH_READ_NCHARS(...)
+
+#define CONFIG_ASH_READ_TIMEOUT 1
+#define ENABLE_ASH_READ_TIMEOUT 1
+#define USE_ASH_READ_TIMEOUT(...)  __VA_ARGS__
+#define SKIP_ASH_READ_TIMEOUT(...)
+
+#define CONFIG_ASH_ALIAS 1
+#define ENABLE_ASH_ALIAS 1
+#define USE_ASH_ALIAS(...)  __VA_ARGS__
+#define SKIP_ASH_ALIAS(...)
+
+#define CONFIG_ASH_MATH_SUPPORT 1
+#define ENABLE_ASH_MATH_SUPPORT 1
+#define USE_ASH_MATH_SUPPORT(...)  __VA_ARGS__
+#define SKIP_ASH_MATH_SUPPORT(...)
+
+#define CONFIG_ASH_MATH_SUPPORT_64 1
+#define ENABLE_ASH_MATH_SUPPORT_64 1
+#define USE_ASH_MATH_SUPPORT_64(...)  __VA_ARGS__
+#define SKIP_ASH_MATH_SUPPORT_64(...)
+
+#define CONFIG_ASH_GETOPTS 1
+#define ENABLE_ASH_GETOPTS 1
+#define USE_ASH_GETOPTS(...)  __VA_ARGS__
+#define SKIP_ASH_GETOPTS(...)
+
+#define CONFIG_ASH_BUILTIN_ECHO 1
+#define ENABLE_ASH_BUILTIN_ECHO 1
+#define USE_ASH_BUILTIN_ECHO(...)  __VA_ARGS__
+#define SKIP_ASH_BUILTIN_ECHO(...)
+
+#define CONFIG_ASH_BUILTIN_TEST 1
+#define ENABLE_ASH_BUILTIN_TEST 1
+#define USE_ASH_BUILTIN_TEST(...)  __VA_ARGS__
+#define SKIP_ASH_BUILTIN_TEST(...)
+
+#define CONFIG_ASH_CMDCMD 1
+#define ENABLE_ASH_CMDCMD 1
+#define USE_ASH_CMDCMD(...)  __VA_ARGS__
+#define SKIP_ASH_CMDCMD(...)
+
+#define CONFIG_ASH_MAIL 1
+#define ENABLE_ASH_MAIL 1
+#define USE_ASH_MAIL(...)  __VA_ARGS__
+#define SKIP_ASH_MAIL(...)
+
+#define CONFIG_ASH_OPTIMIZE_FOR_SIZE 1
+#define ENABLE_ASH_OPTIMIZE_FOR_SIZE 1
+#define USE_ASH_OPTIMIZE_FOR_SIZE(...)  __VA_ARGS__
+#define SKIP_ASH_OPTIMIZE_FOR_SIZE(...)
+
+#define CONFIG_ASH_RANDOM_SUPPORT 1
+#define ENABLE_ASH_RANDOM_SUPPORT 1
+#define USE_ASH_RANDOM_SUPPORT(...)  __VA_ARGS__
+#define SKIP_ASH_RANDOM_SUPPORT(...)
+
+#define CONFIG_ASH_EXPAND_PRMT 1
+#define ENABLE_ASH_EXPAND_PRMT 1
+#define USE_ASH_EXPAND_PRMT(...)  __VA_ARGS__
+#define SKIP_ASH_EXPAND_PRMT(...)
+
+#undef CONFIG_HUSH
+#define ENABLE_HUSH 0
+#define USE_HUSH(...)
+#define SKIP_HUSH(...)  __VA_ARGS__
+
+#undef CONFIG_LASH
+#define ENABLE_LASH 0
+#define USE_LASH(...)
+#define SKIP_LASH(...)  __VA_ARGS__
+
+#define CONFIG_MSH 1
+#define ENABLE_MSH 1
+#define USE_MSH(...)  __VA_ARGS__
+#define SKIP_MSH(...)
+
+
+/*
+ * Bourne Shell Options
+ */
+#define CONFIG_FEATURE_SH_EXTRA_QUIET 1
+#define ENABLE_FEATURE_SH_EXTRA_QUIET 1
+#define USE_FEATURE_SH_EXTRA_QUIET(...)  __VA_ARGS__
+#define SKIP_FEATURE_SH_EXTRA_QUIET(...)
+
+#define CONFIG_FEATURE_SH_STANDALONE_SHELL 1
+#define ENABLE_FEATURE_SH_STANDALONE_SHELL 1
+#define USE_FEATURE_SH_STANDALONE_SHELL(...)  __VA_ARGS__
+#define SKIP_FEATURE_SH_STANDALONE_SHELL(...)
+
+#define CONFIG_FEATURE_COMMAND_EDITING 1
+#define ENABLE_FEATURE_COMMAND_EDITING 1
+#define USE_FEATURE_COMMAND_EDITING(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMMAND_EDITING(...)
+
+#define CONFIG_FEATURE_COMMAND_EDITING_VI 1
+#define ENABLE_FEATURE_COMMAND_EDITING_VI 1
+#define USE_FEATURE_COMMAND_EDITING_VI(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMMAND_EDITING_VI(...)
+
+#define CONFIG_FEATURE_COMMAND_HISTORY 15
+#define ENABLE_FEATURE_COMMAND_HISTORY 1
+#define USE_FEATURE_COMMAND_HISTORY(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMMAND_HISTORY(...)
+
+#define CONFIG_FEATURE_COMMAND_SAVEHISTORY 1
+#define ENABLE_FEATURE_COMMAND_SAVEHISTORY 1
+#define USE_FEATURE_COMMAND_SAVEHISTORY(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMMAND_SAVEHISTORY(...)
+
+#define CONFIG_FEATURE_COMMAND_TAB_COMPLETION 1
+#define ENABLE_FEATURE_COMMAND_TAB_COMPLETION 1
+#define USE_FEATURE_COMMAND_TAB_COMPLETION(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMMAND_TAB_COMPLETION(...)
+
+#define CONFIG_FEATURE_COMMAND_USERNAME_COMPLETION 1
+#define ENABLE_FEATURE_COMMAND_USERNAME_COMPLETION 1
+#define USE_FEATURE_COMMAND_USERNAME_COMPLETION(...)  __VA_ARGS__
+#define SKIP_FEATURE_COMMAND_USERNAME_COMPLETION(...)
+
+#define CONFIG_FEATURE_SH_FANCY_PROMPT 1
+#define ENABLE_FEATURE_SH_FANCY_PROMPT 1
+#define USE_FEATURE_SH_FANCY_PROMPT(...)  __VA_ARGS__
+#define SKIP_FEATURE_SH_FANCY_PROMPT(...)
+
+
+/*
+ * System Logging Utilities
+ */
+#define CONFIG_SYSLOGD 1
+#define ENABLE_SYSLOGD 1
+#define USE_SYSLOGD(...)  __VA_ARGS__
+#define SKIP_SYSLOGD(...)
+
+#define CONFIG_FEATURE_ROTATE_LOGFILE 1
+#define ENABLE_FEATURE_ROTATE_LOGFILE 1
+#define USE_FEATURE_ROTATE_LOGFILE(...)  __VA_ARGS__
+#define SKIP_FEATURE_ROTATE_LOGFILE(...)
+
+#define CONFIG_FEATURE_REMOTE_LOG 1
+#define ENABLE_FEATURE_REMOTE_LOG 1
+#define USE_FEATURE_REMOTE_LOG(...)  __VA_ARGS__
+#define SKIP_FEATURE_REMOTE_LOG(...)
+
+#define CONFIG_FEATURE_IPC_SYSLOG 1
+#define ENABLE_FEATURE_IPC_SYSLOG 1
+#define USE_FEATURE_IPC_SYSLOG(...)  __VA_ARGS__
+#define SKIP_FEATURE_IPC_SYSLOG(...)
+
+#define CONFIG_FEATURE_IPC_SYSLOG_BUFFER_SIZE 16
+#define ENABLE_FEATURE_IPC_SYSLOG_BUFFER_SIZE 1
+#define USE_FEATURE_IPC_SYSLOG_BUFFER_SIZE(...)  __VA_ARGS__
+#define SKIP_FEATURE_IPC_SYSLOG_BUFFER_SIZE(...)
+
+#define CONFIG_LOGREAD 1
+#define ENABLE_LOGREAD 1
+#define USE_LOGREAD(...)  __VA_ARGS__
+#define SKIP_LOGREAD(...)
+
+#define CONFIG_FEATURE_LOGREAD_REDUCED_LOCKING 1
+#define ENABLE_FEATURE_LOGREAD_REDUCED_LOCKING 1
+#define USE_FEATURE_LOGREAD_REDUCED_LOCKING(...)  __VA_ARGS__
+#define SKIP_FEATURE_LOGREAD_REDUCED_LOCKING(...)
+
+#define CONFIG_KLOGD 1
+#define ENABLE_KLOGD 1
+#define USE_KLOGD(...)  __VA_ARGS__
+#define SKIP_KLOGD(...)
+
+#define CONFIG_LOGGER 1
+#define ENABLE_LOGGER 1
+#define USE_LOGGER(...)  __VA_ARGS__
+#define SKIP_LOGGER(...)
+
+#endif /* BB_CONFIG_H */

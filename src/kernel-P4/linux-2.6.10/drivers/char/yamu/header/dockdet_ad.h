@@ -1,0 +1,1 @@
+#define	CONFIG_DOCKDET_AD 1

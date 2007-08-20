@@ -1,0 +1,1 @@
+#define USE_FEATURE_FANCY_HEAD(...)  __VA_ARGS__

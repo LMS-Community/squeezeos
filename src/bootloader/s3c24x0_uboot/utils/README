@@ -1,0 +1,109 @@
+Install Guide for s3c24x0_uboot_dev 's usb device
+
+
+1) Build usb-smlinux.o using build script ¡°build-smlinux¡± as root user.
+
+[root@localhost usb-smlinux]# ./build-smlinux 
+Building usb-smlinux...
+gcc -D__KERNEL__ -DMODULE -I/lib/modules/2.4.20-8/build/include -Wall -Wstrict-prototypes -Wno-trigraphs -O2 -fno-strict-aliasing -fno-common -fomit-frame-pointer -pipe -mpreferred-stack-boundary=2 -march=i586 -c usb-smlinux.c -o usb-smlinux.o
+Successfully done.
+[root@localhost usb-smlinux]#
+
+
+2) Make device node in the directory ¡°/dev/usb/¡±.
+
+
+[root@localhost usb]# pwd
+/dev/usb
+[root@localhost usb]# mknod smusb0 c 180 200
+[root@localhost usb]# ll smusb0 
+crw-r--r--    1 root     root     180, 200 Mar 23 14:18 smusb0
+[root@localhost usb]#
+
+
+3) Load the usb-smlinux.o driver module. At the same time, check the kernel message using ¡°tail¡± function.
+
+
+[root@localhost root]# tail -f /var/log/messages
+[root@localhost usb-smlinux]# insmod usb-smlinux.o
+
+Mar 23 14:22:48 localhost kernel: usb.c: registered new driver smlinux
+Mar 23 14:22:48 localhost kernel: usb-smlinux.c: USB Character Host Driver v0.1
+
+/*******************************************************************************************/
+NOTE :: Sometimes loading of usb-smlinux.o module may fail coz of kernel version mismatch, one
+example of such loading failure print is as follows
+
+[root@localhost usb-smlinux]# insmod usb-smlinux.o
+usb-smlinux.o: kernel-module version mismatch
+	usb-smlinux.o was compiled for kernel version 2.4.22-1.2115.nptlcustom
+	while this kernel is version 2.4.22-1.2115.nptl.
+
+In such cases, you may try the --force option (Force loading under wrong kernel version)
+[root@localhost usb-smlinux]# insmod -f usb-smlinux.o 
+/*******************************************************************************************/
+
+Now host PC side preparation is finished.
+
+
+
+4)SMDK24x0 board preparation
+
+ud: usb device start and ready to recevie
+
+
+Refer to the following example sequence.
+
+After power-on, on the u-boot prompt, execute ¡®ud¡¯ command to prepare device driver on smdk24x0 board.
+
+
+In:    serial
+Out:   serial
+Err:   serial
+go to main.
+Hit any key to stop autoboot:  0 
+SMDK24x0 # ud  [download address]
+
+
+USB Device started for download, counter=0.
+Download address 268435456 (0x10000000)
+Now, Plug the USB cable int USB Host, and Execute the host command
+SMDK24x0 #
+
+
+Connect the USB cable to Host PC. And check the log message of host PC.
+
+The result of tail -f (Host side)
+
+Mar 23 14:40:42 localhost kernel: hub.c: new USB device 00:1f.2-2, assigned address 7
+Mar 23 14:40:42 localhost kernel: usb-smlinux : Bulk OUT
+Mar 23 14:40:42 localhost kernel:   wMaxPacketSize : 32768
+Mar 23 14:40:42 localhost kernel:   EndpointAddress : 1
+Mar 23 14:40:42 localhost kernel: usb-smlinux : Bulk IN
+Mar 23 14:40:42 localhost kernel:   wMaxPacketSize : 64
+Mar 23 14:40:42 localhost kernel:   EndpointAddress : 130
+Mar 23 14:40:42 localhost kernel: usb-smlinux.c: USB smlinux device now attached 0
+Mar 23 14:40:45 localhost /etc/hotplug/usb.agent: ... no modules for USB product 49f/505a/
+
+
+Now the USB is connected and preparation is finished.
+
+
+ 
+5)How to use command to download images.
+
+At the host PC, use following command to send any image or file to the board.
+
+
+[root@localhost tftpboot]# dd if=Image of=/dev/usb/smusb0 bs=32768
+46+1 records in
+46+1 records out
+[root@localhost tftpboot]#
+
+
+At the board, you can see the following message
+
+SMDK24x0 # ************************************
+Download done : Received 116080(0x1c570) bytes
+Download data is located to 0x10000000
+SMDK24x0 #

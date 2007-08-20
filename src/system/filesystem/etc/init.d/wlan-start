@@ -1,0 +1,33 @@
+#!/bin/sh
+
+echo "Starting wifi"
+/sbin/insmod gspi.ko
+/sbin/insmod gspi8686.ko helper_name=/lib/firmware/helper_gspi.bin fw_name=/lib/firmware/gspi8686.bin
+
+
+# Set MAC address using ethaddr parameter on kernel command line
+ethaddr=
+for copt in $(/bin/cat /proc/cmdline)
+do
+  case "${copt%=*}" in
+      "ethaddr")
+	  ethaddr="${copt##*=}"
+	  ;;
+  esac
+done
+
+if [ "x${ethaddr}" != "x" ]
+then
+    echo "Setting ethaddr: ${ethaddr}"
+    /sbin/ifconfig eth0 hw ether ${ethaddr}
+fi
+
+
+# FIXME this needs to be configurable
+/usr/sbin/iwpriv eth0 setregioncode 0x10
+
+# Enable background scanning
+/usr/sbin/iwpriv eth0 bgscan 1
+
+/usr/local/sbin/wpa_supplicant -B -Dmarvell -ieth0 -c/etc/wpa_supplicant.conf
+/usr/local/sbin/wpa_cli -B -a/etc/network/wpa_action
