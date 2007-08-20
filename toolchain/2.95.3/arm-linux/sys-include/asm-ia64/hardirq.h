@@ -1,0 +1,104 @@
+#ifndef _ASM_IA64_HARDIRQ_H
+#define _ASM_IA64_HARDIRQ_H
+
+/*
+ * Copyright (C) 1998-2001 Hewlett-Packard Co
+ * Copyright (C) 1998-2001 David Mosberger-Tang <davidm@hpl.hp.com>
+ */
+
+#include <linux/config.h>
+
+#include <linux/threads.h>
+#include <linux/irq.h>
+
+#include <asm/processor.h>
+
+/*
+ * No irq_cpustat_t for IA-64.  The data is held in the per-CPU data structure.
+ */
+#define softirq_active(cpu)		(cpu_data[cpu].softirq.active)
+#define softirq_mask(cpu)		(cpu_data[cpu].softirq.mask)
+#define irq_count(cpu)			(cpu_data[cpu].irq_stat.f.irq_count)
+#define bh_count(cpu)			(cpu_data[cpu].irq_stat.f.bh_count)
+#define syscall_count(cpu)		/* unused on IA-64 */
+#define nmi_count(cpu)			0
+
+#define local_softirq_active()		(local_cpu_data->softirq.active)
+#define local_softirq_mask()		(local_cpu_data->softirq.mask)
+#define local_irq_count()		(local_cpu_data->irq_stat.f.irq_count)
+#define local_bh_count()		(local_cpu_data->irq_stat.f.bh_count)
+#define local_syscall_count()		/* unused on IA-64 */
+#define local_nmi_count()		0
+
+/*
+ * Are we in an interrupt context? Either doing bottom half or hardware interrupt
+ * processing?
+ */
+#define in_interrupt()			(local_cpu_data->irq_stat.irq_and_bh_counts != 0)
+#define in_irq()			(local_cpu_data->irq_stat.f.irq_count != 0)
+
+#ifndef CONFIG_SMP
+# define local_hardirq_trylock()	(local_irq_count() == 0)
+# define local_hardirq_endlock()	do { } while (0)
+
+# define local_irq_enter(irq)		(local_irq_count()++)
+# define local_irq_exit(irq)		(local_irq_count()--)
+
+# define synchronize_irq()		barrier()
+#else
+
+#include <asm/atomic.h>
+#include <asm/smp.h>
+
+extern unsigned int global_irq_holder;
+extern volatile unsigned long global_irq_lock;
+
+static inline int
+irqs_running (void)
+{
+	int i;
+
+	for (i = 0; i < smp_num_cpus; i++)
+		if (irq_count(i))
+			return 1;
+	return 0;
+}
+
+static inline void
+release_irqlock (int cpu)
+{
+	/* if we didn't own the irq lock, just ignore.. */
+	if (global_irq_holder == cpu) {
+		global_irq_holder = NO_PROC_ID;
+		clear_bit(0,&global_irq_lock);
+        }
+}
+
+static inline void
+local_irq_enter (int irq)
+{
+	local_irq_count()++;
+
+	while (test_bit(0,&global_irq_lock)) {
+		/* nothing */;
+	}
+}
+
+static inline void
+local_irq_exit (int irq)
+{
+	local_irq_count()--;
+}
+
+static inline int
+local_hardirq_trylock (void)
+{
+	return !local_irq_count() && !test_bit(0,&global_irq_lock);
+}
+
+#define local_hardirq_endlock()		do { } while (0)
+
+extern void synchronize_irq (void);
+
+#endif /* CONFIG_SMP */
+#endif /* _ASM_IA64_HARDIRQ_H */

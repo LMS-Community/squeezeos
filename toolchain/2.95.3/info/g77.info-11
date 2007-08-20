@@ -1,0 +1,1389 @@
+This is Info file f/g77.info, produced by Makeinfo version 1.68 from
+the input file ../../../src/gcc-2.95.3/gcc/f/g77.texi.
+
+INFO-DIR-SECTION Programming
+START-INFO-DIR-ENTRY
+* g77: (g77).                  The GNU Fortran compiler.
+END-INFO-DIR-ENTRY
+   This file documents the use and the internals of the GNU Fortran
+(`g77') compiler.  It corresponds to the GCC-2.95 version of `g77'.
+
+   Published by the Free Software Foundation 59 Temple Place - Suite 330
+Boston, MA 02111-1307 USA
+
+   Copyright (C) 1995-1999 Free Software Foundation, Inc.
+
+   Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+   Permission is granted to copy and distribute modified versions of
+this manual under the conditions for verbatim copying, provided also
+that the sections entitled "GNU General Public License," "Funding for
+Free Software," and "Protect Your Freedom--Fight `Look And Feel'" are
+included exactly as in the original, and provided that the entire
+resulting derived work is distributed under the terms of a permission
+notice identical to this one.
+
+   Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that the sections entitled "GNU General Public
+License," "Funding for Free Software," and "Protect Your Freedom--Fight
+`Look And Feel'", and this permission notice, may be included in
+translations approved by the Free Software Foundation instead of in the
+original English.
+
+   Contributed by James Craig Burley (<craig@jcb-sc.com>).  Inspired by
+a first pass at translating `g77-0.5.16/f/DOC' that was contributed to
+Craig by David Ronis (<ronis@onsager.chem.mcgill.ca>).
+
+
+File: g77.info,  Node: Pedantic Compilation,  Next: Distensions,  Prev: Fortran 90,  Up: Other Dialects
+
+Pedantic Compilation
+====================
+
+   The `-fpedantic' command-line option specifies that `g77' is to warn
+about code that is not standard-conforming.  This is useful for finding
+some extensions `g77' accepts that other compilers might not accept.
+(Note that the `-pedantic' and `-pedantic-errors' options always imply
+`-fpedantic'.)
+
+   With `-fno-f90' in force, ANSI FORTRAN 77 is used as the standard
+for conforming code.  With `-ff90' in force, Fortran 90 is used.
+
+   The constructs for which `g77' issues diagnostics when `-fpedantic'
+and `-fno-f90' are in force are:
+
+   * Automatic arrays, as in
+
+          SUBROUTINE X(N)
+          REAL A(N)
+          ...
+
+     where `A' is not listed in any `ENTRY' statement, and thus is not
+     a dummy argument.
+
+   * The commas in `READ (5), I' and `WRITE (10), J'.
+
+     These commas are disallowed by FORTRAN 77, but, while strictly
+     superfluous, are syntactically elegant, especially given that
+     commas are required in statements such as `READ 99, I' and `PRINT
+     *, J'.  Many compilers permit the superfluous commas for this
+     reason.
+
+   * `DOUBLE COMPLEX', either explicitly or implicitly.
+
+     An explicit use of this type is via a `DOUBLE COMPLEX' or
+     `IMPLICIT DOUBLE COMPLEX' statement, for examples.
+
+     An example of an implicit use is the expression `C*D', where `C'
+     is `COMPLEX(KIND=1)' and `D' is `DOUBLE PRECISION'.  This
+     expression is prohibited by ANSI FORTRAN 77 because the rules of
+     promotion would suggest that it produce a `DOUBLE COMPLEX'
+     result--a type not provided for by that standard.
+
+   * Automatic conversion of numeric expressions to `INTEGER(KIND=1)'
+     in contexts such as:
+
+        - Array-reference indexes.
+
+        - Alternate-return values.
+
+        - Computed `GOTO'.
+
+        - `FORMAT' run-time expressions (not yet supported).
+
+        - Dimension lists in specification statements.
+
+        - Numbers for I/O statements (such as `READ (UNIT=3.2), I')
+
+        - Sizes of `CHARACTER' entities in specification statements.
+
+        - Kind types in specification entities (a Fortran 90 feature).
+
+        - Initial, terminal, and incrementation parameters for
+          implied-`DO' constructs in `DATA' statements.
+
+   * Automatic conversion of `LOGICAL' expressions to `INTEGER' in
+     contexts such as arithmetic `IF' (where `COMPLEX' expressions are
+     disallowed anyway).
+
+   * Zero-size array dimensions, as in:
+
+          INTEGER I(10,20,4:2)
+
+   * Zero-length `CHARACTER' entities, as in:
+
+          PRINT *, ''
+
+   * Substring operators applied to character constants and named
+     constants, as in:
+
+          PRINT *, 'hello'(3:5)
+
+   * Null arguments passed to statement function, as in:
+
+          PRINT *, FOO(,3)
+
+   * Disagreement among program units regarding whether a given `COMMON'
+     area is `SAVE'd (for targets where program units in a single source
+     file are "glued" together as they typically are for UNIX
+     development environments).
+
+   * Disagreement among program units regarding the size of a named
+     `COMMON' block.
+
+   * Specification statements following first `DATA' statement.
+
+     (In the GNU Fortran language, `DATA I/1/' may be followed by
+     `INTEGER J', but not `INTEGER I'.  The `-fpedantic' option
+     disallows both of these.)
+
+   * Semicolon as statement separator, as in:
+
+          CALL FOO; CALL BAR
+
+   * Use of `&' in column 1 of fixed-form source (to indicate
+     continuation).
+
+   * Use of `CHARACTER' constants to initialize numeric entities, and
+     vice versa.
+
+   * Expressions having two arithmetic operators in a row, such as
+     `X*-Y'.
+
+   If `-fpedantic' is specified along with `-ff90', the following
+constructs result in diagnostics:
+
+   * Use of semicolon as a statement separator on a line that has an
+     `INCLUDE' directive.
+
+
+File: g77.info,  Node: Distensions,  Prev: Pedantic Compilation,  Up: Other Dialects
+
+Distensions
+===========
+
+   The `-fugly-*' command-line options determine whether certain
+features supported by VAX FORTRAN and other such compilers, but
+considered too ugly to be in code that can be changed to use safer
+and/or more portable constructs, are accepted.  These are humorously
+referred to as "distensions", extensions that just plain look ugly in
+the harsh light of day.
+
+* Menu:
+
+* Ugly Implicit Argument Conversion::  Disabled via `-fno-ugly-args'.
+* Ugly Assumed-Size Arrays::           Enabled via `-fugly-assumed'.
+* Ugly Null Arguments::                Enabled via `-fugly-comma'.
+* Ugly Complex Part Extraction::       Enabled via `-fugly-complex'.
+* Ugly Conversion of Initializers::    Disabled via `-fno-ugly-init'.
+* Ugly Integer Conversions::           Enabled via `-fugly-logint'.
+* Ugly Assigned Labels::               Enabled via `-fugly-assign'.
+
+
+File: g77.info,  Node: Ugly Implicit Argument Conversion,  Next: Ugly Assumed-Size Arrays,  Up: Distensions
+
+Implicit Argument Conversion
+----------------------------
+
+   The `-fno-ugly-args' option disables passing typeless and Hollerith
+constants as actual arguments in procedure invocations.  For example:
+
+     CALL FOO(4HABCD)
+     CALL BAR('123'O)
+
+These constructs can be too easily used to create non-portable code,
+but are not considered as "ugly" as others.  Further, they are widely
+used in existing Fortran source code in ways that often are quite
+portable.  Therefore, they are enabled by default.
+
+
+File: g77.info,  Node: Ugly Assumed-Size Arrays,  Next: Ugly Null Arguments,  Prev: Ugly Implicit Argument Conversion,  Up: Distensions
+
+Ugly Assumed-Size Arrays
+------------------------
+
+   The `-fugly-assumed' option enables the treatment of any array with
+a final dimension specified as `1' as an assumed-size array, as if `*'
+had been specified instead.
+
+   For example, `DIMENSION X(1)' is treated as if it had read
+`DIMENSION X(*)' if `X' is listed as a dummy argument in a preceding
+`SUBROUTINE', `FUNCTION', or `ENTRY' statement in the same program unit.
+
+   Use an explicit lower bound to avoid this interpretation.  For
+example, `DIMENSION X(1:1)' is never treated as if it had read
+`DIMENSION X(*)' or `DIMENSION X(1:*)'.  Nor is `DIMENSION X(2-1)'
+affected by this option, since that kind of expression is unlikely to
+have been intended to designate an assumed-size array.
+
+   This option is used to prevent warnings being issued about apparent
+out-of-bounds reference such as `X(2) = 99'.
+
+   It also prevents the array from being used in contexts that disallow
+assumed-size arrays, such as `PRINT *,X'.  In such cases, a diagnostic
+is generated and the source file is not compiled.
+
+   The construct affected by this option is used only in old code that
+pre-exists the widespread acceptance of adjustable and assumed-size
+arrays in the Fortran community.
+
+   *Note:* This option does not affect how `DIMENSION X(1)' is treated
+if `X' is listed as a dummy argument only *after* the `DIMENSION'
+statement (presumably in an `ENTRY' statement).  For example,
+`-fugly-assumed' has no effect on the following program unit:
+
+     SUBROUTINE X
+     REAL A(1)
+     RETURN
+     ENTRY Y(A)
+     PRINT *, A
+     END
+
+
+File: g77.info,  Node: Ugly Complex Part Extraction,  Next: Ugly Conversion of Initializers,  Prev: Ugly Null Arguments,  Up: Distensions
+
+Ugly Complex Part Extraction
+----------------------------
+
+   The `-fugly-complex' option enables use of the `REAL()' and `AIMAG()'
+intrinsics with arguments that are `COMPLEX' types other than
+`COMPLEX(KIND=1)'.
+
+   With `-ff90' in effect, these intrinsics return the unconverted real
+and imaginary parts (respectively) of their argument.
+
+   With `-fno-f90' in effect, these intrinsics convert the real and
+imaginary parts to `REAL(KIND=1)', and return the result of that
+conversion.
+
+   Due to this ambiguity, the GNU Fortran language defines these
+constructs as invalid, except in the specific case where they are
+entirely and solely passed as an argument to an invocation of the
+`REAL()' intrinsic.  For example,
+
+     REAL(REAL(Z))
+
+is permitted even when `Z' is `COMPLEX(KIND=2)' and `-fno-ugly-complex'
+is in effect, because the meaning is clear.
+
+   `g77' enforces this restriction, unless `-fugly-complex' is
+specified, in which case the appropriate interpretation is chosen and
+no diagnostic is issued.
+
+   *Note CMPAMBIG::, for information on how to cope with existing code
+with unclear expectations of `REAL()' and `AIMAG()' with
+`COMPLEX(KIND=2)' arguments.
+
+   *Note RealPart Intrinsic::, for information on the `REALPART()'
+intrinsic, used to extract the real part of a complex expression
+without conversion.  *Note ImagPart Intrinsic::, for information on the
+`IMAGPART()' intrinsic, used to extract the imaginary part of a complex
+expression without conversion.
+
+
+File: g77.info,  Node: Ugly Null Arguments,  Next: Ugly Complex Part Extraction,  Prev: Ugly Assumed-Size Arrays,  Up: Distensions
+
+Ugly Null Arguments
+-------------------
+
+   The `-fugly-comma' option enables use of a single trailing comma to
+mean "pass an extra trailing null argument" in a list of actual
+arguments to an external procedure, and use of an empty list of
+arguments to such a procedure to mean "pass a single null argument".
+
+   (Null arguments often are used in some procedure-calling schemes to
+indicate omitted arguments.)
+
+   For example, `CALL FOO(,)' means "pass two null arguments", rather
+than "pass one null argument".  Also, `CALL BAR()' means "pass one null
+argument".
+
+   This construct is considered "ugly" because it does not provide an
+elegant way to pass a single null argument that is syntactically
+distinct from passing no arguments.  That is, this construct changes
+the meaning of code that makes no use of the construct.
+
+   So, with `-fugly-comma' in force, `CALL FOO()' and `I = JFUNC()'
+pass a single null argument, instead of passing no arguments as
+required by the Fortran 77 and 90 standards.
+
+   *Note:* Many systems gracefully allow the case where a procedure
+call passes one extra argument that the called procedure does not
+expect.
+
+   So, in practice, there might be no difference in the behavior of a
+program that does `CALL FOO()' or `I = JFUNC()' and is compiled with
+`-fugly-comma' in force as compared to its behavior when compiled with
+the default, `-fno-ugly-comma', in force, assuming `FOO' and `JFUNC' do
+not expect any arguments to be passed.
+
+
+File: g77.info,  Node: Ugly Conversion of Initializers,  Next: Ugly Integer Conversions,  Prev: Ugly Complex Part Extraction,  Up: Distensions
+
+Ugly Conversion of Initializers
+-------------------------------
+
+   The constructs disabled by `-fno-ugly-init' are:
+
+   * Use of Hollerith and typeless constants in contexts where they set
+     initial (compile-time) values for variables, arrays, and named
+     constants--that is, `DATA' and `PARAMETER' statements, plus
+     type-declaration statements specifying initial values.
+
+     Here are some sample initializations that are disabled by the
+     `-fno-ugly-init' option:
+
+          PARAMETER (VAL='9A304FFE'X)
+          REAL*8 STRING/8HOUTPUT00/
+          DATA VAR/4HABCD/
+
+   * In the same contexts as above, use of character constants to
+     initialize numeric items and vice versa (one constant per item).
+
+     Here are more sample initializations that are disabled by the
+     `-fno-ugly-init' option:
+
+          INTEGER IA
+          CHARACTER BELL
+          PARAMETER (IA = 'A')
+          PARAMETER (BELL = 7)
+
+   * Use of Hollerith and typeless constants on the right-hand side of
+     assignment statements to numeric types, and in other contexts
+     (such as passing arguments in invocations of intrinsic procedures
+     and statement functions) that are treated as assignments to known
+     types (the dummy arguments, in these cases).
+
+     Here are sample statements that are disabled by the
+     `-fno-ugly-init' option:
+
+          IVAR = 4HABCD
+          PRINT *, IMAX0(2HAB, 2HBA)
+
+   The above constructs, when used, can tend to result in non-portable
+code.  But, they are widely used in existing Fortran code in ways that
+often are quite portable.  Therefore, they are enabled by default.
+
+
+File: g77.info,  Node: Ugly Integer Conversions,  Next: Ugly Assigned Labels,  Prev: Ugly Conversion of Initializers,  Up: Distensions
+
+Ugly Integer Conversions
+------------------------
+
+   The constructs enabled via `-fugly-logint' are:
+
+   * Automatic conversion between `INTEGER' and `LOGICAL' as dictated by
+     context (typically implies nonportable dependencies on how a
+     particular implementation encodes `.TRUE.' and `.FALSE.').
+
+   * Use of a `LOGICAL' variable in `ASSIGN' and assigned-`GOTO'
+     statements.
+
+   The above constructs are disabled by default because use of them
+tends to lead to non-portable code.  Even existing Fortran code that
+uses that often turns out to be non-portable, if not outright buggy.
+
+   Some of this is due to differences among implementations as far as
+how `.TRUE.' and `.FALSE.' are encoded as `INTEGER' values--Fortran
+code that assumes a particular coding is likely to use one of the above
+constructs, and is also likely to not work correctly on implementations
+using different encodings.
+
+   *Note Equivalence Versus Equality::, for more information.
+
+
+File: g77.info,  Node: Ugly Assigned Labels,  Prev: Ugly Integer Conversions,  Up: Distensions
+
+Ugly Assigned Labels
+--------------------
+
+   The `-fugly-assign' option forces `g77' to use the same storage for
+assigned labels as it would for a normal assignment to the same
+variable.
+
+   For example, consider the following code fragment:
+
+     I = 3
+     ASSIGN 10 TO I
+
+Normally, for portability and improved diagnostics, `g77' reserves
+distinct storage for a "sibling" of `I', used only for `ASSIGN'
+statements to that variable (along with the corresponding
+assigned-`GOTO' and assigned-`FORMAT'-I/O statements that reference the
+variable).
+
+   However, some code (that violates the ANSI FORTRAN 77 standard)
+attempts to copy assigned labels among variables involved with `ASSIGN'
+statements, as in:
+
+     ASSIGN 10 TO I
+     ISTATE(5) = I
+     ...
+     J = ISTATE(ICUR)
+     GOTO J
+
+Such code doesn't work under `g77' unless `-fugly-assign' is specified
+on the command-line, ensuring that the value of `I' referenced in the
+second line is whatever value `g77' uses to designate statement label
+`10', so the value may be copied into the `ISTATE' array, later
+retrieved into a variable of the appropriate type (`J'), and used as
+the target of an assigned-`GOTO' statement.
+
+   *Note:* To avoid subtle program bugs, when `-fugly-assign' is
+specified, `g77' requires the type of variables specified in
+assigned-label contexts *must* be the same type returned by `%LOC()'.
+On many systems, this type is effectively the same as
+`INTEGER(KIND=1)', while, on others, it is effectively the same as
+`INTEGER(KIND=2)'.
+
+   Do *not* depend on `g77' actually writing valid pointers to these
+variables, however.  While `g77' currently chooses that implementation,
+it might be changed in the future.
+
+   *Note Assigned Statement Labels (ASSIGN and GOTO): Assigned
+Statement Labels, for implementation details on assigned-statement
+labels.
+
+
+File: g77.info,  Node: Compiler,  Next: Other Dialects,  Prev: Language,  Up: Top
+
+The GNU Fortran Compiler
+************************
+
+   The GNU Fortran compiler, `g77', supports programs written in the
+GNU Fortran language and in some other dialects of Fortran.
+
+   Some aspects of how `g77' works are universal regardless of dialect,
+and yet are not properly part of the GNU Fortran language itself.
+These are described below.
+
+   *Note: This portion of the documentation definitely needs a lot of
+work!*
+
+* Menu:
+
+* Compiler Limits::
+* Run-time Environment Limits::
+* Compiler Types::
+* Compiler Constants::
+* Compiler Intrinsics::
+
+
+File: g77.info,  Node: Compiler Limits,  Next: Run-time Environment Limits,  Up: Compiler
+
+Compiler Limits
+===============
+
+   `g77', as with GNU tools in general, imposes few arbitrary
+restrictions on lengths of identifiers, number of continuation lines,
+number of external symbols in a program, and so on.
+
+   For example, some other Fortran compiler have an option (such as
+`-NlX') to increase the limit on the number of continuation lines.
+Also, some Fortran compilation systems have an option (such as `-NxX')
+to increase the limit on the number of external symbols.
+
+   `g77', `gcc', and GNU `ld' (the GNU linker) have no equivalent
+options, since they do not impose arbitrary limits in these areas.
+
+   `g77' does currently limit the number of dimensions in an array to
+the same degree as do the Fortran standards--seven (7).  This
+restriction might be lifted in a future version.
+
+
+File: g77.info,  Node: Run-time Environment Limits,  Next: Compiler Types,  Prev: Compiler Limits,  Up: Compiler
+
+Run-time Environment Limits
+===========================
+
+   As a portable Fortran implementation, `g77' offers its users direct
+access to, and otherwise depends upon, the underlying facilities of the
+system used to build `g77', the system on which `g77' itself is used to
+compile programs, and the system on which the `g77'-compiled program is
+actually run.  (For most users, the three systems are of the same
+type--combination of operating environment and hardware--often the same
+physical system.)
+
+   The run-time environment for a particular system inevitably imposes
+some limits on a program's use of various system facilities.  These
+limits vary from system to system.
+
+   Even when such limits might be well beyond the possibility of being
+encountered on a particular system, the `g77' run-time environment has
+certain built-in limits, usually, but not always, stemming from
+intrinsics with inherently limited interfaces.
+
+   Currently, the `g77' run-time environment does not generally offer a
+less-limiting environment by augmenting the underlying system's own
+environment.
+
+   Therefore, code written in the GNU Fortran language, while
+syntactically and semantically portable, might nevertheless make
+non-portable assumptions about the run-time environment--assumptions
+that prove to be false for some particular environments.
+
+   The GNU Fortran language, the `g77' compiler and run-time
+environment, and the `g77' documentation do not yet offer comprehensive
+portable work-arounds for such limits, though programmers should be
+able to find their own in specific instances.
+
+   Not all of the limitations are described in this document.  Some of
+the known limitations include:
+
+* Menu:
+
+* Timer Wraparounds::
+* Year 2000 (Y2K) Problems::
+* Array Size::
+* Character-variable Length::
+* Year 10000 (Y10K) Problems::
+
+
+File: g77.info,  Node: Timer Wraparounds,  Next: Year 2000 (Y2K) Problems,  Up: Run-time Environment Limits
+
+Timer Wraparounds
+-----------------
+
+   Intrinsics that return values computed from system timers, whether
+elapsed (wall-clock) timers, process CPU timers, or other kinds of
+timers, are prone to experiencing wrap-around errors (or returning
+wrapped-around values from successive calls) due to insufficient ranges
+offered by the underlying system's timers.
+
+   Some of the symptoms of such behaviors include apparently negative
+time being computed for a duration, an extremely short amount of time
+being computed for a long duration, and an extremely long amount of
+time being computed for a short duration.
+
+   See the following for intrinsics known to have potential problems in
+these areas on at least some systems: *Note CPU_Time Intrinsic::, *Note
+DTime Intrinsic (function)::, *Note DTime Intrinsic (subroutine)::,
+*Note ETime Intrinsic (function)::, *Note ETime Intrinsic
+(subroutine)::, *Note MClock Intrinsic::, *Note MClock8 Intrinsic::,
+*Note Secnds Intrinsic::, *Note Second Intrinsic (function)::, *Note
+Second Intrinsic (subroutine)::, *Note System_Clock Intrinsic::, *Note
+Time Intrinsic (UNIX)::, *Note Time Intrinsic (VXT)::, *Note Time8
+Intrinsic::.
+
+
+File: g77.info,  Node: Year 2000 (Y2K) Problems,  Next: Array Size,  Prev: Timer Wraparounds,  Up: Run-time Environment Limits
+
+Year 2000 (Y2K) Problems
+------------------------
+
+   While the `g77' compiler itself is believed to be Year-2000 (Y2K)
+compliant, some intrinsics are not, and, potentially, some underlying
+systems are not, perhaps rendering some Y2K-compliant intrinsics
+non-compliant when used on those particular systems.
+
+   Fortran code that uses non-Y2K-compliant intrinsics (listed below)
+is, itself, almost certainly not compliant, and should be modified to
+use Y2K-compliant intrinsics instead.
+
+   Fortran code that uses no non-Y2K-compliant intrinsics, but which
+currently is running on a non-Y2K-compliant system, can be made more
+Y2K compliant by compiling and linking it for use on a new
+Y2K-compliant system, such as a new version of an old,
+non-Y2K-compliant, system.
+
+   Currently, information on Y2K and related issues is being maintained
+at `http://www.gnu.org/software/year2000-list.html'.
+
+   See the following for intrinsics known to have potential problems in
+these areas on at least some systems: *Note Date Intrinsic::, *Note
+IDate Intrinsic (VXT)::.
+
+   The `libg2c' library shipped with any `g77' that warns about
+invocation of a non-Y2K-compliant intrinsic has renamed the `EXTERNAL'
+procedure names of those intrinsics.  This is done so that the `libg2c'
+implementations of these intrinsics cannot be directly linked to as
+`EXTERNAL' names (which normally would avoid the non-Y2K-intrinsic
+warning).
+
+   The renamed forms of the `EXTERNAL' names of these renamed procedures
+may be linked to by appending the string `_y2kbug' to the name of the
+procedure in the source code.  For example:
+
+     CHARACTER*20 STR
+     INTEGER YY, MM, DD
+     EXTERNAL DATE_Y2KBUG, VXTIDATE_Y2KBUG
+     CALL DATE_Y2KBUG (STR)
+     CALL VXTIDATE_Y2KBUG (MM, DD, YY)
+
+   (Note that the `EXTERNAL' statement is not actually required, since
+the modified names are not recognized as intrinsics by the current
+version of `g77'.  But it is shown in this specific case, for purposes
+of illustration.)
+
+   The renaming of `EXTERNAL' procedure names of these intrinsics
+causes unresolved references at link time.  For example, `EXTERNAL
+DATE; CALL DATE(STR)' is normally compiled by `g77' as, in C,
+`date_(&str, 20);'.  This, in turn, links to the `date_' procedure in
+the `libE77' portion of `libg2c', which purposely calls a nonexistent
+procedure named `G77_date_y2kbuggy_0'.  The resulting link-time error
+is designed, via this name, to encourage the programmer to look up the
+index entries to this portion of the `g77' documentation.
+
+   Generally, we recommend that the `EXTERNAL' method of invoking
+procedures in `libg2c' *not* be used.  When used, some of the
+correctness checking normally performed by `g77' is skipped.
+
+   In particular, it is probably better to use the `INTRINSIC' method
+of invoking non-Y2K-compliant procedures, so anyone compiling the code
+can quickly notice the potential Y2K problems (via the warnings
+printing by `g77') without having to even look at the code itself.
+
+   If there are problems linking `libg2c' to code compiled by `g77'
+that involve the string `y2kbug', and these are not explained above,
+that probably indicates that a version of `libg2c' older than `g77' is
+being linked to, or that the new library is being linked to code
+compiled by an older version of `g77'.
+
+   That's because, as of the version that warns about non-Y2K-compliant
+intrinsic invocation, `g77' references the `libg2c' implementations of
+those intrinsics using new names, containing the string `y2kbug'.
+
+   So, linking newly-compiled code (invoking one of the intrinsics in
+question) to an old library might yield an unresolved reference to
+`G77_date_y2kbug_0'.  (The old library calls it `G77_date_0'.)
+
+   Similarly, linking previously-compiled code to a new library might
+yield an unresolved reference to `G77_vxtidate_0'.  (The new library
+calls it `G77_vxtidate_y2kbug_0'.)
+
+   The proper fix for the above problems is to obtain the latest
+release of `g77' and related products (including `libg2c') and install
+them on all systems, then recompile, relink, and install (as
+appropriate) all existing Fortran programs.
+
+   (Normally, this sort of renaming is steadfastly avoided.  In this
+case, however, it seems more important to highlight potential Y2K
+problems than to ease the transition of potentially non-Y2K-compliant
+code to new versions of `g77' and `libg2c'.)
+
+
+File: g77.info,  Node: Array Size,  Next: Character-variable Length,  Prev: Year 2000 (Y2K) Problems,  Up: Run-time Environment Limits
+
+Array Size
+----------
+
+   Currently, `g77' uses the default `INTEGER' type for array indexes,
+which limits the sizes of single-dimension arrays on systems offering a
+larger address space than can be addressed by that type.  (That `g77'
+puts all arrays in memory could be considered another limitation--it
+could use large temporary files--but that decision is left to the
+programmer as an implementation choice by most Fortran implementations.)
+
+   It is not yet clear whether this limitation never, sometimes, or
+always applies to the sizes of multiple-dimension arrays as a whole.
+
+   For example, on a system with 64-bit addresses and 32-bit default
+`INTEGER', an array with a size greater than can be addressed by a
+32-bit offset can be declared using multiple dimensions.  Such an array
+is therefore larger than a single-dimension array can be, on the same
+system.
+
+   Whether large multiple-dimension arrays are reliably supported
+depends mostly on the `gcc' back end (code generator) used by `g77',
+and has not yet been fully investigated.
+
+
+File: g77.info,  Node: Character-variable Length,  Next: Year 10000 (Y10K) Problems,  Prev: Array Size,  Up: Run-time Environment Limits
+
+Character-variable Length
+-------------------------
+
+   Currently, `g77' uses the default `INTEGER' type for the lengths of
+`CHARACTER' variables and array elements.
+
+   This means that, for example, a system with a 64-bit address space
+and a 32-bit default `INTEGER' type does not, under `g77', support a
+`CHARACTER*N' declaration where N is greater than 2147483647.
+
+
+File: g77.info,  Node: Year 10000 (Y10K) Problems,  Prev: Character-variable Length,  Up: Run-time Environment Limits
+
+Year 10000 (Y10K) Problems
+--------------------------
+
+   Most intrinsics returning, or computing values based on, date
+information are prone to Year-10000 (Y10K) problems, due to supporting
+only 4 digits for the year.
+
+   See the following for examples: *Note FDate Intrinsic (function)::,
+*Note FDate Intrinsic (subroutine)::, *Note IDate Intrinsic (UNIX)::,
+*Note Time Intrinsic (VXT)::, *Note Date_and_Time Intrinsic::.
+
+
+File: g77.info,  Node: Compiler Types,  Next: Compiler Constants,  Prev: Run-time Environment Limits,  Up: Compiler
+
+Compiler Types
+==============
+
+   Fortran implementations have a fair amount of freedom given them by
+the standard as far as how much storage space is used and how much
+precision and range is offered by the various types such as
+`LOGICAL(KIND=1)', `INTEGER(KIND=1)', `REAL(KIND=1)', `REAL(KIND=2)',
+`COMPLEX(KIND=1)', and `CHARACTER'.  Further, many compilers offer
+so-called `*N' notation, but the interpretation of N varies across
+compilers and target architectures.
+
+   The standard requires that `LOGICAL(KIND=1)', `INTEGER(KIND=1)', and
+`REAL(KIND=1)' occupy the same amount of storage space, and that
+`COMPLEX(KIND=1)' and `REAL(KIND=2)' take twice as much storage space
+as `REAL(KIND=1)'.  Further, it requires that `COMPLEX(KIND=1)'
+entities be ordered such that when a `COMPLEX(KIND=1)' variable is
+storage-associated (such as via `EQUIVALENCE') with a two-element
+`REAL(KIND=1)' array named `R', `R(1)' corresponds to the real element
+and `R(2)' to the imaginary element of the `COMPLEX(KIND=1)' variable.
+
+   (Few requirements as to precision or ranges of any of these are
+placed on the implementation, nor is the relationship of storage sizes
+of these types to the `CHARACTER' type specified, by the standard.)
+
+   `g77' follows the above requirements, warning when compiling a
+program requires placement of items in memory that contradict the
+requirements of the target architecture.  (For example, a program can
+require placement of a `REAL(KIND=2)' on a boundary that is not an even
+multiple of its size, but still an even multiple of the size of a
+`REAL(KIND=1)' variable.  On some target architectures, using the
+canonical mapping of Fortran types to underlying architectural types,
+such placement is prohibited by the machine definition or the
+Application Binary Interface (ABI) in force for the configuration
+defined for building `gcc' and `g77'.  `g77' warns about such
+situations when it encounters them.)
+
+   `g77' follows consistent rules for configuring the mapping between
+Fortran types, including the `*N' notation, and the underlying
+architectural types as accessed by a similarly-configured applicable
+version of the `gcc' compiler.  These rules offer a widely portable,
+consistent Fortran/C environment, although they might well conflict
+with the expectations of users of Fortran compilers designed and
+written for particular architectures.
+
+   These rules are based on the configuration that is in force for the
+version of `gcc' built in the same release as `g77' (and which was
+therefore used to build both the `g77' compiler components and the
+`libg2c' run-time library):
+
+`REAL(KIND=1)'
+     Same as `float' type.
+
+`REAL(KIND=2)'
+     Same as whatever floating-point type that is twice the size of a
+     `float'--usually, this is a `double'.
+
+`INTEGER(KIND=1)'
+     Same as an integral type that is occupies the same amount of
+     memory storage as `float'--usually, this is either an `int' or a
+     `long int'.
+
+`LOGICAL(KIND=1)'
+     Same `gcc' type as `INTEGER(KIND=1)'.
+
+`INTEGER(KIND=2)'
+     Twice the size, and usually nearly twice the range, as
+     `INTEGER(KIND=1)'--usually, this is either a `long int' or a `long
+     long int'.
+
+`LOGICAL(KIND=2)'
+     Same `gcc' type as `INTEGER(KIND=2)'.
+
+`INTEGER(KIND=3)'
+     Same `gcc' type as signed `char'.
+
+`LOGICAL(KIND=3)'
+     Same `gcc' type as `INTEGER(KIND=3)'.
+
+`INTEGER(KIND=6)'
+     Twice the size, and usually nearly twice the range, as
+     `INTEGER(KIND=3)'--usually, this is a `short'.
+
+`LOGICAL(KIND=6)'
+     Same `gcc' type as `INTEGER(KIND=6)'.
+
+`COMPLEX(KIND=1)'
+     Two `REAL(KIND=1)' scalars (one for the real part followed by one
+     for the imaginary part).
+
+`COMPLEX(KIND=2)'
+     Two `REAL(KIND=2)' scalars.
+
+`NUMERIC-TYPE*N'
+     (Where NUMERIC-TYPE is any type other than `CHARACTER'.)  Same as
+     whatever `gcc' type occupies N times the storage space of a `gcc'
+     `char' item.
+
+`DOUBLE PRECISION'
+     Same as `REAL(KIND=2)'.
+
+`DOUBLE COMPLEX'
+     Same as `COMPLEX(KIND=2)'.
+
+   Note that the above are proposed correspondences and might change in
+future versions of `g77'--avoid writing code depending on them.
+
+   Other types supported by `g77' are derived from gcc types such as
+`char', `short', `int', `long int', `long long int', `long double', and
+so on.  That is, whatever types `gcc' already supports, `g77' supports
+now or probably will support in a future version.  The rules for the
+`NUMERIC-TYPE*N' notation apply to these types, and new values for
+`NUMERIC-TYPE(KIND=N)' will be assigned in a way that encourages
+clarity, consistency, and portability.
+
+
+File: g77.info,  Node: Compiler Constants,  Next: Compiler Intrinsics,  Prev: Compiler Types,  Up: Compiler
+
+Compiler Constants
+==================
+
+   `g77' strictly assigns types to *all* constants not documented as
+"typeless" (typeless constants including `'1'Z', for example).  Many
+other Fortran compilers attempt to assign types to typed constants
+based on their context.  This results in hard-to-find bugs, nonportable
+code, and is not in the spirit (though it strictly follows the letter)
+of the 77 and 90 standards.
+
+   `g77' might offer, in a future release, explicit constructs by which
+a wider variety of typeless constants may be specified, and/or
+user-requested warnings indicating places where `g77' might differ from
+how other compilers assign types to constants.
+
+   *Note Context-Sensitive Constants::, for more information on this
+issue.
+
+
+File: g77.info,  Node: Compiler Intrinsics,  Prev: Compiler Constants,  Up: Compiler
+
+Compiler Intrinsics
+===================
+
+   `g77' offers an ever-widening set of intrinsics.  Currently these
+all are procedures (functions and subroutines).
+
+   Some of these intrinsics are unimplemented, but their names reserved
+to reduce future problems with existing code as they are implemented.
+Others are implemented as part of the GNU Fortran language, while yet
+others are provided for compatibility with other dialects of Fortran
+but are not part of the GNU Fortran language.
+
+   To manage these distinctions, `g77' provides intrinsic *groups*, a
+facility that is simply an extension of the intrinsic groups provided
+by the GNU Fortran language.
+
+* Menu:
+
+* Intrinsic Groups::  How intrinsics are grouped for easy management.
+* Other Intrinsics::  Intrinsics other than those in the GNU
+                       Fortran language.
+
+
+File: g77.info,  Node: Intrinsic Groups,  Next: Other Intrinsics,  Up: Compiler Intrinsics
+
+Intrinsic Groups
+----------------
+
+   A given specific intrinsic belongs in one or more groups.  Each
+group is deleted, disabled, hidden, or enabled by default or a
+command-line option.  The meaning of each term follows.
+
+Deleted
+     No intrinsics are recognized as belonging to that group.
+
+Disabled
+     Intrinsics are recognized as belonging to the group, but
+     references to them (other than via the `INTRINSIC' statement) are
+     disallowed through that group.
+
+Hidden
+     Intrinsics in that group are recognized and enabled (if
+     implemented) *only* if the first mention of the actual name of an
+     intrinsic in a program unit is in an `INTRINSIC' statement.
+
+Enabled
+     Intrinsics in that group are recognized and enabled (if
+     implemented).
+
+   The distinction between deleting and disabling a group is illustrated
+by the following example.  Assume intrinsic `FOO' belongs only to group
+`FGR'.  If group `FGR' is deleted, the following program unit will
+successfully compile, because `FOO()' will be seen as a reference to an
+external function named `FOO':
+
+     PRINT *, FOO()
+     END
+
+If group `FGR' is disabled, compiling the above program will produce
+diagnostics, either because the `FOO' intrinsic is improperly invoked
+or, if properly invoked, it is not enabled.  To change the above
+program so it references an external function `FOO' instead of the
+disabled `FOO' intrinsic, add the following line to the top:
+
+     EXTERNAL FOO
+
+So, deleting a group tells `g77' to pretend as though the intrinsics in
+that group do not exist at all, whereas disabling it tells `g77' to
+recognize them as (disabled) intrinsics in intrinsic-like contexts.
+
+   Hiding a group is like enabling it, but the intrinsic must be first
+named in an `INTRINSIC' statement to be considered a reference to the
+intrinsic rather than to an external procedure.  This might be the
+"safest" way to treat a new group of intrinsics when compiling old
+code, because it allows the old code to be generally written as if
+those new intrinsics never existed, but to be changed to use them by
+inserting `INTRINSIC' statements in the appropriate places.  However,
+it should be the goal of development to use `EXTERNAL' for all names of
+external procedures that might be intrinsic names.
+
+   If an intrinsic is in more than one group, it is enabled if any of
+its containing groups are enabled; if not so enabled, it is hidden if
+any of its containing groups are hidden; if not so hidden, it is
+disabled if any of its containing groups are disabled; if not so
+disabled, it is deleted.  This extra complication is necessary because
+some intrinsics, such as `IBITS', belong to more than one group, and
+hence should be enabled if any of the groups to which they belong are
+enabled, and so on.
+
+   The groups are:
+
+`badu77'
+     UNIX intrinsics having inappropriate forms (usually functions that
+     have intended side effects).
+
+`gnu'
+     Intrinsics the GNU Fortran language supports that are extensions to
+     the Fortran standards (77 and 90).
+
+`f2c'
+     Intrinsics supported by AT&T's `f2c' converter and/or `libf2c'.
+
+`f90'
+     Fortran 90 intrinsics.
+
+`mil'
+     MIL-STD 1753 intrinsics (`MVBITS', `IAND', `BTEST', and so on).
+
+`unix'
+     UNIX intrinsics (`IARGC', `EXIT', `ERF', and so on).
+
+`vxt'
+     VAX/VMS FORTRAN (current as of v4) intrinsics.
+
+
+File: g77.info,  Node: Other Intrinsics,  Prev: Intrinsic Groups,  Up: Compiler Intrinsics
+
+Other Intrinsics
+----------------
+
+   `g77' supports intrinsics other than those in the GNU Fortran
+language proper.  This set of intrinsics is described below.
+
+   (Note that the empty lines appearing in the menu below are not
+intentional--they result from a bug in the `makeinfo' program.)
+
+* Menu:
+
+
+* ACosD Intrinsic::     (Reserved for future use.)
+
+* AIMax0 Intrinsic::    (Reserved for future use.)
+* AIMin0 Intrinsic::    (Reserved for future use.)
+
+* AJMax0 Intrinsic::    (Reserved for future use.)
+* AJMin0 Intrinsic::    (Reserved for future use.)
+
+* ASinD Intrinsic::     (Reserved for future use.)
+
+* ATan2D Intrinsic::    (Reserved for future use.)
+* ATanD Intrinsic::     (Reserved for future use.)
+
+* BITest Intrinsic::    (Reserved for future use.)
+
+* BJTest Intrinsic::    (Reserved for future use.)
+
+* CDAbs Intrinsic::     Absolute value (archaic).
+* CDCos Intrinsic::     Cosine (archaic).
+* CDExp Intrinsic::     Exponential (archaic).
+* CDLog Intrinsic::     Natural logarithm (archaic).
+* CDSin Intrinsic::     Sine (archaic).
+* CDSqRt Intrinsic::    Square root (archaic).
+
+* ChDir Intrinsic (function):: Change directory.
+
+* ChMod Intrinsic (function):: Change file modes.
+
+* CosD Intrinsic::      (Reserved for future use.)
+
+* DACosD Intrinsic::    (Reserved for future use.)
+
+* DASinD Intrinsic::    (Reserved for future use.)
+
+* DATan2D Intrinsic::   (Reserved for future use.)
+* DATanD Intrinsic::    (Reserved for future use.)
+* Date Intrinsic::      Get current date as dd-Mon-yy.
+
+* DbleQ Intrinsic::     (Reserved for future use.)
+
+* DCmplx Intrinsic::    Construct `COMPLEX(KIND=2)' value.
+* DConjg Intrinsic::    Complex conjugate (archaic).
+
+* DCosD Intrinsic::     (Reserved for future use.)
+
+* DFloat Intrinsic::    Conversion (archaic).
+
+* DFlotI Intrinsic::    (Reserved for future use.)
+* DFlotJ Intrinsic::    (Reserved for future use.)
+
+* DImag Intrinsic::     Convert/extract imaginary part of complex (archaic).
+
+* DReal Intrinsic::     Convert value to type `REAL(KIND=2)'.
+
+* DSinD Intrinsic::     (Reserved for future use.)
+
+* DTanD Intrinsic::     (Reserved for future use.)
+
+* DTime Intrinsic (function):: Get elapsed time since last time.
+
+* FGet Intrinsic (function):: Read a character from unit 5 stream-wise.
+
+* FGetC Intrinsic (function):: Read a character stream-wise.
+
+* FloatI Intrinsic::    (Reserved for future use.)
+* FloatJ Intrinsic::    (Reserved for future use.)
+
+* FPut Intrinsic (function):: Write a character to unit 6 stream-wise.
+
+* FPutC Intrinsic (function):: Write a character stream-wise.
+
+* IDate Intrinsic (VXT):: Get local time info (VAX/VMS).
+
+* IIAbs Intrinsic::     (Reserved for future use.)
+* IIAnd Intrinsic::     (Reserved for future use.)
+* IIBClr Intrinsic::    (Reserved for future use.)
+* IIBits Intrinsic::    (Reserved for future use.)
+* IIBSet Intrinsic::    (Reserved for future use.)
+* IIDiM Intrinsic::     (Reserved for future use.)
+* IIDInt Intrinsic::    (Reserved for future use.)
+* IIDNnt Intrinsic::    (Reserved for future use.)
+* IIEOr Intrinsic::     (Reserved for future use.)
+* IIFix Intrinsic::     (Reserved for future use.)
+* IInt Intrinsic::      (Reserved for future use.)
+* IIOr Intrinsic::      (Reserved for future use.)
+* IIQint Intrinsic::    (Reserved for future use.)
+* IIQNnt Intrinsic::    (Reserved for future use.)
+* IIShftC Intrinsic::   (Reserved for future use.)
+* IISign Intrinsic::    (Reserved for future use.)
+
+* IMax0 Intrinsic::     (Reserved for future use.)
+* IMax1 Intrinsic::     (Reserved for future use.)
+* IMin0 Intrinsic::     (Reserved for future use.)
+* IMin1 Intrinsic::     (Reserved for future use.)
+* IMod Intrinsic::      (Reserved for future use.)
+
+* INInt Intrinsic::     (Reserved for future use.)
+* INot Intrinsic::      (Reserved for future use.)
+
+* IZExt Intrinsic::     (Reserved for future use.)
+* JIAbs Intrinsic::     (Reserved for future use.)
+* JIAnd Intrinsic::     (Reserved for future use.)
+* JIBClr Intrinsic::    (Reserved for future use.)
+* JIBits Intrinsic::    (Reserved for future use.)
+* JIBSet Intrinsic::    (Reserved for future use.)
+* JIDiM Intrinsic::     (Reserved for future use.)
+* JIDInt Intrinsic::    (Reserved for future use.)
+* JIDNnt Intrinsic::    (Reserved for future use.)
+* JIEOr Intrinsic::     (Reserved for future use.)
+* JIFix Intrinsic::     (Reserved for future use.)
+* JInt Intrinsic::      (Reserved for future use.)
+* JIOr Intrinsic::      (Reserved for future use.)
+* JIQint Intrinsic::    (Reserved for future use.)
+* JIQNnt Intrinsic::    (Reserved for future use.)
+* JIShft Intrinsic::    (Reserved for future use.)
+* JIShftC Intrinsic::   (Reserved for future use.)
+* JISign Intrinsic::    (Reserved for future use.)
+* JMax0 Intrinsic::     (Reserved for future use.)
+* JMax1 Intrinsic::     (Reserved for future use.)
+* JMin0 Intrinsic::     (Reserved for future use.)
+* JMin1 Intrinsic::     (Reserved for future use.)
+* JMod Intrinsic::      (Reserved for future use.)
+* JNInt Intrinsic::     (Reserved for future use.)
+* JNot Intrinsic::      (Reserved for future use.)
+* JZExt Intrinsic::     (Reserved for future use.)
+
+* Kill Intrinsic (function):: Signal a process.
+
+* Link Intrinsic (function):: Make hard link in file system.
+
+* QAbs Intrinsic::      (Reserved for future use.)
+* QACos Intrinsic::     (Reserved for future use.)
+* QACosD Intrinsic::    (Reserved for future use.)
+* QASin Intrinsic::     (Reserved for future use.)
+* QASinD Intrinsic::    (Reserved for future use.)
+* QATan Intrinsic::     (Reserved for future use.)
+* QATan2 Intrinsic::    (Reserved for future use.)
+* QATan2D Intrinsic::   (Reserved for future use.)
+* QATanD Intrinsic::    (Reserved for future use.)
+* QCos Intrinsic::      (Reserved for future use.)
+* QCosD Intrinsic::     (Reserved for future use.)
+* QCosH Intrinsic::     (Reserved for future use.)
+* QDiM Intrinsic::      (Reserved for future use.)
+* QExp Intrinsic::      (Reserved for future use.)
+* QExt Intrinsic::      (Reserved for future use.)
+* QExtD Intrinsic::     (Reserved for future use.)
+* QFloat Intrinsic::    (Reserved for future use.)
+* QInt Intrinsic::      (Reserved for future use.)
+* QLog Intrinsic::      (Reserved for future use.)
+* QLog10 Intrinsic::    (Reserved for future use.)
+* QMax1 Intrinsic::     (Reserved for future use.)
+* QMin1 Intrinsic::     (Reserved for future use.)
+* QMod Intrinsic::      (Reserved for future use.)
+* QNInt Intrinsic::     (Reserved for future use.)
+* QSin Intrinsic::      (Reserved for future use.)
+* QSinD Intrinsic::     (Reserved for future use.)
+* QSinH Intrinsic::     (Reserved for future use.)
+* QSqRt Intrinsic::     (Reserved for future use.)
+* QTan Intrinsic::      (Reserved for future use.)
+* QTanD Intrinsic::     (Reserved for future use.)
+* QTanH Intrinsic::     (Reserved for future use.)
+
+* Rename Intrinsic (function):: Rename file.
+
+* Secnds Intrinsic::    Get local time offset since midnight.
+
+* Signal Intrinsic (function):: Muck with signal handling.
+
+* SinD Intrinsic::      (Reserved for future use.)
+
+* SnglQ Intrinsic::     (Reserved for future use.)
+
+* SymLnk Intrinsic (function):: Make symbolic link in file system.
+
+* System Intrinsic (function):: Invoke shell (system) command.
+
+* TanD Intrinsic::      (Reserved for future use.)
+
+* Time Intrinsic (VXT):: Get the time as a character value.
+
+* UMask Intrinsic (function):: Set file creation permissions mask.
+
+* Unlink Intrinsic (function):: Unlink file.
+
+* ZExt Intrinsic::      (Reserved for future use.)
+
+
+File: g77.info,  Node: ACosD Intrinsic,  Next: AIMax0 Intrinsic,  Up: Other Intrinsics
+
+ACosD Intrinsic
+...............
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL ACosD' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: AIMax0 Intrinsic,  Next: AIMin0 Intrinsic,  Prev: ACosD Intrinsic,  Up: Other Intrinsics
+
+AIMax0 Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL AIMax0' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: AIMin0 Intrinsic,  Next: AJMax0 Intrinsic,  Prev: AIMax0 Intrinsic,  Up: Other Intrinsics
+
+AIMin0 Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL AIMin0' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: AJMax0 Intrinsic,  Next: AJMin0 Intrinsic,  Prev: AIMin0 Intrinsic,  Up: Other Intrinsics
+
+AJMax0 Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL AJMax0' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: AJMin0 Intrinsic,  Next: ASinD Intrinsic,  Prev: AJMax0 Intrinsic,  Up: Other Intrinsics
+
+AJMin0 Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL AJMin0' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: ASinD Intrinsic,  Next: ATan2D Intrinsic,  Prev: AJMin0 Intrinsic,  Up: Other Intrinsics
+
+ASinD Intrinsic
+...............
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL ASinD' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: ATan2D Intrinsic,  Next: ATanD Intrinsic,  Prev: ASinD Intrinsic,  Up: Other Intrinsics
+
+ATan2D Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL ATan2D' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: ATanD Intrinsic,  Next: BITest Intrinsic,  Prev: ATan2D Intrinsic,  Up: Other Intrinsics
+
+ATanD Intrinsic
+...............
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL ATanD' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: BITest Intrinsic,  Next: BJTest Intrinsic,  Prev: ATanD Intrinsic,  Up: Other Intrinsics
+
+BITest Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL BITest' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: BJTest Intrinsic,  Next: CDAbs Intrinsic,  Prev: BITest Intrinsic,  Up: Other Intrinsics
+
+BJTest Intrinsic
+................
+
+   This intrinsic is not yet implemented.  The name is, however,
+reserved as an intrinsic.  Use `EXTERNAL BJTest' to use this name for an
+external procedure.
+
+
+File: g77.info,  Node: CDAbs Intrinsic,  Next: CDCos Intrinsic,  Prev: BJTest Intrinsic,  Up: Other Intrinsics
+
+CDAbs Intrinsic
+...............
+
+     CDAbs(A)
+
+CDAbs: `REAL(KIND=2)' function.
+
+A: `COMPLEX(KIND=2)'; scalar; INTENT(IN).
+
+Intrinsic groups: `f2c', `vxt'.
+
+Description:
+
+   Archaic form of `ABS()' that is specific to one type for A.  *Note
+Abs Intrinsic::.
+
+
+File: g77.info,  Node: CDCos Intrinsic,  Next: CDExp Intrinsic,  Prev: CDAbs Intrinsic,  Up: Other Intrinsics
+
+CDCos Intrinsic
+...............
+
+     CDCos(X)
+
+CDCos: `COMPLEX(KIND=2)' function.
+
+X: `COMPLEX(KIND=2)'; scalar; INTENT(IN).
+
+Intrinsic groups: `f2c', `vxt'.
+
+Description:
+
+   Archaic form of `COS()' that is specific to one type for X.  *Note
+Cos Intrinsic::.
+
+
+File: g77.info,  Node: CDExp Intrinsic,  Next: CDLog Intrinsic,  Prev: CDCos Intrinsic,  Up: Other Intrinsics
+
+CDExp Intrinsic
+...............
+
+     CDExp(X)
+
+CDExp: `COMPLEX(KIND=2)' function.
+
+X: `COMPLEX(KIND=2)'; scalar; INTENT(IN).
+
+Intrinsic groups: `f2c', `vxt'.
+
+Description:
+
+   Archaic form of `EXP()' that is specific to one type for X.  *Note
+Exp Intrinsic::.
+
+
+File: g77.info,  Node: CDLog Intrinsic,  Next: CDSin Intrinsic,  Prev: CDExp Intrinsic,  Up: Other Intrinsics
+
+CDLog Intrinsic
+...............
+
+     CDLog(X)
+
+CDLog: `COMPLEX(KIND=2)' function.
+
+X: `COMPLEX(KIND=2)'; scalar; INTENT(IN).
+
+Intrinsic groups: `f2c', `vxt'.
+
+Description:
+
+   Archaic form of `LOG()' that is specific to one type for X.  *Note
+Log Intrinsic::.
+
+
+File: g77.info,  Node: CDSin Intrinsic,  Next: CDSqRt Intrinsic,  Prev: CDLog Intrinsic,  Up: Other Intrinsics
+
+CDSin Intrinsic
+...............
+
+     CDSin(X)
+
+CDSin: `COMPLEX(KIND=2)' function.
+
+X: `COMPLEX(KIND=2)'; scalar; INTENT(IN).
+
+Intrinsic groups: `f2c', `vxt'.
+
+Description:
+
+   Archaic form of `SIN()' that is specific to one type for X.  *Note
+Sin Intrinsic::.
+
+
+File: g77.info,  Node: CDSqRt Intrinsic,  Next: ChDir Intrinsic (function),  Prev: CDSin Intrinsic,  Up: Other Intrinsics
+
+CDSqRt Intrinsic
+................
+
+     CDSqRt(X)
+
+CDSqRt: `COMPLEX(KIND=2)' function.
+
+X: `COMPLEX(KIND=2)'; scalar; INTENT(IN).
+
+Intrinsic groups: `f2c', `vxt'.
+
+Description:
+
+   Archaic form of `SQRT()' that is specific to one type for X.  *Note
+SqRt Intrinsic::.
+

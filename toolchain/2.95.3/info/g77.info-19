@@ -1,0 +1,1367 @@
+This is Info file f/g77.info, produced by Makeinfo version 1.68 from
+the input file ../../../src/gcc-2.95.3/gcc/f/g77.texi.
+
+INFO-DIR-SECTION Programming
+START-INFO-DIR-ENTRY
+* g77: (g77).                  The GNU Fortran compiler.
+END-INFO-DIR-ENTRY
+   This file documents the use and the internals of the GNU Fortran
+(`g77') compiler.  It corresponds to the GCC-2.95 version of `g77'.
+
+   Published by the Free Software Foundation 59 Temple Place - Suite 330
+Boston, MA 02111-1307 USA
+
+   Copyright (C) 1995-1999 Free Software Foundation, Inc.
+
+   Permission is granted to make and distribute verbatim copies of this
+manual provided the copyright notice and this permission notice are
+preserved on all copies.
+
+   Permission is granted to copy and distribute modified versions of
+this manual under the conditions for verbatim copying, provided also
+that the sections entitled "GNU General Public License," "Funding for
+Free Software," and "Protect Your Freedom--Fight `Look And Feel'" are
+included exactly as in the original, and provided that the entire
+resulting derived work is distributed under the terms of a permission
+notice identical to this one.
+
+   Permission is granted to copy and distribute translations of this
+manual into another language, under the above conditions for modified
+versions, except that the sections entitled "GNU General Public
+License," "Funding for Free Software," and "Protect Your Freedom--Fight
+`Look And Feel'", and this permission notice, may be included in
+translations approved by the Free Software Foundation instead of in the
+original English.
+
+   Contributed by James Craig Burley (<craig@jcb-sc.com>).  Inspired by
+a first pass at translating `g77-0.5.16/f/DOC' that was contributed to
+Craig by David Ronis (<ronis@onsager.chem.mcgill.ca>).
+
+
+File: g77.info,  Node: Gotchas (Transforming),  Next: TBD (Transforming),  Prev: ste.c,  Up: Overview of Translation Process
+
+Gotchas (Transforming)
+----------------------
+
+   This section is not about transforming "gotchas" into something else.
+It is about the weirder aspects of transforming Fortran, however that's
+defined, into a more modern, canonical form.
+
+Multi-character Lexemes
+.......................
+
+   Each lexeme carries with it a pointer to where it appears in the
+source.
+
+   To provide the ability for diagnostics to point to column numbers,
+in addition to line numbers and names, lexemes that represent more than
+one (significant) character in the source code need, generally, to
+provide pointers to where each *character* appears in the source.
+
+   This provides the ability to properly identify the precise location
+of the problem in code like
+
+     SUBROUTINE X
+     END
+     BLOCK DATA X
+     END
+
+   which, in fixed-form source, would result in single lexemes
+consisting of the strings `SUBROUTINEX' and `BLOCKDATAX'.  (The problem
+is that `X' is defined twice, so a pointer to the `X' in the second
+definition, as well as a follow-up pointer to the corresponding pointer
+in the first, would be preferable to pointing to the beginnings of the
+statements.)
+
+   This need also arises when parsing (and diagnosing) `FORMAT'
+statements.
+
+   Further, it arises when diagnosing `FMT=' specifiers that contain
+constants (or partial constants, or even propagated constants!)  in I/O
+statements, as in:
+
+     PRINT '(I2, 3HAB)', J
+
+   (A pointer to the beginning of the prematurely-terminated Hollerith
+constant, and/or to the close parenthese, is preferable to a pointer to
+the open-parenthese or the apostrophe that precedes it.)
+
+   Multi-character lexemes, which would seem to naturally include at
+least digit strings, alphanumeric strings, `CHARACTER' constants, and
+Hollerith constants, therefore need to provide location information on
+each character.  (Maybe Hollerith constants don't, but it's unnecessary
+to except them.)
+
+   The question then arises, what about *other* multi-character lexemes,
+such as `**' and `//', and Fortran 90's `(/', `/)', `::', and so on?
+
+   Turns out there's a need to identify the location of the second
+character of these two-character lexemes.  For example, in `I(/J) = K',
+the slash needs to be diagnosed as the problem, not the open parenthese.
+Similarly, it is preferable to diagnose the second slash in `I = J //
+K' rather than the first, given the implicit typing rules, which would
+result in the compiler disallowing the attempted concatenation of two
+integers.  (Though, since that's more of a semantic issue, it's not
+*that* much preferable.)
+
+   Even sequences that could be parsed as digit strings could use
+location info, for example, to diagnose the `9' in the octal constant
+`O'129''.  (This probably will be parsed as a character string, to be
+consistent with the parsing of `Z'129A''.)
+
+   To avoid the hassle of recording the location of the second
+character, while also preserving the general rule that each significant
+character is distinctly pointed to by the lexeme that contains it, it's
+best to simply not have any fixed-size lexemes larger than one
+character.
+
+   This new design is expected to make checking for two `*' lexemes in
+a row much easier than the old design, so this is not much of a
+sacrifice.  It probably makes the lexer much easier to implement than
+it makes the parser harder.
+
+Space-padding Lexemes
+.....................
+
+   Certain lexemes need to be padded with virtual spaces when the end
+of the line (or file) is encountered.
+
+   This is necessary in fixed form, to handle lines that don't extend
+to column 72, assuming that's the line length in effect.
+
+Bizarre Free-form Hollerith Constants
+.....................................
+
+   Last I checked, the Fortran 90 standard actually required the
+compiler to silently accept something like
+
+     FORMAT ( 1 2   Htwelve chars )
+
+   as a valid `FORMAT' statement specifying a twelve-character
+Hollerith constant.
+
+   The implication here is that, since the new lexer is a zero-feedback
+one, it won't know that the special case of a `FORMAT' statement being
+parsed requires apparently distinct lexemes `1' and `2' to be treated as
+a single lexeme.
+
+   (This is a horrible misfeature of the Fortran 90 language.  It's one
+of many such misfeatures that almost make me want to not support them,
+and forge ahead with designing a new "GNU Fortran" language that has
+the features, but not the misfeatures, of Fortran 90, and provide
+utility programs to do the conversion automatically.)
+
+   So, the lexer must gather distinct chunks of decimal strings into a
+single lexeme in contexts where a single decimal lexeme might start a
+Hollerith constant.
+
+   (Which probably means it might as well do that all the time for all
+multi-character lexemes, even in free-form mode, leaving it to
+subsequent phases to pull them apart as they see fit.)
+
+   Compare the treatment of this to how
+
+     CHARACTER * 4 5 HEY
+
+   and
+
+     CHARACTER * 12 HEY
+
+   must be treated--the former must be diagnosed, due to the separation
+between lexemes, the latter must be accepted as a proper declaration.
+
+Hollerith Constants
+...................
+
+   Recognizing a Hollerith constant--specifically, that an `H' or `h'
+after a digit string begins such a constant--requires some knowledge of
+context.
+
+   Hollerith constants (such as `2HAB') can appear after:
+
+   * `('
+
+   * `,'
+
+   * `='
+
+   * `+', `-', `/'
+
+   * `*', except as noted below
+
+   Hollerith constants don't appear after:
+
+   * `CHARACTER*', which can be treated generally as any `*' that is
+     the second lexeme of a statement
+
+Confusing Function Keyword
+..........................
+
+   While
+
+     REAL FUNCTION FOO ()
+
+   must be a `FUNCTION' statement and
+
+     REAL FUNCTION FOO (5)
+
+   must be a type-definition statement,
+
+     REAL FUNCTION FOO (NAMES)
+
+   where NAMES is a comma-separated list of names, can be one or the
+other.
+
+   The only way to disambiguate that statement (short of mandating
+free-form source or a short maximum length for name for external
+procedures) is based on the context of the statement.
+
+   In particular, the statement is known to be within an
+already-started program unit (but not at the outer level of the
+`CONTAINS' block), it is a type-declaration statement.
+
+   Otherwise, the statement is a `FUNCTION' statement, in that it
+begins a function program unit (external, or, within `CONTAINS',
+nested).
+
+Weird READ
+..........
+
+   The statement
+
+     READ (N)
+
+   is equivalent to either
+
+     READ (UNIT=(N))
+
+   or
+
+     READ (FMT=(N))
+
+   depending on which would be valid in context.
+
+   Specifically, if `N' is type `INTEGER', `READ (FMT=(N))' would not
+be valid, because parentheses may not be used around `N', whereas they
+may around it in `READ (UNIT=(N))'.
+
+   Further, if `N' is type `CHARACTER', the opposite is true--`READ
+(UNIT=(N))' is not valid, but `READ (FMT=(N))' is.
+
+   Strictly speaking, if anything follows
+
+     READ (N)
+
+   in the statement, whether the first lexeme after the close
+parenthese is a comma could be used to disambiguate the two cases,
+without looking at the type of `N', because the comma is required for
+the `READ (FMT=(N))' interpretation and disallowed for the `READ
+(UNIT=(N))' interpretation.
+
+   However, in practice, many Fortran compilers allow the comma for the
+`READ (UNIT=(N))' interpretation anyway (in that they generally allow a
+leading comma before an I/O list in an I/O statement), and much code
+takes advantage of this allowance.
+
+   (This is quite a reasonable allowance, since the juxtaposition of a
+comma-separated list immediately after an I/O control-specification
+list, which is also comma-separated, without an intervening comma,
+looks sufficiently "wrong" to programmers that they can't resist the
+itch to insert the comma.  `READ (I, J), K, L' simply looks cleaner than
+`READ (I, J) K, L'.)
+
+   So, type-based disambiguation is needed unless strict adherence to
+the standard is always assumed, and we're not going to assume that.
+
+
+File: g77.info,  Node: TBD (Transforming),  Prev: Gotchas (Transforming),  Up: Overview of Translation Process
+
+TBD (Transforming)
+------------------
+
+   Continue researching gotchas, designing the transformational process,
+and implementing it.
+
+   Specific issues to resolve:
+
+   * Just where should `INCLUDE' processing take place?
+
+     Clearly before (or part of) statement identification (`sta.c'),
+     since determining whether `I(J)=K' is a statement-function
+     definition or an assignment statement requires knowing the context,
+     which in turn requires having processed `INCLUDE' files.
+
+   * Just where should (if it was implemented) `USE' processing take
+     place?
+
+     This gets into the whole issue of how `g77' should handle the
+     concept of modules.  I think GNAT already takes on this issue, but
+     don't know more than that.  Jim Giles has written extensively on
+     `comp.lang.fortran' about his opinions on module handling, as have
+     others.  Jim's views should be taken into account.
+
+     Actually, Richard M. Stallman (RMS) also has written up some
+     guidelines for implementing such things, but I'm not sure where I
+     read them.  Perhaps the old <gcc2@cygnus.com> list.
+
+     If someone could dig references to these up and get them to me,
+     that would be much appreciated!  Even though modules are not on
+     the short-term list for implementation, it'd be helpful to know
+     *now* how to avoid making them harder to implement them *later*.
+
+   * Should the `g77' command become just a script that invokes all the
+     various preprocessing that might be needed, thus making it seem
+     slower than necessary for legacy code that people are unwilling to
+     convert, or should we provide a separate script for that, thus
+     encouraging people to convert their code once and for all?
+
+     At least, a separate script to behave as old `g77' did, perhaps
+     named `g77old', might ease the transition, as might a
+     corresponding one that converts source codes named `g77oldnew'.
+
+     These scripts would take all the pertinent options `g77' used to
+     take and run the appropriate filters, passing the results to `g77'
+     or just making new sources out of them (in a subdirectory, leaving
+     the user to do the dirty deed of moving or copying them over the
+     old sources).
+
+   * Do other Fortran compilers provide a prefix syntax to govern the
+     treatment of backslashes in `CHARACTER' (or Hollerith) constants?
+
+     Knowing what other compilers provide would help.
+
+   * Is it okay to drop support for the `-fintrin-case-initcap',
+     `-fmatch-case-initcap', `-fsymbol-case-initcap', and
+     `-fcase-initcap' options?
+
+     I've asked <info-gnu-fortran@gnu.org> for input on this.  Not
+     having to support these makes it easier to write the new front end,
+     and might also avoid complicated its design.
+
+
+File: g77.info,  Node: Philosophy of Code Generation,  Next: Two-pass Design,  Prev: Overview of Translation Process,  Up: Front End
+
+Philosophy of Code Generation
+=============================
+
+   Don't poke the bear.
+
+   The `g77' front end generates code via the `gcc' back end.
+
+   The `gcc' back end (GBE) is a large, complex labyrinth of intricate
+code written in a combination of the C language and specialized
+languages internal to `gcc'.
+
+   While the *code* that implements the GBE is written in a combination
+of languages, the GBE itself is, to the front end for a language like
+Fortran, best viewed as a *compiler* that compiles its own, unique,
+language.
+
+   The GBE's "source", then, is written in this language, which
+consists primarily of a combination of calls to GBE functions and
+"tree" nodes (which are, themselves, created by calling GBE functions).
+
+   So, the `g77' generates code by, in effect, translating the Fortran
+code it reads into a form "written" in the "language" of the `gcc' back
+end.
+
+   This language will heretofore be referred to as "GBEL", for GNU Back
+End Language.
+
+   GBEL is an evolving language, not fully specified in any published
+form as of this writing.  It offers many facilities, but its "core"
+facilities are those that corresponding most directly to those needed
+to support `gcc' (compiling code written in GNU C).
+
+   The `g77' Fortran Front End (FFE) is designed and implemented to
+navigate the currents and eddies of ongoing GBEL and `gcc' development
+while also delivering on the potential of an integrated FFE (as
+compared to using a converter like `f2c' and feeding the output into
+`gcc').
+
+   Goals of the FFE's code-generation strategy include:
+
+   * High likelihood of generation of correct code, or, failing that,
+     producing a fatal diagnostic or crashing.
+
+   * Generation of highly optimized code, as directed by the user via
+     GBE-specific (versus `g77'-specific) constructs, such as
+     command-line options.
+
+   * Fast overall (FFE plus GBE) compilation.
+
+   * Preservation of source-level debugging information.
+
+   The strategies historically, and currently, used by the FFE to
+achieve these goals include:
+
+   * Use of GBEL constructs that most faithfully encapsulate the
+     semantics of Fortran.
+
+   * Avoidance of GBEL constructs that are so rarely used, or limited
+     to use in specialized situations not related to Fortran, that
+     their reliability and performance has not yet been established as
+     sufficient for use by the FFE.
+
+   * Flexible design, to readily accommodate changes to specific
+     code-generation strategies, perhaps governed by command-line
+     options.
+
+   "Don't poke the bear" somewhat summarizes the above strategies.  The
+GBE is the bear.  The FFE is designed and implemented to avoid poking it
+in ways that are likely to just annoy it.  The FFE usually either
+tackles it head-on, or avoids treating it in ways dissimilar to how the
+`gcc' front end treats it.
+
+   For example, the FFE uses the native array facility in the back end
+instead of the lower-level pointer-arithmetic facility used by `gcc'
+when compiling `f2c' output).  Theoretically, this presents more
+opportunities for optimization, faster compile times, and the
+production of more faithful debugging information.  These benefits were
+not, however, immediately realized, mainly because `gcc' itself makes
+little or no use of the native array facility.
+
+   Complex arithmetic is a case study of the evolution of this strategy.
+When originally implemented, the GBEL had just evolved its own native
+complex-arithmetic facility, so the FFE took advantage of that.
+
+   When porting `g77' to 64-bit systems, it was discovered that the GBE
+didn't really implement its native complex-arithmetic facility properly.
+
+   The short-term solution was to rewrite the FFE to instead use the
+lower-level facilities that'd be used by `gcc'-compiled code (assuming
+that code, itself, didn't use the native complex type provided, as an
+extension, by `gcc'), since these were known to work, and, in any case,
+if shown to not work, would likely be rapidly fixed (since they'd
+likely not work for vanilla C code in similar circumstances).
+
+   However, the rewrite accommodated the original, native approach as
+well by offering a command-line option to select it over the emulated
+approach.  This allowed users, and especially GBE maintainers, to try
+out fixes to complex-arithmetic support in the GBE while `g77'
+continued to default to compiling more code correctly, albeit producing
+(typically) slower executables.
+
+   As of April 1999, it appeared that the last few bugs in the GBE's
+support of its native complex-arithmetic facility were worked out.  The
+FFE was changed back to default to using that native facility, leaving
+emulation as an option.
+
+   Other Fortran constructs--arrays, character strings, complex
+division, `COMMON' and `EQUIVALENCE' aggregates, and so on--involve
+issues similar to those pertaining to complex arithmetic.
+
+   So, it is possible that the history of how the FFE handled complex
+arithmetic will be repeated, probably in modified form (and hopefully
+over shorter timeframes), for some of these other facilities.
+
+
+File: g77.info,  Node: Two-pass Design,  Next: Challenges Posed,  Prev: Philosophy of Code Generation,  Up: Front End
+
+Two-pass Design
+===============
+
+   The FFE does not tell the GBE anything about a program unit until
+after the last statement in that unit has been parsed.  (A program unit
+is a Fortran concept that corresponds, in the C world, mostly closely
+to functions definitions in ISO C.  That is, a program unit in Fortran
+is like a top-level function in C.  Nested functions, found among the
+extensions offered by GNU C, correspond roughly to Fortran's statement
+functions.)
+
+   So, while parsing the code in a program unit, the FFE saves up all
+the information on statements, expressions, names, and so on, until it
+has seen the last statement.
+
+   At that point, the FFE revisits the saved information (in what
+amounts to a second "pass" over the program unit) to perform the actual
+translation of the program unit into GBEL, ultimating in the generation
+of assembly code for it.
+
+   Some lookahead is performed during this second pass, so the FFE
+could be viewed as a "two-plus-pass" design.
+
+* Menu:
+
+* Two-pass Code::
+* Why Two Passes::
+
+
+File: g77.info,  Node: Two-pass Code,  Next: Why Two Passes,  Up: Two-pass Design
+
+Two-pass Code
+-------------
+
+   Most of the code that turns the first pass (parsing) into a second
+pass for code generation is in `egcs/gcc/f/std.c'.
+
+   It has external functions, called mainly by siblings in
+`egcs/gcc/f/stc.c', that record the information on statements and
+expressions in the order they are seen in the source code.  These
+functions save that information.
+
+   It also has an external function that revisits that information,
+calling the siblings in `egcs/gcc/f/ste.c', which handles the actual
+code generation (by generating GBEL code, that is, by calling GBE
+routines to represent and specify expressions, statements, and so on).
+
+
+File: g77.info,  Node: Why Two Passes,  Prev: Two-pass Code,  Up: Two-pass Design
+
+Why Two Passes
+--------------
+
+   The need for two passes was not immediately evident during the
+design and implementation of the code in the FFE that was to produce
+GBEL.  Only after a few kludges, to handle things like
+incorrectly-guessed `ASSIGN' label nature, had been implemented, did
+enough evidence pile up to make it clear that `std.c' had to be
+introduced to intercept, save, then revisit as part of a second pass,
+the digested contents of a program unit.
+
+   Other such missteps have occurred during the evolution of the FFE,
+because of the different goals of the FFE and the GBE.
+
+   Because the GBE's original, and still primary, goal was to directly
+support the GNU C language, the GBEL, and the GBE itself, requires more
+complexity on the part of most front ends than it requires of `gcc''s.
+
+   For example, the GBEL offers an interface that permits the `gcc'
+front end to implement most, or all, of the language features it
+supports, without the front end having to make use of non-user-defined
+variables.  (It's almost certainly the case that all of K&R C, and
+probably ANSI C as well, is handled by the `gcc' front end without
+declaring such variables.)
+
+   The FFE, on the other hand, must resort to a variety of "tricks" to
+achieve its goals.
+
+   Consider the following C code:
+
+     int
+     foo (int a, int b)
+     {
+       int c = 0;
+     
+       if ((c = bar (c)) == 0)
+         goto done;
+     
+       quux (c << 1);
+     
+     done:
+       return c;
+     }
+
+   Note what kinds of objects are declared, or defined, before their
+use, and before any actual code generation involving them would
+normally take place:
+
+   * Return type of function
+
+   * Entry point(s) of function
+
+   * Dummy arguments
+
+   * Variables
+
+   * Initial values for variables
+
+   Whereas, the following items can, and do, suddenly appear "out of
+the blue" in C:
+
+   * Label references
+
+   * Function references
+
+   Not surprisingly, the GBE faithfully permits the latter set of items
+to be "discovered" partway through GBEL "programs", just as they are
+permitted to in C.
+
+   Yet, the GBE has tended, at least in the past, to be reticent to
+fully support similar "late" discovery of items in the former set.
+
+   This makes Fortran a poor fit for the "safe" subset of GBEL.
+Consider:
+
+           FUNCTION X (A, ARRAY, ID1)
+           CHARACTER*(*) A
+           DOUBLE PRECISION X, Y, Z, TMP, EE, PI
+           REAL ARRAY(ID1*ID2)
+           COMMON ID2
+           EXTERNAL FRED
+     
+           ASSIGN 100 TO J
+           CALL FOO (I)
+           IF (I .EQ. 0) PRINT *, A(0)
+           GOTO 200
+     
+           ENTRY Y (Z)
+           ASSIGN 101 TO J
+     200   PRINT *, A(1)
+           READ *, TMP
+           GOTO J
+     100   X = TMP * EE
+           RETURN
+     101   Y = TMP * PI
+           CALL FRED
+           DATA EE, PI /2.71D0, 3.14D0/
+           END
+
+   Here are some observations about the above code, which, while
+somewhat contrived, conforms to the FORTRAN 77 and Fortran 90 standards:
+
+   * The return type of function `X' is not known until the `DOUBLE
+     PRECISION' line has been parsed.
+
+   * Whether `A' is a function or a variable is not known until the
+     `PRINT *, A(0)' statement has been parsed.
+
+   * The bounds of the array of argument `ARRAY' depend on a
+     computation involving the subsequent argument `ID1' and the
+     blank-common member `ID2'.
+
+   * Whether `Y' and `Z' are local variables, additional function entry
+     points, or dummy arguments to additional entry points is not known
+     until the `ENTRY' statement is parsed.
+
+   * Similarly, whether `TMP' is a local variable is not known until
+     the `READ *, TMP' statement is parsed.
+
+   * The initial values for `EE' and `PI' are not known until after the
+     `DATA' statement is parsed.
+
+   * Whether `FRED' is a function returning type `REAL' or a subroutine
+     (which can be thought of as returning type `void' *or*, to support
+     alternate returns in a simple way, type `int') is not known until
+     the `CALL FRED' statement is parsed.
+
+   * Whether `100' is a `FORMAT' label or the label of an executable
+     statement is not known until the `X =' statement is parsed.
+     (These two types of labels get *very* different treatment,
+     especially when `ASSIGN''ed.)
+
+   * That `J' is a local variable is not known until the first `ASSIGN'
+     statement is parsed.  (This happens *after* executable code has
+     been seen.)
+
+   Very few of these "discoveries" can be accommodated by the GBE as it
+has evolved over the years.  The GBEL doesn't support several of them,
+and those it might appear to support don't always work properly,
+especially in combination with other GBEL and GBE features, as
+implemented in the GBE.
+
+   (Had the GBE and its GBEL originally evolved to support `g77', the
+shoe would be on the other foot, so to speak--most, if not all, of the
+above would be directly supported by the GBEL, and a few C constructs
+would probably not, as they are in reality, be supported.  Both this
+mythical, and today's real, GBE caters to its GBEL by, sometimes,
+scrambling around, cleaning up after itself--after discovering that
+assumptions it made earlier during code generation are incorrect.)
+
+   So, the FFE handles these discrepancies--between the order in which
+it discovers facts about the code it is compiling, and the order in
+which the GBEL and GBE support such discoveries--by performing what
+amounts to two passes over each program unit.
+
+   (A few ambiguities can remain at that point, such as whether, given
+`EXTERNAL BAZ' and no other reference to `BAZ' in the program unit, it
+is a subroutine, a function, or a block-data--which, in C-speak,
+governs its declared return type.  Fortunately, these distinctions are
+easily finessed for the procedure, library, and object-file interfaces
+supported by `g77'.)
+
+
+File: g77.info,  Node: Challenges Posed,  Next: Transforming Statements,  Prev: Two-pass Design,  Up: Front End
+
+Challenges Posed
+================
+
+   Consider the following Fortran code, which uses various extensions
+(including some to Fortran 90):
+
+     SUBROUTINE X(A)
+     CHARACTER*(*) A
+     COMPLEX CFUNC
+     INTEGER*2 CLOCKS(200)
+     INTEGER IFUNC
+     
+     CALL SYSTEM_CLOCK (CLOCKS (IFUNC (CFUNC ('('//A//')'))))
+
+   The above poses the following challenges to any Fortran compiler
+that uses run-time interfaces, and a run-time library, roughly similar
+to those used by `g77':
+
+   * Assuming the library routine that supports `SYSTEM_CLOCK' expects
+     to set an `INTEGER*4' variable via its `COUNT' argument, the
+     compiler must make available to it a temporary variable of that
+     type.
+
+   * Further, after the `SYSTEM_CLOCK' library routine returns, the
+     compiler must ensure that the temporary variable it wrote is
+     copied into the appropriate element of the `CLOCKS' array.  (This
+     assumes the compiler doesn't just reject the code, which it should
+     if it is compiling under some kind of a "strict" option.)
+
+   * To determine the correct index into the `CLOCKS' array, (putting
+     aside the fact that the index, in this particular case, need not
+     be computed until after the `SYSTEM_CLOCK' library routine
+     returns), the compiler must ensure that the `IFUNC' function is
+     called.
+
+     That requires evaluating its argument, which requires, for `g77'
+     (assuming `-ff2c' is in force), reserving a temporary variable of
+     type `COMPLEX' for use as a repository for the return value being
+     computed by `CFUNC'.
+
+   * Before invoking `CFUNC', is argument must be evaluated, which
+     requires allocating, at run time, a temporary large enough to hold
+     the result of the concatenation, as well as actually performing
+     the concatenation.
+
+   * The large temporary needed during invocation of `CFUNC' should,
+     ideally, be deallocated (or, at least, left to the GBE to dispose
+     of, as it sees fit) as soon as `CFUNC' returns, which means before
+     `IFUNC' is called (as it might need a lot of dynamically allocated
+     memory).
+
+   `g77' currently doesn't support all of the above, but, so that it
+might someday, it has evolved to handle at least some of the above
+requirements.
+
+   Meeting the above requirements is made more challenging by
+conforming to the requirements of the GBEL/GBE combination.
+
+
+File: g77.info,  Node: Transforming Statements,  Next: Transforming Expressions,  Prev: Challenges Posed,  Up: Front End
+
+Transforming Statements
+=======================
+
+   Most Fortran statements are given their own block, and, for
+temporary variables they might need, their own scope.  (A block is what
+distinguishes `{ foo (); }' from just `foo ();' in C.  A scope is
+included with every such block, providing a distinct name space for
+local variables.)
+
+   Label definitions for the statement precede this block, so `10 PRINT
+*, I' is handled more like `fl10: { ... }' than `{ fl10: ... }' (where
+`fl10' is just a notation meaning "Fortran Label 10" for the purposes
+of this document).
+
+* Menu:
+
+* Statements Needing Temporaries::
+* Transforming DO WHILE::
+* Transforming Iterative DO::
+* Transforming Block IF::
+* Transforming SELECT CASE::
+
+
+File: g77.info,  Node: Statements Needing Temporaries,  Next: Transforming DO WHILE,  Up: Transforming Statements
+
+Statements Needing Temporaries
+------------------------------
+
+   Any temporaries needed during, but not beyond, execution of a
+Fortran statement, are made local to the scope of that statement's
+block.
+
+   This allows the GBE to share storage for these temporaries among the
+various statements without the FFE having to manage that itself.
+
+   (The GBE could, of course, decide to optimize management of these
+temporaries.  For example, it could, theoretically, schedule some of
+the computations involving these temporaries to occur in parallel.
+More practically, it might leave the storage for some temporaries
+"live" beyond their scopes, to reduce the number of manipulations of
+the stack pointer at run time.)
+
+   Temporaries needed across distinct statement boundaries usually are
+associated with Fortran blocks (such as `DO'/`END DO').  (Also, there
+might be temporaries not associated with blocks at all--these would be
+in the scope of the entire program unit.)
+
+   Each Fortran block *should* get its own block/scope in the GBE.
+This is best, because it allows temporaries to be more naturally
+handled.  However, it might pose problems when handling labels (in
+particular, when they're the targets of `GOTO's outside the Fortran
+block), and generally just hassling with replicating parts of the `gcc'
+front end (because the FFE needs to support an arbitrary number of
+nested back-end blocks if each Fortran block gets one).
+
+   So, there might still be a need for top-level temporaries, whose
+"owning" scope is that of the containing procedure.
+
+   Also, there seems to be problems declaring new variables after
+generating code (within a block) in the back end, leading to, e.g.,
+`label not defined before binding contour' or similar messages, when
+compiling with `-fstack-check' or when compiling for certain targets.
+
+   Because of that, and because sometimes these temporaries are not
+discovered until in the middle of of generating code for an expression
+statement (as in the case of the optimization for `X**I'), it seems
+best to always pre-scan all the expressions that'll be expanded for a
+block before generating any of the code for that block.
+
+   This pre-scan then handles discovering and declaring, to the back
+end, the temporaries needed for that block.
+
+   It's also important to treat distinct items in an I/O list as
+distinct statements deserving their own blocks.  That's because there's
+a requirement that each I/O item be fully processed before the next one,
+which matters in cases like `READ (*,*), I, A(I)'--the element of `A'
+read in the second item *must* be determined from the value of `I' read
+in the first item.
+
+
+File: g77.info,  Node: Transforming DO WHILE,  Next: Transforming Iterative DO,  Prev: Statements Needing Temporaries,  Up: Transforming Statements
+
+Transforming DO WHILE
+---------------------
+
+   `DO WHILE(expr)' *must* be implemented so that temporaries needed to
+evaluate `expr' are generated just for the test, each time.
+
+   Consider how `DO WHILE (A//B .NE. 'END'); ...; END DO' is
+transformed:
+
+     for (;;)
+       {
+         int temp0;
+     
+         {
+           char temp1[large];
+     
+           libg77_catenate (temp1, a, b);
+           temp0 = libg77_ne (temp1, 'END');
+         }
+     
+         if (! temp0)
+           break;
+     
+         ...
+       }
+
+   In this case, it seems like a time/space tradeoff between allocating
+and deallocating `temp1' for each iteration and allocating it just once
+for the entire loop.
+
+   However, if `temp1' is allocated just once for the entire loop, it
+could be the wrong size for subsequent iterations of that loop in cases
+like `DO WHILE (A(I:J)//B .NE. 'END')', because the body of the loop
+might modify `I' or `J'.
+
+   So, the above implementation is used, though a more optimal one can
+be used in specific circumstances.
+
+
+File: g77.info,  Node: Transforming Iterative DO,  Next: Transforming Block IF,  Prev: Transforming DO WHILE,  Up: Transforming Statements
+
+Transforming Iterative DO
+-------------------------
+
+   An iterative `DO' loop (one that specifies an iteration variable) is
+required by the Fortran standards to be implemented as though an
+iteration count is computed before entering the loop body, and that
+iteration count used to determine the number of times the loop body is
+to be performed (assuming the loop isn't cut short via `GOTO' or
+`EXIT').
+
+   The FFE handles this by allocating a temporary variable to contain
+the computed number of iterations.  Since this variable must be in a
+scope that includes the entire loop, a GBEL block is created for that
+loop, and the variable declared as belonging to the scope of that block.
+
+
+File: g77.info,  Node: Transforming Block IF,  Next: Transforming SELECT CASE,  Prev: Transforming Iterative DO,  Up: Transforming Statements
+
+Transforming Block IF
+---------------------
+
+   Consider:
+
+     SUBROUTINE X(A,B,C)
+     CHARACTER*(*) A, B, C
+     LOGICAL LFUNC
+     
+     IF (LFUNC (A//B)) THEN
+       CALL SUBR1
+     ELSE IF (LFUNC (A//C)) THEN
+       CALL SUBR2
+     ELSE
+       CALL SUBR3
+     END
+
+   The arguments to the two calls to `LFUNC' require dynamic allocation
+(at run time), but are not required during execution of the `CALL'
+statements.
+
+   So, the scopes of those temporaries must be within blocks inside the
+block corresponding to the Fortran `IF' block.
+
+   This cannot be represented "naturally" in vanilla C, nor in GBEL.
+The `if', `elseif', `else', and `endif' constructs provided by both
+languages must, for a given `if' block, share the same C/GBE block.
+
+   Therefore, any temporaries needed during evaluation of `expr' while
+executing `ELSE IF(expr)' must either have been predeclared at the top
+of the corresponding `IF' block, or declared within a new block for
+that `ELSE IF'--a block that, since it cannot contain the `else' or
+`else if' itself (due to the above requirement), actually implements
+the rest of the `IF' block's `ELSE IF' and `ELSE' statements within an
+inner block.
+
+   The FFE takes the latter approach.
+
+
+File: g77.info,  Node: Transforming SELECT CASE,  Prev: Transforming Block IF,  Up: Transforming Statements
+
+Transforming SELECT CASE
+------------------------
+
+   `SELECT CASE' poses a few interesting problems for code generation,
+if efficiency and frugal stack management are important.
+
+   Consider `SELECT CASE (I('PREFIX'//A))', where `A' is
+`CHARACTER*(*)'.  In a case like this--basically, in any case where
+largish temporaries are needed to evaluate the expression--those
+temporaries should not be "live" during execution of any of the `CASE'
+blocks.
+
+   So, evaluation of the expression is best done within its own block,
+which in turn is within the `SELECT CASE' block itself (which contains
+the code for the CASE blocks as well, though each within their own
+block).
+
+   Otherwise, we'd have the rough equivalent of this pseudo-code:
+
+     {
+       char temp[large];
+     
+       libg77_catenate (temp, 'prefix', a);
+     
+       switch (i (temp))
+         {
+         case 0:
+           ...
+         }
+     }
+
+   And that would leave temp[large] in scope during the CASE blocks
+(although a clever back end *could* see that it isn't referenced in
+them, and thus free that temp before executing the blocks).
+
+   So this approach is used instead:
+
+     {
+       int temp0;
+     
+       {
+         char temp1[large];
+     
+         libg77_catenate (temp1, 'prefix', a);
+         temp0 = i (temp1);
+       }
+     
+       switch (temp0)
+         {
+         case 0:
+           ...
+         }
+     }
+
+   Note how `temp1' goes out of scope before starting the switch, thus
+making it easy for a back end to free it.
+
+   The problem *that* solution has, however, is with `SELECT
+CASE('prefix'//A)' (which is currently not supported).
+
+   Unless the GBEL is extended to support arbitrarily long character
+strings in its `case' facility, the FFE has to implement `SELECT CASE'
+on `CHARACTER' (probably excepting `CHARACTER*1') using a cascade of
+`if', `elseif', `else', and `endif' constructs in GBEL.
+
+   To prevent the (potentially large) temporary, needed to hold the
+selected expression itself (`'prefix'//A'), from being in scope during
+execution of the `CASE' blocks, two approaches are available:
+
+   * Pre-evaluate all the `CASE' tests, producing an integer ordinal
+     that is used, a la `temp0' in the earlier example, as if `SELECT
+     CASE(temp0)' had been written.
+
+     Each corresponding `CASE' is replaced with `CASE(I)', where I is
+     the ordinal for that case, determined while, or before, generating
+     the cascade of `if'-related constructs to cope with `CHARACTER'
+     selection.
+
+   * Make `temp0' above just large enough to hold the longest `CASE'
+     string that'll actually be compared against the expression (in
+     this case, `'prefix'//A').
+
+     Since that length must be constant (because `CASE' expressions are
+     all constant), it won't be so large, and, further, `temp1' need
+     not be dynamically allocated, since normal `CHARACTER' assignment
+     can be used into the fixed-length `temp0'.
+
+   Both of these solutions require `SELECT CASE' implementation to be
+changed so all the corresponding `CASE' statements are seen during the
+actual code generation for `SELECT CASE'.
+
+
+File: g77.info,  Node: Transforming Expressions,  Next: Internal Naming Conventions,  Prev: Transforming Statements,  Up: Front End
+
+Transforming Expressions
+========================
+
+   The interactions between statements, expressions, and subexpressions
+at program run time can be viewed as:
+
+     ACTION(EXPR)
+
+   Here, ACTION is the series of steps performed to effect the
+statement, and EXPR is the expression whose value is used by ACTION.
+
+   Expanding the above shows a typical order of events at run time:
+
+     Evaluate EXPR
+     Perform ACTION, using result of evaluation of EXPR
+     Clean up after evaluating EXPR
+
+   So, if evaluating EXPR requires allocating memory, that memory can
+be freed before performing ACTION only if it is not needed to hold the
+result of evaluating EXPR.  Otherwise, it must be freed no sooner than
+after ACTION has been performed.
+
+   The above are recursive definitions, in the sense that they apply to
+subexpressions of EXPR.
+
+   That is, evaluating EXPR involves evaluating all of its
+subexpressions, performing the ACTION that computes the result value of
+EXPR, then cleaning up after evaluating those subexpressions.
+
+   The recursive nature of this evaluation is implemented via
+recursive-descent transformation of the top-level statements, their
+expressions, *their* subexpressions, and so on.
+
+   However, that recursive-descent transformation is, due to the nature
+of the GBEL, focused primarily on generating a *single* stream of code
+to be executed at run time.
+
+   Yet, from the above, it's clear that multiple streams of code must
+effectively be simultaneously generated during the recursive-descent
+analysis of statements.
+
+   The primary stream implements the primary ACTION items, while at
+least two other streams implement the evaluation and clean-up items.
+
+   Requirements imposed by expressions include:
+
+   * Whether the caller needs to have a temporary ready to hold the
+     value of the expression.
+
+   * Other stuff???
+
+
+File: g77.info,  Node: Internal Naming Conventions,  Prev: Transforming Expressions,  Up: Front End
+
+Internal Naming Conventions
+===========================
+
+   Names exported by FFE modules have the following
+(regular-expression) forms.  Note that all names beginning `ffeMOD' or
+`FFEMOD', where MOD is lowercase or uppercase alphanumerics,
+respectively, are exported by the module `ffeMOD', with the source code
+doing the exporting in `MOD.h'.  (Usually, the source code for the
+implementation is in `MOD.c'.)
+
+   Identifiers that don't fit the following forms are not considered
+exported, even if they are according to the C language.  (For example,
+they might be made available to other modules solely for use within
+expansions of exported macros, not for use within any source code in
+those other modules.)
+
+`ffeMOD'
+     The single typedef exported by the module.
+
+`FFEUMOD_[A-Z][A-Z0-9_]*'
+     (Where UMOD is the uppercase for of MOD.)
+
+     A `#define' or `enum' constant of the type `ffeMOD'.
+
+`ffeMOD[A-Z][A-Z][a-z0-9]*'
+     A typedef exported by the module.
+
+     The portion of the identifier after `ffeMOD' is referred to as
+     `ctype', a capitalized (mixed-case) form of `type'.
+
+`FFEUMOD_TYPE[A-Z][A-Z0-9_]*[A-Z0-9]?'
+     (Where UMOD is the uppercase for of MOD.)
+
+     A `#define' or `enum' constant of the type `ffeMODTYPE', where
+     TYPE is the lowercase form of CTYPE in an exported typedef.
+
+`ffeMOD_VALUE'
+     A function that does or returns something, as described by VALUE
+     (see below).
+
+`ffeMOD_VALUE_INPUT'
+     A function that does or returns something based primarily on the
+     thing described by INPUT (see below).
+
+   Below are names used for VALUE and INPUT, along with their
+definitions.
+
+`col'
+     A column number within a line (first column is number 1).
+
+`file'
+     An encapsulation of a file's name.
+
+`find'
+     Looks up an instance of some type that matches specified criteria,
+     and returns that, even if it has to create a new instance or crash
+     trying to find it (as appropriate).
+
+`initialize'
+     Initializes, usually a module.  No type.
+
+`int'
+     A generic integer of type `int'.
+
+`is'
+     A generic integer that contains a true (non-zero) or false (zero)
+     value.
+
+`len'
+     A generic integer that contains the length of something.
+
+`line'
+     A line number within a source file, or a global line number.
+
+`lookup'
+     Looks up an instance of some type that matches specified criteria,
+     and returns that, or returns nil.
+
+`name'
+     A `text' that points to a name of something.
+
+`new'
+     Makes a new instance of the indicated type.  Might return an
+     existing one if appropriate--if so, similar to `find' without
+     crashing.
+
+`pt'
+     Pointer to a particular character (line, column pairs) in the
+     input file (source code being compiled).
+
+`run'
+     Performs some herculean task.  No type.
+
+`terminate'
+     Terminates, usually a module.  No type.
+
+`text'
+     A `char *' that points to generic text.
+
+
+File: g77.info,  Node: Diagnostics,  Next: Index,  Prev: Front End,  Up: Top
+
+Diagnostics
+***********
+
+   Some diagnostics produced by `g77' require sufficient explanation
+that the explanations are given below, and the diagnostics themselves
+identify the appropriate explanation.
+
+   Identification uses the GNU Info format--specifically, the `info'
+command that displays the explanation is given within square brackets
+in the diagnostic.  For example:
+
+     foo.f:5: Invalid statement [info -f g77 M FOOEY]
+
+   More details about the above diagnostic is found in the `g77' Info
+documentation, menu item `M', submenu item `FOOEY', which is displayed
+by typing the UNIX command `info -f g77 M FOOEY'.
+
+   Other Info readers, such as EMACS, may be just as easily used to
+display the pertinent node.  In the above example, `g77' is the Info
+document name, `M' is the top-level menu item to select, and, in that
+node (named `Diagnostics', the name of this chapter, which is the very
+text you're reading now), `FOOEY' is the menu item to select.
+
+* Menu:
+
+* CMPAMBIG::    Ambiguous use of intrinsic.
+* EXPIMP::      Intrinsic used explicitly and implicitly.
+* INTGLOB::     Intrinsic also used as name of global.
+* LEX::         Various lexer messages
+* GLOBALS::     Disagreements about globals.
+* LINKFAIL::    When linking `f771' fails.
+* Y2KBAD::      Use of non-Y2K-compliant intrinsic.
+
+
+File: g77.info,  Node: CMPAMBIG,  Next: EXPIMP,  Up: Diagnostics
+
+`CMPAMBIG'
+==========
+
+     Ambiguous use of intrinsic INTRINSIC ...
+
+   The type of the argument to the invocation of the INTRINSIC
+intrinsic is a `COMPLEX' type other than `COMPLEX(KIND=1)'.  Typically,
+it is `COMPLEX(KIND=2)', also known as `DOUBLE COMPLEX'.
+
+   The interpretation of this invocation depends on the particular
+dialect of Fortran for which the code was written.  Some dialects
+convert the real part of the argument to `REAL(KIND=1)', thus losing
+precision; other dialects, and Fortran 90, do no such conversion.
+
+   So, GNU Fortran rejects such invocations except under certain
+circumstances, to avoid making an incorrect assumption that results in
+generating the wrong code.
+
+   To determine the dialect of the program unit, perhaps even whether
+that particular invocation is properly coded, determine how the result
+of the intrinsic is used.
+
+   The result of INTRINSIC is expected (by the original programmer) to
+be `REAL(KIND=1)' (the non-Fortran-90 interpretation) if:
+
+   * It is passed as an argument to a procedure that explicitly or
+     implicitly declares that argument `REAL(KIND=1)'.
+
+     For example, a procedure with no `DOUBLE PRECISION' or `IMPLICIT
+     DOUBLE PRECISION' statement specifying the dummy argument
+     corresponding to an actual argument of `REAL(Z)', where `Z' is
+     declared `DOUBLE COMPLEX', strongly suggests that the programmer
+     expected `REAL(Z)' to return `REAL(KIND=1)' instead of
+     `REAL(KIND=2)'.
+
+   * It is used in a context that would otherwise not include any
+     `REAL(KIND=2)' but where treating the INTRINSIC invocation as
+     `REAL(KIND=2)' would result in unnecessary promotions and
+     (typically) more expensive operations on the wider type.
+
+     For example:
+
+          DOUBLE COMPLEX Z
+          ...
+          R(1) = T * REAL(Z)
+
+     The above example suggests the programmer expected the real part
+     of `Z' to be converted to `REAL(KIND=1)' before being multiplied
+     by `T' (presumed, along with `R' above, to be type `REAL(KIND=1)').
+
+     Otherwise, the conversion would have to be delayed until after the
+     multiplication, requiring not only an extra conversion (of `T' to
+     `REAL(KIND=2)'), but a (typically) more expensive multiplication
+     (a double-precision multiplication instead of a single-precision
+     one).
+
+   The result of INTRINSIC is expected (by the original programmer) to
+be `REAL(KIND=2)' (the Fortran 90 interpretation) if:
+
+   * It is passed as an argument to a procedure that explicitly or
+     implicitly declares that argument `REAL(KIND=2)'.
+
+     For example, a procedure specifying a `DOUBLE PRECISION' dummy
+     argument corresponding to an actual argument of `REAL(Z)', where
+     `Z' is declared `DOUBLE COMPLEX', strongly suggests that the
+     programmer expected `REAL(Z)' to return `REAL(KIND=2)' instead of
+     `REAL(KIND=1)'.
+
+   * It is used in an expression context that includes other
+     `REAL(KIND=2)' operands, or is assigned to a `REAL(KIND=2)'
+     variable or array element.
+
+     For example:
+
+          DOUBLE COMPLEX Z
+          DOUBLE PRECISION R, T
+          ...
+          R(1) = T * REAL(Z)
+
+     The above example suggests the programmer expected the real part
+     of `Z' to *not* be converted to `REAL(KIND=1)' by the `REAL()'
+     intrinsic.
+
+     Otherwise, the conversion would have to be immediately followed by
+     a conversion back to `REAL(KIND=2)', losing the original, full
+     precision of the real part of `Z', before being multiplied by `T'.
+
+   Once you have determined whether a particular invocation of INTRINSIC
+expects the Fortran 90 interpretation, you can:
+
+   * Change it to `DBLE(EXPR)' (if INTRINSIC is `REAL') or
+     `DIMAG(EXPR)' (if INTRINSIC is `AIMAG') if it expected the Fortran
+     90 interpretation.
+
+     This assumes EXPR is `COMPLEX(KIND=2)'--if it is some other type,
+     such as `COMPLEX*32', you should use the appropriate intrinsic,
+     such as the one to convert to `REAL*16' (perhaps `DBLEQ()' in
+     place of `DBLE()', and `QIMAG()' in place of `DIMAG()').
+
+   * Change it to `REAL(INTRINSIC(EXPR))', otherwise.  This converts to
+     `REAL(KIND=1)' in all working Fortran compilers.
+
+   If you don't want to change the code, and you are certain that all
+ambiguous invocations of INTRINSIC in the source file have the same
+expectation regarding interpretation, you can:
+
+   * Compile with the `g77' option `-ff90', to enable the Fortran 90
+     interpretation.
+
+   * Compile with the `g77' options `-fno-f90 -fugly-complex', to
+     enable the non-Fortran-90 interpretations.
+
+   *Note REAL() and AIMAG() of Complex::, for more information on this
+issue.
+
+   Note: If the above suggestions don't produce enough evidence as to
+whether a particular program expects the Fortran 90 interpretation of
+this ambiguous invocation of INTRINSIC, there is one more thing you can
+try.
+
+   If you have access to most or all the compilers used on the program
+to create successfully tested and deployed executables, read the
+documentation for, and *also* test out, each compiler to determine how
+it treats the INTRINSIC intrinsic in this case.  (If all the compilers
+don't agree on an interpretation, there might be lurking bugs in the
+deployed versions of the program.)
+
+   The following sample program might help:
+
+           PROGRAM JCB003
+     C
+     C Written by James Craig Burley 1997-02-23.
+     C
+     C Determine how compilers handle non-standard REAL
+     C and AIMAG on DOUBLE COMPLEX operands.
+     C
+           DOUBLE COMPLEX Z
+           REAL R
+           Z = (3.3D0, 4.4D0)
+           R = Z
+           CALL DUMDUM(Z, R)
+           R = REAL(Z) - R
+           IF (R .NE. 0.) PRINT *, 'REAL() is Fortran 90'
+           IF (R .EQ. 0.) PRINT *, 'REAL() is not Fortran 90'
+           R = 4.4D0
+           CALL DUMDUM(Z, R)
+           R = AIMAG(Z) - R
+           IF (R .NE. 0.) PRINT *, 'AIMAG() is Fortran 90'
+           IF (R .EQ. 0.) PRINT *, 'AIMAG() is not Fortran 90'
+           END
+     C
+     C Just to make sure compiler doesn't use naive flow
+     C analysis to optimize away careful work above,
+     C which might invalidate results....
+     C
+           SUBROUTINE DUMDUM(Z, R)
+           DOUBLE COMPLEX Z
+           REAL R
+           END
+
+   If the above program prints contradictory results on a particular
+compiler, run away!
+
