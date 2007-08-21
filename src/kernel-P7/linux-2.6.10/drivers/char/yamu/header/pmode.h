@@ -1,0 +1,1 @@
+#define CONFIG_PMODE 1
