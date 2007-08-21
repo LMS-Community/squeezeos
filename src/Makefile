@@ -24,7 +24,7 @@ KERNEL_SRC=${TOPDIR}/src/kernel-P7/linux-2.6.10
 BOOTLOADER_SRC=${TOPDIR}/src/bootloader/s3c24x0_uboot
 
 
-.PHONY: all bootloader fw_env kernel system jive image clean distclean
+.PHONY: all bootloader fw_env kernel kernel-P4 kernel-P7 system jive image clean distclean
 
 all: bootloader system kernel fw_env jive image
 

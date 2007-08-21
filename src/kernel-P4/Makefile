@@ -46,6 +46,10 @@ kernel-clean:
 # Kernel modules
 #
 kernel-modules: mini_fo
+	install modules/kernel/gspi8686.ko ${MODDIR}/gspi8686.ko
+	install modules/kernel/gspi.ko ${MODDIR}/gspi.ko
+	install modules/kernel/lis302dl.ko ${MODDIR}/lis302dl.ko
+
 
 modules-clean:
 	-cd mini_fo-0-6-2-pre1; rm *.ko *.o
