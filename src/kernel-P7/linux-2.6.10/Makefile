@@ -192,7 +192,7 @@ SUBARCH := arm
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 
 ARCH		:= $(SUBARCH)
-CROSS_COMPILE	:= ../../../tools/gcc-4.1.1-glibc-2.3.2/arm-9tdmi-linux-gnu/bin/arm-9tdmi-linux-gnu-
+CROSS_COMPILE	:= ../../../toolchain/gcc-4.1.1-glibc-2.3.2/arm-9tdmi-linux-gnu/bin/arm-9tdmi-linux-gnu-
 
 # Architecture as present in compile.h
 UTS_MACHINE := $(ARCH)

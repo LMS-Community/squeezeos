@@ -1,5 +1,5 @@
 ARCH=arm-9tdmi-linux-gnu
-LIB_DIR=../../../tools/gcc-4.1.1-glibc-2.3.2/$(ARCH)/$(ARCH)/lib
+LIB_DIR=../../../toolchain/gcc-4.1.1-glibc-2.3.2/$(ARCH)/$(ARCH)/lib
 
 install:
 	mkdir -p ${PREFIX} ${PREFIX}/dev ${PREFIX}/etc ${PREFIX}/etc/init.d ${PREFIX}/bin ${PREFIX}/lib ${PREFIX}/proc ${PREFIX}/mnt ${PREFIX}/mnt/yaffs ${PREFIX}/mnt/overlay ${PREFIX}/mnt/mmc ${PREFIX}/tmp ${PREFIX}/var ${PREFIX}/var/shm ${PREFIX}/var/log ${PREFIX}/var/run ${PREFIX}/etc/network ${PREFIX}/etc/dropbear ${PREFIX}/usr/lib ${PREFIX}/usr/bin ${PREFIX}/root

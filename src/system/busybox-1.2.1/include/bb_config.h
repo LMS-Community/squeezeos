@@ -6,7 +6,7 @@
 
 /* Version Number */
 #define BB_VER "1.2.1"
-#define BB_BT "2007.08.20-15:50+0000"
+#define BB_BT "2007.08.21-13:42+0000"
 
 #define HAVE_DOT_CONFIG 1
 #define ENABLE_DOT_CONFIG 1
@@ -140,7 +140,7 @@
 #define USE_CROSS_COMPILER(...)  __VA_ARGS__
 #define SKIP_CROSS_COMPILER(...)
 
-#define CROSS_COMPILER_PREFIX "../../../tools/gcc-4.1.1-glibc-2.3.2/arm-9tdmi-linux-gnu/bin/arm-9tdmi-linux-gnu-"
+#define CROSS_COMPILER_PREFIX "../../../toolchain/gcc-4.1.1-glibc-2.3.2/arm-9tdmi-linux-gnu/bin/arm-9tdmi-linux-gnu-"
 #define ENABLE_COMPILER_PREFIX 1
 #define USE_COMPILER_PREFIX(...)  __VA_ARGS__
 #define SKIP_COMPILER_PREFIX(...)

@@ -17,7 +17,7 @@ deps_config := \
 	coreutils/Config.in \
 	archival/Config.in \
 	libbb/Config.in \
-	/home/ubuntu/pad/src/userland/busybox-1.2.1/Config.in
+	/home/ubuntu/trunk/squeezeboxJive/src/system/busybox-1.2.1/Config.in
 
 .config include/config.h: $(deps_config)
 
