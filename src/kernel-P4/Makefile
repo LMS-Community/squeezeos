@@ -3,8 +3,8 @@
 SRCDIR = $(realpath ${PWD}/..)
 TOPDIR = $(dir ${SRCDIR})
 
-export DESTDIR=$(TOPDIR)build
-export PREFIX=${DESTDIR}/usr
+export BUILDDIR=$(TOPDIR)build
+export PREFIX=${BUILDDIR}/usr
 
 export CFLAGS=-I${PREFIX}/include -Os
 export LDFLAGS=-L${PREFIX}/lib
@@ -22,7 +22,7 @@ export TOOLPATH = $(shell dirname `which gcc`)
 
 # EXTRAVERSION passed from top-level Makefile
 KERNEL_SRC=${TOPDIR}/src/kernel${EXTRAVERSION}/linux-2.6.10
-MODDIR=${DESTDIR}/lib/modules/2.6.10${EXTRAVERSION}
+MODDIR=${BUILDDIR}/lib/modules/2.6.10${EXTRAVERSION}
 
 
 .PHONY: all clean kernel kernel-modules mini_fo

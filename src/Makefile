@@ -4,9 +4,9 @@ TOPDIR = $(dir ${PWD})
 
 IMAGEDIR=${TOPDIR}image
 
-export DESTDIR=$(TOPDIR)build
+export BUILDDIR=$(TOPDIR)build
 export STAGE=$(TOPDIR)stage
-export PREFIX=${DESTDIR}/usr
+export PREFIX=${BUILDDIR}/usr
 
 export CFLAGS=-I${PREFIX}/include -Os
 export LDFLAGS=-L${PREFIX}/lib
@@ -43,8 +43,8 @@ ${IMAGEDIR}/u-boot.bin: ${IMAGEDIR}
 #
 fw_env:
 	cd ${BOOTLOADER_SRC}/tools/env && ${MAKE} CFLAGS="${CFLAGS} -I ${KERNEL_SRC}/include"
-	install ${BOOTLOADER_SRC}/tools/env/fw_printenv ${DESTDIR}/usr/sbin/fw_printenv
-	cd ${DESTDIR}/usr/sbin && ln -fs fw_printenv fw_setenv
+	install ${BOOTLOADER_SRC}/tools/env/fw_printenv ${BUILDDIR}/usr/sbin/fw_printenv
+	cd ${BUILDDIR}/usr/sbin && ln -fs fw_printenv fw_setenv
 
 
 kernel: kernel-P4 kernel-P7
@@ -78,13 +78,13 @@ jive:
 #
 image: ${IMAGEDIR}
 	# Bump version number
-	scripts/mkversion > ${DESTDIR}/etc/jive.version
-	cp ${DESTDIR}/etc/jive.version ${IMAGEDIR}/jive.version
+	scripts/mkversion > ${BUILDDIR}/etc/jive.version
+	cp ${BUILDDIR}/etc/jive.version ${IMAGEDIR}/jive.version
 	# Copy files for cramfs
 	-rm -rf ${STAGE}
 	mkdir -p ${STAGE}
-	cd ${DESTDIR}; find * -type d -exec mkdir ${STAGE}/{} \;
-	cd ${DESTDIR}; find * \( -name man -or -name include \) -prune -or \! \( -name *.a -or -name *.la -or -type d \) -exec cp -rp {} ${STAGE}/{} \;
+	cd ${BUILDDIR}; find * -type d -exec mkdir ${STAGE}/{} \;
+	cd ${BUILDDIR}; find * \( -name man -or -name include \) -prune -or \! \( -name *.a -or -name *.la -or -type d \) -exec cp -rp {} ${STAGE}/{} \;
 	# Create cramfs
 	mkcramfs ${STAGE} ${IMAGEDIR}/root.cramfs
 	# Create upgrade.md5
@@ -108,4 +108,4 @@ clean:
 	cd ../../jive/src/pkg; ${MAKE} -f Makefile.squeezeboxjive TOPDIR=${TOPDIR} clean
 
 distclean: clean
-	rm -rf ${DESTDIR}
+	rm -rf ${BUILDDIR}
