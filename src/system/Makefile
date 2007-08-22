@@ -118,7 +118,7 @@ dropbear-0.48.1/Makefile:
 	cd dropbear-0.48.1; LD=${CC} ./configure --host=${TARGET} --target=${TARGET}
 
 dropbear:dropbear-0.48.1/Makefile
-	cd dropbear-0.48.1; make PROGRAMS="dropbear dropbearkey scp" ; make PROGRAMS="dropbear dropbearkey scp" install DESTDIR={$BUILDDIR}
+	cd dropbear-0.48.1; make PROGRAMS="dropbear dropbearkey scp" ; make PROGRAMS="dropbear dropbearkey scp" install DESTDIR=${BUILDDIR}
 
 
 # netperf	
@@ -126,7 +126,7 @@ netperf-2.4.3/Makefile:
 	cd netperf-2.4.3 && ./configure --host=${TARGET} --target=${TARGET} --program-prefix=
 
 netperf:netperf-2.4.3/Makefile
-	cd netperf-2.4.3 && make && make install DESTDIR={$BUILDDIR}
+	cd netperf-2.4.3 && make && make install DESTDIR=${BUILDDIR}
 
 
 # jpeg
