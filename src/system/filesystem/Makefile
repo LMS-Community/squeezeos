@@ -42,6 +42,7 @@ install:
 	mkdir -p ${PREFIX}/etc/network/if-post-down.d
 	mkdir -p ${PREFIX}/etc/network/if-up.d
 	mkdir -p ${PREFIX}/etc/network/if-pre-up.d
+	install etc/network/config ${PREFIX}/etc/network
 	install etc/network/interfaces ${PREFIX}/etc/network
 	install etc/network/if_mapping ${PREFIX}/etc/network
 	install etc/network/udhcpc_action ${PREFIX}/etc/network
