@@ -6,7 +6,7 @@
 
 /* Version Number */
 #define BB_VER "1.2.1"
-#define BB_BT "2007.08.22-10:44+0000"
+#define BB_BT "2007.08.24-16:15+0000"
 
 #define HAVE_DOT_CONFIG 1
 #define ENABLE_DOT_CONFIG 1
