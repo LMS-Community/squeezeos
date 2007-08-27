@@ -23,6 +23,8 @@
 #include <asm/arch-s3c2413/regs-gpio.h>
 #include <asm/arch-s3c2413/regs-timer.h>
 #include <asm/arch-s3c2413/regs-irq.h>
+#include <asm/arch-s3c2413/regs-dsc.h>
+#include <asm/arch-s3c2413/regs-ssmc.h>
 
 #include <asm/arch-s3c2413/map.h>
 #include <asm/hardware/clock.h>
@@ -67,6 +69,14 @@ extern void LCD_CMD(unsigned short address, unsigned short data);
 #define JIVE_MGMT_IOCPM_INT_ENABLE	31	// enable   an interrupt source for wakeup
 #define JIVE_MGMT_IOCPM_INT_DISABLE	32	// disable  "   "          "     "     "
 
+#define JIVE_MGMT_IOCGCLKCON		40	// printk current clock
+#define JIVE_MGMT_IOCSCLKCONENABLE     	41	// enable clock X
+#define JIVE_MGMT_IOCSCLKCONDISABLE    	42	// disable clock X
+#define JIVE_MGMT_IOCGARMDIV		43	// get ARMDIV
+#define JIVE_MGMT_IOCSARMDIV		44	// set ARMDIV
+#define JIVE_MGMT_IOCGDSC0		45	// get DSC0 register
+#define JIVE_MGMT_IOCGDSC1		46	// get DSC1 register
+#define JIVE_MGMT_IOCGSSMC		47	// printk SSMC bank X
 
 
 /*
@@ -313,6 +323,61 @@ static int jive_mgmt_ioctl(struct inode *inode, struct file *filp, unsigned int 
 		disable_irq_wake(val);
 		break;
 
+	case JIVE_MGMT_IOCGCLKCON: {
+		int i;
+		unsigned int clkcon = RAW(S3C2413_CLKCON);
+
+		for (i=0; i<=28; i++) {
+			printk("CLKCON %d: %d\n", i, (clkcon & 1));
+			clkcon >>= 1;
+		}
+		break;
+
+	}
+	case JIVE_MGMT_IOCSCLKCONENABLE: {
+		unsigned int mask = 1 << val;
+		RAW(S3C2413_CLKCON) |= mask;
+		break;
+	}
+	case JIVE_MGMT_IOCSCLKCONDISABLE: {
+		unsigned int mask = 1 << val;
+		RAW(S3C2413_CLKCON) &= ~mask;
+		break;
+	}
+	case JIVE_MGMT_IOCGARMDIV:
+		val = (RAW(S3C2413_CLKDIVN) & S3C2413_CLKDIVN_ARMDIV_MASK);
+		break;
+
+	case JIVE_MGMT_IOCSARMDIV:
+		if (val) {
+			RAW(S3C2413_CLKDIVN) |= S3C2413_CLKDIVN_ARMDIV_MASK;
+		}
+		else {
+			RAW(S3C2413_CLKDIVN) &= ~S3C2413_CLKDIVN_ARMDIV_MASK;
+		}
+		break;
+
+	case JIVE_MGMT_IOCGDSC0:
+		val = RAW(S3C2413_DSC0);
+		break;
+
+	case JIVE_MGMT_IOCGDSC1:
+		val = RAW(S3C2413_DSC1);
+		break;
+
+	case JIVE_MGMT_IOCGSSMC: {
+		int i;
+		int *base = S3C2413_SSMC_SMBIDCYR0 + (val * 0x0020);
+		printk("SMBIDCYR%d = %x\n", val, RAW(base + 0x00));
+
+		printk("SMBWSTRDR%d = %x\n", val, RAW(base + 0x04));
+		printk("SMBWSTWRR%d = %x\n", val, RAW(base + 0x08));
+		printk("SMBWSTOENR%d = %x\n", val, RAW(base + 0x0C));
+		printk("SMBWSTWENR%d = %x\n", val, RAW(base + 0x10));
+		printk("SMBCR%d = %x\n", val, RAW(base + 0x14));
+		printk("SMBWSTBRDR%d = %x\n", val, RAW(base + 0x1C));
+		break;
+	}
 	default:
 		return -EINVAL;
 	}
