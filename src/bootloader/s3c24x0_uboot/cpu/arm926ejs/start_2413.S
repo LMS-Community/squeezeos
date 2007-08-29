@@ -65,6 +65,19 @@ _armboot_start:
 
 _start_armboot: 
 		.word start_armboot
+
+#ifdef CONFIG_PM
+WakeupStart:
+	@Go ...
+	ldr r0, GPRAM0_ADDR
+	ldr r1, [r0]
+	mov pc, r1
+	nop
+	nop
+	
+	1:  b   1b
+#endif
+	
 /*
  * These are defined in the board-specific linker script.
  */
@@ -199,6 +212,13 @@ reset:
 	bl	InitClock
  	bl	InitMemCtl
 @ 	bl	InitDDRCtl
+#ifdef CONFIG_PM
+	@ Check if this is a wake-up from sleep
+	ldr     r0, ALIVECON_ADDR
+	ldr     r1, [r0]
+	tst r1, #(1<<1)
+	bne     WakeupStart
+#endif
 	bl	InitUART
 
 #ifdef CONFIG_DEBUG_LL
@@ -683,3 +703,12 @@ UBRDIV_VAL:     		.long   ((UART_REF_CLK / (CONFIG_SERIAL_DEFAULT_BAUDRATE * 16)
 HD_CLKDIV:				.long	CLKDIV_VAL
 HD_MPLLCON:				.long	MPLL_VAL
 HD_UPLLCON:				.long	UPLL_VAL
+
+#ifdef CONFIG_PM
+.align 4
+ALIVECON_ADDR:
+	.long 0x560000BC
+
+GPRAM0_ADDR:
+	.long 0x560000C8
+#endif
