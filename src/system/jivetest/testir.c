@@ -7,6 +7,8 @@ int main(int argv, char **args) {
 	int fd;
 	int DrvCount;
 	int Tx[100];
+	int lead_mark, lead_space, one_mark, one_space, zero_mark, zero_space, last_mark;
+	int i;
 
 	fd = open(dev, O_RDWR);
 	if (fd == -1) {
@@ -14,25 +16,101 @@ int main(int argv, char **args) {
 		exit(-1);
 	}
 
-	DrvCount=66;
-	/* Reder */             Tx[0]=4500;     Tx[1]=4500;
-	/* Bin Data             0000 0111 0000 0111 0001 0000 1110 1111 => 1110 0000 1110 0000 0000 1000 1111 0111 */
-	/* Cus1 1110 */         Tx[2]=560;      Tx[3]=1690;     Tx[4]=560;      Tx[5]=1690;     Tx[6]=560;      Tx[7]=1690;     Tx[8]=560;
-	Tx[9]=565;
-	/* Cus2 0000 */ Tx[10]=560;     Tx[11]=565;     Tx[12]=560;     Tx[13]=565;     Tx[14]=560;     Tx[15]=565;     Tx[16]=560;     Tx[17]=565;
-	/* Cus3 1110 */         Tx[18]=560;     Tx[19]=1690;    Tx[20]=560;     Tx[21]=1690;    Tx[22]=560;     Tx[23]=1690;    Tx[24]=560;
-	Tx[25]=565;
-	/* Cus4 0000 */ Tx[26]=560;     Tx[27]=565;     Tx[28]=560;     Tx[29]=565;     Tx[30]=560;     Tx[31]=565;     Tx[32]=560;     Tx[33]=565;
-	
-	/* data1 0000 */        Tx[34]=560;     Tx[35]=565;     Tx[36]=560;     Tx[37]=565;     Tx[38]=560;     Tx[39]=565;     Tx[40]=560;
-	Tx[41]=565;
-	/* data2 1000 */        Tx[42]=560;     Tx[43]=1690;    Tx[44]=560;     Tx[45]=565;     Tx[46]=560;     Tx[47]=565;     Tx[48]=560;
-	Tx[49]=565;
-	/* data3 1111 */        Tx[50]=560;     Tx[51]=1690;    Tx[52]=560;     Tx[53]=1690;    Tx[54]=560;     Tx[55]=1690;    Tx[56]=560;
-	Tx[57]=1690;
-	/* data4 0111 */        Tx[58]=560;     Tx[59]=565;     Tx[60]=560;     Tx[61]=1690;    Tx[62]=560;     Tx[63]=1690;    Tx[64]=560;
-	Tx[65]=1690;
+	// Time values for mark and space for NEC format (regular Slim remote)
+	// Currently doubled from the regular values to make up for the bug in the driver
+	lead_mark = 8800 * 2;
+	lead_space = 4400 * 2;
+	one_mark = 550 * 2;
+	one_space = 1625 * 2;
+	zero_mark = 550 * 2;
+	zero_space = 550 * 2;
+	last_mark = 550;	// This one is not doubled since the second half is in the driver.
+
+	// Lead bit:		1	mark and space => 2
+	// Command bits: 	32	mark and space => 64
+	// Last bit:		1	half mark to make up the half mark in the driver => 1
+	DrvCount=2+64+1;
+
+	// Lead
+	Tx[0]=lead_mark;
+	Tx[1]=lead_space;
+
+	// SB power toggle command: 0x768940BF
+	// 0x07 => 0111
+	Tx[2]=zero_mark;
+	Tx[3]=zero_space;
+	Tx[4]=one_mark;
+	Tx[5]=one_space;
+	Tx[6]=one_mark;
+	Tx[7]=one_space;
+	Tx[8]=one_mark;
+	Tx[9]=one_space;
+	// 0x06 => 0110
+	Tx[10]=zero_mark;
+	Tx[11]=zero_space;
+	Tx[12]=one_mark;
+	Tx[13]=one_space;
+	Tx[14]=one_mark;
+	Tx[15]=one_space;
+	Tx[16]=zero_mark;
+	Tx[17]=zero_space;
+	// 0x08 => 1000
+	Tx[18]=one_mark;
+	Tx[19]=one_space;
+	Tx[20]=zero_mark;
+	Tx[21]=zero_space;
+	Tx[22]=zero_mark;
+	Tx[23]=zero_space;
+	Tx[24]=zero_mark;
+	Tx[25]=zero_space;
+	// 0x09 => 1001
+	Tx[26]=one_mark;
+	Tx[27]=one_space;
+	Tx[28]=zero_mark;
+	Tx[29]=zero_space;
+	Tx[30]=zero_mark;
+	Tx[31]=zero_space;
+	Tx[32]=one_mark;
+	Tx[33]=one_space;
+	// 0x04 => 0100
+	Tx[34]=zero_mark;
+	Tx[35]=zero_space;
+	Tx[36]=one_mark;
+	Tx[37]=one_space;
+	Tx[38]=zero_mark;
+	Tx[39]=zero_space;
+	Tx[40]=zero_mark;
+	Tx[41]=zero_space;
+	// 0x00 => 0000
+	Tx[42]=zero_mark;
+	Tx[43]=zero_space;
+	Tx[44]=zero_mark;
+	Tx[45]=zero_space;
+	Tx[46]=zero_mark;
+	Tx[47]=zero_space;
+	Tx[48]=zero_mark;
+	Tx[49]=zero_space;
+	// 0x0B => 1011
+	Tx[50]=one_mark;
+	Tx[51]=one_space;
+	Tx[52]=zero_mark;
+	Tx[53]=zero_space;
+	Tx[54]=one_mark;
+	Tx[55]=one_space;
+	Tx[56]=one_mark;
+	Tx[57]=one_space;
+	// 0x0F	=> 1111
+	Tx[58]=one_mark;
+	Tx[59]=one_space;
+	Tx[60]=one_mark;
+	Tx[61]=one_space;
+	Tx[62]=one_mark;
+	Tx[63]=one_space;
+	Tx[64]=one_mark;
+	Tx[65]=one_space;
+	// This one is needed to make up for the last bit that is wrong in the driver
+	Tx[66]=last_mark;
 
 	write(fd, Tx, DrvCount);
-	printf("IR Tx OK\n");
+	printf("IR Tx OK - SB power toggle command\n");
 }
