@@ -515,9 +515,9 @@ static int __init jive_mgmt_init(void) {
 	*(volatile unsigned int __force *)S3C2413_EXTINT1 &= ~(0xF<<12);
 	*(volatile unsigned int __force *)S3C2413_EXTINT1 |= (0xE<<12);
 
-	disable_irq(IRQ_EINT16);
-        if (request_irq(IRQ_EINT16, acpower_irq, SA_SAMPLE_RANDOM, "SW_0", NULL)) {
-                 printk(KERN_ERR "Could not allocate acpower IRQ_EINT16\n");
+	disable_irq(IRQ_EINT11);
+        if (request_irq(IRQ_EINT11, acpower_irq, SA_SAMPLE_RANDOM, "SW_0", NULL)) {
+                 printk(KERN_ERR "Could not allocate acpower IRQ_EINT11\n");
 	}
 
 
