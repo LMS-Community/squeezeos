@@ -29,7 +29,7 @@
 #define EUNBALPER   10000
 
 #if ENABLE_FEATURE_IFUPDOWN_MAPPING
-#define MAX_INTERFACE_LENGTH 10
+#define MAX_INTERFACE_LENGTH 33
 #endif
 
 #define debug_noise(args...) /*fprintf(stderr, args)*/
@@ -502,7 +502,10 @@ static int dhcp_up(struct interface_defn_t *ifd, execfn *exec)
 	if (!execute("ip link set %iface% up", ifd, exec))
 		return 0;
 #endif
-	return execute("udhcpc -R -n -p /var/run/udhcpc.%iface%.pid "
+
+// -R was not in the file patched by Elvis. Check what it does
+	return execute("udhcpc -R -p /var/run/udhcpc.%iface%.pid "
+					"-b --zeroconf [[-s %script%]] "
 			"-i %iface%[[ -H %hostname%]][[ -c %clientid%]][[ -s %script%]]",
 			ifd, exec);
 #else

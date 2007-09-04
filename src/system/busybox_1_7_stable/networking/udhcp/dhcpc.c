@@ -8,6 +8,11 @@
  * Licensed under the GPL v2 or later, see the file LICENSE in this tarball.
  */
 
+/*
+ * 3 Sept 2007 Martin applied the zeroconf patch from:
+ *     http://udhcp.busybox.net/lists/udhcp/2005-May/000124.html
+ */
+
 #include <getopt.h>
 #include <syslog.h>
 
@@ -17,6 +22,10 @@
 #include "dhcpd.h"
 #include "dhcpc.h"
 #include "options.h"
+
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+#include "zeroconf.h"
+#endif
 
 
 /* Something is definitely wrong here. IPv4 addresses
@@ -66,6 +75,9 @@ static void perform_renew(void)
 		break;
 	case RENEW_REQUESTED: /* impatient are we? fine, square 1 */
 		udhcp_run_script(NULL, "deconfig");
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+		zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
+#endif
 	case REQUESTING:
 	case RELEASED:
 		change_mode(LISTEN_RAW);
@@ -96,6 +108,9 @@ static void perform_release(void)
 		temp_addr.s_addr = requested_ip;
 		bb_info_msg("Unicasting a release of %s to %s",
 				inet_ntoa(temp_addr), buffer);
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+		zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
+#endif
 		send_release(server_addr, requested_ip); /* unicast */
 		udhcp_run_script(NULL, "deconfig");
 	}
@@ -158,6 +173,9 @@ int udhcpc_main(int argc, char **argv)
 	struct in_addr temp_addr;
 	struct dhcpMessage packet;
 	fd_set rfds;
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+	int with_zeroconf = 0;
+#endif
 
 	enum {
 		OPT_c = 1 << 0,
@@ -179,6 +197,7 @@ int udhcpc_main(int argc, char **argv)
 		OPT_t = 1 << 16,
 		OPT_v = 1 << 17,
 		OPT_S = 1 << 18,
+		OPT_z = 1 << 19,
 	};
 #if ENABLE_GETOPT_LONG
 	static const char udhcpc_longopts[] ALIGN1 =
@@ -201,6 +220,7 @@ int udhcpc_main(int argc, char **argv)
 		"version\0"       No_argument       "v"
 		"retries\0"       Required_argument "t"
 		"syslog\0"        No_argument       "S"
+		"zeroconf\0"      No_argument       "z"
 		;
 #endif
 	/* Default options. */
@@ -215,7 +235,7 @@ int udhcpc_main(int argc, char **argv)
 #if ENABLE_GETOPT_LONG
 	applet_long_options = udhcpc_longopts;
 #endif
-	opt = getopt32(argv, "c:CV:fbH:h:F:i:np:qRr:s:T:t:vS",
+	opt = getopt32(argv, "c:CV:fbH:h:F:i:np:qRr:s:T:t:vSz",
 		&str_c, &str_V, &str_h, &str_h, &str_F,
 		&client_config.interface, &client_config.pidfile, &str_r,
 		&client_config.script, &str_T, &str_t
@@ -245,6 +265,12 @@ int udhcpc_main(int argc, char **argv)
 		/* client_config.fqdn[OPT_DATA + 2] = 0; - redundant */
 	}
 	// if (opt & OPT_i) client_config.interface = ...
+	if (opt & OPT_z)
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+		with_zeroconf = 1;
+#else
+		printf("Zeroconf support not included in this build.\n");
+#endif
 	if (opt & OPT_n)
 		client_config.abort_if_no_lease = 1;
 	// if (opt & OPT_p) client_config.pidfile = ...
@@ -285,6 +311,11 @@ int udhcpc_main(int argc, char **argv)
 	/* Goes to stdout and possibly syslog */
 	bb_info_msg("%s (v%s) started", applet_name, BB_VER);
 
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+	zeroconf_init(with_zeroconf, client_config.arp, client_config.interface, 
+		      client_config.ifindex);
+#endif
+
 	/* if not set, and not suppressed, setup the default client ID */
 	if (!client_config.clientid && !(opt & OPT_C)) {
 		client_config.clientid = alloc_dhcp_option(DHCP_CLIENT_ID, "", 7);
@@ -300,25 +331,45 @@ int udhcpc_main(int argc, char **argv)
 
 	state = INIT_SELECTING;
 	udhcp_run_script(NULL, "deconfig");
+
+
 	change_mode(LISTEN_RAW);
+
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+	zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
+#else
 	tv.tv_sec = 0;
 	goto jump_in;
+#endif
 
 	for (;;) {
+
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+		zeroconf_set_smallest_timeout(&tv, timeout);
+#else
 		tv.tv_sec = timeout - monotonic_sec();
  jump_in:
 		tv.tv_usec = 0;
-
+#endif
 		if (listen_mode != LISTEN_NONE && sockfd < 0) {
 			if (listen_mode == LISTEN_KERNEL)
 				sockfd = listen_socket(/*INADDR_ANY,*/ CLIENT_PORT, client_config.interface);
 			else
 				sockfd = raw_socket(client_config.ifindex);
 		}
+
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+		if (zeroconf_fd > -1) {
+			max_fd = udhcp_sp_fd_set2(&rfds, sockfd, zeroconf_fd);
+		} else {
+			max_fd = udhcp_sp_fd_set(&rfds, sockfd);
+		}
+#else
 		max_fd = udhcp_sp_fd_set(&rfds, sockfd);
+#endif
 
 		retval = 0; /* If we already timed out, fall through, else... */
-		if (tv.tv_sec > 0) {
+		if (tv.tv_sec > 0 || tv.tv_usec > 0) {
 			DEBUG("Waiting on select...");
 			retval = select(max_fd + 1, &rfds, NULL, NULL, &tv);
 		}
@@ -331,7 +382,20 @@ int udhcpc_main(int argc, char **argv)
 				bb_perror_msg_and_die("select");
 			}
 		} else if (retval == 0) {
-			/* timeout dropped to zero */
+			/* timeout, must be forwarded to Zeroconf and DHCP state machines */
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+			/* Zeroconf has its own timeout tests, just tick it */
+			zeroconf_event(ZEROCONF_EVENT_TICK);
+#endif
+
+			if (timeout > now) {
+				/* it is not DHCP's timeout */
+				continue;
+			}
+
+			DEBUG(LOG_INFO, "DHCP timeout");
+			
+			/* DHCP timeout dropped to zero */
 			switch (state) {
 			case INIT_SELECTING:
 				if (packet_num < client_config.retries) {
@@ -372,6 +436,9 @@ int udhcpc_main(int argc, char **argv)
 					/* timed out, go back to init state */
 					if (state == RENEW_REQUESTED)
 						udhcp_run_script(NULL, "deconfig");
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+					zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
+#endif
 					state = INIT_SELECTING;
 					timeout = now;
 					packet_num = 0;
@@ -405,6 +472,9 @@ int udhcpc_main(int argc, char **argv)
 					state = INIT_SELECTING;
 					bb_info_msg("Lease lost, entering init state");
 					udhcp_run_script(NULL, "deconfig");
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+					zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
+#endif
 					timeout = now;
 					packet_num = 0;
 					change_mode(LISTEN_RAW);
@@ -420,7 +490,18 @@ int udhcpc_main(int argc, char **argv)
 				timeout = INT_MAX;
 				break;
 			}
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+		} else if (retval > 0 && zeroconf_fd > -1 && FD_ISSET(zeroconf_fd, &rfds)) {
+			/* zeroconf packet is ready, process */
+
+			DEBUG(LOG_INFO, "Socket data for Zeroconf");
+
+			zeroconf_event(ZEROCONF_EVENT_SOCKETREADY);
+#endif
 		} else if (listen_mode != LISTEN_NONE && FD_ISSET(sockfd, &rfds)) {
+
+			DEBUG(LOG_INFO, "Socket data for DHCP");
+
 			/* a packet is ready, read it */
 
 			if (listen_mode == LISTEN_KERNEL)
@@ -497,6 +578,9 @@ int udhcpc_main(int argc, char **argv)
 					start = now;
 					timeout = start + t1;
 					requested_ip = packet.yiaddr;
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+					zeroconf_event(ZEROCONF_EVENT_DHCPIN);
+#endif
 					udhcp_run_script(&packet,
 						   ((state == RENEWING || state == REBINDING) ? "renew" : "bound"));
 
@@ -514,8 +598,12 @@ int udhcpc_main(int argc, char **argv)
 					/* return to init state */
 					bb_info_msg("Received DHCP NAK");
 					udhcp_run_script(&packet, "nak");
-					if (state != REQUESTING)
+					if (state != REQUESTING) {
 						udhcp_run_script(NULL, "deconfig");
+#ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
+						zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
+#endif
+					}
 					state = INIT_SELECTING;
 					timeout = now;
 					requested_ip = 0;
@@ -535,6 +623,13 @@ int udhcpc_main(int argc, char **argv)
 			case SIGUSR2:
 				perform_release();
 				break;
+			case SIGHUP:
+				/* Richard 30 May 2007
+				 * release the interface and exit
+				 */
+				bb_info_msg(LOG_INFO, "Received SIGHUP");
+				udhcp_run_script(NULL, "deconfig");
+				return 0;
 			case SIGTERM:
 				bb_info_msg("Received SIGTERM");
 				if (client_config.release_on_quit)

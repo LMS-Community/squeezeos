@@ -45,6 +45,7 @@ void udhcp_sp_setup(void)
 	signal(SIGUSR1, signal_handler);
 	signal(SIGUSR2, signal_handler);
 	signal(SIGTERM, signal_handler);
+	signal(SIGHUP, signal_handler);
 }
 
 
@@ -60,6 +61,13 @@ int udhcp_sp_fd_set(fd_set *rfds, int extra_fd)
 		FD_SET(extra_fd, rfds);
 	}
 	return signal_pipe[0] > extra_fd ? signal_pipe[0] : extra_fd;
+}
+
+int udhcp_sp_fd_set2(fd_set *rfds, int extra_fd, int extra_fd2)
+{
+	int max_fd = udhcp_sp_fd_set(rfds, extra_fd);
+	if (extra_fd2 >= 0) FD_SET(extra_fd2, rfds);
+	return (max_fd > extra_fd2 ? max_fd : extra_fd2);
 }
 
 

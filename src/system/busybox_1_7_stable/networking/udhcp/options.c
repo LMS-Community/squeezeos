@@ -80,7 +80,8 @@ uint8_t *get_option(struct dhcpMessage *packet, int code)
 	length = 308;
 	while (!done) {
 		if (i >= length) {
-			bb_error_msg("bogus packet, option fields too long");
+			if (length > 0)
+				bb_error_msg("bogus packet, option fields too long");
 			return NULL;
 		}
 		if (optionptr[i + OPT_CODE] == code) {
