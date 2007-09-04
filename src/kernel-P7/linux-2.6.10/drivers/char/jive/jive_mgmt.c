@@ -90,11 +90,10 @@ extern void LCD_CMD(unsigned short address, unsigned short data);
 
 
 
-// When changing the pwm value, the led stays on for 1 full timer periode.
-// If this timer periode if 4096, the light on can be seen.
-// If the periode is 255, we cannot see it
-
-#define MAX_DIMMER 0x0FFF
+// When changing the pwm value, the led stays on for 1 full timer period.
+// If this timer period is MAX_DIMMER the light on can be seen. If the
+// period is 0 the light is off.
+#define MAX_DIMMER 0xFFFF
 
 #define RAW(var) (*(volatile unsigned int __force *)var)
 
