@@ -17,18 +17,17 @@ int main(int argv, char **args) {
 	}
 
 	// Time values for mark and space for NEC format (regular Slim remote)
-	// Currently doubled from the regular values to make up for the bug in the driver
-	lead_mark = 8800 * 2;
-	lead_space = 4400 * 2;
-	one_mark = 550 * 2;
-	one_space = 1625 * 2;
-	zero_mark = 550 * 2;
-	zero_space = 550 * 2;
-	last_mark = 550;	// This one is not doubled since the second half is in the driver.
+	lead_mark = 8800;
+	lead_space = 4400;
+	one_mark = 550;
+	one_space = 1625;
+	zero_mark = 550;
+	zero_space = 550;
+	last_mark = 550;
 
 	// Lead bit:		1	mark and space => 2
 	// Command bits: 	32	mark and space => 64
-	// Last bit:		1	half mark to make up the half mark in the driver => 1
+	// Last bit:		1	last mark => 1
 	DrvCount=2+64+1;
 
 	// Lead
@@ -108,7 +107,7 @@ int main(int argv, char **args) {
 	Tx[63]=one_space;
 	Tx[64]=one_mark;
 	Tx[65]=one_space;
-	// This one is needed to make up for the last bit that is wrong in the driver
+	// Last mark
 	Tx[66]=last_mark;
 
 	write(fd, Tx, DrvCount);
