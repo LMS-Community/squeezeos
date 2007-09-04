@@ -1,6 +1,6 @@
 
 
-all: jivectl evtest testir mixext
+all: jivectl evtest testir mixext testir
 
 padtest: test.c
 	${CC} ${CFLAGS} test.c ${LDFLAGS} -o $@
@@ -34,3 +34,5 @@ install:
 	install jivectl ${PREFIX}/bin
 	install evtest ${PREFIX}/bin
 	install mixext ${PREFIX}/bin
+	install testir ${PREFIX}/bin
+

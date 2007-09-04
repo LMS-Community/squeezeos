@@ -29,6 +29,7 @@
 #include <asm/bitops.h>
 #include <asm/delay.h>
 
+#include <asm/arch/hardware.h>
 #include <asm/arch-s3c2413/regs-gpio.h>
 #include <asm/arch-s3c2413/regs-timer.h>
 #include <asm/arch-s3c2413/map.h>
@@ -40,15 +41,17 @@
 #define JIVE_IRTX_NAME   JIVE_MGMT_MODULE_NAME " hardware driver " JIVE_IRTX_VERSION
 #define PFX JIVE_MGMT_MODULE_NAME ": "
 
+#define RAW(var) (*(volatile unsigned int __force *)var)
+
 
 //===================================================================
 #define CarrierNothing	0
 #define CarrierProcess	1
 
 //===================================================================
-int DisableCarrierNothing(void);
-int EnableCarrierProcess(void);
-int ir_delay(unsigned int count);
+static inline void DisableCarrierNothing(void);
+static inline void EnableCarrierProcess(void);
+
 
 //===================================================================
 static int IRTransmission_open (struct inode *inode, struct file *filp)
@@ -76,7 +79,7 @@ static ssize_t IRTransmission_write (struct file *filp, const char *buf, size_t 
 	DisableCarrierNothing();
 	Triger = 0;
 
-	cli();		// interrupt disable
+	cli();	// interrupt disable
 	for(TxBitCnt=0; TxBitCnt<TxChkCnt; TxBitCnt++) {
 		if (Triger) {
 			DisableCarrierNothing();
@@ -86,11 +89,11 @@ static ssize_t IRTransmission_write (struct file *filp, const char *buf, size_t 
 			EnableCarrierProcess();
 			Triger = 1;
 		}
-		ir_delay(TxData[TxBitCnt]);
+		udelay(TxData[TxBitCnt]);
 	}
 	//End bit
-	EnableCarrierProcess();
-	ir_delay(560);
+	//	EnableCarrierProcess();
+	//	udelay(560);
 	DisableCarrierNothing();
 
 	sti();	// interrupt enable
@@ -129,41 +132,29 @@ static void __exit IRTransmission_exit(void)
 }
 
 //===================================================================
-int DisableCarrierNothing()
+static inline void DisableCarrierNothing(void)
 {
-	(*(volatile unsigned int __force *)S3C2413_TCON &= 0xFFFFF0FF);		
-	(*(volatile unsigned int __force *)S3C2413_GPBCON &= 0xFFFFFFFF);  	// GPB1 :
-	(*(volatile unsigned int __force *)S3C2413_GPBCON |= 0x00000004);  	// GPB1 : Normal Port Setting
-	(*(volatile unsigned int __force *)S3C2413_GPBDAT &= 0xFFFFFFFD);	// GPB1 Low
-	return 0;
+	RAW(S3C2413_TCON) &= 0xFFFFF0FF;		
+
+	s3c2413_gpio_cfgpin(S3C2413_GPB1, S3C2413_GPB1_OUTP);
+	s3c2413_gpio_setpin(S3C2413_GPB1, 0);
 }				
 
-int EnableCarrierProcess()
+static inline void EnableCarrierProcess(void)
 {
-	(*(volatile unsigned int __force *)S3C2413_GPBCON &= 0xFFFFFFF3);  	// GPB1 : 
-	(*(volatile unsigned int __force *)S3C2413_GPBCON |= 0x00000008);  	// GPB1 : TOUT1 Setting
-	(*(volatile unsigned int __force *)S3C2413_TCFG0 &= 0x00000000);	// Prescale 0x00
-	(*(volatile unsigned int __force *)S3C2413_TCFG1 &= 0xFFFFFF0F);	// PCLK devide 1/2
-	(*(volatile unsigned int __force *)S3C2413_TCFG1 &= 0xFFFFFF1F);	// PCLK devide 1/4
-	(*(volatile unsigned int __force *)S3C2413_TCNTB(1) = 0x0294);		// 37.8Khz
-	(*(volatile unsigned int __force *)S3C2413_TCMPB(1) = 0x14A);		
-	(*(volatile unsigned int __force *)S3C2413_TCON &= 0xFFFFF0FF);		
-	(*(volatile unsigned int __force *)S3C2413_TCON |= 0x00000200);		// Manual update
-	(*(volatile unsigned int __force *)S3C2413_TCON |= 0x00000900);		// Start timer1 with Auto reload
-	(*(volatile unsigned int __force *)S3C2413_TCON &= ~(0x00000200));	// Manual update mode disable	
-	return 0;
-}
+	s3c2413_gpio_cfgpin(S3C2413_GPB1, S3C2413_GPB1_TOUT1);
 
-int ir_delay(unsigned int count)
-{
-	int i, k;
-	int temp = 0;
-	for (i=0; i<count; i++) {
-		for (k=0; k<49; k++) {
-			temp++;
-		}
-	}
-	return 0;
+	RAW(S3C2413_TCFG0) &= ~S3C2413_TCFG_PRESCALER0_MASK;	// Prescale 0x00 for Timer 0 and 1
+	RAW(S3C2413_TCFG1) &= ~S3C2413_TCFG1_MUX1_MASK;
+	RAW(S3C2413_TCFG1) |= S3C2413_TCFG1_MUX1_DIV4;		// PCLK devide 1/4
+
+	RAW(S3C2413_TCNTB(1)) = 0x0294;				// 37.8Khz
+	RAW(S3C2413_TCMPB(1)) = 0x014A;
+
+	RAW(S3C2413_TCON) &= 0xFFFFF0FF;
+	RAW(S3C2413_TCON) |= S3C2413_TCON_T1MANUALUPD;		// Manual update
+	RAW(S3C2413_TCON) |= S3C2413_TCON_T1RELOAD | S3C2413_TCON_T1START; // Start timer1 with Auto reload
+	RAW(S3C2413_TCON) &= ~S3C2413_TCON_T1MANUALUPD;		// Manual update mode disable	
 }
 
 //===================================================================
