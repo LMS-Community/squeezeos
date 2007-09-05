@@ -187,11 +187,11 @@ static void s3c2413_timer_setup (void)
 		tcfg1 |= S3C2413_TCFG1_MUX4_DIV2;
 
 		tcfg0 &= ~S3C2413_TCFG_PRESCALER1_MASK;
-		//tcfg0 |= ((6 - 1) / 2) << S3C2413_TCFG_PRESCALER1_SHIFT;
-		tcfg0 |= (15) << S3C2413_TCFG_PRESCALER1_SHIFT;
+		tcfg0 |= ((6 - 1) / 2) << S3C2413_TCFG_PRESCALER1_SHIFT;
+		//tcfg0 |= (15) << S3C2413_TCFG_PRESCALER1_SHIFT;
 
-		//tcnt = (s3c24xx_pclk / 6) / HZ;
-		tcnt = (s3c24xx_pclk / 32) / HZ;
+		tcnt = (s3c24xx_pclk / 6) / HZ;
+		//tcnt = (s3c24xx_pclk / 32) / HZ;
 	}
 
 	/* timers reload after counting zero, so reduce the count by 1 */
