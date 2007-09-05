@@ -39,23 +39,13 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <errno.h>
-#if __GLIBC__ >=2 && __GLIBC_MINOR >= 1
 #include <netpacket/packet.h>
 #include <net/ethernet.h>
-#else
-#include <asm/types.h>
-#include <linux/if_packet.h>
-#include <linux/if_ether.h>
-#endif
 
-#ifndef MAC_BCAST_ADDR
-#define MAC_BCAST_ADDR		(uint8_t *) "\xff\xff\xff\xff\xff\xff"
-#endif
+#include <net/if_arp.h>
 
-#include "arpping.h"
 #include "common.h"
-#include "packet.h"
-#include "libbb_udhcp.h"
+#include "arpping.h"
 #include "zeroconf.h"
 
 
@@ -128,7 +118,7 @@ void zeroconf_init(int enable, uint8_t arp[], const char* pinterface, int pifind
 /* generates address in 169.254.0.0/16 range, excluding 169.254.0.0/24 and
  * 169.254.255.0/24 edge ranges */
 
-static void choose_addr()
+static void choose_addr(void)
 {
 	if (conflicted) {
 
@@ -139,7 +129,7 @@ static void choose_addr()
 				(254 << 16) +
 				256 + (random() % (65536 - 256 - 256));
 
-		DEBUG(LOG_INFO, "zeroconf: previous address conflicted, trying random this time");
+		DEBUG("zeroconf: previous address conflicted, trying random this time");
 
 	} else {
 		/* calculate IP address based on MAC so it will be the same
@@ -152,7 +142,7 @@ static void choose_addr()
 
 	linklocal_addr.s_addr = htonl(linklocal_addr.s_addr);
 	
-	LOG(LOG_INFO, "zeroconf: address selected is %s", inet_ntoa(linklocal_addr));
+	DEBUG("zeroconf: address selected is %s", inet_ntoa(linklocal_addr));
 }
 
 /* Helper function to set TIMEVAL structure to smallest timeout
@@ -189,7 +179,7 @@ void zeroconf_set_smallest_timeout(struct timeval* tv, long int other_timeout)
 		tv->tv_sec = tv->tv_usec = 0;
 	}
 
-// DEBUG(LOG_INFO, "zeroconf_set_smallest_timeout: o=%d, z=%d:%d, tv set to %d:%d, now is %d:%d", 
+// DEBUG("zeroconf_set_smallest_timeout: o=%d, z=%d:%d, tv set to %d:%d, now is %d:%d", 
 //			other_timeout, timeout.tv_sec, timeout.tv_usec,
 // 			tv->tv_sec, tv->tv_usec, now.tv_sec, now.tv_usec);
 }
@@ -217,7 +207,7 @@ static void set_timeout(long int usecs, int times)
 		timeout_count = times;
 	}
 
-	DEBUG(LOG_INFO, "zeroconf timeout set to %d:%d, now is %d:%d",	timeout.tv_sec,
+	DEBUG("zeroconf timeout set to %d:%d, now is %d:%d",	timeout.tv_sec,
 							 		timeout.tv_usec,
 									now.tv_sec,
 									now.tv_usec);
@@ -225,21 +215,21 @@ static void set_timeout(long int usecs, int times)
 
 /* Disarms timeout bomb :) */
 
-static void disarm_timeout()
+static void disarm_timeout(void)
 {
 	timeout.tv_sec = timeout.tv_usec = 0;
 }
 
 /* Timeout test functions */
 
-static int is_timeout_disarmed()
+static int is_timeout_disarmed(void)
 {
 	return timeout.tv_sec == 0 && timeout.tv_usec == 0;
 }
 
 /* Tests if timeout moment has passed (i.e. timeout is done) */
 
-static int timeout_passed()
+static int timeout_passed(void)
 {
 	struct timeval now;
 	gettimeofday(&now, NULL);
@@ -254,14 +244,14 @@ static int timeout_passed()
 	     now.tv_usec >= timeout.tv_usec));
 }
 
-static int timeout_exhausted()
+static int timeout_exhausted(void)
 {
 	return timeout_count <= 0;
 }
 
 /* Does the low-level disabling task, it is used by many functions */
 
-static void _disable()
+static void _disable(void)
 {
 	close(zeroconf_fd);
 	zeroconf_fd = -1;
@@ -270,23 +260,23 @@ static void _disable()
 
 /* State machine transition: disables zeroconf (probably because DHCP got an address) */
 
-static void disable()
+static void disable(void)
 {
-	LOG(LOG_INFO, "zeroconf: state is Disabled.");
+	DEBUG("zeroconf: state is Disabled.");
 	_disable();
 	state = ZEROCONF_SM_DISABLED;
 }
 
-static void disable_permanently()
+static void disable_permanently(void)
 {
-	LOG(LOG_INFO, "zeroconf: state is Disabled permanently.");
+	DEBUG("zeroconf: state is Disabled permanently.");
 	_disable();
 	state = ZEROCONF_SM_DISABLED_PERMANENTLY;
 }
 
 /* Sends ARP probe to see if our chosen IP address has another owner */
 
-static void arp_probe()
+static void arp_probe(void)
 {
 	struct arpMsg arpbuffer;
 	struct sockaddr iface;
@@ -307,13 +297,13 @@ static void arp_probe()
 	memset(&iface, 0, sizeof(iface));
 	strcpy(iface.sa_data, interface);
 
-	DEBUG(LOG_INFO, "zeroconf: Sending ARP probe.");
+	DEBUG("zeroconf: Sending ARP probe.");
 
 	if (sendto(zeroconf_fd, &arpbuffer, sizeof(arpbuffer), 0, &iface, sizeof(iface)) < 0) {
 
 		/* serious error, disable zeroconf completely */
 
-		LOG(LOG_ERR, "zeroconf: packet socket error in sendto(), disabling zeroconf.");
+		perror("zeroconf: packet socket error in sendto(), disabling zeroconf.");
 
 		disable_permanently();
 	}
@@ -342,13 +332,13 @@ static void arp_announce(struct in_addr *target)
 	memset(&iface, 0, sizeof(iface));
 	strcpy(iface.sa_data, interface);
 
-	DEBUG(LOG_INFO, "zeroconf: Sending ARP announcement.");
+	DEBUG("zeroconf: Sending ARP announcement.");
 
 	if (sendto(zeroconf_fd, &arpbuffer, sizeof(arpbuffer), 0, &iface, sizeof(iface)) < 0) {
 
 		/* serious error, disable zeroconf completely */
 
-		LOG(LOG_ERR, "zeroconf: packet socket error in sendto(), disabling zeroconf.");
+		perror("zeroconf: packet socket error in sendto(), disabling zeroconf.");
 
 		disable_permanently();
 	}
@@ -357,7 +347,7 @@ static void arp_announce(struct in_addr *target)
 /* State machine transition: enables zeroconf (probably because DHCP didn't get a
  * better IP address yet */
 
-static void initial_time()
+static void initial_time(void)
 {
 	struct ifreq iface;
 	int optval = 1;
@@ -369,20 +359,20 @@ static void initial_time()
 	zeroconf_fd = socket(PF_PACKET, SOCK_PACKET, htons(ETH_P_ARP));
 
 	if (zeroconf_fd < 0) {
-		LOG(LOG_ERR, "zeroconf: link socket creation error, disabling zeroconf.");
+		perror("zeroconf: link socket creation error, disabling zeroconf.");
 		disable_permanently();
 		return;
 	}
 
 	if (setsockopt(zeroconf_fd, SOL_SOCKET, SO_BROADCAST, &optval, sizeof(optval)) == -1) {
-		LOG(LOG_ERR, "zeroconf: Could not setsocketopt(BROADCAST) link socket");
+		perror("zeroconf: Could not setsocketopt(BROADCAST) link socket");
 		disable_permanently();
 		return;
 	}
 
 	strncpy(iface.ifr_ifrn.ifrn_name, interface, IFNAMSIZ);
 	if (setsockopt(zeroconf_fd, SOL_SOCKET, SO_BINDTODEVICE, (char*) &iface, sizeof(iface)) < 0) {
-		LOG(LOG_ERR, "zeroconf: Could not setsocketopt(BINDTODEVICE) link socket");
+		perror("zeroconf: Could not setsocketopt(BINDTODEVICE) link socket");
 		disable_permanently();
 		return;
 	}
@@ -399,10 +389,10 @@ static void initial_time()
 /* State machine transition: after initial time, probe to see if the chosen link-local
  * address does not have an owner */
 
-static void probe()
+static void probe(void)
 {
 	if (state != ZEROCONF_SM_PROBE) {
-		DEBUG(LOG_INFO, "zeroconf: Changed state to PROBE");
+		DEBUG("zeroconf: Changed state to PROBE");
 		state = ZEROCONF_SM_PROBE;
 
 		/* Timeout will fire for ZEROCONF_PROBE_NUM times */
@@ -416,14 +406,14 @@ static void probe()
 
 		/* Timeout count not exausthed, probe again */
 		
-		DEBUG(LOG_INFO, "zeroconf: PROBE state maintained, probing again");
+		DEBUG("zeroconf: PROBE state maintained, probing again");
 
 		set_timeout(ZEROCONF_PROBE_MIN + 
 					random() % (ZEROCONF_PROBE_MAX - ZEROCONF_PROBE_MIN),
 				     0);
 		arp_probe();
 	} else {
-		DEBUG(LOG_INFO, "zeroconf: PROBE complete, going to active/ann state");
+		DEBUG("zeroconf: PROBE complete, going to active/ann state");
 		active_announce();
 	}
 	
@@ -431,13 +421,14 @@ static void probe()
 
 /* State machine transition: link-local address is ours, hooray! */
 
-static void active_announce()
+static void active_announce(void)
 {
 	if (state != ZEROCONF_SM_ACTIVE_ANNOUNCE) {
-		LOG(LOG_INFO, "zeroconf: state is Active/Announce, Link-local address %s",
+		struct dhcpMessage fake;
+
+		DEBUG("zeroconf: state is Active/Announce, Link-local address %s",
 				inet_ntoa(linklocal_addr));
 
-		struct dhcpMessage fake;
 		bzero(&fake, sizeof(fake));
 		fake.yiaddr = linklocal_addr.s_addr;
 		
@@ -450,7 +441,7 @@ static void active_announce()
 		arp_announce(&linklocal_addr);
 
 	} else if (! timeout_exhausted()) {
-		DEBUG(LOG_INFO, "zeroconf: Announcing again link-local address");
+		DEBUG("zeroconf: Announcing again link-local address");
 		set_timeout(ZEROCONF_ANNOUNCE_INTERVAL, 0);
 		arp_announce(&linklocal_addr);
 
@@ -461,9 +452,9 @@ static void active_announce()
 
 /* Machine state: active and no more announcements due. Rest in peace */
 
-static void active_rest()
+static void active_rest(void)
 {
-	DEBUG(LOG_INFO, "zeroconf: State is Active/rest");
+	DEBUG("zeroconf: State is Active/rest");
 	state = ZEROCONF_SM_ACTIVE_REST;
 	conflict_count = 0;
 	disarm_timeout();
@@ -471,9 +462,9 @@ static void active_rest()
 
 /* Machine state: too many conflicts in link-local negotiation, sleep for a while */
 
-static void rate_limit()
+static void rate_limit(void)
 {
-	DEBUG(LOG_INFO, "zeroconf: State is Rate limit");
+	DEBUG("zeroconf: State is Rate limit");
 
 	_disable();
 	state = ZEROCONF_SM_RATE_LIMIT;
@@ -485,20 +476,20 @@ static void rate_limit()
 
 /* Reads link-layer socket about ARP packets, and detects conflicts */
 
-static int arp_conflict()
+static int arp_conflict(void)
 {
+	struct arpMsg arpbuffer;
+	
 	if (zeroconf_fd < 0) {
-		DEBUG(LOG_INFO, "zeroconf: arp_conflict(): hey, socket is closed, do not call me!");
+		DEBUG("zeroconf: arp_conflict(): hey, socket is closed, do not call me!");
 		return 0;
 	}
-	
-	struct arpMsg arpbuffer;
 	
 	if (recv(zeroconf_fd, &arpbuffer, sizeof(arpbuffer), 0) < 0) {
 
 		/* socket error, we disable zeroconf completely */
 
-		LOG(LOG_ERR, "zeroconf: link socket read error, disabling zeroconf.");
+		perror("zeroconf: link socket read error, disabling zeroconf.");
 
 		if (state == ZEROCONF_SM_ACTIVE_ANNOUNCE || state == ZEROCONF_SM_ACTIVE_REST) {
 			udhcp_run_script(NULL, "deconfig");
@@ -514,7 +505,7 @@ static int arp_conflict()
 		/* if the packet is ARPOP_REPLY, and the source MAC address is not ours,
 		 * and the source IP address *is* ours, there is a conflict. */
 		
-		LOG(LOG_INFO, "zeroconf: conflict: %02x:%02x:%02x:%02x:%02x:%02x claims "
+		DEBUG("zeroconf: conflict: %02x:%02x:%02x:%02x:%02x:%02x claims "
 			      "to have same IP as ours.", arpbuffer.sHaddr[0], arpbuffer.sHaddr[1], 
 			      arpbuffer.sHaddr[2], arpbuffer.sHaddr[3], arpbuffer.sHaddr[4],
 			      arpbuffer.sHaddr[5]);
@@ -530,7 +521,7 @@ static int arp_conflict()
 		 * (ok, it will duplicate kernel response, a kernel patch for Zeroconf
 		 * would be a better solution) */
 		
-		LOG(LOG_INFO, "zeroconf: ARP request for our address, answering in broadcast.");
+		DEBUG("zeroconf: ARP request for our address, answering in broadcast.");
 		arp_announce((struct in_addr*) &arpbuffer.sInaddr);
 	}
 	
@@ -544,32 +535,32 @@ static int arp_conflict()
 void zeroconf_event(int event)
 {
 	if (state == ZEROCONF_SM_PERMANENTLY_DISABLED) {
-		DEBUG(LOG_INFO, "zeroconf: event: we are permanently disabled, ignoring.");
+		DEBUG("zeroconf: event: we are permanently disabled, ignoring.");
 		return;
 
 	} else if (event == ZEROCONF_EVENT_DHCPIN) {
 		/* DHCP offers a better address, cut off zeroconf */
-		DEBUG(LOG_INFO, "zeroconf: Going to disabled state.");
+		DEBUG("zeroconf: Going to disabled state.");
 		disable();
 
 	} else if (event == ZEROCONF_EVENT_DHCPOUT) {
 		if (state == ZEROCONF_SM_DISABLED) {
 			/* If zeroconf is off but not permanently off, turn it on */
-			DEBUG(LOG_INFO, "zeroconf: Going to 'initial time' state.");
+			DEBUG("zeroconf: Going to 'initial time' state.");
 			initial_time();
 		}
 
 	} else if (event == ZEROCONF_EVENT_SOCKETREADY) {
 		if (arp_conflict() &&
 		    state != ZEROCONF_SM_DISABLED && state != ZEROCONF_SM_DISABLED_PERMANENTLY) {
-			DEBUG(LOG_INFO, "zeroconf: Conflict detected and we are not disabled.");
+			DEBUG("zeroconf: Conflict detected and we are not disabled.");
 			conflicted = 1;
 			++conflict_count;
 			if (conflict_count > ZEROCONF_MAX_COLLISIONS) {
-				DEBUG(LOG_INFO, "zeroconf: Too many conflicts, rate limiting!");
+				DEBUG("zeroconf: Too many conflicts, rate limiting!");
 				rate_limit();
 			} else {
-				DEBUG(LOG_INFO, "zeroconf: Back to square one.");
+				DEBUG("zeroconf: Back to square one.");
 				initial_time();
 			}
 		}
@@ -578,25 +569,25 @@ void zeroconf_event(int event)
 	/* We grab every opportunity to test if timeout has elapsed */
 
 	if (timeout_passed()) {
-		DEBUG(LOG_INFO, "zeroconf: a timeout has passed");
+		DEBUG("zeroconf: a timeout has passed");
 
 		disarm_timeout();
 		--timeout_count;
 
 		if (state == ZEROCONF_SM_INITIALTIME) {
-			DEBUG(LOG_INFO, "zeroconf: initial time T/O, going to probe");
+			DEBUG("zeroconf: initial time T/O, going to probe");
 			probe();
 
 		} else if (state == ZEROCONF_SM_PROBE) {
-			DEBUG(LOG_INFO, "zeroconf: probe T/O, probing again");
+			DEBUG("zeroconf: probe T/O, probing again");
 			probe();
 
 		} else if (state == ZEROCONF_SM_ACTIVE_ANNOUNCE) {
-			DEBUG(LOG_INFO, "zeroconf: announce T/O, announcing again");
+			DEBUG("zeroconf: announce T/O, announcing again");
 			active_announce();
 
 		} else if (state == ZEROCONF_SM_RATE_LIMIT) {
-			DEBUG(LOG_INFO, "zeroconf: rate limit T/O, going to initial time");
+			DEBUG("zeroconf: rate limit T/O, going to initial time");
 			initial_time();
 		}
 	}

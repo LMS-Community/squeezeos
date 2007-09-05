@@ -46,13 +46,8 @@ filesystem:
 
 
 # busybox
-busybox: busybox121
-
-busybox121:
-	cd busybox-1.2.1; make oldconfig; make busybox; make install; cp -rf _install/bin _install/sbin _install/usr ${BUILDDIR}
-
-busybox17:
-	cd busybox_1_7_stable; make oldconfig ; make CROSS_COMPILE=$(TARGET)- busybox; make CROSS_COMPILE=$(TARGET)- install; cp -rf _install/bin _install/sbin _install/usr ${BUILDDIR}
+busybox:
+	cd busybox_1_7_stable; make oldconfig && make CROSS_COMPILE=$(TARGET)- busybox && make CROSS_COMPILE=$(TARGET)- install && cp -rf _install/bin _install/sbin _install/usr ${BUILDDIR}
 
 
 # strace

@@ -627,7 +627,7 @@ int udhcpc_main(int argc, char **argv)
 				/* Richard 30 May 2007
 				 * release the interface and exit
 				 */
-				bb_info_msg(LOG_INFO, "Received SIGHUP");
+				bb_info_msg("Received SIGHUP");
 				udhcp_run_script(NULL, "deconfig");
 				return 0;
 			case SIGTERM:
