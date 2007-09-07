@@ -115,7 +115,7 @@ zlib: zlib-1.2.3/Makefile
 
 # dropbear
 dropbear-0.48.1/Makefile:
-	cd dropbear-0.48.1; LD=${CC} ./configure --host=${TARGET} --target=${TARGET}
+	cd dropbear-0.48.1; LD=${CC} ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
 
 dropbear:dropbear-0.48.1/Makefile
 	cd dropbear-0.48.1; make PROGRAMS="dropbear dropbearkey scp" ; make PROGRAMS="dropbear dropbearkey scp" install DESTDIR=${BUILDDIR}
@@ -123,7 +123,7 @@ dropbear:dropbear-0.48.1/Makefile
 
 # netperf	
 netperf-2.4.3/Makefile:
-	cd netperf-2.4.3 && ./configure --host=${TARGET} --target=${TARGET} --program-prefix=
+	cd netperf-2.4.3 && ./configure --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
 
 netperf:netperf-2.4.3/Makefile
 	cd netperf-2.4.3 && make && make install DESTDIR=${BUILDDIR}
