@@ -54,8 +54,8 @@ kernel-modules: mini_fo
 	install modules/kernel/lis302dl.ko ${MODDIR}/lis302dl.ko
 	install modules/lib/firmware/gspi8686.bin ${BUILDTOP}/lib/firmware/gspi8686.bin
 	install modules/lib/firmware/helper_gspi.bin ${BUILDTOP}/lib/firmware/helper_gspi.bin
-	install modules/usr/local/sbin/wpa_cli ${BUILDTOP}/usr/local/sbin/wpa_cli
-	install modules/usr/local/sbin/wpa_supplicant ${BUILDTOP}/usr/local/sbin/wpa_supplicant
+	install modules/usr/local/sbin/wpa_cli ${BUILDTOP}/usr/sbin/wpa_cli
+	install modules/usr/local/sbin/wpa_supplicant ${BUILDTOP}/usr/sbin/wpa_supplicant
 	install modules/usr/sbin/wlanconfig ${BUILDTOP}/usr/sbin/wlanconfig
 
 

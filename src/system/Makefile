@@ -176,7 +176,7 @@ wavplay:
 
 .PHONY: clean
 clean:
-	-cd busybox-1.2.1; make clean
+	-cd busybox_1_7_stable; make clean
 	-cd strace-4.5.14; make distclean
 	-cd oprofile-0.9.2; make distclean
 	-cd popt-1.7; make distclean
