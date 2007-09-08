@@ -24,7 +24,7 @@ extern int zeroconf_fd;
 
 void zeroconf_init(int enable, uint8_t arp[], const char* interface, int ifindex);
 void zeroconf_event(int event);
-void zeroconf_set_smallest_timeout(struct timeval* tm, long int other_timeout);
+void zeroconf_set_smallest_timeout(struct timeval* tm, unsigned int other_timeout);
 
 /* Zeroconf constants, time constants in microseconds */
 

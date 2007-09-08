@@ -337,10 +337,11 @@ int udhcpc_main(int argc, char **argv)
 
 #ifdef ENABLE_FEATURE_UDHCP_ZEROCONF
 	zeroconf_event(ZEROCONF_EVENT_DHCPOUT);
-#else
+#endif
+
 	tv.tv_sec = 0;
 	goto jump_in;
-#endif
+
 
 	for (;;) {
 
@@ -348,9 +349,11 @@ int udhcpc_main(int argc, char **argv)
 		zeroconf_set_smallest_timeout(&tv, timeout);
 #else
 		tv.tv_sec = timeout - monotonic_sec();
+#endif
+
  jump_in:
 		tv.tv_usec = 0;
-#endif
+
 		if (listen_mode != LISTEN_NONE && sockfd < 0) {
 			if (listen_mode == LISTEN_KERNEL)
 				sockfd = listen_socket(/*INADDR_ANY,*/ CLIENT_PORT, client_config.interface);

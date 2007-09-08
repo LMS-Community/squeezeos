@@ -148,14 +148,12 @@ static void choose_addr(void)
 /* Helper function to set TIMEVAL structure to smallest timeout
  * between DHCP and zeroconf (NOTE: other_timeout is UNIX time seconds since 1970) */
 
-void zeroconf_set_smallest_timeout(struct timeval* tv, long int other_timeout)
+void zeroconf_set_smallest_timeout(struct timeval* tv, unsigned int other_timeout)
 {
 	struct timeval now;
 	gettimeofday(&now, NULL);
 
-	if (other_timeout <= 0) {
-		*tv = now;
-	} else if (is_timeout_disarmed()) {
+	if (is_timeout_disarmed()) {
 		tv->tv_sec = other_timeout;
 		tv->tv_usec = 0;
 	} else if (other_timeout <= timeout.tv_sec) {
