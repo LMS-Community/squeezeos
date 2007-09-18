@@ -95,58 +95,52 @@ extern void LCD_CMD(unsigned short address, unsigned short data);
 // period is 0 the light is off.
 #define MAX_DIMMER 0xFFFF
 
+
+// Number of battery samples
+#define N_BATTERY_SAMPLES 6
+
+
 #define RAW(var) (*(volatile unsigned int __force *)var)
 
 
 static struct input_dev bsp_dev;
 
-
 static int get_battery(void) {
-	unsigned int i, max, min, maxindex, minindex, temp[5];
+	unsigned int i, max, min, maxindex, minindex;
 	unsigned int sum = 0x00;
+	unsigned int adc_value;
 
-	for(i=0; i<5; i++) {
-		(*(volatile unsigned int __force *)S3C2413_ADCCON) = S3C2413_ADCCON_PRSCEN | S3C2413_ADCCON_PRSCVL(0x70) | S3C2413_ADCCON_SELMUX(0x02);
+	min = 0xffff;
+	max = 0x0000;
+	for(i=0; i<N_BATTERY_SAMPLES; i++) {
+		(*(volatile unsigned int __force *)S3C2413_ADCCON) =
+			S3C2413_ADCCON_PRSCEN |
+			S3C2413_ADCCON_PRSCVL(0x70) |
+			S3C2413_ADCCON_SELMUX(0x02);
 		udelay(10);
 		(*(volatile unsigned int __force *)S3C2413_ADCTSC) &= 0xfb;
 		(*(volatile unsigned int __force *)S3C2413_ADCCON) |= S3C2413_ADCCON_ENABLE_START;
 
 		while((*(volatile unsigned int __force *)S3C2413_ADCCON) & S3C2413_ADCCON_ENABLE_START); //check if start bit is low
 		while(!((*(volatile unsigned int __force *)S3C2413_ADCCON) & S3C2413_ADCCON_ECFLG)); //check if EC(End of Conversion) flag is high
-
-		temp[i] = (((*(volatile unsigned int __force*)S3C2413_ADCDAT0)&0x3ff) >> 2);
+		
+		adc_value = (((*(volatile unsigned int __force*)S3C2413_ADCDAT0)&0x3ff));
+		sum+=adc_value;
+		if (adc_value < min)
+			min = adc_value;
+		if (adc_value > max)
+			max = adc_value;
 		udelay(10);
 	}
 
 	(*(volatile unsigned int __force *)S3C2413_ADCCON) &= ~S3C2413_ADCCON_PRSCEN;
 
+	// throw out the max and min.
+	sum -= max;
+	sum -= min;
+	sum = sum / (N_BATTERY_SAMPLES-2);
 
-	// Discard maximum and minimum samples, average the rest
-	// FIXME why do this?
-	max = temp[0]; maxindex = 0;
-	min = temp[0]; minindex = 0;
-	
-	for(i=0; i<5; i++) {
-		if (temp[i] > max) {
-			max = temp[i]; maxindex = i;
-		}
-		if (temp[i] < min) {
-			min = temp[i]; minindex = i;
-		}
-	}
-
-	for(i=0;i<5; i++) {
-		if (i != maxindex && i != minindex) {
-			sum += temp[i];
-		}
-	}
-	
-	if (maxindex == minindex) {
-		return (unsigned char) (sum/4);
-	}
-	else {
-		return (unsigned char) (sum/3);
-	}
+	return sum;
 }
 
 
