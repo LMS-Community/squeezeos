@@ -29,15 +29,17 @@
  */
 /*#define CONFIG_FILE     "/etc/fw_env.config"*/
 
-/*#define HAVE_REDUND*/ /* For systems with 2 env sectors */
+#define HAVE_REDUND /* For systems with 2 env sectors */
+
 #define DEVICE1_NAME      "/dev/mtd/3"
-/*#define DEVICE2_NAME      "/dev/mtd2"*/
 #define DEVICE1_OFFSET    0x0000
 #define ENV1_SIZE         0x4000
 #define DEVICE1_ESIZE     0x4000
-/*#define DEVICE2_OFFSET    0x0000*/
-/*#define ENV2_SIZE         0x4000*/
-/*#define DEVICE2_ESIZE     0x4000*/
+
+#define DEVICE2_NAME      "/dev/mtd/3"
+#define DEVICE2_OFFSET    0x4000
+#define ENV2_SIZE         0x4000
+#define DEVICE2_ESIZE     0x4000
 
 
 /*
@@ -58,6 +60,5 @@
 extern		void  fw_printenv(int argc, char *argv[]);
 extern unsigned char *fw_getenv  (unsigned char *name);
 extern		int   fw_setenvs  (int argc, char *argv[]);
-extern		int   fw_setenv  (int argc, char *argv[]);
 
 extern unsigned	long  crc32	 (unsigned long, const unsigned char *, unsigned);

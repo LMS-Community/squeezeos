@@ -57,19 +57,15 @@ main(int argc, char *argv[])
 
 	if (strcmp(cmdname, CMD_PRINTENV) == 0) {
 
-			fw_printenv (argc, argv);
-
-			return (EXIT_SUCCESS);
+		fw_printenv (argc, argv);
+		return (EXIT_SUCCESS);
 
 	} else if (strcmp(cmdname, CMD_SETENV) == 0) {
-			if (argc < 4) {// Atomic assignement
-					if (fw_setenv (argc, argv) != 0)
-						return (EXIT_FAILURE);
-			} else {
-					if (fw_setenvs (argc, argv) != 0)
-						return (EXIT_FAILURE);
-			}
-			return (EXIT_SUCCESS);
+
+		if (fw_setenvs (argc, argv) != 0) {
+			return (EXIT_FAILURE);
+		}
+		return (EXIT_SUCCESS);
 	}
 
 	fprintf (stderr,

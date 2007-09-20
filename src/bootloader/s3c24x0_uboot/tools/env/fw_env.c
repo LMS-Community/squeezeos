@@ -68,9 +68,6 @@ static env_t environment;
 
 static int HaveRedundEnv = 0;
 
-static uchar active_flag = 1;
-static uchar obsolete_flag = 0;
-
 
 #define XMK_STR(x)	#x
 #define MK_STR(x)	XMK_STR(x)
@@ -151,7 +148,8 @@ static uchar default_environment[] = {
 	"\0"			/* Termimate env_t data with 2 NULs */
 };
 
-static int flash_io (int mode);
+static int flash_io_read ();
+static int flash_io_write ();
 static uchar *envmatch (uchar * s1, uchar * s2);
 static int env_init (void);
 static int parse_config (void);
@@ -163,8 +161,8 @@ static inline ulong getenvsize (void)
 {
 	ulong rc = CFG_ENV_SIZE - sizeof (long);
 
-	if (HaveRedundEnv)
-		rc -= sizeof (char);
+	//	if (HaveRedundEnv)
+	//		rc -= sizeof (char);
 	return rc;
 }
 
@@ -326,7 +324,7 @@ int fw_setenvs(int argc, char *argv[])
 		}
 	
 		/* Delete only ? */
-		if (strlen(value)!=0) {
+		if (strlen((char *)value)!=0) {
 			/*
 			 * Append new definition at the end
 			 */
@@ -360,7 +358,7 @@ int fw_setenvs(int argc, char *argv[])
 	environment.crc = crc32 (0, environment.data, ENV_SIZE);
 
 	/* write environment back to flash */
-	if (flash_io (O_RDWR)) {
+	if (flash_io_write ()) {
 		fprintf (stderr, "Error: can't write fw_env to flash\n");
 		return (-1);
 	}
@@ -369,130 +367,104 @@ int fw_setenvs(int argc, char *argv[])
 	
 }
 
-/*
- * Deletes or sets environment variables. Returns errno style error codes:
- * 0	  - OK
- * EINVAL - need at least 1 argument
- * EROFS  - certain variables ("ethaddr", "serial#") cannot be
- *	    modified or deleted
- *
- */
-int fw_setenv (int argc, char *argv[])
-{
-	int i, len;
-	uchar *env, *nxt;
-	uchar *oldval = NULL;
-	uchar *name;
 
-	
-	if (argc < 2) {
-		return (EINVAL);
-	}
-
-	if (env_init ())
-		return (errno);
-
-	name = (uchar *)argv[1];
-
-	/*
-	 * search if variable with this name already exists
-	 */
-	for (nxt = env = environment.data; *env; env = nxt + 1) {
-		for (nxt = env; *nxt; ++nxt) {
-			if (nxt >= &environment.data[ENV_SIZE]) {
-				fprintf (stderr, "## Error: "
-					"environment not terminated\n");
-				return (EINVAL);
-			}
-		}
-		if ((oldval = envmatch (name, env)) != NULL)
-			break;
-	}
-
-	/*
-	 * Delete any existing definition
-	 */
-	if (oldval) {
-		/*
-		 * Ethernet Address and serial# can be set only once
-		 */
-		if ((strcmp ((char *)name, "ethaddr") == 0) ||
-			(strcmp ((char *)name, "serial#") == 0)) {
-			fprintf (stderr, "Can't overwrite \"%s\"\n", name);
-			return (EROFS);
-		}
-
-		if (*++nxt == '\0') {
-			*env = '\0';
-		} else {
-			for (;;) {
-				*env = *nxt++;
-				if ((*env == '\0') && (*nxt == '\0'))
-					break;
-				++env;
-			}
-		}
-		*++env = '\0';
-	}
-
-	/* Delete only ? */
-	if ((argc < 3) || (strlen(argv[2])==0))
-		goto WRITE_FLASH;
-
-	/*
-	 * Append new definition at the end
-	 */
-	for (env = environment.data; *env || *(env + 1); ++env);
-	if (env > environment.data)
-		++env;
-	/*
-	 * Overflow when:
-	 * "name" + "=" + "val" +"\0\0"  > CFG_ENV_SIZE - (env-environment)
-	 */
-	len = strlen ((char *)name) + 2;
-	/* add '=' for first arg, ' ' for all others */
-	for (i = 2; i < argc; ++i) {
-		len += strlen (argv[i]) + 1;
-	}
-	if (len > (&environment.data[ENV_SIZE] - env)) {
-		fprintf (stderr,
-			"Error: environment overflow, \"%s\" deleted\n",
-			name);
-		return (-1);
-	}
-	while ((*env = *name++) != '\0')
-		env++;
-	for (i = 2; i < argc; ++i) {
-		uchar *val = (uchar *)argv[i];
-
-		*env = (i == 2) ? '=' : ' ';
-		while ((*++env = *val++) != '\0');
-	}
-
-	/* end is marked with double '\0' */
-	*++env = '\0';
-
-  WRITE_FLASH:
-
-	/* Update CRC */
-	environment.crc = crc32 (0, environment.data, ENV_SIZE);
-
-	/* write environment back to flash */
-	if (flash_io (O_RDWR)) {
-		fprintf (stderr, "Error: can't write fw_env to flash\n");
-		return (-1);
-	}
-
-	return (0);
-}
-
-static int flash_io (int mode)
-{
-	int fd, fdr, rc, otherdev, len, pagesize;
+static int flash_io_write_part (int fd, int otherdev) {
+	int len;
 	erase_info_t erase;
 	char *data = NULL;
 
-	if ((fd = open ((char *)DEVNAME (curdev), mode)) < 0) {
+	len = sizeof (environment.crc);
+
+	/* erase existing environment */
+	printf ("Erasing old environment %s:%lx\n", DEVNAME (otherdev), DEVOFFSET(otherdev));
+
+	erase.length = DEVESIZE (otherdev);
+	erase.start = DEVOFFSET (otherdev);
+	if (ioctl (fd, MEMERASE, &erase) != 0) {
+		fprintf (stderr, "MTD erase error on %s: %s\n",
+			 DEVNAME (otherdev),
+			 strerror (errno));
+		return (-1);
+	}
+
+	printf ("Writing environment to %s:%lx\n", DEVNAME (otherdev), DEVOFFSET(otherdev));
+
+	if ((data = malloc(DEVESIZE(otherdev))) == NULL) {
+		fprintf(stderr, "Cannot malloc %ld bytes: %s\n",
+			DEVESIZE(otherdev),
+			strerror (errno));
+		return (-1);
+	}
+
+	/* set environment data */
+	memcpy(data, &environment, len);
+	memcpy(data + len, environment.data, ENV_SIZE);
+	
+	/* write updated environment */
+	if (lseek (fd, DEVOFFSET (otherdev), SEEK_SET) == -1) {
+		fprintf (stderr,
+			 "seek error on %s: %s\n",
+			 DEVNAME (otherdev), strerror (errno));
+		return (-1);
+	}
+
+	if (write (fd, data, DEVESIZE(otherdev)) != DEVESIZE(otherdev)) {
+		fprintf (stderr,
+			 "MTD write error on %s: %s\n",
+			 DEVNAME (otherdev), strerror (errno));
+		return (-1);
+	}
+
+	free(data);
+
+	return 0;
+}
+
+
+static int flash_io_write ()
+{
+	int fd;
+
+	if ((fd = open ((char *)DEVNAME (curdev), O_RDWR)) < 0) {
+		fprintf (stderr,
+			"Can't open %s: %s\n",
+			DEVNAME (curdev), strerror (errno));
+		return (-1);
+	}
+
+	if (HaveRedundEnv) {
+
+		if (curdev == 0) {
+			flash_io_write_part (fd, 1);
+			flash_io_write_part (fd, 0);
+		}
+		else {
+			flash_io_write_part (fd, 0);
+			flash_io_write_part (fd, 1);
+		}
+	}
+	else {
+		flash_io_write_part (fd, 0);
+	}
+
+	if (close (fd)) {
+		fprintf (stderr,
+			"I/O error on %s: %s\n",
+			DEVNAME (curdev), strerror (errno));
+		return (-1);
+	}
+
+	/* everything ok */
+	return (0);
+}
+
+static int flash_io_read()
+{
+	int fd, rc, len;
+
+	//printf ("Reading environment to %s:%lx\n", DEVNAME (curdev), DEVOFFSET(curdev));
+
+	if ((fd = open ((char *)DEVNAME (curdev), O_RDONLY)) < 0) {
 		fprintf (stderr,
 			"Can't open %s: %s\n",
 			DEVNAME (curdev), strerror (errno));
@@ -500,114 +472,27 @@ static int flash_io (int mode)
 	}
 
 	len = sizeof (environment.crc);
-	if (HaveRedundEnv) {
-		len += sizeof (environment.flags);
+	//if (HaveRedundEnv) {
+	//	len += sizeof (environment.flags);
+	//}
+
+	if (lseek (fd, DEVOFFSET (curdev), SEEK_SET) == -1) {
+		fprintf (stderr,
+			 "seek error on %s: %s\n",
+			 DEVNAME (curdev), strerror (errno));
+		return (-1);
 	}
-
-	if (mode == O_RDWR) {
-		if (HaveRedundEnv) {
-			/* switch to next partition for writing */
-			otherdev = !curdev;
-			if ((fdr = open ((char *)DEVNAME (otherdev), mode)) < 0) {
-				fprintf (stderr,
-					"Can't open %s: %s\n",
-					DEVNAME (otherdev),
-					strerror (errno));
-				return (-1);
-			}
-		} else {
-			otherdev = curdev;
-			fdr = fd;
-		}
-
-		/* read existing environment */
-		pagesize = DEVESIZE(otherdev);
-		if ((data = malloc(pagesize)) == NULL) {
-			fprintf(stderr, "Cannot malloc %d bytes: %s\n",
-				pagesize,
-				strerror (errno));
-			return (-1);
-		}
-		if ((rc = read(fdr, data, pagesize)) != pagesize) {
-			fprintf (stderr,
-				 "read error on %s: %s\n",
-				 DEVNAME (otherdev),
-				 strerror (errno));
-			return (-1);
-		}
-
-		/* erase existing environment */
-		printf ("Erasing old environment...\n");
-
-		erase.length = DEVESIZE (otherdev);
-		erase.start = DEVOFFSET (otherdev);
-		if (ioctl (fdr, MEMERASE, &erase) != 0) {
-			fprintf (stderr, "MTD erase error on %s: %s\n",
-				DEVNAME (otherdev),
-				strerror (errno));
-			return (-1);
-		}
-
-		printf ("Done\n");
-
-		printf ("Writing environment to %s...\n", DEVNAME (otherdev));
-
-		/* set environment data */
-		memcpy(data, &environment, len);
-		memcpy(data + len, environment.data, ENV_SIZE);
-
-		/* write updated environment */
-		if (lseek (fdr, DEVOFFSET (otherdev), SEEK_SET) == -1) {
-			fprintf (stderr,
-				"seek error on %s: %s\n",
-				DEVNAME (otherdev), strerror (errno));
-			return (-1);
-		}
-
-		if (write (fdr, data, pagesize) != pagesize) {
-			fprintf (stderr,
-				 "MTD write error on %s: %s\n",
-				 DEVNAME (otherdev), strerror (errno));
-			return (-1);
-		}
-		
-		if (HaveRedundEnv) {
-			/* change flag on current active env partition */
-			if (lseek (fd, DEVOFFSET (curdev) + sizeof (ulong), SEEK_SET)
-				== -1) {
-				fprintf (stderr, "seek error on %s: %s\n",
-					DEVNAME (curdev), strerror (errno));
-				return (-1);
-			}
-			if (write (fd, &obsolete_flag, sizeof (obsolete_flag)) !=
-				sizeof (obsolete_flag)) {
-				fprintf (stderr,
-					"Write error on %s: %s\n",
-					DEVNAME (curdev), strerror (errno));
-				return (-1);
-			}
-		}
-		printf ("Done\n");
-	} else {
-
-		if (lseek (fd, DEVOFFSET (curdev), SEEK_SET) == -1) {
-			fprintf (stderr,
-				"seek error on %s: %s\n",
-				DEVNAME (curdev), strerror (errno));
-			return (-1);
-		}
-		if (read (fd, &environment, len) != len) {
-			fprintf (stderr,
-				"CRC read error on %s: %s\n",
-				DEVNAME (curdev), strerror (errno));
-			return (-1);
-		}
-		if ((rc = read (fd, environment.data, ENV_SIZE)) != ENV_SIZE) {
-			fprintf (stderr,
-				"Read error on %s: %s\n",
-				DEVNAME (curdev), strerror (errno));
-			return (-1);
-		}
+	if (read (fd, &environment, len) != len) {
+		fprintf (stderr,
+			 "CRC read error on %s: %s\n",
+			 DEVNAME (curdev), strerror (errno));
+		return (-1);
+	}
+	if ((rc = read (fd, environment.data, ENV_SIZE)) != ENV_SIZE) {
+		fprintf (stderr,
+			 "Read error on %s: %s\n",
+			 DEVNAME (curdev), strerror (errno));
+		return (-1);
 	}
 
 	if (close (fd)) {
@@ -647,7 +532,6 @@ static int env_init (void)
 	uchar *addr1;
 
 	int crc2, crc2_ok;
-	uchar flag1, flag2, *addr2;
 
 	if (parse_config ())		/* should fill envdevices */
 		return 1;
@@ -659,91 +543,49 @@ static int env_init (void)
 		return (errno);
 	}
 
-	/* read environment from FLASH to local buffer */
+	/* read environment block 0 from FLASH to local buffer */
 	environment.data = addr1;
 	curdev = 0;
-	if (flash_io (O_RDONLY)) {
+	if (flash_io_read()) {
 		return (errno);
 	}
 
 	crc1_ok = ((crc1 = crc32 (0, environment.data, ENV_SIZE))
 			   == environment.crc);
+
+	if (crc1_ok) {
+		return 0;
+	}
+
 	if (!HaveRedundEnv) {
 		if (!crc1_ok) {
 			fprintf (stderr,
 				"Warning: Bad CRC, using default environment\n");
 			memcpy(environment.data, default_environment, sizeof(default_environment));
 		}
-	} else {
-		flag1 = environment.flags;
-
-		curdev = 1;
-		if ((addr2 = calloc (1, ENV_SIZE)) == NULL) {
-			fprintf (stderr,
-				"Not enough memory for environment (%ld bytes)\n",
-				ENV_SIZE);
-			return (errno);
-		}
-		environment.data = addr2;
-
-		if (flash_io (O_RDONLY)) {
-			return (errno);
-		}
-
-		crc2_ok = ((crc2 = crc32 (0, environment.data, ENV_SIZE))
-				   == environment.crc);
-		flag2 = environment.flags;
-
-		if (crc1_ok && !crc2_ok) {
-			environment.data = addr1;
-			environment.flags = flag1;
-			environment.crc = crc1;
-			curdev = 0;
-			free (addr2);
-		} else if (!crc1_ok && crc2_ok) {
-			environment.data = addr2;
-			environment.flags = flag2;
-			environment.crc = crc2;
-			curdev = 1;
-			free (addr1);
-		} else if (!crc1_ok && !crc2_ok) {
-			fprintf (stderr,
-				"Warning: Bad CRC, using default environment\n");
-			memcpy(environment.data, default_environment, sizeof(default_environment));
-			curdev = 0;
-			free (addr1);
-		} else if (flag1 == active_flag && flag2 == obsolete_flag) {
-			environment.data = addr1;
-			environment.flags = flag1;
-			environment.crc = crc1;
-			curdev = 0;
-			free (addr2);
-		} else if (flag1 == obsolete_flag && flag2 == active_flag) {
-			environment.data = addr2;
-			environment.flags = flag2;
-			environment.crc = crc2;
-			curdev = 1;
-			free (addr1);
-		} else if (flag1 == flag2) {
-			environment.data = addr1;
-			environment.flags = flag1;
-			environment.crc = crc1;
-			curdev = 0;
-			free (addr2);
-		} else if (flag1 == 0xFF) {
-			environment.data = addr1;
-			environment.flags = flag1;
-			environment.crc = crc1;
-			curdev = 0;
-			free (addr2);
-		} else if (flag2 == 0xFF) {
-			environment.data = addr2;
-			environment.flags = flag2;
-			environment.crc = crc2;
-			curdev = 1;
-			free (addr1);
-		}
 	}
+
+	memset(addr1, 0, ENV_SIZE);
+
+	/* read environment block 1 from FLASH to local buffer */
+	curdev = 1;
+	if (flash_io_read()) {
+		return (errno);
+	}
+
+	crc2_ok = ((crc2 = crc32 (0, environment.data, ENV_SIZE))
+		   == environment.crc);
+
+	if (crc2_ok) {
+		return (0);
+	}
+
+	/* default environment */
+	fprintf (stderr,
+		 "Warning: Bad CRC, using default environment\n");
+	memcpy(environment.data, default_environment, sizeof(default_environment));
+	curdev = 0;
+
 	return (0);
 }
 
@@ -764,8 +606,9 @@ static int parse_config ()
 	DEVOFFSET (0) = DEVICE1_OFFSET;
 	ENVSIZE (0) = ENV1_SIZE;
 	DEVESIZE (0) = DEVICE1_ESIZE;
-#ifdef HAVE_REDUND
-	strcpy (DEVNAME (1), DEVICE2_NAME);
+
+#if defined HAVE_REDUND
+	strcpy ((char *)DEVNAME (1), (char *)DEVICE2_NAME);
 	DEVOFFSET (1) = DEVICE2_OFFSET;
 	ENVSIZE (1) = ENV2_SIZE;
 	DEVESIZE (1) = DEVICE2_ESIZE;
