@@ -274,22 +274,42 @@ int  env_init(void)
 	/* Nothing */
 #else
 
+	/* Standard environment */
 #if defined(CONFIG_S3C2413)
 	nandll_read_blocks(env_ptr, CFG_ENV_NAND_BLOCK, CFG_ENV_SIZE);
 #else
 	nandll_read_blocks(env_ptr, CFG_ENV_NAND_BLOCK*NAND_BLOCK_SIZE, CFG_ENV_SIZE);
-#endif
 #endif
 
 	if (crc32(0, env_ptr->data, ENV_SIZE) == env_ptr->crc) {
 		gd->env_addr  = (ulong)&(env_ptr->data);
 		gd->env_valid = 1;
 		debug("env is valid.\n");
-	} else {
-		gd->env_addr  = (ulong)&default_environment[0];
-		gd->env_valid = 0;
-		debug("env is invalid.\n");
+		return (0);
 	}
+
+
+	/* Redundant environment */
+#ifdef CFG_ENV_NAND_BLOCK_REDUND
+#if defined(CONFIG_S3C2413)
+	nandll_read_blocks(env_ptr, CFG_ENV_NAND_BLOCK_REDUND, CFG_ENV_SIZE);
+#else
+	nandll_read_blocks(env_ptr, CFG_ENV_NAND_BLOCK_REDUND*NAND_BLOCK_SIZE, CFG_ENV_SIZE);
+#endif
+
+	if (crc32(0, env_ptr->data, ENV_SIZE) == env_ptr->crc) {
+		gd->env_addr  = (ulong)&(env_ptr->data);
+		gd->env_valid = 2;
+		debug("env is valid.\n");
+		return (0);
+	}
+#endif 
+#endif
+
+	/* Default environment */
+	gd->env_addr  = (ulong)&default_environment[0];
+	gd->env_valid = 0;
+	debug("env is invalid.\n");
 
 	return (0);
 }
@@ -298,7 +318,7 @@ int  env_init(void)
 
 #if defined( CONFIG_S3C24A0A_USE_NAND ) || defined (CONFIG_S3C2440A_USE_NAND) || defined( CONFIG_S3C2410_USE_NAND ) || defined (CONFIG_S3C2413_USE_NAND)
 extern void env_crc_update(void);
-extern int s3c24x0_nand_write(uint, uint, uint);
+extern int s3c24x0_nand_write(uint targetBlock,uint targetSize, uint srcAddress, int flag, int yaffs_option);
 int saveenv(void)
 {
         DECLARE_GLOBAL_DATA_PTR;
@@ -306,8 +326,23 @@ int saveenv(void)
         /* update crc */
         env_crc_update ();
 
+#ifndef CFG_ENV_NAND_BLOCK_REDUND
         /* save env to nand flash */
-        s3c24x0_nand_write( CFG_ENV_NAND_BLOCK, CFG_ENV_SIZE, (uint)(env_ptr));
+        s3c24x0_nand_write( CFG_ENV_NAND_BLOCK, CFG_ENV_SIZE, (uint)(env_ptr), 0, 0);
+
+
+#else // CFG_ENV_NAND_BLOCK_REDUND
+	if (gd->env_valid == 1) {
+		s3c24x0_nand_write( CFG_ENV_NAND_BLOCK_REDUND, CFG_ENV_SIZE, (uint)(env_ptr), 0, 0);
+		s3c24x0_nand_write( CFG_ENV_NAND_BLOCK, CFG_ENV_SIZE, (uint)(env_ptr), 0, 0);
+	}
+	else {
+		s3c24x0_nand_write( CFG_ENV_NAND_BLOCK, CFG_ENV_SIZE, (uint)(env_ptr), 0, 0);
+		s3c24x0_nand_write( CFG_ENV_NAND_BLOCK_REDUND, CFG_ENV_SIZE, (uint)(env_ptr), 0, 0);
+	}
+#endif // CFG_ENV_NAND_BLOCK_REDUND
+
+	return 0;
 }
 
 

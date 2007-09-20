@@ -12,7 +12,8 @@
 #ifndef __SMDK2413_NAND_H
 #define __SMDK2413_NAND_H
 
-#define CFG_ENV_NAND_BLOCK     10
+#define CFG_ENV_NAND_BLOCK     	      10
+#define CFG_ENV_NAND_BLOCK_REDUND     11
 
 #define NAND_OOB_SIZE           (16)
 #define NAND_PAGES_IN_BLOCK     (32)

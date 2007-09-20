@@ -287,6 +287,31 @@ int s3c24x0_nand_write(uint targetBlock,uint targetSize, uint srcAddress, int fl
 }
 
 
+int do_nandbb(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
+{
+	int startblk, numblks, i;
+
+	if ( argc != 3 ){
+		printf ("Usage:\n%s\n", cmdtp->usage);
+		return 1;
+	}
+	startblk = simple_strtoul(argv[1], NULL, 16);
+	numblks  = simple_strtoul(argv[2], NULL, 16);
+	printf("StartBlock %d (0x%x) : NumBlock %d (0x%x) \n",startblk,startblk,numblks, numblks);
+
+	for (i=startblk; i<startblk+numblks; i++) {
+		if(NF_IsBadBlock(i)) {	// 1:bad 0:good
+			printf("B");
+		}
+		else {
+			printf(".");
+		}
+		if (!( i % 16 )) printf("\n");
+	}
+	printf("\n");
+}
+
+
 static int NF_CheckBadNande(u32 block);
 int do_nande    (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 {
@@ -422,6 +447,13 @@ int do_nandr    (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	s3c24x0_nand_read(startblk,size,memadr);
 	return 0;
 }
+
+U_BOOT_CMD(
+	nandbb,	4,	1,	do_nandbb,
+       "nandbb HEX: targetblock numblocks \n",
+       "\n	- SMDK24X0 NAND Flash Bad Block Check\n"	\
+       "nandbb targetblock numblocks \n"	\
+);
 
 U_BOOT_CMD(
 	nandw,	4,	1,	do_nandw,
