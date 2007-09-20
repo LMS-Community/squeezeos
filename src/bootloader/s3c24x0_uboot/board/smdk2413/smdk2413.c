@@ -77,12 +77,6 @@ static void ref_port(void)
 	GPACON &= ~(0x1f<<17);
     GPACON |= (0x1f<<17);
 #endif
-
-
-    	GPGCON	= (GPGCON&0xfffffcff)|0x00000100;		//yamu board port G4 lcd power on 
-    	GPGDN	|= (0x1<<4); // pull-down disable	
-    	GPGDAT = (GPGDAT & ~(0x1<<4)) | ((1 & 0x1)<<4) ;	//port G4
-
 }
 
 /*

@@ -339,6 +339,31 @@ void start_armboot (void)
 	drv_vfd_init();
 #endif
 
+	/* enable keypad backlights with PWM timer */
+#define MAX_BRIGHTNESS 0xFFFF
+	CLKCON |= (1 << 17); // Enable PWM timer block
+
+	GPBCON &= ~(0x3 << 4);
+	GPBCON |= (0x2 << 4); // GPB2 = TOUT2
+
+	TCFG0 &= ~(255 << 8);
+	TCFG0 |= ((6 - 1) / 2) << 8; // Same prescaler that is used by linux
+
+	TCFG1 &= ~(0xF << 8);
+	TCFG1 |= (0x0 << 8); // PCLK divide 1/2
+
+	TCON |= (1 << 13); // Manual update
+
+	TCNTB2 = MAX_BRIGHTNESS;
+	TCMPB2 = (MAX_BRIGHTNESS / 4); // quarter brightness
+
+	TCON |= (1 << 15); // Auto reload
+	TCON |= (1 << 14); // Output inverted
+	TCON |= (1 << 12); // Start timer
+
+	TCON &= ~(1 << 13); // Turn off manual update
+
+
 	/* IP Address */
 	bd_data.bi_ip_addr = getenv_IPaddr ("ipaddr");
 
@@ -469,28 +494,24 @@ void hang (void)
 int do_blink (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 {
 	unsigned long delay;
+	unsigned int val;
 	
 	if (argc < 2) {
-		delay = 1;
+		delay = 500;
 	}
 	else {
 		delay = simple_strtoul(argv[1], NULL, 10);
 	}
 
-	GPBDAT &= ~(1<<2); // LEDs on
-	
-	while (delay) {
-		int i;
-		for (i=0; i<1000; ++i) {
-			if (ctrlc ()) {
-				return (-1);
-			}
-			udelay (1000);
-		}
+	val = TCMPB2;
+	TCMPB2 = (MAX_BRIGHTNESS / 8); // dim
+
+	while (delay && !ctrlc()) {
+		udelay (1000);
 		--delay;
 	}
 
-	GPBDAT |= (1<<2); // LEDs off
+	TCMPB2 = val; // restore brightness
 }
 
 
