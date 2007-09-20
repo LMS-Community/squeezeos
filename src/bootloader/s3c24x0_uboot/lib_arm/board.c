@@ -504,7 +504,7 @@ int do_blink (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	}
 
 	val = TCMPB2;
-	TCMPB2 = (MAX_BRIGHTNESS / 8); // dim
+	TCMPB2 = 0; // off
 
 	while (delay && !ctrlc()) {
 		udelay (1000);
