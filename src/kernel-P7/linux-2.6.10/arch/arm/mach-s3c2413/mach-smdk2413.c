@@ -53,7 +53,7 @@
  *
  * 0x00000000-0x00028000 : uboot
  * 0x00028000-0x0002c000 : uboot env
- * 0x0002c000-0x00030000 : spare
+ * 0x0002c000-0x00030000 : uboot env
  * 0x00030000-0x00200000 : zimage A
  * 0x00200000-0x01600000 : cramfs A
  * 0x01600000-0x017d0000 : zimage B
@@ -106,7 +106,7 @@ static struct mtd_partition smdk2413_imageA_nand_part[] = {
         {
                 .name           = "env",
                 .offset         = (160*SZ_1K),
-                .size           = (16*SZ_1K),
+                .size           = 2 * (16*SZ_1K),
         },
 
 	/* upgrade images */
@@ -168,7 +168,7 @@ static struct mtd_partition smdk2413_imageB_nand_part[] = {
         {
                 .name           = "env",
                 .offset         = (160*SZ_1K),
-                .size           = (16*SZ_1K),
+                .size           = 2 * (16*SZ_1K),
         },
 
 	/* upgrade images */

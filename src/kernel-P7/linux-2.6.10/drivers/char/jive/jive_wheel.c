@@ -35,7 +35,7 @@
 #include <asm/io.h>
 
 
-#define PULSES_PER_DETENT 3
+#define PULSES_PER_DETENT 2
 
 static int pos;
 static int lastAB;
@@ -52,7 +52,7 @@ static irqreturn_t Wheel_CWA(int irq, void *dev_id, struct pt_regs *regs) {
 
 	// XXXX without this delay we miss some key up events
 	// XXXX FIXME experiment with different values here
-	udelay(10);
+	udelay(1);
 
 	// read A and B
 	val = __raw_readl(S3C2413_GPGDAT);
