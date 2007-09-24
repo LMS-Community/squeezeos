@@ -65,19 +65,6 @@ _armboot_start:
 
 _start_armboot: 
 		.word start_armboot
-
-#ifdef CONFIG_PM
-WakeupStart:
-	@Go ...
-	ldr r0, GPRAM0_ADDR
-	ldr r1, [r0]
-	mov pc, r1
-	nop
-	nop
-	
-	1:  b   1b
-#endif
-	
 /*
  * These are defined in the board-specific linker script.
  */
@@ -210,16 +197,60 @@ reset:
 	bl  InitGPIO
 	bl	PreInit
 	bl	InitClock
- 	bl	InitMemCtl
-@ 	bl	InitDDRCtl
-#ifdef CONFIG_PM
-	@ Check if this is a wake-up from sleep
-	ldr     r0, ALIVECON_ADDR
-	ldr     r1, [r0]
-	tst r1, #(1<<1)
-	bne     WakeupStart
-#endif
 	bl	InitUART
+ 	bl	InitMemCtl
+
+#if 1
+	bl	StartMemCtl
+	
+	/* check whether we are recovering from sleep mode. */
+
+	mov	r2, #0x4c000000
+
+	/* read the power configuration register and check the
+	 * contents to see if we where sent to sleep. */
+	ldr	r0, [ r2, #0x24 ]
+	and	r0, r0, #0xc0
+	teq	r0, #0xc0
+	bne	power_on
+	
+	/* second check, ensure the inform register is the correct
+	 * value for the magic that should have been placed in it
+	 * over sleep. */
+	
+	ldr	r0, [ r2, #0x70 ]
+	str	r0, [ r2, #0x78 ]
+	ldr	r3, =0x2bed
+	teq	r0, r3
+	bne	power_on
+
+	/* validate that we are resuming from SDRAM, since this
+	 * where the code is likely to be residing. */
+	
+	ldr	r0, [ r2, #0x74 ]
+	subs	r2, r0, #0x30000000
+	cmp	r2, #0x10000000
+	bcs	power_on
+
+	/* validate resume kernel marker, to ensure that we are
+	 * resuming to an valid image. */
+	
+	ldr	r2, [ r0, # -4 ]
+	ldr	r3, = 0x2bedf00d
+	teq	r2, r3
+	bne	power_on
+
+	/* jump into the image to resume here. */
+	mov	pc, r0
+
+	/* reach here if we failed to resume, continue to load uboot */
+power_on:
+#endif
+	
+	bl	StartMemCtl
+	
+@ 	bl	InitDDRCtl
+
 
 #ifdef CONFIG_DEBUG_LL
 	/* for debugging */
@@ -335,18 +366,21 @@ InitMemCtl:
 	@EBI Setting
 	ldr	r0, =SDRAM_BASE_ADDR
 	orr	r0, r0, #0x800000
-	mov r1, #0xff
-	str r1, [r0, #oBANK_CFG]
+	mov	r1, #0xff
+	str	r1, [r0, #oBANK_CFG]
 	
 	ldr	r0, =SDRAM_BASE_ADDR
-	adrl	r1,	 SDRAMDATA
+	adrl	r1,  SDRAMDATA
 	ldmia   r1!, {r2-r5}
-    stmia   r0!, {r2-r5}
+	stmia   r0!, {r2-r5}
 
+	mov	pc, r14
+
+StartMemCtl:
 	@ Step 1: issue precharge all(PALL) command
 	ldr	r0, =SDRAM_BASE_ADDR
 	ldr	r1, [r0, #0x4]	
-	bic r1,r1, #0x3
+	bic	r1,r1, #0x3
 	mov	r1, #0x1
 	str	r1, [r0, #oBANKCON1]
 
@@ -703,12 +737,3 @@ UBRDIV_VAL:     		.long   ((UART_REF_CLK / (CONFIG_SERIAL_DEFAULT_BAUDRATE * 16)
 HD_CLKDIV:				.long	CLKDIV_VAL
 HD_MPLLCON:				.long	MPLL_VAL
 HD_UPLLCON:				.long	UPLL_VAL
-
-#ifdef CONFIG_PM
-.align 4
-ALIVECON_ADDR:
-	.long 0x560000BC
-
-GPRAM0_ADDR:
-	.long 0x560000C8
-#endif

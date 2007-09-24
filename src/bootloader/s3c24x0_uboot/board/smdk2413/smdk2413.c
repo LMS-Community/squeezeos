@@ -103,8 +103,8 @@ int board_init(void)
 	delay(4000);
 	ref_port();
 
-	/* arch number of SMDK2440-Board */
-	gd->bd->bi_arch_number = 193;
+	/* arch number of Jive Board */
+	gd->bd->bi_arch_number = 1490;
 
 	/* adress of boot parameters */
 	gd->bd->bi_boot_params = 0x30000100;

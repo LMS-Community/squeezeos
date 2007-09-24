@@ -136,7 +136,7 @@
 
 /******    KERNEL PARAMETER *************/
 #define CFG_KERNEL_BOOT       0x30008000
-#define CFG_MACH_ID           887
+#define CFG_MACH_ID           1490
 /****************************************/
 
 /*
