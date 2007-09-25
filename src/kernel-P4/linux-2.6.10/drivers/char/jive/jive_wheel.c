@@ -120,13 +120,13 @@ static irqreturn_t Wheel_CWA(int irq, void *dev_id, struct pt_regs *regs) {
 	}
 
 	if (pos > PULSES_PER_DETENT) {
-		input_report_rel(&wheel_dev, REL_Y, 1);
+		input_report_rel(&wheel_dev, REL_WHEEL, 1);
 		input_sync(&wheel_dev);
 		pos = 0;
 	}
 
 	if (pos < -PULSES_PER_DETENT) {
-		input_report_rel(&wheel_dev, REL_Y, -1);
+		input_report_rel(&wheel_dev, REL_WHEEL, -1);
 		input_sync(&wheel_dev);
 		pos = 0;
 	}
@@ -163,9 +163,8 @@ static int __init Wheel_init(void)
 {
 	// we need to register at least one button and two relative axes 
 	// to emulate a mouse
-	wheel_dev.evbit[0] = BIT(EV_KEY) | BIT(EV_REL);
-	wheel_dev.keybit[LONG(BTN_MOUSE)] = BIT(BTN_LEFT) | BIT(BTN_RIGHT);
-	wheel_dev.relbit[0] = BIT(REL_X) | BIT(REL_Y);
+	wheel_dev.evbit[0] = BIT(EV_REL);
+	wheel_dev.relbit[0] = BIT(REL_WHEEL);
 	wheel_dev.name = "Wheel";
 
 	input_register_device(&wheel_dev);
