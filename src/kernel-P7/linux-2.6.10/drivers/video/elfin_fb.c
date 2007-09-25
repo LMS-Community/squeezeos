@@ -287,6 +287,11 @@ static int s3c24xxfb_pan_display(struct fb_var_screeninfo *var,
 	local_irq_restore(flags);
 
 
+#if 0
+	/* The Jive application processes events after the framebuffer
+	 * has been flipped, so lets not delay here.
+	 */
+
 	/* Wait until the start of the next frame */
 	ret = s3c24xxfb_enable_irq();
 	if (ret) {
@@ -302,6 +307,7 @@ static int s3c24xxfb_pan_display(struct fb_var_screeninfo *var,
 	if (ret == 0) {
 		return -ETIMEDOUT;
 	}
+#endif
 
 	return 0;
 }
