@@ -4,10 +4,14 @@ SRCDIR = $(realpath ${PWD}/..)
 TOPDIR = $(dir ${SRCDIR})
 
 export BUILDDIR=$(TOPDIR)build
+export DEBUG_BUILDDIR=$(TOPDIR)build-debug
 export PREFIX=${BUILDDIR}/usr
 
 export CFLAGS=-I${PREFIX}/include -Os
 export LDFLAGS=-L${PREFIX}/lib
+
+export DEBUG_CFLAGS=-I${DEBUG_BUILDDIR}/usr/include ${CFLAGS}
+export DEBUG_LDFLAGS=-L${DEBUG_BUILDDIR}/usr/lib ${LDFLAGS}
 
 TARGET=arm-9tdmi-linux-gnu
 
@@ -20,7 +24,7 @@ export HOST=${TARGET}
 LIB_DIR=$(TOPDIR)/toolchain/gcc-4.1.1-glibc-2.3.2/$(TARGET)/$(TARGET)/lib
 
 
-.PHONY: all clean filesystem busybox strace oprofile popt bfd libiberty jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl wavplay
+.PHONY: all debug clean filesystem busybox strace oprofile oprofileui-arm popt bfd libiberty jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl wavplay glib
 
 
 #
@@ -30,9 +34,14 @@ all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbea
 
 
 # debugging targets
-debug: strace popt bfd libiberty oprofile
-	install ${LIB_DIR}/libstdc++.* ${PREFIX}/lib
-	install ${LIB_DIR}/libgcc_s.* ${PREFIX}/lib
+debug: #bfd libiberty opcodes binutils popt strace oprofile
+	install ${LIB_DIR}/libstdc++.so ${DEBUG_BUILDDIR}/usr/lib
+	cd ${DEBUG_BUILDDIR}/usr/lib; ln -sf libstdc++.so libstdc++.so.6
+	cd ${DEBUG_BUILDDIR}/usr/lib; ln -sf libstdc++.so libstdc++.so.6.0.8
+	install ${LIB_DIR}/librt.so ${DEBUG_BUILDDIR}/usr/lib
+	cd ${DEBUG_BUILDDIR}/usr/lib; ln -sf librt.so librt.so.1
+	install ${LIB_DIR}/libgcc_s.so ${DEBUG_BUILDDIR}/usr/lib
+	cd ${DEBUG_BUILDDIR}/usr/lib; ln -sf libgcc_s.so libgcc_s.so.1
 
 
 # mtd-utils
@@ -55,22 +64,47 @@ strace-4.5.14/Makefile:
 	cd strace-4.5.14; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
 
 strace: strace-4.5.14/Makefile
-	cd strace-4.5.14; make; make DESTDIR=${BUILDDIR} install
+	cd strace-4.5.14; make; make DESTDIR=${DEBUG_BUILDDIR} install
 
 # gdb
 gdb-6.6/Makefile:
 	cd gdb-6.6; ./configure --host=${TARGET} --prefix=/usr
 
 gdb: gdb-6.6/Makefile
-	cd gdb-6.6; make; make DESTDIR=${BUILDDIR} install
+	cd gdb-6.6; make; make DESTDIR=${DEBUG_BUILDDIR} install
+
+
+# glib
+glib-2.12.13-arm/Makefile:
+	if test ! -d glib-2.12.13-arm; then mkdir glib-2.12.13-arm; fi
+	cd glib-2.12.13-arm; ../glib-2.12.13/configure --cache-file=../glib-2.12.13/arm.cache --host=${TARGET} --target=${TARGET} --prefix=/usr
+
+glib: glib-2.12.13-arm/Makefile
+	cd glib-2.12.13-arm; make && make DESTDIR=${BUILDDIR} install
 
 
 # oprofile
-oprofile-0.9.2/Makefile:
-	cd oprofile-0.9.2; ./configure --with-kernel-support --with-binutils=${PREFIX} --host=${TARGET} --target=${TARGET} --prefix=/usr
+oprofile-0.9.3/Makefile:
+	cd oprofile-0.9.3; CFLAGS="${DEBUG_CFLAGS}" CXXFLAGS="${DEBUG_CFLAGS}" LDFLAGS="${DEBUG_LDFLAGS}" ./configure --with-kernel-support --with-binutils=${PREFIX} --host=${TARGET} --target=${TARGET} --prefix=/usr
 
-oprofile: oprofile-0.9.2/Makefile
-	cd oprofile-0.9.2; make; make DESTDIR=${BUILDDIR} install
+oprofile: oprofile-0.9.3/Makefile
+	cd oprofile-0.9.3; make; make DESTDIR=${DEBUG_BUILDDIR} install
+
+
+# oprofileui
+oprofileui-arm/Makefile:
+	if test ! -d oprofileui-arm; then mkdir oprofileui-arm; fi
+	cd oprofileui-arm; ../oprofileui/configure --enable-server --disable-client --host=${TARGET} --target=${TARGET} --prefix=/usr
+
+oprofileui-arm: oprofileui-arm/Makefile
+	cd oprofileui-arm; make && make DESTDIR=${DEBUG_BUILDDIR} install
+
+oprofileui-host/Makefile:
+	if test ! -d oprofileui-host; then mkdir oprofileui-host; fi
+	cd oprofileui-host; CC=gcc ../oprofileui/configure --disable-server --enable-client
+
+oprofileui-host: oprofileui-host/Makefile
+	cd oprofileui-host; make
 
 
 # popt
@@ -86,13 +120,25 @@ binutils-2.17/bfd/Makefile:
 	cd binutils-2.17/bfd; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
 
 bfd: binutils-2.17/bfd/Makefile
-	cd binutils-2.17/bfd; make; make DESTDIR=${BUILDDIR} install
+	cd binutils-2.17/bfd; make; make DESTDIR=${DEBUG_BUILDDIR} install
 
 binutils-2.17/libiberty/Makefile:
 	cd binutils-2.17/libiberty; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
 
 libiberty: binutils-2.17/libiberty/Makefile
-	cd binutils-2.17/libiberty; make; make DESTDIR=${BUILDDIR} install
+	cd binutils-2.17/libiberty; make; make DESTDIR=${DEBUG_BUILDDIR} install
+
+binutils-2.17/opcodes/Makefile:
+	cd binutils-2.17/opcodes; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
+
+opcodes: binutils-2.17/opcodes/Makefile
+	cd binutils-2.17/opcodes; make; make DESTDIR=${DEBUG_BUILDDIR} install
+
+binutils-2.17/binutils/Makefile:
+	cd binutils-2.17/binutils; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
+
+binutils: binutils-2.17/binutils/Makefile
+	cd binutils-2.17/binutils; make; make DESTDIR=${DEBUG_BUILDDIR} install
 
 
 # jivetest
@@ -178,7 +224,7 @@ wavplay:
 clean:
 	-cd busybox_1_7_stable; make clean
 	-cd strace-4.5.14; make distclean
-	-cd oprofile-0.9.2; make distclean
+	-cd oprofile-0.9.3; make distclean
 	-cd popt-1.7; make distclean
 	-cd binutils-2.17/bfd; make distclean
 	-cd binutils-2.17/libiberty; make distclean

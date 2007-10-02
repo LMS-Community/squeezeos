@@ -24,9 +24,9 @@ KERNEL_SRC=${TOPDIR}/src/kernel-P7/linux-2.6.10
 BOOTLOADER_SRC=${TOPDIR}/src/bootloader/s3c24x0_uboot
 
 
-.PHONY: all bootloader fw_env kernel kernel-P4 kernel-P7 system jive image clean distclean
+.PHONY: all bootloader fw_env kernel kernel-P4 kernel-P7 system debug jive image clean distclean
 
-all: bootloader system kernel fw_env jive image
+all: bootloader system debug kernel fw_env jive image
 
 
 #
@@ -65,6 +65,9 @@ kernel-P7: $(IMAGEDIR)
 system:
 	cd system; ${MAKE} -f Makefile
 
+debug:
+	cd system; ${MAKE} -f Makefile debug
+
 
 #
 # Jive Apps
@@ -85,6 +88,8 @@ image: ${IMAGEDIR}
 	mkdir -p ${STAGE}
 	cd ${BUILDDIR}; find * -type d -exec mkdir ${STAGE}/{} \;
 	cd ${BUILDDIR}; find * \( -name man -or -name include \) -prune -or \! \( -name *.a -or -name *.la -or -type d \) -exec cp -rp {} ${STAGE}/{} \;
+	#sudo mknod ${STAGE}/dev/console c 5 1
+	#sudo mknod ${STAGE}/dev/ttySAC0 c 204 64
 	# Create cramfs
 	mkcramfs ${STAGE} ${IMAGEDIR}/root.cramfs
 	# Create upgrade.md5
