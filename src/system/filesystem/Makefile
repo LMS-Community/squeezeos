@@ -2,7 +2,7 @@ ARCH=arm-9tdmi-linux-gnu
 LIB_DIR=../../../toolchain/gcc-4.1.1-glibc-2.3.2/$(ARCH)/$(ARCH)/lib
 
 install:
-	mkdir -p ${PREFIX} ${PREFIX}/dev ${PREFIX}/etc ${PREFIX}/etc/init.d ${PREFIX}/bin ${PREFIX}/lib ${PREFIX}/proc ${PREFIX}/mnt ${PREFIX}/mnt/yaffs ${PREFIX}/mnt/overlay ${PREFIX}/mnt/mmc ${PREFIX}/tmp ${PREFIX}/var ${PREFIX}/var/shm ${PREFIX}/var/log ${PREFIX}/var/run ${PREFIX}/etc/network ${PREFIX}/etc/dropbear ${PREFIX}/usr/lib ${PREFIX}/usr/bin ${PREFIX}/root
+	mkdir -p ${PREFIX} ${PREFIX}/dev ${PREFIX}/etc ${PREFIX}/etc/init.d ${PREFIX}/bin ${PREFIX}/lib ${PREFIX}/proc ${PREFIX}/sys ${PREFIX}/mnt ${PREFIX}/mnt/yaffs ${PREFIX}/mnt/overlay ${PREFIX}/mnt/mmc ${PREFIX}/tmp ${PREFIX}/var ${PREFIX}/var/shm ${PREFIX}/var/log ${PREFIX}/var/run ${PREFIX}/etc/network ${PREFIX}/etc/dropbear ${PREFIX}/usr/lib ${PREFIX}/usr/bin ${PREFIX}/root
 	chmod 755 . ${PREFIX}/dev ${PREFIX}/etc ${PREFIX}/etc/init.d ${PREFIX}/bin ${PREFIX}/proc ${PREFIX}/mnt ${PREFIX}/tmp ${PREFIX}/var ${PREFIX}/var/shm
 	mkdir -p ${PREFIX}/etc/dropbear
 	install linuxrc ${PREFIX}
@@ -20,20 +20,48 @@ install:
 	install etc/passwd ${PREFIX}/etc
 	install etc/shadow ${PREFIX}/etc
 	install etc/group ${PREFIX}/etc
-	install ${LIB_DIR}/ld-*.so ${PREFIX}/lib
-	install ${LIB_DIR}/ld-linux.so* ${PREFIX}/lib
-	install ${LIB_DIR}/libc.* ${PREFIX}/lib
-	install ${LIB_DIR}/libm.* ${PREFIX}/lib
-	install ${LIB_DIR}/libdl.* ${PREFIX}/lib
-	install ${LIB_DIR}/libnss_compat.* ${PREFIX}/lib
-	install ${LIB_DIR}/libnss_dns.* ${PREFIX}/lib
-	install ${LIB_DIR}/libnss_files.* ${PREFIX}/lib
-	install ${LIB_DIR}/libresolv.* ${PREFIX}/lib
-	install ${LIB_DIR}/libpthread.* ${PREFIX}/lib
-	install ${LIB_DIR}/libutil.* ${PREFIX}/lib
-	install ${LIB_DIR}/libnsl.* ${PREFIX}/lib
-	install ${LIB_DIR}/libcrypt.* ${PREFIX}/lib
-	install ${LIB_DIR}/libcrypt.* ${PREFIX}/lib
+	cd ${PREFIX}/etc; ln -sf /proc/mounts mtab
+	#install ${LIB_DIR}/ld-*.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/ld-linux.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libcrypt.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libc.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libdl.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libm.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libnsl.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libnss_compat.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libnss_dns.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libnss_files.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libpthread.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libresolv.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libstdc++.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libutil.so* ${PREFIX}/lib
+	#install ${LIB_DIR}/libgcc_s.so* ${PREFIX}/lib
+	install ${LIB_DIR}/ld-2.3.2.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf ld-2.3.2.so ld-linux.so.2
+	install ${LIB_DIR}/libcrypt.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libcrypt.so libcrypt.so.1
+	install ${LIB_DIR}/libc.so ${PREFIX}/lib
+	install ${LIB_DIR}/libc.so.6 ${PREFIX}/lib
+	install ${LIB_DIR}/libdl.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libdl.so libdl.so.2
+	install ${LIB_DIR}/libm.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libm.so libm.so.6
+	install ${LIB_DIR}/libnsl.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libnsl.so libnsl.so.1
+	install ${LIB_DIR}/libnss_compat.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libnss_compat.so libnss_compat.so.2
+	install ${LIB_DIR}/libnss_dns.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libnss_dns.so libnss_dns.so.2
+	install ${LIB_DIR}/libnss_files.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libnss_files.so libnss_files.so.2
+	install ${LIB_DIR}/libpthread.so ${PREFIX}/lib
+	install ${LIB_DIR}/libpthread.so.0 ${PREFIX}/lib
+	install ${LIB_DIR}/libresolv.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libresolv.so libresolv.so.2
+	install ${LIB_DIR}/libutil.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libutil.so libutil.so.1
+	install ${LIB_DIR}/libgcc_s.so ${PREFIX}/lib
+	cd ${PREFIX}/lib; ln -sf libgcc_s.so libgcc_s.so.1
 	install etc/dropbear/dropbear_dss_host_key ${PREFIX}/etc/dropbear
 	install etc/dropbear/dropbear_rsa_host_key ${PREFIX}/etc/dropbear
 	install etc/dropbear/README ${PREFIX}/etc/dropbear
