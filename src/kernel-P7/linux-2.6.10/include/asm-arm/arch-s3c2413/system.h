@@ -30,25 +30,16 @@ void (*s3c24xx_idle)(void);
 
 void s3c24xx_default_idle(void)
 {
-	unsigned long reg = S3C2413_PWRCFG;
 	unsigned long tmp;
-	int i;
 
-	/* idle the system by using the idle mode which will wait for an
-	 * interrupt to happen before restarting the system.
-	 */
+	/* ensure our idle mode is to go to idle */
 
-	/* Warning: going into idle state upsets jtag scanning */
+	tmp = __raw_readl(S3C2413_PWRCFG);
+	tmp &= ~S3C2413_PWRCFG_STANDBYWFI_MASK;
+	tmp |= S3C2413_PWRCFG_STANDBYWFI_IDLE;
+	__raw_writel(tmp, S3C2413_PWRCFG);
 
-	__raw_writel(__raw_readl(reg) | S3C2413_PWRCFG_STANDBYWFI_IDLE , reg);
-
-	/* the samsung port seems to do a loop and then unset idle.. */
-	for (i = 0; i < 50; i++) {
-		tmp += __raw_readl(reg); /* ensure loop not optimised out */
-	}
-
-	/* this bit is not cleared on re-start... */
-	__raw_writel(__raw_readl(reg) & ~( S3C2413_PWRCFG_STANDBYWFI_IDLE ), reg);
+	cpu_do_idle();
 }
 
 static void arch_idle(void)
