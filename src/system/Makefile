@@ -34,7 +34,7 @@ all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbea
 
 
 # debugging targets
-debug: #bfd libiberty opcodes binutils popt strace oprofile
+debug: bfd libiberty opcodes binutils popt strace oprofile
 	install ${LIB_DIR}/libstdc++.so ${DEBUG_BUILDDIR}/usr/lib
 	cd ${DEBUG_BUILDDIR}/usr/lib; ln -sf libstdc++.so libstdc++.so.6
 	cd ${DEBUG_BUILDDIR}/usr/lib; ln -sf libstdc++.so libstdc++.so.6.0.8

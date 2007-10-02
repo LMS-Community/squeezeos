@@ -21,21 +21,6 @@ install:
 	install etc/shadow ${PREFIX}/etc
 	install etc/group ${PREFIX}/etc
 	cd ${PREFIX}/etc; ln -sf /proc/mounts mtab
-	#install ${LIB_DIR}/ld-*.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/ld-linux.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libcrypt.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libc.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libdl.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libm.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libnsl.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libnss_compat.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libnss_dns.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libnss_files.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libpthread.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libresolv.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libstdc++.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libutil.so* ${PREFIX}/lib
-	#install ${LIB_DIR}/libgcc_s.so* ${PREFIX}/lib
 	install ${LIB_DIR}/ld-2.3.2.so ${PREFIX}/lib
 	cd ${PREFIX}/lib; ln -sf ld-2.3.2.so ld-linux.so.2
 	install ${LIB_DIR}/libcrypt.so ${PREFIX}/lib
