@@ -1,0 +1,153 @@
+OProfileUI
+~~~~~~~~~~
+
+OProfileUI is a user-interface both for controlling the capture of OProfile
+profiles from remote devices and for displaying the profile in a graphical
+manner.
+
+There are the following sections of documentation below: 
+  * Building
+  * Requirements
+  * Usage: Online method
+  * Usage: Offline method
+  * The view
+
+
+Building
+~~~~~~~~
+
+Please see INSTALL.
+
+
+Requirements
+~~~~~~~~~~~~
+
+In order to convert the data from the sample format from the target to the
+host the opimport program is needed. This is not included in the main Debian
+packages but is included in the packages available from OpenedHand:
+
+http://debian.o-hand.com/
+
+The packages are based on a recent CVS snapshot with a set of patches. We are
+working on pushing those patches upstream so that they will be available in
+future releases.
+
+At the moment these patches are available from:
+http://svn.o-hand.com/view/poky/trunk/meta/packages/oprofile/oprofile/
+
+The patches that are required are: 
+
+oparchive-debug-dir.patch
+oparchive-list-files.patch
+opreport-xml-output-fixes.patch
+xml_callgraph.patch
+oparchive-exit-code-on-error.patch
+
+A known good date to take a snapshot from CVS is 2007-01-06. 
+
+
+Usage: Online method
+~~~~~~ ~~~~~~ ~~~~~~
+
+Ensure you have a working OProfile setup on the device. A useful command to do
+this is (as root):
+
+# opcontrol --init; opcontrol --status
+
+The server can then be started using 'oprofile-server':
+
+# oprofile-server
+
+If this is successful no output will be given, it is important to run this as
+root. By default it listens on port 4224. This can be changed with the --port
+command line option.
+
+The client program is called 'oprofile-viewer'.
+
+The UI is relatively straightforward, the key functionality is accessed
+through the buttons on the toolbar (which are duplicated in the menus.)
+
+These buttons are:
+
+Connect - connect to the remote host, the IP address or hostname for the
+target can be supplied here
+Disconnect - disconnect from the target
+
+Start - start the profiling on the device
+Stop - stop the profiling on the device and download the data to the local
+host. This will generate the profile and show it in the viewer.
+
+Download - download the data from the target, generate the profile and show it
+in the viewer.
+Reset - reset the sample data on the device. This will remove the sample
+information that was collected on a previous sampling run. Ensure you do this
+if you do not want to include old sample information.
+
+Save - save the data downloaded from the target to another directory for later
+examination
+Open - load data that was previously saved.
+
+The behaviour of the client is to download the complete 'profile archive' from
+the target to the host for processing. This archive is a directory containing
+the sample data, the object files and the debug information for said object
+files. This archive is then converted using a script included in this
+distribution ('oparchconv') that uses 'opimport' to convert the archive from
+the target to something that can be processed on the host.
+
+Downloaded archives are kept in /tmp and cleared up when they are no longer in
+use.
+
+
+Usage: Offline method
+~~~~~~ ~~~~~~~ ~~~~~~
+
+If no network access to the target is available an archive for processing in
+'oprofile-viewer' can be generated with the following set of command.
+
+# opcontrol --reset
+# opcontrol --start --separate=lib --no-vmlinux
+
+Now do the tasks that you want to be profiled.
+
+# opcontrol --stop
+# oparchive -o my_archive
+
+Where my_archive is the name of the archive directory where you would like the
+profile archive to be kept. The directory will be created for you. This can
+then be copied to another host and loaded using 'oprofile-viewer''s open
+functionality. The archive will be converted if necessary.
+
+
+The view
+~~~ ~~~~
+
+The UI has 4 ways to group the profiling information in the viewer. These are
+controlled through the options "Group by Application" and "Group by Module" in
+the 'View' menu.
+
+These map to various use-cases:
+
+Find the busiest application: use "Group by Application".
+
+Find the busiest module (e.g. library) in an application: use "Group by
+Application" and "Group by Module".
+
+Find the busiest symbol for an application across all of the modules: use
+"Group by Application" but not "Group by Module".
+
+Find the busiest module: use "Group by Module" but not "Group by Application".
+
+Find the busiest symbol: use neither "Group by Application" nor "Group by
+Module".
+
+The panel at the bottom shows useful information about the selected module or
+symbol.
+
+For modules it shows details about how busy the module is and which
+applications use it.
+
+For symbols it shows the instance for the symbol but also the callees and
+callers for the symbol. If "Group by Application" it will show the
+callees/callers for the symbol in that application. Otherwise it will show the
+aggregation of the callees and callers for all occurances of this symbol.
+
