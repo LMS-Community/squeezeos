@@ -135,7 +135,7 @@ opcodes: binutils-2.17/opcodes/Makefile
 	cd binutils-2.17/opcodes; make; make DESTDIR=${DEBUG_BUILDDIR} install
 
 binutils-2.17/binutils/Makefile:
-	cd binutils-2.17/binutils; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
+	cd binutils-2.17/binutils; ./configure --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
 
 binutils: binutils-2.17/binutils/Makefile
 	cd binutils-2.17/binutils; make; make DESTDIR=${DEBUG_BUILDDIR} install
