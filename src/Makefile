@@ -26,7 +26,7 @@ BOOTLOADER_SRC=${TOPDIR}/src/bootloader/s3c24x0_uboot
 
 .PHONY: all bootloader fw_env kernel kernel-P4 kernel-P7 system debug jive image clean distclean
 
-all: bootloader system debug kernel fw_env jive image
+all: bootloader system kernel fw_env jive image
 
 
 #
