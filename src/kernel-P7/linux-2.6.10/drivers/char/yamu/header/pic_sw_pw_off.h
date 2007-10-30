@@ -1,1 +1,0 @@
-#define	CONFIG_SW_PW_OFF 1

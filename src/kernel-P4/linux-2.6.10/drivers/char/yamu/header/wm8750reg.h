@@ -1,1 +1,0 @@
-#define CONFIG_WM8750_REG 1

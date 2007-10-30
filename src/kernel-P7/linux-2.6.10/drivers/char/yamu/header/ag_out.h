@@ -1,1 +1,0 @@
-#define CONFIG_AG_OUT 1
