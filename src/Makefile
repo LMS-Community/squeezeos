@@ -24,7 +24,7 @@ KERNEL_SRC=${TOPDIR}/src/kernel-P7/linux-2.6.22
 BOOTLOADER_SRC=${TOPDIR}/src/bootloader/s3c24x0_uboot
 
 
-.PHONY: all bootloader fw_env kernel kernel-P4 kernel-P7 system debug jive image clean distclean
+.PHONY: all bootloader fw_env kernel kernel-P7 system debug jive image clean distclean
 
 all: bootloader system debug kernel fw_env jive image
 
@@ -47,13 +47,7 @@ fw_env:
 	cd ${BUILDDIR}/usr/sbin && ln -fs fw_printenv fw_setenv
 
 
-kernel: kernel-P4 kernel-P7
-
-kernel-P4: $(IMAGEDIR)
-	cd kernel-P4; make -f Makefile EXTRAVERSION=-P4
-	# backwards compatibility
-	mv ${IMAGEDIR}/zImage-P4 ${IMAGEDIR}/zImage
-
+kernel: kernel-P7
 
 kernel-P7: $(IMAGEDIR)
 	cd kernel-P7; make -f Makefile EXTRAVERSION=-P7
@@ -107,7 +101,6 @@ ${IMAGEDIR}:
 #
 clean:
 	cd bootloader/s3c24x0_uboot; ${MAKE} clean
-	cd kernel-P4; ${MAKE} clean EXTRAVERSION=-P4
 	cd kernel-P7; ${MAKE} clean EXTRAVERSION=-P7
 	cd system; ${MAKE} -f Makefile clean
 	cd ../../jive/src/pkg; ${MAKE} -f Makefile.squeezeboxjive TOPDIR=${TOPDIR} clean
