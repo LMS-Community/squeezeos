@@ -1,0 +1,1 @@
+#define CONFIG_CHG_PPR 1

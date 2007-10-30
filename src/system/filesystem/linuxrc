@@ -1,0 +1,43 @@
+#!/bin/sh
+#
+# System initialisation
+
+# Mount /proc and /sys filesystems
+/bin/mount -a
+
+# Create /dev using mdev
+/bin/echo "Creating /dev"
+/bin/mount -t ramfs mdev /dev
+/bin/mkdir /dev/pts
+/bin/mount -t devpts devpts /dev/pts
+echo /sbin/mdev > /proc/sys/kernel/hotplug
+/sbin/mdev -s
+
+# Mount read/write filesystem
+/bin/mount -t jffs2 -o noatime /dev/mtdblock/2 /mnt/storage
+JFFS2_OK=$?
+
+# Factory reset
+if [ $JFFS2_OK -ne 0 -o -f /mnt/storage/.factoryreset ]
+then
+	/bin/echo "*** FACTORY RESET ***"
+
+	/bin/umount /mnt/storage
+	/usr/sbin/flash_eraseall -q /dev/mtd/2
+	/bin/mount -t jffs2 -o noatime /dev/mtdblock/2 /mnt/storage
+fi
+
+# Mount overlay filesystem
+/bin/mount -t mini_fo -o base=/,sto=/mnt/storage / /mnt/overlay
+
+# Mount devfs filesystem in overlay
+/bin/mount -o move /dev /mnt/overlay/dev
+
+# Run init process
+exec /usr/sbin/chroot /mnt/overlay /sbin/init
+
+/bin/echo "Failed to run init"
+exec /bin/sh
+
+exit 1
+

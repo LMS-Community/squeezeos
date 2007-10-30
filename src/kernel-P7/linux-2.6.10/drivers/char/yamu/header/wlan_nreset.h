@@ -1,0 +1,1 @@
+#define CONFIG_WLAN_nRESET 1

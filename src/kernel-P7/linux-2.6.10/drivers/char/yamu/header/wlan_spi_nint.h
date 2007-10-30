@@ -1,0 +1,1 @@
+#define CONFIG_WLAN_SPI_nINT 1

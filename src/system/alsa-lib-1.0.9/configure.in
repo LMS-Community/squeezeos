@@ -1,0 +1,213 @@
+dnl Process this file with autoconf to produce a configure script.
+AC_PREREQ(2.53)
+AC_INIT(src/control/control.c)
+dnl *************************************************
+dnl current:revision:age
+dnl change (without API) = c:r+1:a
+dnl change API = c+1:0:a
+dnl add API = c+1:0:a+1
+dnl remove API = c+1:0:0
+dnl *************************************************
+AC_CANONICAL_SYSTEM
+AM_INIT_AUTOMAKE(alsa-lib, 1.0.9)
+eval LIBTOOL_VERSION_INFO="2:0:0"
+dnl *************************************************
+AM_CONDITIONAL(INSTALL_M4, test -n "${ACLOCAL}")
+
+AC_PREFIX_DEFAULT(/usr)
+
+dnl Checks for programs.
+
+dnl try to gues cross-compiler if not set
+if test "x$target" != "x$host" -a -z "`echo $CC | grep -e '-gcc'`";
+then
+  AC_MSG_CHECKING(for cross-compiler)
+
+  which ${program_prefix}gcc >/dev/null 2>&1 && CC=${program_prefix}gcc
+  which ${target_cpu}-${target_os}-gcc >/dev/null 2>&1 \
+  && CC=${target_cpu}-${target-os}-gcc
+  which ${target_cpu}-${target_vendor}-${target_os}-gcc >/dev/null 2>&1 \
+  && CC=${target_cpu}-${target_vendor}-${target_os}-gcc
+
+  AC_MSG_RESULT($CC)
+fi
+	    
+
+AC_PROG_CC
+AC_PROG_INSTALL
+AC_PROG_LN_S 
+AC_DISABLE_STATIC
+AC_LIBTOOL_DLOPEN
+AM_PROG_LIBTOOL
+
+dnl Checks for header files.
+AC_HEADER_STDC
+AM_CONFIG_HEADER(include/config.h)
+
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+AC_C_INLINE
+AC_HEADER_TIME
+
+dnl Checks for library functions.
+AC_PROG_GCC_TRADITIONAL
+AC_CHECK_FUNC([hsearch_r], [HAVE_HSEARCH_R=yes])
+AM_CONDITIONAL(ALSA_HSEARCH_R, [test "x$HAVE_HSEARCH_R" != xyes])
+
+SAVE_LIBRARY_VERSION
+AC_SUBST(LIBTOOL_VERSION_INFO)
+
+test "x$prefix" = xNONE && prefix=$ac_default_prefix
+
+eval dir="$datadir"
+case "$dir" in
+/*) ;;
+*) dir="$PWD/$dir"
+esac
+AC_DEFINE_UNQUOTED(DATADIR, "$dir", [directory containing ALSA configuration database])
+
+test "x$exec_prefix" = xNONE && exec_prefix=$prefix
+
+eval dir="$libdir"
+case "$dir" in
+/*) ;;
+*) dir="$PWD/$dir"
+esac
+AC_DEFINE_UNQUOTED(PKGLIBDIR, "$dir/$PACKAGE", [directory containing ALSA add-on modules])
+
+dnl Check for versioned symbols
+AC_MSG_CHECKING(for versioned symbols)
+AC_ARG_WITH(versioned,
+  [  --with-versioned=yes,no  shared library will (not) be compiled with versioned symbols],
+  versioned="$withval", versioned="yes")
+if test "$versioned" = "yes"; then
+  # it seems that GNU ld versions since 2.10 are not broken
+  xres=`grep '^VERSION=' $ac_aux_dir/libtool | cut -d = -f 2`
+  major=`echo $xres | cut -d . -f 1`
+  minor=`echo $xres | cut -d . -f 2`
+  pass=0
+  if test $major -eq 1 -a $minor -gt 3; then
+    pass=1
+  else
+    if test $major -gt 1; then
+      pass=1
+    fi
+  fi
+  if test $pass -eq 1; then
+    AC_DEFINE(VERSIONED_SYMBOLS,,[compiled with versioned symbols])
+    AC_MSG_RESULT(yes)
+  else
+    AC_MSG_RESULT(broken libtool - use libtool v1.4+; no versions)
+  fi
+else
+  AC_MSG_RESULT(no)
+fi
+AM_CONDITIONAL(VERSIONED_SYMBOLS, test x$versioned = xyes)
+
+dnl Check for debug...
+AC_MSG_CHECKING(for debug)
+AC_ARG_WITH(debug,
+  [  --with-debug=yes,no     library will (not) be compiled with asserts],
+  debug="$withval", debug="yes")
+if test "$debug" = "yes"; then
+  AC_MSG_RESULT(yes)
+else
+  AC_DEFINE(NDEBUG,,[No assert debug])
+  AC_MSG_RESULT(no)
+fi
+
+dnl Temporary directory
+AC_MSG_CHECKING(for tmpdir)
+AC_ARG_WITH(tmpdir,
+  [  --with-tmpdir=directory   directory to put tmp socket files (/tmp)],
+  tmpdir="$withval", tmpdir="/tmp")
+AC_MSG_RESULT($tmpdir)
+AC_DEFINE_UNQUOTED(TMPDIR, "$tmpdir", [directory to put tmp socket files])
+
+dnl Check for softfloat...
+AC_MSG_CHECKING(for softfloat)
+AC_ARG_WITH(softfloat,
+  [  --with-softfloat        do you have floating point unit on this machine? (optional)],
+  [  AC_DEFINE(HAVE_SOFT_FLOAT, "1", [Avoid calculation in float])
+     softfloat=yes ],)
+if test "$softloat" = "yes" ; then
+  AC_MSG_RESULT(yes)
+else
+  AC_MSG_RESULT(no)
+fi
+
+dnl Check for architecture
+AC_MSG_CHECKING(for architecture)
+case "$target" in
+i?86*)
+  AC_MSG_RESULT(x86)
+  ;;
+x86_64*)
+  AC_MSG_RESULT(x86)
+  ;;
+alpha*)
+  AC_MSG_RESULT(alpha)
+  ;;
+powerpc*|ppc*)
+  AC_MSG_RESULT(ppc)
+  CPPFLAGS="$CPPFLAGS -D__ppc__"
+  ;;
+ia64*)
+  AC_MSG_RESULT(ia64)
+  CPPFLAGS="$CPPFLAGS -D__ia64__"
+  ;;
+mips*)
+  AC_MSG_RESULT(mips)
+  CPPFLAGS="$CPPFLAGS -D__mips__"
+  ;;
+arm*)
+  AC_MSG_RESULT(arm)
+  CPPFLAGS="$CPPFLAGS -D__arm__"
+  ;;
+*)
+  AC_MSG_RESULT($host_cpu)
+  echo "No atomic operations supported.." 
+  ;;
+esac
+
+dnl Check for resmgr support...
+AC_MSG_CHECKING(for resmgr support)
+AC_ARG_ENABLE(resmgr,
+  [  --enable-resmgr         support resmgr (optional)],
+  resmgr="$enableval", resmgr="no")
+AC_MSG_RESULT($resmgr)
+if test "$resmgr" = "yes"; then
+  AC_CHECK_LIB(resmgr, rsm_open_device,,
+    AC_ERROR([Cannot find libresmgr]))
+  AC_DEFINE(SUPPORT_RESMGR, "1", [Support resmgr with alsa-lib])
+fi
+
+dnl Check for aload* support...
+AC_MSG_CHECKING(for aload* support)
+AC_ARG_ENABLE(aload,
+  [  --disable-aload         disable reading /dev/aload*],
+  aload="$enableval", aload="yes")
+AC_MSG_RESULT($aload)
+if test "$aload" = "yes"; then
+  AC_DEFINE(SUPPORT_ALOAD, "1", [Support /dev/aload* access for auto-loading])
+fi
+
+dnl Make a symlink for inclusion of alsa/xxx.h
+if test ! -L include/alsa ; then
+  echo "Making a symlink include/alsa"
+  rm -f include/alsa
+  ln -sf . include/alsa
+fi
+
+AC_OUTPUT(Makefile doc/Makefile doc/pictures/Makefile include/Makefile
+	  include/sound/Makefile src/Makefile \
+          src/control/Makefile src/mixer/Makefile src/ordinary_mixer/Makefile \
+	  src/pcm/Makefile src/pcm/scopes/Makefile src/ordinary_pcm/Makefile \
+	  src/rawmidi/Makefile src/timer/Makefile \
+          src/hwdep/Makefile src/seq/Makefile src/instr/Makefile \
+          src/compat/Makefile src/alisp/Makefile src/conf/Makefile \
+	  src/conf/cards/Makefile \
+	  src/conf/pcm/Makefile \
+	  alsalisp/Makefile aserver/Makefile test/Makefile utils/Makefile \
+          utils/alsa-lib.spec utils/alsa.pc)
