@@ -87,7 +87,7 @@ image: ${IMAGEDIR}
 	# Create cramfs
 	mkcramfs ${STAGE} ${IMAGEDIR}/root.cramfs
 	# Create upgrade.md5
-	cd ${IMAGEDIR} && md5sum zImage zImage-P7 root.cramfs > upgrade.md5
+	cd ${IMAGEDIR} && md5sum zImage-P7 root.cramfs > upgrade.md5
 	# Create jive.bin
 	cd ${IMAGEDIR} && zip ${IMAGEDIR}/jive.bin jive.version upgrade.md5 zImage zImage-P7 root.cramfs
 	@cat ${IMAGEDIR}/jive.version
