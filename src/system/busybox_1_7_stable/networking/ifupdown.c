@@ -505,7 +505,7 @@ static int dhcp_up(struct interface_defn_t *ifd, execfn *exec)
 
 // -R was not in the file patched by Elvis. Check what it does
 	return execute("udhcpc -R -p /var/run/udhcpc.%iface%.pid "
-					"-b --zeroconf [[-s %script%]] "
+					"-b --syslog --zeroconf [[-s %script%]] "
 			"-i %iface%[[ -H %hostname%]][[ -c %clientid%]][[ -s %script%]]",
 			ifd, exec);
 #else
