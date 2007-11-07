@@ -1,3 +1,22 @@
+/* drivers/char/jive/jive_wheel.c
+ *
+ * Copyright 2007 Logitech.
+ *	Richard Titmuss <richard_titmuss@logitech.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ */
 
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -36,37 +55,44 @@
 
 #define PULSES_PER_DETENT 2
 
+#define DEBOUNCE_PERIOD_MS 2
+#define PRESS_TIME_MS 4
+#define RELEASE_TIME_MS 40
+
 static int pos;
+
 static int lastAB;
+
+static unsigned int state[PRESS_TIME_MS / DEBOUNCE_PERIOD_MS];
+
+static unsigned int count;
+
+static unsigned int index;
+
 static struct input_dev *wheel_dev;
 
-static inline void reg_orrl(void __iomem *reg, unsigned int val)
-{
-	__raw_writel(__raw_readl(reg) | val, reg);
-}
-
-static inline void reg_andl(void __iomem *reg, unsigned int val)
-{
-	__raw_writel(__raw_readl(reg) & val, reg);
-}
+struct timer_list wheel_timer;
 
 
-static irqreturn_t Wheel_CWA(int irq, void *dev_id)
+static void wheel_scan(unsigned long data)
 {		
-	int val, dir, AB, ABCD;
-	unsigned int control;
-	unsigned long flags;
+	int i, AB, ABCD;
 
-	s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_INPUT);
-	s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_INPUT);
-
-	// XXXX without this delay we miss some key up events
-	// XXXX FIXME experiment with different values here
-	udelay(1);
+	if (++index >= ARRAY_SIZE(state)) {
+		index = 0;
+	}
 
 	// read A and B
-	val = __raw_readl(S3C2410_GPGDAT);
-	AB = ( (val & 0x0030) >> 4);
+	state[index] = s3c2410_gpio_getpin(S3C2410_GPG4) ? (1 << 0) : 0;
+	state[index] |= s3c2410_gpio_getpin(S3C2410_GPG5) ? (1 << 1) : 0;
+
+
+	/* debounce switches */
+	AB = 0xFF;
+	for (i = 0; i < ARRAY_SIZE(state); i++) {
+		AB &= state[i];
+	}
+
 
 	/* CW rotation:
 	 * A B  C D (CD are previous AB state)
@@ -84,7 +110,7 @@ static irqreturn_t Wheel_CWA(int irq, void *dev_id)
 	 */
 
 
-	// wheel state
+	/* wheel state */
 	ABCD = (AB << 2) | lastAB;
 
 	switch (ABCD) {
@@ -92,42 +118,38 @@ static irqreturn_t Wheel_CWA(int irq, void *dev_id)
 	case 0x8:
 	case 0x7:
 	case 0xE:
-		// CW rotation
-		dir = 1;
+		/* CW rotation */
+		pos += 1;
+		count = 0;
 		lastAB = AB;
-		//printk("\tAB %x ABCD %x  1\n", AB, ABCD);
+		//printk(KERN_DEBUG "\tAB %x ABCD %x  1\n", AB, ABCD);
 		break;
 
 	case 0xB:
 	case 0x4:
 	case 0x2:
 	case 0xD:
-		// CCW rotation
-		dir = -1;
+		/* CCW rotation */
+		pos -= 1;
+		count = 0;
 		lastAB = AB;
-		//printk("\tAB %x ABCD %x  -1\n", AB, ABCD);
+		//printk(KERN_DEBUG "\tAB %x ABCD %x  -1\n", AB, ABCD);
 		break;
 
 	case 0x0:
 	case 0x5:
 	case 0xA:
 	case 0xF:
-		// no change
-		dir = 0;
+		/* no change */
 		break;
 
 	default:
-		// impossible state
-		dir = 0;
-		printk("bad wheel state %x\n", ABCD);
+		/* impossible state */
+		printk(KERN_INFO "bad wheel state %x\n", ABCD);
 	}
 
 
-	// update position and detent
-	if (dir != 0) {
-		pos += dir;
-	}
-
+	/* update detent */
 	if (pos > PULSES_PER_DETENT) {
 		input_report_rel(wheel_dev, REL_WHEEL, 1);
 		input_sync(wheel_dev);
@@ -140,45 +162,37 @@ static irqreturn_t Wheel_CWA(int irq, void *dev_id)
 		pos = 0;
 	}
 
-#ifdef CONFIG_JIVE_WHEEL_LEVELIRQ
-	// both edge interrupts seem unreliable with zippy, so modify the
-	// interrupt control register to use low and high interrupt levels
-	control = 0;
-	if (AB & 0x02) {
-		control |= 0x8 << 20; // EINT13 low level
+	if (count++ < (RELEASE_TIME_MS / DEBOUNCE_PERIOD_MS)) {
+		/* keep scanning while wheel is rotating */
+		mod_timer(&wheel_timer, jiffies + (DEBOUNCE_PERIOD_MS * HZ/1000));
 	}
 	else {
-		control |= 0x9 << 20; // EINT13 high level
-	}
-	if (AB & 0x01) {
-		control |= 0x8 << 16; // EINT12 low level 
-	}
-	else {
-		control |= 0x9 << 16; // EINT12 high level
+		/* return the lines to interrupt */
+		s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_SFN2);
+		s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_SFN2);
 	}
 
-	local_irq_save(flags);
-
-	reg_andl(S3C2410_EXTINT1, 0xFF00FFFF);
-	reg_orrl(S3C2410_EXTINT1, control);
-
-	local_irq_restore(flags);
-#endif
-
-	s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_SFN2);
-	s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_SFN2);
-
-	return IRQ_HANDLED;
+	return;
 }
 
-#ifdef CONFIG_JIVE_WHEEL_LEVELIRQ
-#define IRQ_FLAGS IRQF_TRIGGER_HIGH | IRQF_SAMPLE_RANDOM
-#else
-#define IRQ_FLAGS IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_SAMPLE_RANDOM
-#endif
-
-static int __init Wheel_init(void)
+static irqreturn_t wheel_irq(int irq, void *dev_id) 
 {
+	s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_INPUT);
+	s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_INPUT);
+
+	/* scan wheel */
+	mod_timer(&wheel_timer, jiffies); // now
+
+	return IRQ_HANDLED;
+}		
+
+
+#define IRQ_FLAGS IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_SAMPLE_RANDOM
+
+static int __init wheel_init(void)
+{
+	int i;
+
 	/* For compatibility with the old bootloader allow s3c2413 machines
 	 * to work here too. We can't use machine_is_s3c2413() here as that
 	 * machine is not configured in the kernel.
@@ -203,12 +217,23 @@ static int __init Wheel_init(void)
 
 	input_register_device(wheel_dev);
 
-        if (request_irq(IRQ_EINT12, Wheel_CWA, IRQ_FLAGS, "CCW_B", NULL)) {
+	/* Key debounce state */
+	index = 0;
+	lastAB = 0;
+	for (i = 0; i < ARRAY_SIZE(state); i++) {
+		state[i] = 0;
+	}
+
+	init_timer(&wheel_timer);
+	wheel_timer.function = wheel_scan;
+
+
+        if (request_irq(IRQ_EINT12, wheel_irq, IRQ_FLAGS, "CCW_B", NULL)) {
                  printk(KERN_ERR "Could not allocate CCW_B on IRQ_EINT12 !\n");
                  return -EIO;
 	}
 
-        if (request_irq(IRQ_EINT13, Wheel_CWA, IRQ_FLAGS, "CW_A", NULL)) {
+        if (request_irq(IRQ_EINT13, wheel_irq, IRQ_FLAGS, "CW_A", NULL)) {
                  printk(KERN_ERR "Could not allocate CW_A on IRQ_EINT13 !\n");
                  return -EIO;
 	}
@@ -219,15 +244,15 @@ static int __init Wheel_init(void)
     	return 0;
 }
 
-static void __exit Wheel_exit(void) {
+static void __exit wheel_exit(void) {
 	free_irq(IRQ_EINT12, NULL);
 	free_irq(IRQ_EINT13, NULL);
 
 	input_unregister_device(wheel_dev);
 }
 
-module_init(Wheel_init);
-module_exit(Wheel_exit);
+module_init(wheel_init);
+module_exit(wheel_exit);
 
 
 MODULE_DESCRIPTION("Jive wheel driver");
