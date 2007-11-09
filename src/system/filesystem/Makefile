@@ -20,6 +20,7 @@ install:
 	install etc/passwd ${PREFIX}/etc
 	install etc/shadow ${PREFIX}/etc
 	install etc/group ${PREFIX}/etc
+	install etc/motd ${PREFIX}/etc
 	install etc/mdev.conf ${PREFIX}/etc
 	cd ${PREFIX}/etc; ln -sf /proc/mounts mtab
 	install ${LIB_DIR}/ld-2.6.1.so ${PREFIX}/lib
