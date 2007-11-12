@@ -147,7 +147,7 @@ static struct mtd_partition jive_imageA_nand_part[] = {
         {
                 .name           = "env",
                 .offset         = (160*SZ_1K),
-                .size           = (16*SZ_1K),
+                .size           = 2 * (16*SZ_1K),
         },
 
 	/* upgrade images */
@@ -209,7 +209,7 @@ static struct mtd_partition jive_imageB_nand_part[] = {
         {
                 .name           = "env",
                 .offset         = (160*SZ_1K),
-                .size           = (16*SZ_1K),
+                .size           = 2 * (16*SZ_1K),
         },
 
 	/* upgrade images */
