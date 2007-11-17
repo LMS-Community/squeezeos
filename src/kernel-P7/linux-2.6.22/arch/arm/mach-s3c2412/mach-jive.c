@@ -509,8 +509,8 @@ static struct i2c_board_info jive_i2c_devs[] = {
 /* SD card info */
 
 static struct s3c24xx_mci_pdata jive_mmc_cfg = {
-	.gpio_wprotect	= S3C2410_GPH8,
-	.gpio_detect	= S3C2410_GPG10,
+	.gpio_wprotect	= S3C2410_GPG10,
+	.gpio_detect	= S3C2410_GPH8,
 	.set_power	= NULL,
 	.ocr_avail 	= MMC_VDD_32_33,
 };
@@ -702,6 +702,9 @@ static void __init jive_machine_init(void)
 	s3c2410_pm_init();
 
 	s3c_device_nand.dev.platform_data = &jive_nand_info;
+
+	/* make sure CLKOUT0 is turn off for EMI emissions */
+	s3c2410_gpio_cfgpin(S3C2410_GPH9, S3C2410_GPIO_INPUT);
 
 	/* initialise the spi */
 

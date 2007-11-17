@@ -49,6 +49,7 @@ static void ref_port(void)
 	/* set up the I/O ports */
 	GPACON = 0x007FFFFF;
 	GPBCON = 0x00044555;
+	GPBDAT = 0x00000004; // backlight pwm off
 	GPBUP = 0x000007FF;
 	GPCCON = 0xAAAAAAAA;
 	GPCUP = 0x0000FFFF;
@@ -60,7 +61,7 @@ static void ref_port(void)
 	GPFDN = 0x0000000F; // Pull down disabled on outputs
 	GPGCON = 0xFF95FFBA;
 	GPGDN = 0x0000FFFF;
-	GPHCON = 0x002AFAAA;
+	GPHCON = 0x0022F0AA; // GPH9/CLKOUT0 must be off for EMI
 	GPHDN = 0x000007FF;
 
 
@@ -68,6 +69,18 @@ static void ref_port(void)
 	/*GPGCON is reset for USB Device */
 	GPGCON = (GPGCON & ~(3 << 24)) | (1 << 24);	/* Output Mode */
 	GPGDN = GPGDN | (1 << 12);	/* Pull up disable */
+
+	/* GPB6 : usb_device_dp -> OUTPUT HIGH */
+	GPBCON = (GPBCON & ~(3 << 12)) | (1 << 12);
+	GPBDAT |= (1 << 6);
+
+	/* GPH4 : usb_host_dp -> input, pull-up disable */
+	GPHCON = (GPHCON & ~(3 << 8));
+	GPHDN = GPHDN | (1 << 4);
+
+	/* GPH5 : usb_host_dn -> input, pull-up disable */
+	GPHCON = (GPHCON & ~(3 << 10));
+	GPHDN = GPHDN | (1 << 5);
 
 	GPGDAT |= (1 << 12);
 	GPGDAT &= ~(1 << 12);
