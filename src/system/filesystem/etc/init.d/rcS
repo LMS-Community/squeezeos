@@ -5,16 +5,8 @@
 echo "Mounting RAM Disk"
 /bin/mount -t ramfs ramfs /tmp
 /bin/mount -t ramfs ramfs /var
-mkdir /var/shm /var/log /var/run /var/core
+mkdir /var/shm /var/log /var/run
 
-
-# enable core files, dumped in /var
-echo "/var/core/core-%e" > /proc/sys/kernel/core_pattern
-ulimit -c unlimited
-
-
-echo "Starting syslogd"
-/sbin/syslogd
 
 if [ -b /dev/mmcblk0p1 ]; then
 	echo "Mounting MMC/SD card (partition 1)"
@@ -23,6 +15,25 @@ elif [ -b /dev/mmcblk0 ]; then
 	echo "Mounting MMC/SD card (whole device)"
 	mount -t vfat /dev/mmcblk0 /mnt/mmc
 fi
+
+
+grep /mnt/mmc /proc/mounts | cut -d' ' -f 4 | grep -q rw
+if [ $? = 0  ]; then
+	# log and core files to mmc
+	/bin/mkdir -p /mnt/mmc/var/log /mnt/mmc/var/core
+
+	echo "Starting syslogd (to mmc)"
+	/sbin/syslogd -O /mnt/mmc/var/log/messages
+
+	echo "Enabling core files (to mmc)"
+	echo "/mnt/mmc/var/core/core-%e" > /proc/sys/kernel/core_pattern
+	ulimit -c unlimited
+else
+	# log to /var
+	echo "Starting syslogd"
+	/sbin/syslogd
+fi
+
 
 if ! [ -f /etc/firstboot ]; then
 	echo "First boot"
@@ -34,13 +45,13 @@ if ! [ -f /etc/firstboot ]; then
 fi
 
 if ! [ -f /etc/dropbear/dropbear_rsa_host_key ] ; then
-    echo "Creating dropbear rsa host key"
-    /usr/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+	echo "Creating dropbear rsa host key"
+	/usr/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
 fi
 
 if ! [ -f /etc/dropbear/dropbear_dss_host_key ]; then
-    echo "Creating dropbear dss host key"
-    /usr/bin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
+	echo "Creating dropbear dss host key"
+	/usr/bin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
 fi
 
 echo "Starting lo"
