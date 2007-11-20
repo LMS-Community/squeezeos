@@ -345,7 +345,8 @@ static int soc_codec_close(struct snd_pcm_substream *substream)
 		platform->pcm_ops->close(substream);
 	cpu_dai->runtime = NULL;
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+	    codec->dapm_state == SNDRV_CTL_POWER_D0) {
 		/* start delayed pop wq here for playback streams */
 		codec_dai->pop_wait = 1;
 		schedule_delayed_work(&socdev->delayed_work,
