@@ -85,7 +85,7 @@ print_essid(int			skfd,
 {
   struct iwreq		wrq;
   char			essid[IW_ESSID_MAX_SIZE + 1];	/* ESSID */
-  char			pessid[IW_ESSID_MAX_SIZE + 1];	/* Pcmcia format */
+  char			pessid[4 * IW_ESSID_MAX_SIZE + 1];	/* Printable format */
   unsigned int		i;
   unsigned int		j;
 
@@ -104,7 +104,7 @@ print_essid(int			skfd,
     case FORMAT_SCHEME:
       /* Strip all white space and stuff */
       j = 0;
-      for(i = 0; i < strlen(essid); i++)
+      for(i = 0; i < wrq.u.essid.length; i++)
 	if(isalnum(essid[i]))
 	  pessid[j++] = essid[i];
       pessid[j] = '\0';
@@ -116,7 +116,8 @@ print_essid(int			skfd,
       printf("%s\n", essid);
       break;
     default:
-      printf("%-8.16s  ESSID:\"%s\"\n", ifname, essid);
+      iw_essid_escape(pessid, essid, wrq.u.essid.length);
+      printf("%-8.16s  ESSID:\"%s\"\n", ifname, pessid);
       break;
     }
 

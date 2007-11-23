@@ -1,5 +1,5 @@
-		Sane network interface management with Hotplug
-		----------------------------------------------
+		Sane network interface management with Hotplug or uDev
+		------------------------------------------------------
 
 INTRODUCTION
 ------------
@@ -11,13 +11,15 @@ Pcmcia subsystem for PCI and USB, it was decided to create the much
 simpler Hotplug system.
 	The USB subsystem already uses Hotplug. The Pcmcia subsystem
 is migrating to it : CardBus cards (32 bits) already use Hotplug,
-whereas Pcmcia cards (16 bits) still use the old Pcmcia scripts.
-	The Hotplug system is still in its infancy, but already shows
-some good promise. Most users are disappointed at first by its
-apparent lack of features compared to the Pcmcia scripts. In this
-document, we will show how to fully exploit the Hotplug system and try
-to implement the equivalent of all the functionality of the Pcmcia
-scripts.
+whereas Pcmcia cards (16 bits) often still use the old Pcmcia scripts.
+	The Hotplug system is now very mature. Most users comming from
+the old Pcmcia scripts are disappointed at first by its apparent lack
+of features, however it is very flexible and powerful. The new uDev
+system depend on Hotplug and integrates tightly with it.
+	In this document, we will show how to fully exploit the
+Hotplug system and try to implement the equivalent of all the
+functionality of the Pcmcia scripts.
+
 
 ASSUMPTIONS
 -----------
@@ -29,6 +31,7 @@ configuration described in DISTRIBUTIONS.txt.
 	The main focus is of course on removable wireless interfaces,
 but we will to talk about network interface management in general, so
 this should apply also to built-in Ethernet cards.
+
 
 PROBLEM STATEMENT
 -----------------
@@ -53,6 +56,7 @@ interface names (starting at "eth0" and going up). I call that the
 to a single fixed configuration in the configuration
 database. Clearly, this won't satisfy our requirements.
 
+
 EXAMPLE SYSTEM
 --------------
 	The distribution I use is Debian 3.0, and some parts of what I
@@ -76,6 +80,7 @@ to this document.
 has enough interfaces to make it interesting. All the examples I
 present in this document are extracted from this system.
 
+
 BASIC CONCEPTS
 --------------
 	Most of the concept and tricks presented here are not really
@@ -86,24 +91,27 @@ new. The main contribution is to integrate them.
 always present in this system and available at boot time (Pcmcia cards
 were not made to be soldered in the Pcmcia slot). Therefore Hotplug is
 the way to go.
-	2) Built-in PCI and ISA cards are managed by the init scripts,
+	2) The Hotplug system can use either the original Hotplug
+scripts or the uDev daemon with the uDev scripts.
+	3) Built-in PCI and ISA cards are managed by the init scripts,
 as they have always been. The ISA subsystem will never have Hotplug
 support, and hotplug is not necessary for PCI cards.
-	3) Built-in devices that are disable most of the time should
+	4) Built-in devices that are disable most of the time should
 be enabled manually by the user. Therefore both Hotplug and the init
 scripts should ignore those devices by default.
-	4) (1), (2) and (3) must be compatible on the same system and
+	5) (1), (3) and (4) must be compatible on the same system and
 play nice with each other.
 
-	5) A well defined and consistent network interface name is
+	6) A well defined and consistent network interface name is
 assigned to each network hardware interface using 'ifrename'. Device A
 is always named 'ethA' (or whatever name you like such as
 'mynetworkcard').
-	6) No interface is called 'eth0' (or 'wlan0'). Any unknown
+	7) No interface is called 'eth0' (or 'wlan0'). Any unknown
 device would be 'eth0', so known devices should be called something
-else.
-	7) Multiple configurations for a single interface (schemes)
+else. There are also other issues with using 'eth0'.
+	8) Multiple configurations for a single interface (schemes)
 are managed by the ifup/ifdown subsystem.
+
 
 CONFIGURATION FROM INIT SCRIPTS
 -------------------------------
@@ -145,8 +153,9 @@ can skip directly to the next section.
 	There are 3 alternatives to manage device drivers as
 modules.
 		1) Some distributions have an explicit list of modules
-that are loaded at boot time. If you want to use that feature you need
-to check the documentation of your distribution.
+that are loaded at boot time, usuall in /etc/modules. If you want to
+use that feature you need to check the documentation of your
+distribution.
 		2) Some system, such as Hotplug, Discover or Kudzu,
 can scan the various buses of the PC and load the appropriate
 drivers. This is mostly configuration-free, but may not support all
@@ -188,27 +197,50 @@ obviously you don't want to touch that.
 have (we'll fix that in a minute). Note that for modern PCI cards this
 is much more straightforward than for old ISA cards.
 
+	When loading modules on-demand, you usually can not use the
+name 'eth0' or other 'ethX' with a low number for your interfaces, as
+on-demand module may fail to load them. If there is a unknown
+interface or an interface not yet renamed on the system, it will be
+eth0, and the system will assume the module for eth0 is already loaded
+and will fail to load the proper module.
+	To test on-demand loading of module, you can do :
+--------------------------
+> /sbin/modprobe -r eth2
+> /sbin/modprobe eth2
+--------------------------
+
 	3) Installing 'ifrename'
 	------------------------
 	You will need to install ifrename on your system. 'ifrename'
 is part of the Wireless Tools package (version 27 and later) and is a
 complete rewrite of the now obsolete 'nameif'.
-	Some distributions, such as Debian Sarge, offer a separate
+	Some distributions, such as Debian 3.1/4.0, offer a separate
 package for 'ifrename', and in this case you should just install this
 package. Other distributions may include ifrename as part of their
 'wireless-tools' package (this should be the case for Gentoo, Fedora
-and Mandrake). Other distributions, such as Debian 3.0, don't include
-ifrename at all, so you should compile yourself a recent version of
-Wireless Tools (v27 or later) and install it.
+and Mandrake). Other distributions, such as Debian 3.0 and Unbuntu
+7.10, don't include ifrename at all, so you should compile yourself a
+recent version of Wireless Tools (v29 or later) and install it.
+	The installation of Wireless Tools is described in the INSTALL
+file of the Wireless Tools package. If you plan to only use ifrename,
+a good option is to compile a static version of Wireless Tools and
+only copy the resulting ifrename executable.
 
 	In any case, you should verify that 'ifrename' is properly
 installed and check the path needed to call it :
 --------------------------
 > which ifrename
 /sbin/ifrename
+> whereis ifrename
+ifrename: /sbin/ifrename /usr/man/man8/ifrename.8 /usr/share/man/man8/ifrename.8.gz
 --------------------------
-	Most distributions will install 'ifrename' in '/sbin', while if
-you compile your own wireless tools, it will be in '/usr/local/sbin'.
+	Most distributions will install 'ifrename' in '/sbin', while
+if you compile your own wireless tools, by default it will be in
+'/usr/local/sbin' (see Makefile on how to change that).
+	If you are upgrading ifrename from a previous version, you
+should make sure that the new version of ifrename is either installed
+in the same location (overwrite old version) or in a place earlier in
+the PATH (check with whereis).
 
 	4) Making the boot scripts call 'ifrename'
 	------------------------------------------
@@ -219,9 +251,12 @@ to look into your own init files, or ask people familiar with your
 distribution. It will need to run just before the call to 'ifup' or
 'ifconfig' command.
 
-	In Debian 3.0 and Debian Sarge, it needs to be run from
-/etc/init.d/networking, which is not the default. The necessary patch
-is below :
+	In Debian 4.0 (Etch) and later, the 'ifrename' package adds it
+own init script at the right place, called /etc/init.d/ifrename. You
+don't have to do anything.
+	In Debian 3.0 (Woody) and Debian 3.1 (Sarge), ifrename needs
+to be run from /etc/init.d/networking, which is not the default. The
+necessary patch to the init script is below :
 
 ----------------------------------------------------------------
 --- networking-orig     Wed Feb 18 13:56:23 2004
@@ -292,6 +327,10 @@ you have to manage large number of computers (like a rack of servers
 or clusters), then you may want to look at other selectors offered by
 'ifrename'.
 
+	In this example, we used the MAC address of the card. Using
+the MAC address is not always an option, there is a section at the end
+of this document dedicated to those cases.
+
 	To test that ifrename works, do the following :
 		o Load all your drivers, see section (2)
 		o Check /proc/net/dev to see which interface exist
@@ -328,14 +367,22 @@ iface eth2 inet static
 	This was the last part. Now, at your next boot, all your
 interfaces should be assigned the proper name and the proper
 configuration.
+	If this is not the case, there is a troubleshooting section at
+the end of this document.
 
-CONFIGURATION VIA HOTPLUG
--------------------------
+
+CONFIGURATION VIA UDEV
+----------------------
 	Dealing with removable interfaces is similar to dealing with
-built-in interfaces, the main difference is that we will use the
-Hotplug scripts instead of the init scripts. Another difference is
-that it will likely require more work on your part because most
-distributions are not fully ready for it.
+built-in interfaces, the main difference is that we will use Hotplug
+event with the uDev system instead of the init scripts. This requires
+a fairly recent distributions, older distributions don't have uDev or
+uDev system not capable enough.
+	Note that you can also use removable interfaces with the
+original Hotplug scripts. This is detailed in the next section. The
+installation of uDev changes a lot of things on a system, so may not
+be for everybody, however recent version of Gnome and KDE seem to
+require it.
 
 	1) Applicability
 	----------------
@@ -348,11 +395,256 @@ removable network interface, such as :
 	It may also be used to manage other types of network
 interfaces, although it may not be the best choice for them.
 
-	2) How Hotplug works
-	--------------------
-	Conceptually, Hotplug is very simple. When something
-interesting happens, the Linux kernel generates an Hotplug event. This
-runs the proper script from the /etc/hotplug directory.
+	2) How Hotplug works with the uDev scripts
+	------------------------------------------
+	When using uDev, the concept is similar to the original
+Hotplug scripts, however the implementation is slightly less
+transparent. Also, the name of the rules and the location of scripts
+vary from distribution from distribution.
+
+	When something interesting happens, the Linux kernel generates
+an Hotplug event. The uDev deamon (udevd) receive the event, does some
+processing on its own, use the rules in /etc/udev/rules.d/, and
+finally run the proper script in /lib/udev/.
+	There are 3 types of Hotplug events we care about :
+		o PCI event : a CardBus device is added or removed
+from the system. The hotplug rule loads the driver, in my case
+/etc/udev/rules.d/z55_hotplug.rules.
+		o USB event : a USB device is added or removed from
+the system. The hotplug rule loads the driver, in my case
+/etc/udev/rules.d/z55_hotplug.rules.
+		o Network event : a network interface is added or
+removed from the system. The script /lib/udev/net.agent is run.
+
+	If we insert a CardBus network card in the system, the
+following happens :
+		1) Kernel detects new CardBus device
+		2) Kernel generates PCI Hotplug event
+		3) udevd receive the event, runs the Hotplug rule.
+		4) The Hotplug rule find the proper driver module and loads it.
+		5) Driver module initialises, creates new network device
+		6) Kernel detects new network device
+		7) Kernel generates Network Hotplug event
+		8) /lib/udev/net.agent runs, configures network device
+	The sequence of events is similar for USB devices and for removals.
+
+	3) Installing uDev for Debian Lenny
+	-----------------------------------
+	Thanks to the great work of many people, Debian Lenny has all
+the necessary packages and complete udev support, and will work mostly
+'out of the box'.
+	You will need to install the following packages :
+		o udev
+		o ifrename
+
+	The configuration of Hotplug and uDev is simple. You only have
+to modify the file /etc/network/interfaces to enable your interfaces
+to be managed with Hotplug and uDev.
+	By default, ifup ignore all hotplug network events, as it
+assume network interfaces are configured using the static init
+scripts. To enable ifup to configure specific network interfaces on
+hotplug events, you need to list those interface in a "allow-hotplug"
+statement.
+	For example, your /etc/network/interfaces would include :
+--------- /etc/network/interfaces -----------
+# Enable Hotplug support (Etch and later)
+#
+allow-hotplug prism0 acx0
+---------------------------------------------
+
+	4) Installing uDev for Debian Etch (4.0)
+	----------------------------------------
+	The uDev system provided with Debian Etch (4.0) is fully
+functional, except for one missing feature. This version of uDev can
+not integrate with ifrename. The version of ifrename provided also
+lacks uDev support.
+	If you want to use uDev with Debian Etch (4.0), there are two
+possibilities. The first solution is use the uDev system to rename
+interfaces, loosing some of the power of ifrename. The second solution
+is to upgrade both udevd and ifrename.
+
+	This is the procedure I personally use to upgrade udevd on
+Debian Etch (4.0) :
+	o Get the canonical version of udev 107 from :
+		http://www.kernel.org/pub/linux/utils/kernel/hotplug/udev.html
+	o Compile it with "make".
+	o Do not "make install" !
+	o Run "strip udevd"
+	o Save a copy of the original udevd "cp /sbin/udevd /sbin/udevd.orig"
+	o Copy the new udevd with "cp udevd /sbin/udevd".
+	Note that udevd is an essential component of the OS. This
+procedure should be safe, but I do not guarantee it will always be
+safe.
+
+	Upgrading ifrename is simple, this is like installing ifrename
+and is described above in this document.
+
+	Once those two packages are upgraded, you can go follow the
+procedure going back to step (3).
+
+	5) Installing uDev for Debian Sarge (3.1)
+	-----------------------------------------
+	The uDev system provided with Debian Sarge (3.1) is a very old
+version of uDev that is not integrated with the Hotplug scripts. In
+other words, if you install uDev with Sarge, you will still need to
+use the original Hotplug scripts and configure your system with them.
+
+	6) Installing uDev on other distributions
+	--------------------------------------------
+	The canonical version of hotplug is available at :
+		http://www.kernel.org/pub/linux/utils/kernel/hotplug/udev.html
+	The mailing list for udev is the Hotplug mailins list :
+		http://linux-hotplug.sourceforge.net/
+		http://marc.theaimsgroup.com/?l=linux-hotplug-devel&r=1&w=2
+
+	Most distributions have highly customized uDev packages and
+most likely the canonical version won't completely work on your
+system. The udevd deamon is has usually little changes, however the
+rules and scripts are very different.
+	To be able to use uDev with ifrename, you will need uDev
+version 107 and later, which has support for calling ifrename. You
+will also need ifrename version 29.pre17 or later (I recommend version
+29). Most modern distributions should already have those versions.
+	If this is the case, you only need to install the uDev and
+ifrename package. If there is no ifrename package, it's easy to
+compile it from source and install it.
+
+	7) Making uDev call ifrename
+	----------------------------
+	We need to make sure that 'ifrename' is run by the uDev
+subsystem at the right time. Because of the complex way uDev works,
+the smooth integration can only be done one way. Other methods may
+leave the uDev system in a confused state, which may be a problem when
+the card/interface is removed.
+
+	Most often, the only thing to do it to copy the file
+'19-udev-ifrename.rules' from the Wireless Tools package to the
+directory "/etc/udev/rules.d/". It should work on most system.
+
+	What follow is a detailed explanation of what this additional
+rules does.
+	uDev needs to call ifrename as an IMPORT rule, and with the
+right parameter. As I said, this requires uDev version 107 and later
+and ifrename version 29.pre17 or later.
+	The ifrename rule need to be called *before* the 'persistent'
+rules. I also like the ifrename rule to happen after local rules. The
+uDev rules are processed in alphabetical orders, which is why the
+rules filename start usually with numbers. However, those name vary
+betwen distributions. Make sure the ifrename rule has a proper
+filename for your distribution.
+
+	The rules we add looks like this :
+------ /etc/udev/rules.d/19-udev-ifrename.rules ------
+# Main ifrename rule.
+# If interface is found in /etc/iftab, subsequent rename rules are bypassed.
+# If interface is not found in /etc/iftab, subsequent rename rules applies.
+SUBSYSTEM=="net", ACTION=="add", IMPORT="/sbin/ifrename -u -i %k", NAME:="%k"
+------------------------------------------------------
+
+	Lastly, make sure the rule has the right path for ifrename :
+--------------------------
+> which ifrename
+/sbin/ifrename
+--------------------------
+
+	8) Loading driver modules
+	-------------------------
+	Wow ! The most difficult part is done.
+	In theory, you don't need to do any specific configuration for
+the driver modules to be loaded. The uDev system should load the right
+driver module for you.
+	Also, you don't need to define aliases in /etc/modprobe.d/* or
+in /etc/modprobe.conf, it's useless and may be counterproductive.
+
+	If you use a driver compiled statically in the kernel, you
+also have nothing to do.
+
+	9) Renaming interfaces
+	-----------------------
+	We still use ifrename to assign names to interfaces. The
+configuration of 'ifrename' is the same. To keep the possibility of
+having multiple wireless cards (one in each CardBus slot), we use
+wildcards in both the MAC address and the name :
+
+--------- /etc/iftab -----------------------
+# SMC 2835W wireless CardBus card
+prism*		mac 00:30:B4:*
+---------------------------------------------
+
+	If you insert two cards, they would be named prism0 and
+prism1. If you want to control which card get each name, you should
+not use wildcards and set a specific line for each card :
+
+--------- /etc/iftab -----------------------
+# SMC 2835W wireless CardBus card
+prism0		mac 00:30:B4:64:27:8B
+prism1		mac 00:30:B4:64:27:8D
+---------------------------------------------
+
+	10) Configuring interfaces
+	--------------------------
+	At this point, configuration of uDev network interfaces is done
+just like their built-in counterparts. This part is still distribution
+specific, and still already documented in the file DISTRIBUTIONS.txt.
+
+	In Debian, you would need to modify the file
+/etc/network/interfaces like this :
+
+--------- /etc/network/interfaces -----------
+# Enable Hotplug support (Etch and later)
+#
+allow-hotplug prism0
+
+# SMC 2835W wireless CardBus card
+iface prism0 inet static
+    address 10.0.1.2
+    netmask 255.255.255.0
+    broadcast 10.0.1.255
+    wireless-essid THE_ESSID
+    wireless-mode ad-hoc
+    wireless-channel 5
+---------------------------------------------
+
+	Note that you can also use graphical tools such as
+NetworkManager to configure interfaces at this point.
+
+	Now, just cross your fingers and plug the card in the slot...
+	If it does not work, there is a troubleshooting section at the
+end of this document.
+
+
+CONFIGURATION VIA THE ORIGINAL HOTPLUG SCRIPTS
+----------------------------------------------
+	The previous section was dealing with removable interfaces
+with Hotplug events and the uDev system. In various cases, or for old
+distributions, it's preferable to use the original Hotplug
+scripts. The original Hotplug scripts are much less invasive on the
+system than uDev.
+	Using the original Hotplug scripts is similar to using uDev or
+dealing with built-in interfaces, the main difference is that the
+script used are different. Another difference is that it will likely
+require more work on your part because most distributions do not have
+all part properly integrated.
+
+	1) Applicability
+	----------------
+	The Hotplug configuration method is the best choice for any
+removable network interface, such as :
+		o Pcmcia (16 bits) network cards
+		o CardBus (32 bits) network cards
+		o USB network dongles
+		o Hot-PCI network cards
+	It may also be used to manage other types of network
+interfaces, although it may not be the best choice for them.
+
+	2) How the original Hotplug scripts works
+	-----------------------------------------
+	Conceptually, Hotplug is very simple, and the Hotplug scripts
+are quite easy to follow.
+
+	When something interesting happens, the Linux kernel generates
+an Hotplug event. This runs the main Hotplug script, which in turn
+runs the appropriate script from the /etc/hotplug directory.
 	There are 3 types of Hotplug events we care about :
 		o PCI event : a CardBus device is added or removed
 from the system. The script /etc/hotplug/pci.agent is run.
@@ -371,11 +663,13 @@ following happens :
 		6) Kernel detects new network device
 		7) Kernel generates Network Hotplug event
 		8) /etc/hotplug/net.agent runs, configures network device
-	The sequence of events is similar for removals and USB devices.
+	The sequence of events is similar for USB devices and for removals.
 
 	3) Make sure ifup does not deadlock
 	-----------------------------------
 	<Most people should ignore this part>
+	<This applies only to Debian 3.0 and earlier>
+
 	The first problem is that we need to make sure the command
 'ifup' does not deadlock by calling itself re-entrantly. If the system
 has built-in interfaces, the 'ifup' may reenter itself at boot time
@@ -391,19 +685,46 @@ via Hotplug :
 	Note that you can produce the same reentrancy if you call ifup
 manually on an interface which module is not yet loaded.
 
-	The default version of 'ifup' for Debian 3.0 and Debian Sarge
+	The default version of 'ifup' for Debian 3.0 and Debian 3.1
 is not reentrant and can therefore deadlock if not used properly. The
 patch to make 'ifup' properly reentrant is available here :
 		http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=231197
-	Contemporary versions of Debian (Sarge and later) have a
+	Contemporary versions of Debian (3.1 and later) have a
 net.agent script that contains workarounds to prevents deadlock
 situations, so for normal use the default 'ifup' should work fine.
+	Modern version of Debian (4.0 and later) have a version of
+'ifup' that is reentrant and that won't deadlock.
 
 	Other distributions have very different ifup programs and I
 have not tried those (tell me about it !).
 
-	4) Installing Hotplug for Debian Sarge (testing/unstable)
-	---------------------------------------------------------
+	4) Installing uDev for Debian Etch (4.0) or Lenny
+	-------------------------------------------------
+	Thanks to the great work of many people, Debian Etch and Lenny
+has all the necessary packages and hotplug support, and will work
+mostly 'out of the box'.
+	You will need to install the following packages :
+		o hotplug
+		o ifrename
+
+	The configuration of network Hotplug has been much simplified
+compared to Debian Sarge (3.0). You only have
+to modify the file /etc/network/interfaces to enable your interfaces
+to be managed with Hotplug and uDev.
+	By default, ifup ignore all hotplug network events, as it
+assume network interfaces are configured using the static init
+scripts. To enable ifup to configure specific network interfaces on
+hotplug events, you need to list those interface in a "allow-hotplug"
+statement.
+	For example, your /etc/network/interfaces would include :
+--------- /etc/network/interfaces -----------
+# Enable Hotplug support (Etch and later)
+#
+allow-hotplug prism0 acx0
+---------------------------------------------
+
+	5) Installing Hotplug for Debian Sarge (3.1)
+	--------------------------------------------
 	Thanks to the great work of many people, Debian Sarge has all
 the necessary packages and hotplug support, and will work mostly 'out
 of the box'.
@@ -454,7 +775,7 @@ mapping hotplug
     map ethA
 ---------------------------------------------
 
-	5) Installing Hotplug for Debian 3.0
+	6) Installing Hotplug for Debian 3.0
 	------------------------------------
 	Debian 3.0 doesn't come by default with hotplug, but the
 hotplug package is available as regular Debian package (on the CD or
@@ -491,7 +812,7 @@ the file /etc/hotplug/net.agent.
 hotplug is much more basic, and doesn't have any scanning at boot time
 and doesn't need to be enabled in /etc/network/interfaces.
 
-	6) Installing hotplug on other distributions
+	7) Installing hotplug on other distributions
 	--------------------------------------------
 	The canonical version of hotplug is available at :
 		http://linux-hotplug.sourceforge.net/
@@ -501,11 +822,15 @@ chances are that the canonical version won't completely work on your
 system. All these various changing versions make it difficult for me
 to tell what exactly needs to be changed in the hotplug scripts to
 make them work. However, most should work out of the box.
+	Remember also that in most cases, you can not have the
+original Hotplug scripts and uDev together. If uDev is already
+installed on your system, downgrading to the original Hotplug scripts
+may be tricky.
 
 	My guess is that in a few releases, all these problems will
 sort themselves out. Just be patient.
 
-	7) Dealing with 'init' hotplug
+	8) Dealing with 'init' hotplug
 	------------------------------
 	In addition to the standard kernel Hotplug events, modern
 versions of the Hotplug scripts add init scripts that scan the system
@@ -543,7 +868,7 @@ will not be loaded.
 appropriate .rc script in /etc/hotplug, or just deleting/renaming
 those files.
 
-	8) Making hotplug scripts call ifrename
+	9) Making hotplug scripts call ifrename
 	---------------------------------------
 	The last hotplug step is to make sure that 'ifrename' is run
 by the hotplug subsystem at the right time. As before, we want to run
@@ -633,14 +958,19 @@ prism1		mac 00:30:B4:64:27:8D
 
 	11) Configuring interfaces
 	-------------------------
-	At this point, configuration of Hotplug interfaces is done
-just like their built-in counterparts. This part is still distribution
-specific, and still already documented in the file DISTRIBUTIONS.txt.
+	At this point, configuration of Hotplug network interfaces is
+done just like their built-in counterparts. This part is still
+distribution specific, and still already documented in the file
+DISTRIBUTIONS.txt.
 
 	In Debian, you would need to modify the file
 /etc/network/interfaces like this :
 
 --------- /etc/network/interfaces -----------
+# Enable Hotplug support (Etch and later)
+#
+allow-hotplug prism0 acx0
+
 # Enable Hotplug support (Sarge and later)
 mapping hotplug
     script grep
@@ -660,6 +990,7 @@ iface prism0 inet static
 using waproamd to set these parameters.
 
 	Now, just cross your fingers and plug the card in the slot...
+
 
 PCMCIA INTERFACES (16 bits)
 ---------------------------
@@ -707,6 +1038,7 @@ Pcmcia cards with ifrename. You would need to modify
 /etc/pcmcia/network to add 'ifrename' before 'ifup' the same way it
 was done for /etc/hotplug/net.agent. But, as in the long term Pcmcia
 will migrate to Hotplug, I would not bother...
+
 
 MANUAL LOADING, DOCKING STATIONS
 --------------------------------
@@ -892,6 +1224,7 @@ iface prism0-other inet static
     wireless-key "s:secure"
 ------------------------------------------------------
 
+
 FIRMWARE LOADING
 ----------------
 	A lot of modern wireless card don't have built in firmware and
@@ -917,7 +1250,8 @@ sysfs		/sys	      sysfs  defaults                   0      0
 --------------------------------------------------
 
 	Then, you add the firmware file in the directory where it's
-expected, which is /usr/lib/hotplug/firmware/ in most cases.
+expected, which is /lib/firmware/ in most cases, and
+/usr/lib/hotplug/firmware/ on older systems.
 
 	Most distributions nowadays have a version of the Hotplug
 scripts that knows how to deal with firmware. If it is not the case,
@@ -951,8 +1285,9 @@ you make sure that the network init scripts run 'ifrename
 -p'. 'ifrename' will trigger the module to load, and all the Hotplug
 events will be generated properly to configure the interface.
 
-DEVICES WITH MULTIPLE NAMES
----------------------------
+
+DEVICES WITH MULTIPLE NAMES/INTERFACES
+--------------------------------------
 	Some wireless drivers offer multiple network interfaces for
 the same device. A classical example is the Aironet driver that
 creates a 'ethX' and 'wifiY' for each card.
@@ -983,6 +1318,7 @@ selectors, but it is architectured such as adding selectors is relatively
 trivial. If you find a case that 'ifrename' can't handle, you should
 just extend it.
 
+
 DEVICES WITHOUT MAC ADDRESSES
 -----------------------------
 	Most Ethernet and Wireless devices have a fixed and unique MAC
@@ -1011,30 +1347,77 @@ usb-p		firmware "Prolific PL-2301/PL-2302"
 usb-4		bus-info usb-00:02.0-1.4
 ---------------------------------------------
 
+
 TROUBLESHOOTING
 ---------------
 	If your interface doesn't show up as expected with ifconfig,
 you will need to find out why. First, you need to be familiar with the
 sequence of actions in the system and find which one did not happen.
 
+	1) Interfaces on the system
+	---------------------------
+	You first need to check which network interfaces are currently
+available on your system and configuration was assigned to it. This is
+mostly done using 'ifconfig'.
+	To list only the configured network interfaces :
+--------------------------
+> /sbin/ifconfig
+--------------------------
+	The list all network interfaces :
+--------------------------
+> /sbin/ifconfig -a
+--------------------------
+	You can also use 'iwconfig' to check the wireless configuration.
+
+	2) Modules
+	----------
 	You need to check that the driver module(s) was loaded using
 'lsmod'.
 
+	If this device is configure via init scripts, you should test
+if the on-demand loading of module (module probing works). This is
+done with :
+--------------------------
+> /sbin/modprobe -r eth2
+> /sbin/modprobe eth2
+--------------------------
+
+	If your module does not load, first you should check that the
+hardware is present. This depend on the bus used, for PCI bus you will
+use 'lspci' and for USB bus you will use 'lsusb'.
+	The second step is to check if the driver for your hardware is
+available on the system.
+
+	3) Ifrename
+	-----------
 	You need to check if the interface was properly renamed with
 'ifrename'. You can use 'ifrename -D -V' to debug your /etc/iftab.
 	Get the list of interfaces on your system with 'ifconfig -a'
 or 'cat /proc/net/dev', and check if an interface is using the name
 you assigned or 'eth0'. Check any suspicious interfaces with 'ifconfig
-eth0', and check its MAC address. Note that some rare drivers don't
-have a proper MAC address before brought up, which fools ifrename.
+eth0', and check its MAC address.
 	Verify that no line in /etc/iftab matches the all-zero MAC
 address. The all-zero MAC address matches the loopback interface 'lo'
 and various pseudo network devices, renaming the loopback interface is
 highly discouraged.
+	Finally, run ifrename in debug mode :
+--------------------------
+> /sbin/ifrename -D -V
+--------------------------
 
-	You need to check which configuration was given to the
-interface using 'ifconfig' and 'iwconfig'.
+	The only case where running ifrename in debug mode would
+differ from when it is run normally are drivers that don't have valid
+descriptor value until after ifrename is run. There are a few drivers,
+such as prism54, which don't have a proper MAC address before brought
+up. This obviously fools ifrename.
+	A way to debug that is to change the way ifrename is called to
+save the debug output. For example, you could call ifrename that way :
+------- /etc/hotplug/net.agent ------------------
+		NEWNAME=`/sbin/ifrename -i $INTERFACE -V 2>> /var/log/ifrename`
+-------------------------------------------------
 
+	4) Original Hotplug scripts
+	---------------------------
 	The Hotplug subsystem has also good debugging facilities.
 	To enable Hotplug debugging, just make sure the variable DEBUG
 is defined in /sbin/hotplug :
@@ -1055,6 +1438,49 @@ is defined in /sbin/hotplug :
 'tail -f /var/log/messages'. Verify that the various Hotplug events
 happen as expected (pci, firmware, net...), and verify the log
 messages from 'net.agent'.
+
+	5) UDev
+	-------
+	There are two main facilities to debug uDev, the 'udevtest'
+program and udev daemon debugging.
+
+	The uDev package comes with 'udevtest', a program that
+simulate a hotplug event, however this has many limitations and is not
+exactly like the real thing.
+	The file 19-udev-ifrename.rules has a special rule to work
+with udevtest. This rule runs ifrename in dry-run mode. This rule is
+disabled by default, and if you intend to use udevtest you should
+enable this rule :
+--------- 19-udev-ifrename.rules ---------------------
+# Enable this rule to test with udevtest.
+ENV{UDEV_LOG}=="6", SUBSYSTEM=="net", ACTION=="add", IMPORT="/sbin/ifrename -D -V -u -i %k", NAME:="%k"
+------------------------------------------------------
+	Then, to test on a specific interface, you would run it like this :
+----------------------
+> udevtest /sys/class/net/eth5
+[...]
+run_program: '/usr/sbin/ifrename' (stderr) 'Dry-run : Would rename eth0 to eth5.'
+[...]
+udev_rules_get_name: rule applied, 'eth0' becomes 'eth5'
+----------------------
+	The advantage of this procedure is that it's very simple to
+try and all the output is on the console.
+
+	The enable udevd debugging, you need to change the default log
+level to "debug" in the file /etc/udev/udev.conf :
+--------- /etc/udev/udev.conf ------------------------
+udev_log="debug"
+------------------------------------------------------
+	You will also need to reboot for this change to be
+effective. The alternative is to use 'udevcontrol'.
+	Make sure the special udevtest rule for ifrename described
+above is *NOT* enabled, i.e. it should be commented out or
+eliminated.
+	The debug message may be spread in various log files depending
+on the distribution. On Debian, I would find them with 'tail -f
+/var/log/debug'.
+
+
 
 
 	Have fun...

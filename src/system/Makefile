@@ -147,7 +147,7 @@ jivetest:
 
 # wireless tools
 wireless-tools:
-	cd wireless_tools.28; make iwmulticall CC=${CC} PREFIX=${PREFIX}; make install-iwmulticall PREFIX=${PREFIX}
+	cd wireless_tools.30; make iwmulticall CC=${CC} PREFIX=${PREFIX}; make install-iwmulticall PREFIX=${PREFIX}
 
 
 # zlib
@@ -242,7 +242,7 @@ clean:
 	-cd binutils-2.17/bfd; make distclean
 	-cd binutils-2.17/libiberty; make distclean
 	-cd jivetest; make clean
-	-cd wireless_tools.28; make clean
+	-cd wireless_tools.30; make clean
 	-cd mtd-utils; make clean
 	-cd zlib-1.2.3; make distclean; rm Makefile
 	-cd dropbear-0.48.1; make distclean
