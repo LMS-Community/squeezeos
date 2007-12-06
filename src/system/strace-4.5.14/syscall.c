@@ -1089,6 +1089,15 @@ struct tcb *tcp;
 		/*
 		 * Note: we only deal with only 32-bit CPUs here.
 		 */
+
+		if (!(tcp->flags & TCB_INSYSCALL) &&
+		    (tcp->flags & TCB_WAITEXECVE)) {
+			/* caught a fake syscall from the execve's exit */
+			tcp->flags &= ~TCB_WAITEXECVE;
+			return 0;
+		}
+ 
+
 		if (regs.ARM_cpsr & 0x20) {
 			/*
 			 * Get the Thumb-mode system call number
@@ -1108,16 +1117,25 @@ struct tcb *tcp;
 				return 0;
 			}
 
-			if ((scno & 0x0ff00000) != 0x0f900000) {
-				fprintf(stderr, "syscall: unknown syscall trap 0x%08lx\n",
-					scno);
-				return -1;
-			}
+			/* Handle the EABI syscall convention.  We do not
+			   bother converting structures between the two
+			   ABIs, but basic functionality should work even
+			   if strace and the traced program have different
+			   ABIs.  */
+			if (scno == 0xef000000) {
+				scno = regs.ARM_r7;
+			} else {
+				if ((scno & 0x0ff00000) != 0x0f900000) {
+					fprintf(stderr, "syscall: unknown syscall trap 0x%08lx\n",
+						scno);
+					return -1;
+				}
 
-			/*
-			 * Fixup the syscall number
-			 */
-			scno &= 0x000fffff;
+				/*
+				 * Fixup the syscall number
+				 */
+				scno &= 0x000fffff;
+			}
 		}
 
 		if (tcp->flags & TCB_INSYSCALL) {
