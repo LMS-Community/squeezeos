@@ -1,7 +1,7 @@
 /*
  * Automatically generated C config: don't edit
  * Linux kernel version: 2.6.22
- * Tue Oct 16 17:32:42 2007
+ * Thu Dec  6 15:28:09 2007
  */
 #define AUTOCONF_INCLUDED
 #define CONFIG_CPU_COPY_V4WB 1
