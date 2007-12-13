@@ -122,7 +122,7 @@
 #define CONFIG_BOOTARGS    	"root=/dev/mtdblock1 console=ttySAC0,115200 mem=64M init=/linuxrc"
 #define CONFIG_BOOTCOMMAND	"nandr $(kernelblock) 1d0000 30008000; setenv bootargs $(bootargs) mtdset=$(mtdset); bootm"
 
-#define CONFIG_EXTRA_ENV_SETTINGS "sw6=echo Factory reset; blink; nande af4 1400000; blink\0" \
+#define CONFIG_EXTRA_ENV_SETTINGS "sw6=echo Factory reset; blink; nande b00 1400000; blink\0" \
                                   "kernelblock=c\0" \
                                   "mtdset=0\0"
 

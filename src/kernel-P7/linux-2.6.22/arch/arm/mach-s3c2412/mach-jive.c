@@ -94,13 +94,12 @@ static struct s3c2410_uartcfg jive_uartcfgs[] = {
 /* Jive flash assignment
  *
  * 0x00000000-0x00028000 : uboot
- * 0x00028000-0x0002c000 : uboot env
- * 0x0002c000-0x00030000 : spare
+ * 0x00028000-0x00030000 : uboot env
  * 0x00030000-0x00200000 : zimage A
  * 0x00200000-0x01600000 : cramfs A
  * 0x01600000-0x017d0000 : zimage B
  * 0x017d0000-0x02bd0000 : cramfs B
- * 0x02bd0000-0x03fd0000 : yaffs
+ * 0x02c00000-0x04000000 : yaffs
  */
 static struct mtd_partition jive_imageA_nand_part[] = {
 
@@ -112,13 +111,6 @@ static struct mtd_partition jive_imageA_nand_part[] = {
 		.size           = (160*SZ_1K),
 		.mask_flags	= MTD_WRITEABLE, /* force read-only */
 	},
-
-	/* spare */
-        {
-                .name           = "spare",
-                .offset         = (176*SZ_1K),
-                .size           = (16*SZ_1K),
-        },
 #endif
 
 	/* booted images */
@@ -174,13 +166,6 @@ static struct mtd_partition jive_imageB_nand_part[] = {
 		.size           = (160*SZ_1K),
 		.mask_flags	= MTD_WRITEABLE, /* force read-only */
 	},
-
-	/* spare */
-        {
-                .name           = "spare",
-                .offset         = (176*SZ_1K),
-                .size           = (16*SZ_1K),
-        },
 #endif
 
 	/* booted images */
