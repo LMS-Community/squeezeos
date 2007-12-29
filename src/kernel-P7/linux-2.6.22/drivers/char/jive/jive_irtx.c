@@ -51,7 +51,8 @@
 
 //===================================================================
 static inline void DisableCarrierNothing(void);
-static inline void EnableCarrierProcess(void);
+static inline void EnableCarrierProcess(int v1, int v2);
+static inline void EnableNoCarrier(void);
 
 
 //===================================================================
@@ -68,40 +69,83 @@ static int IRTransmission_release (struct inode *inode, struct file *filp)
 //===================================================================
 static ssize_t IRTransmission_write (struct file *filp, const char *buf, size_t count, loff_t *f_pos)
 {
-	int MoveCount = CarrierNothing;
-	int Triger,TxBitCnt,TxChkCnt;
+	#define BUFFER_MAX		100
+	#define NO_CARRIER_DELAY_MAX	20		// 20uS
+	#define MARK_BIT		0x80000000
+	#define OMIT_CARRIER_BIT	0x40000000
+
+	#define CLOCK_FREQUENCY		12000000	//  12MHz
+	#define CARRIER_FREQUENCY_MIN	20000		//  20kHz
+	#define CARRIER_FREQUENCY_MAX	500000		// 500kHz
+
+	int i;
 	unsigned int TxData[100];
 	unsigned long flags;
 	int ret;
-	
-	MoveCount = count*4;
+	unsigned int MarkBit;
+	unsigned int OmitCarrierBit;
+	unsigned int DelayTime;
+	unsigned int CarrierFrequency;
+	int v1, v2;
 
-	ret = copy_from_user(TxData, buf, MoveCount);
-	if (ret < 0)
+//	printk(KERN_WARNING "***** count: %d\n", count);
+
+	// Sanity check
+	if( count > BUFFER_MAX) {
+		count = BUFFER_MAX;
+	}
+
+	ret = copy_from_user(TxData, buf, count*4);
+	if (ret < 0) {
 		return ret;
+	}
 
-	TxBitCnt=0;
-	TxChkCnt=count;
+	// First value in array is carrier frequency in Hz
+	CarrierFrequency = TxData[0];
+	// Sanity checks
+	if( CarrierFrequency < CARRIER_FREQUENCY_MIN) {
+		CarrierFrequency = CARRIER_FREQUENCY_MIN;
+	}
+	if( CarrierFrequency > CARRIER_FREQUENCY_MAX) {
+		CarrierFrequency = CARRIER_FREQUENCY_MAX;
+	}
+	// Calculate timer values
+	v1 = CLOCK_FREQUENCY / CarrierFrequency;
+	v2 = v1 / 2;
 
 	DisableCarrierNothing();
-	Triger = 0;
 
 	local_irq_save(flags);
 
-	for(TxBitCnt=0; TxBitCnt<TxChkCnt; TxBitCnt++) {
-		if (Triger) {
+	for(i=1; i<count; i++) {
+		MarkBit = TxData[i] & MARK_BIT;
+		OmitCarrierBit = TxData[i] & OMIT_CARRIER_BIT;
+		DelayTime = TxData[i] & ~( MARK_BIT | OMIT_CARRIER_BIT);
+
+		// Mark
+		if( MarkBit) {
+			// Mark - omit carrier
+			if( OmitCarrierBit) {
+				// Limit to 20uS
+				if( DelayTime > NO_CARRIER_DELAY_MAX) {
+					DelayTime = NO_CARRIER_DELAY_MAX;
+				}
+				EnableNoCarrier();
+			// Mark - w/ carrier
+			} else {
+				// Pass values for carrier frequency
+				EnableCarrierProcess( v1, v2);
+			}
+		// Space
+		} else {
 			DisableCarrierNothing();
-			Triger = 0;
 		}
-		else {
-			EnableCarrierProcess();
-			Triger = 1;
-		}
-		udelay(TxData[TxBitCnt]);
+
+//		printk(KERN_WARNING "***** TxData[%d]: %x\n", TxBitCnt, DelayTime);
+		mdelay( DelayTime / 1000);
+		udelay( DelayTime % 1000);
 	}
-	//End bit
-	//	EnableCarrierProcess();
-	//	udelay(560);
+
 	DisableCarrierNothing();
 
 	local_irq_restore(flags);
@@ -164,7 +208,7 @@ static inline void DisableCarrierNothing(void)
 	s3c2410_gpio_setpin(S3C2410_GPB1, 0);
 }				
 
-static inline void EnableCarrierProcess(void)
+static inline void EnableCarrierProcess(int v1, int v2)
 {
 	unsigned long flags;
 
@@ -176,8 +220,8 @@ static inline void EnableCarrierProcess(void)
 	RAW(S3C2410_TCFG1) &= ~S3C2410_TCFG1_MUX1_MASK;
 	RAW(S3C2410_TCFG1) |= S3C2410_TCFG1_MUX1_DIV4;		// PCLK devide 1/4
 
-	RAW(S3C2410_TCNTB(1)) = 0x0294;				// 37.8Khz
-	RAW(S3C2410_TCMPB(1)) = 0x014A;
+	RAW(S3C2410_TCNTB(1)) = v1;				// 37.8Khz
+	RAW(S3C2410_TCMPB(1)) = v2;
 
 	RAW(S3C2410_TCON) &= 0xFFFFF0FF;
 	RAW(S3C2410_TCON) |= S3C2410_TCON_T1MANUALUPD;		// Manual update
@@ -187,6 +231,19 @@ static inline void EnableCarrierProcess(void)
 	local_irq_restore(flags);
 }
 
+static inline void EnableNoCarrier(void)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	RAW(S3C2410_TCON) &= 0xFFFFF0FF;		
+
+	local_irq_restore(flags);
+
+	s3c2410_gpio_cfgpin(S3C2410_GPB1, S3C2410_GPB1_OUTP);
+	s3c2410_gpio_setpin(S3C2410_GPB1, 1);
+}
 //===================================================================
 module_init(IRTransmission_init);
 module_exit(IRTransmission_exit);
