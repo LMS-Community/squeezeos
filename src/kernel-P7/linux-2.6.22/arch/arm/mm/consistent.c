@@ -302,6 +302,14 @@ dma_alloc_writecombine(struct device *dev, size_t size, dma_addr_t *handle, gfp_
 }
 EXPORT_SYMBOL(dma_alloc_writecombine);
 
+void *
+dma_alloc_cached(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp)
+{
+	return __dma_alloc(dev, size, handle, gfp,
+			   __pgprot(pgprot_val(pgprot_kernel) | L_PTE_CACHEABLE | L_PTE_BUFFERABLE));
+}
+EXPORT_SYMBOL(dma_alloc_cached);
+
 static int dma_mmap(struct device *dev, struct vm_area_struct *vma,
 		    void *cpu_addr, dma_addr_t dma_addr, size_t size)
 {

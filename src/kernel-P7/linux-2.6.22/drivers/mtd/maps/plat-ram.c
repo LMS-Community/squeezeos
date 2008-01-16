@@ -273,7 +273,8 @@ static void __exit platram_exit(void)
 	platform_driver_unregister(&platram_driver);
 }
 
-module_init(platram_init);
+//module_init(platram_init);
+late_initcall(platram_init);
 module_exit(platram_exit);
 
 MODULE_LICENSE("GPL");

@@ -723,8 +723,8 @@ static int __init s3c2410fb_map_video_memory(struct fb_info *info)
 
 	dprintk("map_video_memory(fbi=%p) map_size %u\n", fbi, map_size);
 
-	info->screen_base = dma_alloc_writecombine(fbi->dev, map_size,
-						   &map_dma, GFP_KERNEL);
+	info->screen_base = dma_alloc_cached(fbi->dev, map_size,
+					     &map_dma, GFP_KERNEL);
 
 	if (info->screen_base) {
 		/* prevent initial garbage on screen */

@@ -138,6 +138,9 @@ int dma_mmap_coherent(struct device *dev, struct vm_area_struct *vma,
 extern void *
 dma_alloc_writecombine(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp);
 
+extern void *
+dma_alloc_cached(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp);
+
 #define dma_free_writecombine(dev,size,cpu_addr,handle) \
 	dma_free_coherent(dev,size,cpu_addr,handle)
 

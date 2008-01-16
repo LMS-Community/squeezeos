@@ -525,7 +525,8 @@ int s3c2410_dma_enqueue(unsigned int channel, void *id,
 		}
 	} else if (chan->state == S3C2410_DMA_IDLE) {
 		if (chan->flags & S3C2410_DMAF_AUTOSTART) {
-			s3c2410_dma_ctrl(chan->number, S3C2410_DMAOP_START);
+			s3c2410_dma_ctrl(chan->number | DMACH_LOW_LEVEL,
+					 S3C2410_DMAOP_START);
 		}
 	}
 
@@ -787,7 +788,7 @@ int s3c2410_dma_request(unsigned int channel,
 
 	pr_debug("%s: channel initialised, %p\n", __FUNCTION__, chan);
 
-	return 0;
+	return chan->number | DMACH_LOW_LEVEL;
 }
 
 EXPORT_SYMBOL(s3c2410_dma_request);
@@ -1185,7 +1186,7 @@ int s3c2410_dma_devconfig(int channel,
 		dma_wrreg(chan, S3C2410_DMA_DIDSTC, (0<<1) | (0<<0));
 
 		chan->addr_reg = dma_regaddr(chan, S3C2410_DMA_DIDST);
-		return 0;
+		break;
 
 	case S3C2410_DMASRC_MEM:
 		/* source is memory */
@@ -1196,11 +1197,19 @@ int s3c2410_dma_devconfig(int channel,
 		dma_wrreg(chan, S3C2410_DMA_DIDSTC, hwcfg & 3);
 
 		chan->addr_reg = dma_regaddr(chan, S3C2410_DMA_DISRC);
-		return 0;
+		break;
+
+	default:
+		printk(KERN_ERR "dma%d: invalid source type (%d)\n",
+		       channel, source);
+
+		return -EINVAL;
 	}
 
-	printk(KERN_ERR "dma%d: invalid source type (%d)\n", channel, source);
-	return -EINVAL;
+	if (dma_sel.direction != NULL)
+		(dma_sel.direction)(chan, chan->map, source);
+
+	return 0;
 }
 
 EXPORT_SYMBOL(s3c2410_dma_devconfig);
