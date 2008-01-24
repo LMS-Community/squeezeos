@@ -464,6 +464,41 @@ int do_nandr    (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	return 0;
 }
 
+// nand checksum per block
+int do_nandc    (cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
+{
+	ulong	startblk,size;
+	ulong crc;
+	char *buf;
+	int numblocks, i, j;
+
+	if (argc !=  3) {
+		printf ("Usage:\n%s\n", cmdtp->usage);
+		return 1;
+	}
+
+	//startblk = cblock_size*simple_strtoul(argv[1], NULL, 16);
+	startblk = simple_strtoul(argv[1], NULL, 16);
+	size  = simple_strtoul(argv[2], NULL, 16);
+
+	buf = malloc(cblock_size);
+	numblocks = size / cblock_size;
+
+	NF_Init();
+	NF_Reset();
+	for ( i=0 ; i < numblocks;  i++) {
+		if(NF_IsBadBlock(startblk + i)) {	// 1:bad 0:good
+			printf("Block %d (0x%x) = BAD\n", startblk + 1, startblk + 1);
+		}
+		else {
+			s3c24x0_nand_read(startblk + i,cblock_size,(ulong)buf);
+			crc = crc32(0, (const uchar *) buf, cblock_size);
+			printf("Block %d (0x%x) = 0x%0lx %s\n", startblk + i, startblk + i, crc, (crc==0x690b37d3)?" ERASED":"");
+		}
+	}
+	return 0;
+}
+
 U_BOOT_CMD(
 	nandbb,	4,	1,	do_nandbb,
        "nandbb HEX: targetblock numblocks \n",
@@ -511,7 +546,14 @@ U_BOOT_CMD(
 	 nandr,	4,	1,	do_nandr,
 	 "nandr - HEX: targetblock targetsize mem_adr \n",
 	 "\n	-SMDK24X0 NAND Flash Read Program\n"	\
-	 "nandw targetblock, targetsize memory addr \n"	\
+	 "nandr targetblock, targetsize memory addr \n"	\
+);
+
+U_BOOT_CMD(
+	 nandc,	4,	1,	do_nandc,
+	 "nandc - HEX: targetblock targetsize_adr \n",
+	 "\n	-SMDK24X0 NAND Flash Checksum\n"	\
+	 "nandc targetblock, targetsize \n"	\
 );
 
 static u8 seBuf[64]=
