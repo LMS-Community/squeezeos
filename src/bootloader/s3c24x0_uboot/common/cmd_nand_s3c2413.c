@@ -186,14 +186,14 @@ int s3c24x0_nand_read(uint srcBlock,uint readSize, uint dstAddress)
 	while(1) {
 #if BAD_CHECK       
 		if(NF_IsBadBlock(blockIndex)) {	// 1:bad 0:good
-			printf("Skipping Bad Block %d\n",blockIndex);
+			printf("Skipping Bad Block %d (0x%x)\n",blockIndex,blockIndex);
 			blockIndex++;  
 			continue;
 		}
 #endif
 		for(i=0; i< cpages_in_block ;i++) {
 			if(!NF_ReadPage(blockIndex,i,dstPt)) {
-				printf("Error in Reading Block %d Page %d\n",blockIndex,i);
+				printf("Error in Reading Block %d (0x%x) Page %d\n",blockIndex,blockIndex,i);
 			}
 			dstPt += cpage_size;
 			if((u32)dstPt >= (dstAddress+readSize)) // Check end of buffer
@@ -232,7 +232,7 @@ int s3c24x0_nand_write(uint targetBlock,uint targetSize, uint srcAddress, int fl
 #endif
 		if(!NF_EraseBlock(blockIndex)) {
 			blockIndex++;   // for next block
-			printf(" Error->  Erase Block %d  \n",(int)blockIndex);
+			printf(" Error->  Erase Block %d (0x%x)  \n",(int)blockIndex,blockIndex);
 			continue;
 		}
 
@@ -300,15 +300,31 @@ int do_nandbb(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
 	printf("StartBlock %d (0x%x) : NumBlock %d (0x%x) \n",startblk,startblk,numblks, numblks);
 
 	for (i=startblk; i<startblk+numblks; i++) {
-		if(NF_IsBadBlock(i)) {	// 1:bad 0:good
-			printf("B");
-		}
-		else {
-			printf(".");
-		}
-		if (!( i % 16 )) printf("\n");
+		NF_IsBadBlock(i); // prints bad blocks
 	}
-	printf("\n");
+
+	return 0;
+}
+
+
+int do_nandmb(cmd_tbl_t *cmdtp, int flag, int argc, char *argv[])
+{
+	int blk;
+
+	if ( argc != 2 ){
+		printf ("Usage:\n%s\n", cmdtp->usage);
+		return 1;
+	}
+	blk = simple_strtoul(argv[1], NULL, 16);
+	printf("Mark block %d (0x%x) as BAD\n", blk, blk);
+
+	NF_Init();
+	NF_Reset();
+
+	NF_MarkBadBlock(blk, NF_BB_ON);
+	NF_IsBadBlock(blk);
+
+	return 0;
 }
 
 
@@ -456,6 +472,13 @@ U_BOOT_CMD(
 );
 
 U_BOOT_CMD(
+	nandmb,	4,	1,	do_nandmb,
+       "nandmb HEX: targetblock \n",
+       "\n	- SMDK24X0 NAND Flash Mark Bad Block\n"	\
+       "nandmb targetblock \n"	\
+);
+
+U_BOOT_CMD(
 	nandw,	4,	1,	do_nandw,
        "nandw HEX: targetblock targetsize mem_addr \n",
        "\n	- SMDK24X0 NAND Flash Write Program\n"		\
@@ -545,9 +568,9 @@ static int NF_MarkBadBlock(u32 block, int mark_flag)
 		NF_nFCE_H();
 	}
 	if ( mark_flag == NF_BB_ON) {
-		printf("[block 0x%x is marked as a bad block]\n",block);
+		printf("[block %d (0x%x) is marked as a bad block]\n",block,block);
 	} else {
-		printf("[block 0x%x is marked as a good block]\n",block);
+		printf("[block %d (0x%x) is marked as a good block]\n",block,block);
 	}
 	return 1;
 } 
@@ -654,7 +677,7 @@ static int NF_WritePage(u32 block,u32 page,u8 *buffer)
 
 	if (status & 0x1) {// Page write error
 		NF_nFCE_H();
-		printf("[PROGRAM_ERROR:block#=%d]\n",block);
+		printf("[PROGRAM_ERROR:block#=%d (0x%x)]\n",block,block);
 		NF_MarkBadBlock(block, NF_BB_ON);
 		return FAIL;
 	} else {
@@ -808,7 +831,7 @@ static int NF_EraseBlock(u32 block)
 
 	if (NFDATA8 & 0x1) {
 		NF_nFCE_H();
-		printf("[ERASE_ERROR:block#=%d]\n",block);
+		printf("[ERASE_ERROR:block#=%d (0x%x)]\n",block,block);
 		NF_MarkBadBlock(block,NF_BB_ON);
 		return FAIL;
 	}
@@ -822,7 +845,7 @@ static int NF_CheckBadNande(u32 block)
 {
 	int i;
 	unsigned int blockPage;
-	u16 data;
+	u16 data = 0;
 
 	blockPage = block * cpages_in_block;
 
@@ -858,7 +881,7 @@ static int NF_CheckBadNande(u32 block)
 	}
 	NF_nFCE_H();
 	if (i != (coob_size/2)) {
-		printf("[block %d is bad block(%x)]\n",block,data);
+		printf("[block %d (0x%x) is bad block(%x)]\n",block,block,data);
 		return 1;
 	}
 	return 0;
@@ -911,7 +934,7 @@ static int NF_IsBadBlock(u32 block)
 
 	if(data != 0xff)
 	{
-		printf("[block %d has been marked as a bad block(%x)]\n",block,data);
+		printf("[block %d (0x%x) has been marked as a bad block(%x)]\n",block,block,data);
 		return 1;
 	}
 	return 0;
