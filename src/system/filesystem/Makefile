@@ -10,7 +10,8 @@ install:
 	install etc/inetd.conf ${PREFIX}/etc
 	install etc/inittab ${PREFIX}/etc
 	install etc/init.d/rcS ${PREFIX}/etc/init.d
-	install etc/init.d/wlan-start ${PREFIX}/etc/init.d
+	install etc/init.d/wlan ${PREFIX}/etc/init.d
+	install etc/init.d/suspend ${PREFIX}/etc/init.d
 	-install etc/init.d/rcS.local ${PREFIX}/etc/init.d
 	install etc/issue ${PREFIX}/etc
 	install etc/protocols ${PREFIX}/etc

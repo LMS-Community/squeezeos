@@ -8,6 +8,7 @@ echo "Mounting RAM Disk"
 mkdir /var/shm /var/log /var/run
 
 
+# Mount SD card
 if [ -b /dev/mmcblk0p1 ]; then
 	echo "Mounting MMC/SD card (partition 1)"
 	mount -t vfat /dev/mmcblk0p1 /mnt/mmc
@@ -17,13 +18,23 @@ elif [ -b /dev/mmcblk0 ]; then
 fi
 
 
+# Start syslogd
 grep /mnt/mmc /proc/mounts | cut -d' ' -f 4 | grep -q rw
-if [ $? = 0 -a -e /mnt/mmc/var  ]; then
+if [ $? = 0 -a -e /mnt/mmc/log  ]; then
+	# log and core files to mmc
+
+	echo "Starting syslogd (to mmc)"
+	/sbin/syslogd -s500 -O /mnt/mmc/log/messages
+
+	echo "Enabling core files (to mmc)"
+	echo "/mnt/mmc/log/core-%e" > /proc/sys/kernel/core_pattern
+	ulimit -c unlimited
+elif [ $? = 0 -a -e /mnt/mmc/var  ]; then
 	# log and core files to mmc
 	/bin/mkdir -p /mnt/mmc/var/log /mnt/mmc/var/core
 
 	echo "Starting syslogd (to mmc)"
-	/sbin/syslogd -O /mnt/mmc/var/log/messages
+	/sbin/syslogd -s500 -O /mnt/mmc/var/log/messages
 
 	echo "Enabling core files (to mmc)"
 	echo "/mnt/mmc/var/core/core-%e" > /proc/sys/kernel/core_pattern
@@ -35,6 +46,11 @@ else
 fi
 
 
+# Start kernel logger
+/sbin/klogd
+
+
+# Execute firstboot script?
 if ! [ -f /etc/firstboot ]; then
 	echo "First boot"
 	touch /etc/firstboot
@@ -44,6 +60,8 @@ if ! [ -f /etc/firstboot ]; then
 	fi
 fi
 
+
+# Create ssh keys
 if ! [ -f /etc/dropbear/dropbear_rsa_host_key ] ; then
 	echo "Creating dropbear rsa host key"
 	/usr/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
@@ -54,6 +72,8 @@ if ! [ -f /etc/dropbear/dropbear_dss_host_key ]; then
 	/usr/bin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
 fi
 
+
+# Start network
 echo "Starting lo"
 /sbin/ifconfig lo up 127.0.0.1
 
@@ -62,7 +82,7 @@ echo "Starting inetd"
 
 
 # Start wlan
-/etc/init.d/wlan-start
+/etc/init.d/wlan start
 
 
 if [ -x /etc/init.d/rcS.local ]; then
