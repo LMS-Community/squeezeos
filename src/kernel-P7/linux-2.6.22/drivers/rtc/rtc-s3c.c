@@ -266,16 +266,29 @@ static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 		writeb(BIN2BCD(tm->tm_hour), base + S3C2410_ALMHOUR);
 	}
 
+	if (tm->tm_mday < 31 && tm->tm_mday >= 0) {
+		alrm_en |= S3C2410_RTCALM_DAYEN;
+		writeb(BIN2BCD(tm->tm_mday), base + S3C2410_ALMDATE);
+	}
+
+	if (tm->tm_mon < 12 && tm->tm_mon >= 0) {
+		alrm_en |= S3C2410_RTCALM_MONEN;
+		writeb(BIN2BCD(tm->tm_mon + 1), base + S3C2410_ALMMON);
+	}
+
+	if (tm->tm_year >= 0 && tm->tm_year < 0xffff) {
+		alrm_en |= S3C2410_RTCALM_YEAREN;
+		writeb(BIN2BCD(tm->tm_year - 100), base + S3C2410_ALMYEAR);
+	}
+
+	if (alrm->enabled)
+		alrm_en |= S3C2410_RTCALM_ALMEN;
+	else
+		alrm_en &= ~S3C2410_RTCALM_ALMEN;
+
 	pr_debug("setting S3C2410_RTCALM to %08x\n", alrm_en);
 
-	writeb(alrm_en, base + S3C2410_RTCALM);
-
-	if (0) {
-		alrm_en = readb(base + S3C2410_RTCALM);
-		alrm_en &= ~S3C2410_RTCALM_ALMEN;
-		writeb(alrm_en, base + S3C2410_RTCALM);
-		disable_irq_wake(s3c_rtc_alarmno);
-	}
+ 	writeb(alrm_en, base + S3C2410_RTCALM);
 
 	if (alrm->enabled)
 		enable_irq_wake(s3c_rtc_alarmno);
@@ -510,6 +523,8 @@ static int s3c_rtc_probe(struct platform_device *pdev)
 		 readb(s3c_rtc_base + S3C2410_RTCCON));
 
 	s3c_rtc_setfreq(s3c_rtc_freq);
+
+	device_init_wakeup(&pdev->dev, 1);
 
 	/* register RTC and exit */
 
