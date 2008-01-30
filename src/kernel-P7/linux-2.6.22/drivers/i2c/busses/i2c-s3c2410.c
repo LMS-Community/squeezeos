@@ -38,6 +38,8 @@
 #include <asm/irq.h>
 #include <asm/io.h>
 
+#include <asm/plat-s3c24xx/cpu-freq.h>
+
 #include <asm/arch/regs-gpio.h>
 #include <asm/arch/regs-iic.h>
 #include <asm/arch/iic.h>
@@ -71,6 +73,10 @@ struct s3c24xx_i2c {
 	struct resource		*irq;
 	struct resource		*ioarea;
 	struct i2c_adapter	adap;
+
+#ifdef CONFIG_CPU_FREQ
+	struct notifier_block	freq_transition;
+#endif
 };
 
 /* default platform data to use if not supplied in the platform_device
@@ -645,15 +651,16 @@ static inline int freq_acceptable(unsigned int freq, unsigned int wanted)
 */
 
 static int s3c24xx_i2c_getdivisor(struct s3c24xx_i2c *i2c,
-				  struct s3c2410_platform_i2c *pdata,
+				  unsigned long clkin,
 				  unsigned long *iicon,
 				  unsigned int *got)
 {
-	unsigned long clkin = clk_get_rate(i2c->clk);
-	
+	struct s3c2410_platform_i2c *pdata;
 	unsigned int divs, div1;
 	int freq;
 	int start, end;
+
+	pdata  = s3c24xx_i2c_get_platformdata(i2c->adap.dev.parent);
 
 	clkin /= 1000;		/* clkin now in KHz */
      
@@ -694,6 +701,77 @@ static int s3c24xx_i2c_getdivisor(struct s3c24xx_i2c *i2c,
 	return 0;
 }
 
+#ifdef CONFIG_CPU_FREQ
+
+static int s3c24xx_i2c_cpufreq_transition(struct notifier_block *nb,
+					  unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freqs = data;
+	struct s3c24xx_cpufreq_freqs *s3c_freqs = to_s3c_cpufreq(freqs);
+	struct s3c24xx_i2c *i2c = container_of(nb, struct s3c24xx_i2c,
+					       freq_transition);
+	unsigned long iiccon;
+	unsigned long iiccon_f;
+	unsigned long flags;
+	unsigned int got;
+	int ret;
+
+	if ((val == CPUFREQ_POSTCHANGE &&
+	     s3c_freqs->new.pclk < s3c_freqs->old.pclk) ||
+	    (val == CPUFREQ_PRECHANGE &&
+	     s3c_freqs->new.pclk > s3c_freqs->old.pclk)) {
+		iiccon_f = 0;
+		ret = s3c24xx_i2c_getdivisor(i2c, s3c_freqs->new.pclk,
+					     &iiccon_f, &got);
+
+		if (ret < 0) {
+			dev_err(i2c->dev, "cannot find frequency\n");
+		} else {
+			dev_info(i2c->dev, "setting freq %d\n", got);
+			
+			spin_lock_irq(&i2c->lock);
+			
+			iiccon = readl(i2c->regs + S3C2410_IICCON);
+
+			iiccon &= ~(S3C2410_IICCON_SCALEMASK |
+				    S3C2410_IICCON_TXDIV_512);
+
+			iiccon |= iiccon_f;
+
+			writel(iiccon, i2c->regs + S3C2410_IICCON);
+			
+			spin_unlock_irq(&i2c->lock);
+		}				   
+	}
+
+	return 0;
+}
+
+static inline int s3c24xx_i2c_register_cpufreq(struct s3c24xx_i2c *i2c)
+{
+	i2c->freq_transition.notifier_call = s3c24xx_i2c_cpufreq_transition;
+
+	return cpufreq_register_notifier(&i2c->freq_transition,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void s3c24xx_i2c_deregister_cpufreq(struct s3c24xx_i2c *i2c)
+{
+	cpufreq_unregister_notifier(&i2c->freq_transition,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+#else
+static inline int s3c24xx_i2c_register_cpufreq(struct s3c24xx_i2c *i2c)
+{
+	return 0;
+}
+
+static inline void s3c24xx_i2c_deregister_cpufreq(struct s3c24xx_i2c *i2c)
+{
+}
+#endif
+
 /* s3c24xx_i2c_init
  *
  * initialise the controller, set the IO lines and frequency 
@@ -722,7 +800,7 @@ static int s3c24xx_i2c_init(struct s3c24xx_i2c *i2c)
 
 	/* we need to work out the divisors for the clock... */
 
-	if (s3c24xx_i2c_getdivisor(i2c, pdata, &iicon, &freq) != 0) {
+	if (s3c24xx_i2c_getdivisor(i2c, clk_get_rate(i2c->clk), &iicon, &freq) != 0) {
 		dev_err(i2c->dev, "cannot meet bus frequency required\n");
 		return -EINVAL;
 	}
@@ -838,6 +916,13 @@ static int s3c24xx_i2c_probe(struct platform_device *pdev)
 
 	i2c->adap.nr = pdata->bus_num;
 
+
+	ret = s3c24xx_i2c_register_cpufreq(i2c);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to register cpufreq notifier\n");
+		goto err_irq;
+	}
+
 	/* if there is no bus specified, then use a dynamic number to
 	 * register. If there has been none set (ie, 0) then you will
 	 * get i2c bus 0. */
@@ -849,13 +934,16 @@ static int s3c24xx_i2c_probe(struct platform_device *pdev)
 
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to add bus to i2c core\n");
-		goto err_irq;
+		goto err_cpufreq;
 	}
 
 	platform_set_drvdata(pdev, i2c);
 
 	dev_info(&pdev->dev, "%s: S3C I2C adapter\n", i2c->adap.dev.bus_id);
 	return 0;
+
+ err_cpufreq:
+	s3c24xx_i2c_deregister_cpufreq(i2c);
 
  err_irq:
 	free_irq(i2c->irq->start, i2c);
@@ -883,6 +971,8 @@ static int s3c24xx_i2c_probe(struct platform_device *pdev)
 static int s3c24xx_i2c_remove(struct platform_device *pdev)
 {
 	struct s3c24xx_i2c *i2c = platform_get_drvdata(pdev);
+
+	s3c24xx_i2c_deregister_cpufreq(i2c);
 
 	i2c_del_adapter(&i2c->adap);
 	free_irq(i2c->irq->start, i2c);

@@ -60,6 +60,8 @@
 
 #include <asm/io.h>
 
+#include <asm/plat-s3c24xx/cpu-freq.h>
+
 #include <asm/arch/regs-nand.h>
 #include <asm/arch/nand.h>
 
@@ -121,6 +123,10 @@ struct s3c2410_nand_info {
 	int				mtd_count;
 
 	enum s3c_cpu_type		cpu_type;
+
+#ifdef CONFIG_CPU_FREQ
+	struct notifier_block	freq_transition;
+#endif
 };
 
 /* conversion functions */
@@ -178,14 +184,14 @@ static int s3c_nand_calc_rate(int wanted, unsigned long clk, int max)
 
 /* controller setup */
 
-static int s3c2410_nand_inithw(struct s3c2410_nand_info *info,
-			       struct platform_device *pdev)
+static int s3c2410_nand_setrate(struct s3c2410_nand_info *info,
+				unsigned long clkrate)
 {
-	struct s3c2410_platform_nand *plat = to_nand_plat(pdev);
-	unsigned long clkrate = clk_get_rate(info->clk);
+	struct s3c2410_platform_nand *plat = info->platform;
 	int tacls_max = (info->cpu_type == TYPE_S3C2412) ? 8 : 4;
 	int tacls, twrph0, twrph1;
-	unsigned long cfg = 0;
+	unsigned long set, cfg, mask;
+	unsigned long flags;
 
 	/* calculate the timing information for the controller */
 
@@ -212,26 +218,68 @@ static int s3c2410_nand_inithw(struct s3c2410_nand_info *info,
 
  	switch (info->cpu_type) {
  	case TYPE_S3C2410:
-		cfg = S3C2410_NFCONF_EN;
-		cfg |= S3C2410_NFCONF_TACLS(tacls - 1);
-		cfg |= S3C2410_NFCONF_TWRPH0(twrph0 - 1);
-		cfg |= S3C2410_NFCONF_TWRPH1(twrph1 - 1);
+		mask = (S3C2410_NFCONF_TACLS(3) |
+			S3C2410_NFCONF_TWRPH0(7) |
+			S3C2410_NFCONF_TWRPH1(7));
+		set = S3C2410_NFCONF_EN;
+		set |= S3C2410_NFCONF_TACLS(tacls - 1);
+		set |= S3C2410_NFCONF_TWRPH0(twrph0 - 1);
+		set |= S3C2410_NFCONF_TWRPH1(twrph1 - 1);
 		break;
 
  	case TYPE_S3C2440:
  	case TYPE_S3C2412:
-		cfg = S3C2440_NFCONF_TACLS(tacls - 1);
-		cfg |= S3C2440_NFCONF_TWRPH0(twrph0 - 1);
-		cfg |= S3C2440_NFCONF_TWRPH1(twrph1 - 1);
+		mask = (S3C2410_NFCONF_TACLS(tacls_max - 1) |
+			S3C2410_NFCONF_TWRPH0(7) |
+			S3C2410_NFCONF_TWRPH1(7));
 
+		set = S3C2440_NFCONF_TACLS(tacls - 1);
+		set |= S3C2440_NFCONF_TWRPH0(twrph0 - 1);
+		set |= S3C2440_NFCONF_TWRPH1(twrph1 - 1);
+		break;
+
+	default:
+		/* keep compiler happy */
+		mask = 0;
+		set = 0;
+		BUG();
+	}
+
+	dev_dbg(info->device, "NF_CONF is 0x%lx\n", cfg);
+
+	local_irq_save(flags);
+
+	cfg = readl(info->regs + S3C2410_NFCONF);
+	cfg &= ~mask;
+	cfg |= set;
+	writel(cfg, info->regs + S3C2410_NFCONF);
+
+	local_irq_restore(flags);
+
+	return 0;
+}
+
+static int s3c2410_nand_inithw(struct s3c2410_nand_info *info)
+{
+	unsigned long clkrate = clk_get_rate(info->clk);
+	int ret;
+
+	ret = s3c2410_nand_setrate(info, clkrate);
+	if (ret < 0)
+		return ret;
+
+ 	switch (info->cpu_type) {
+ 	case TYPE_S3C2410:
+	default:
+		break;
+
+ 	case TYPE_S3C2440:
+ 	case TYPE_S3C2412:
 		/* enable the controller and de-assert nFCE */
 
 		writel(S3C2440_NFCONT_ENABLE, info->regs + S3C2440_NFCONT);
 	}
 
-	dev_dbg(info->device, "NF_CONF is 0x%lx\n", cfg);
-
-	writel(cfg, info->regs + S3C2410_NFCONF);
 	return 0;
 }
 
@@ -502,6 +550,56 @@ static void s3c2410_nand_write_buf(struct mtd_info *mtd, const u_char *buf, int 
 	writesb(this->IO_ADDR_W, buf, len);
 }
 
+/* cpufreq driver support */
+
+#ifdef CONFIG_CPU_FREQ
+
+static int s3c2410_nand_cpufreq_transition(struct notifier_block *nb,
+					  unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freqs = data;
+	struct s3c24xx_cpufreq_freqs *s3c_freqs = to_s3c_cpufreq(freqs);
+	struct s3c2410_nand_info *info;
+
+	info = container_of(nb, struct s3c2410_nand_info, freq_transition);
+
+	if ((val == CPUFREQ_POSTCHANGE &&
+	     s3c_freqs->new.pclk < s3c_freqs->old.pclk) ||
+	    (val == CPUFREQ_PRECHANGE &&
+	     s3c_freqs->new.pclk > s3c_freqs->old.pclk)) {
+		
+		/* change the frequency */
+		s3c2410_nand_setrate(info, s3c_freqs->new.pclk);
+	}
+
+	return 0;
+}
+
+static inline int s3c2410_nand_cpufreq_register(struct s3c2410_nand_info *info)
+{
+	info->freq_transition.notifier_call = s3c2410_nand_cpufreq_transition;
+
+	return cpufreq_register_notifier(&info->freq_transition,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void s3c2410_nand_cpufreq_deregister(struct s3c2410_nand_info *info)
+{
+	cpufreq_unregister_notifier(&info->freq_transition,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+#else
+static inline int s3c2410_nand_cpufreq_register(struct s3c2410_nand_info *info)
+{
+	return 0;
+}
+
+static inline void s3c2410_nand_cpufreq_deregister(struct s3c2410_nand_info *info)
+{
+}
+#endif
+
 /* device management functions */
 
 static int s3c2410_nand_remove(struct platform_device *pdev)
@@ -513,9 +611,10 @@ static int s3c2410_nand_remove(struct platform_device *pdev)
 	if (info == NULL)
 		return 0;
 
-	/* first thing we need to do is release all our mtds
-	 * and their partitions, then go through freeing the
-	 * resources used
+	s3c2410_nand_cpufreq_deregister(info);
+
+	/* Release all our mtds  and their partitions, then go through
+	 * freeing the resources used
 	 */
 
 	if (info->mtds != NULL) {
@@ -746,7 +845,7 @@ static int s3c24xx_nand_probe(struct platform_device *pdev,
 
 	/* initialise the hardware */
 
-	err = s3c2410_nand_inithw(info, pdev);
+	err = s3c2410_nand_inithw(info);
 	if (err != 0)
 		goto exit_error;
 
@@ -786,6 +885,12 @@ static int s3c24xx_nand_probe(struct platform_device *pdev,
 			sets++;
 	}
 
+	err = s3c2410_nand_cpufreq_register(info);
+	if (err < 0) {
+		dev_err(&pdev->dev, "failed to init cpufreq support\n");
+		goto exit_error;
+	}
+
 	if (allow_clk_stop(info)) {
 		dev_info(&pdev->dev, "clock idle support enabled\n");
 		clk_disable(info->clk);
@@ -823,7 +928,7 @@ static int s3c24xx_nand_resume(struct platform_device *dev)
 
 	if (info) {
 		clk_enable(info->clk);
-		s3c2410_nand_inithw(info, dev);
+		s3c2410_nand_inithw(info);
 
 		if (allow_clk_stop(info))
 			clk_disable(info->clk);

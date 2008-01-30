@@ -69,4 +69,8 @@ struct s3cmci_host {
 
 	unsigned int		ccnt, dcnt;
 	struct tasklet_struct	pio_tasklet;
+
+#ifdef CONFIG_CPU_FREQ
+	struct notifier_block	freq_transition;
+#endif
 };

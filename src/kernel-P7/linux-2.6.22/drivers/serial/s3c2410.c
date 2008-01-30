@@ -78,6 +78,8 @@
 
 #include <asm/hardware.h>
 
+#include <asm/plat-s3c24xx/cpu-freq.h>
+
 #include <asm/arch/regs-serial.h>
 #include <asm/arch/regs-gpio.h>
 
@@ -106,12 +108,17 @@ struct s3c24xx_uart_info {
 struct s3c24xx_uart_port {
 	unsigned char			rx_claimed;
 	unsigned char			tx_claimed;
+	unsigned int			pm_level;
 
 	struct s3c24xx_uart_info	*info;
 	struct s3c24xx_uart_clksrc	*clksrc;
 	struct clk			*clk;
 	struct clk			*baudclk;
 	struct uart_port		port;
+
+#ifdef CONFIG_CPU_FREQ
+	struct notifier_block		freq_transition;
+#endif
 };
 
 
@@ -562,6 +569,8 @@ static void s3c24xx_serial_pm(struct uart_port *port, unsigned int level,
 {
 	struct s3c24xx_uart_port *ourport = to_ourport(port);
 
+	ourport->pm_level = level;
+
 	switch (level) {
 	case 3:
 		if (!IS_ERR(ourport->baudclk) && ourport->baudclk != NULL)
@@ -1010,6 +1019,83 @@ static inline int s3c24xx_serial_resetport(struct uart_port * port,
 	return (info->reset_port)(port, cfg);
 }
 
+
+#ifdef CONFIG_CPU_FREQ
+
+static int s3c24xx_serial_cpufreq_transition(struct notifier_block *nb,
+					     unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freqs = data;
+	struct s3c24xx_cpufreq_freqs *s3c_freqs = to_s3c_cpufreq(freqs);
+	struct s3c24xx_uart_port *port;
+	struct uart_port *uport;
+
+	port = container_of(nb, struct s3c24xx_uart_port, freq_transition);
+	uport = &port->port;
+
+	/* check to see if port is enabled */
+
+	if (port->pm_level != 0)
+		return 0;
+
+	if ((val == CPUFREQ_POSTCHANGE &&
+	     s3c_freqs->new.pclk < s3c_freqs->old.pclk) ||
+	    (val == CPUFREQ_PRECHANGE &&
+	     s3c_freqs->new.pclk > s3c_freqs->old.pclk)) {
+		struct ktermios *termios;
+		struct tty_struct *tty;
+
+		if (uport->info == NULL) {
+			printk(KERN_WARNING "%s: info NULL\n", __func__);
+			goto exit;
+		}
+
+		tty = uport->info->tty;
+
+		if (tty == NULL) {
+			printk(KERN_WARNING "%s: tty is NULL\n", __func__);
+			goto exit;
+		}
+
+		termios = tty->termios;
+
+		if (termios == NULL) {
+			printk(KERN_WARNING "%s: no termios?\n", __func__);
+			goto exit;
+		}
+
+		s3c24xx_serial_set_termios(uport, termios, NULL);
+	}
+
+	exit:
+	return 0;
+}
+
+static inline int s3c24xx_serial_cpufreq_register(struct s3c24xx_uart_port *port)
+{
+	port->freq_transition.notifier_call = s3c24xx_serial_cpufreq_transition;
+
+	return cpufreq_register_notifier(&port->freq_transition,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void s3c24xx_serial_cpufreq_deregister(struct s3c24xx_uart_port *port)
+{
+	cpufreq_unregister_notifier(&port->freq_transition,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+#else
+static inline int s3c24xx_serial_cpufreq_register(struct s3c24xx_uart_port *port)
+{
+	return 0;
+}
+
+static inline void s3c24xx_serial_cpufreq_deregister(struct s3c24xx_uart_port *port)
+{
+}
+#endif
+
 /* s3c24xx_serial_init_port
  *
  * initialise a single serial port from the platform device given
@@ -1022,6 +1108,7 @@ static int s3c24xx_serial_init_port(struct s3c24xx_uart_port *ourport,
 	struct uart_port *port = &ourport->port;
 	struct s3c2410_uartcfg *cfg;
 	struct resource *res;
+	int ret;
 
 	dbg("s3c24xx_serial_init_port: port=%p, platdev=%p\n", port, platdev);
 
@@ -1070,6 +1157,13 @@ static int s3c24xx_serial_init_port(struct s3c24xx_uart_port *ourport,
 
 	ourport->clk	= clk_get(&platdev->dev, "uart");
 
+	ret = s3c24xx_serial_cpufreq_register(ourport);
+	if (ret < 0) {
+		printk(KERN_ERR "failed to add cpufreq for port %08lx\n",
+		       port->mapbase);
+		return ret;
+	}
+
 	dbg("port: map=%08x, mem=%08x, irq=%d, clock=%ld\n",
 	    port->mapbase, port->membase, port->irq, port->uartclk);
 
@@ -1113,8 +1207,10 @@ static int s3c24xx_serial_remove(struct platform_device *dev)
 {
 	struct uart_port *port = s3c24xx_dev_to_port(&dev->dev);
 
-	if (port)
+	if (port) {
+		s3c24xx_serial_cpufreq_deregister(to_ourport(port));
 		uart_remove_one_port(&s3c24xx_uart_drv, port);
+	}
 
 	return 0;
 }

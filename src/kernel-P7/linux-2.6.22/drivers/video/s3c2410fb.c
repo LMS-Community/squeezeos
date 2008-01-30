@@ -88,6 +88,8 @@
 #include <asm/io.h>
 #include <asm/div64.h>
 
+#include <asm/plat-s3c24xx/cpu-freq.h>
+
 #include <asm/mach/map.h>
 #include <asm/arch/regs-lcd.h>
 #include <asm/arch/regs-gpio.h>
@@ -149,7 +151,7 @@ static void s3c2410fb_set_lcdaddr(struct fb_info *info)
 static unsigned int s3c2410fb_calc_pixclk(struct s3c2410fb_info *fbi,
 					  unsigned long pixclk)
 {
-	unsigned long clk = clk_get_rate(fbi->clk);
+	unsigned long clk = fbi->clk_rate;
 	unsigned long long div;
 
 	/* pixclk is in picoseconds, our clock is in Hz
@@ -845,6 +847,57 @@ static irqreturn_t s3c2410fb_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+#ifdef CONFIG_CPU_FREQ
+
+static int s3c2410fb_cpufreq_transition(struct notifier_block *nb,
+					unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freqs = data;
+	struct s3c24xx_cpufreq_freqs *s3c_freqs = to_s3c_cpufreq(freqs);
+	struct s3c2410fb_info *info;
+	struct fb_info *fbinfo;
+
+	info = container_of(nb, struct s3c2410fb_info, freq_transition);
+	fbinfo = platform_get_drvdata(to_platform_device(info->dev));
+
+	if ((val == CPUFREQ_POSTCHANGE &&
+	     s3c_freqs->new.pclk < s3c_freqs->old.pclk) ||
+	    (val == CPUFREQ_PRECHANGE &&
+	     s3c_freqs->new.pclk > s3c_freqs->old.pclk)) {
+		
+		info->clk_rate = s3c_freqs->new.pclk;
+		s3c2410fb_activate_var(fbinfo);
+	}
+
+	return 0;
+}
+
+static inline int s3c2410fb_cpufreq_register(struct s3c2410fb_info *info)
+{
+	info->freq_transition.notifier_call = s3c2410fb_cpufreq_transition;
+
+	return cpufreq_register_notifier(&info->freq_transition,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void s3c2410fb_cpufreq_deregister(struct s3c2410fb_info *info)
+{
+	cpufreq_unregister_notifier(&info->freq_transition,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+#else
+static inline int s3c2410fb_cpufreq_register(struct s3c2410fb_info *info)
+{
+	return 0;
+}
+
+static inline void s3c2410fb_cpufreq_deregister(struct s3c2410fb_info *info)
+{
+}
+#endif
+
+
 static char driver_name[] = "s3c2410fb";
 
 static int __init s3c24xxfb_probe(struct platform_device *pdev,
@@ -956,6 +1009,8 @@ static int __init s3c24xxfb_probe(struct platform_device *pdev,
 
 	msleep(1);
 
+	info->clk_rate = clk_get_rate(info->clk);
+
 	/* find maximum required memory size for display */
 	for (i = 0; i < mach_info->num_displays; i++) {
 		unsigned long smem_len = mach_info->displays[i].xres_virtual;
@@ -986,11 +1041,17 @@ static int __init s3c24xxfb_probe(struct platform_device *pdev,
 
 	s3c2410fb_check_var(&fbinfo->var, fbinfo);
 
+	ret = s3c2410fb_cpufreq_register(info);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "Failed to register cpufreq\n");
+		goto free_video_memory;
+	}
+
 	ret = register_framebuffer(fbinfo);
 	if (ret < 0) {
 		printk(KERN_ERR "Failed to register framebuffer device: %d\n",
 			ret);
-		goto free_video_memory;
+		goto free_cpufreq;
 	}
 
 	/* create device files */
@@ -1000,7 +1061,9 @@ static int __init s3c24xxfb_probe(struct platform_device *pdev,
 		fbinfo->node, fbinfo->fix.id);
 
 	return 0;
-
+	
+ free_cpufreq:
+	s3c2410fb_cpufreq_deregister(info);
 free_video_memory:
 	s3c2410fb_unmap_video_memory(fbinfo);
 release_clock:
@@ -1055,6 +1118,8 @@ static int s3c2410fb_remove(struct platform_device *pdev)
 	int irq;
 
 	unregister_framebuffer(fbinfo);
+
+	s3c2410fb_cpufreq_deregister(info);
 
 	s3c2410fb_stop_lcd(info);
 	msleep(1);

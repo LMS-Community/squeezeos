@@ -16,6 +16,9 @@ obj-$(CONFIG_CPU_S3C2410_DMA)	+= dma.o
 obj-$(CONFIG_S3C2410_PM)	+= pm.o sleep.o
 obj-$(CONFIG_S3C2410_GPIO)	+= gpio.o
 obj-$(CONFIG_S3C2410_CLOCK)	+= clock.o
+obj-$(CONFIG_S3C2410_CPUFREQ)	+= cpu-freq.o
+obj-$(CONFIG_S3C2410_IOTIMING)	+= iotiming.o
+obj-$(CONFIG_S3C2410_PLLTABLE)	+= pll.o
 
 # Machine support
 

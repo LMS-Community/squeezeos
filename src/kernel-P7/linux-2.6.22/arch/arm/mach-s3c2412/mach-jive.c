@@ -52,6 +52,7 @@
 #include <asm/plat-s3c24xx/devs.h>
 #include <asm/plat-s3c24xx/cpu.h>
 #include <asm/plat-s3c24xx/pm.h>
+#include <asm/plat-s3c24xx/cpu-freq.h>
 
 #include <asm/arch/spi-gpio.h>
 #include <asm/arch/nand.h>
@@ -570,6 +571,10 @@ static void jive_power_off(void)
 	s3c2410_gpio_cfgpin(S3C2410_GPC5, S3C2410_GPIO_OUTPUT);
 }
 
+static struct s3c24xx_cpufreq_board __initdata jive_cpufreq = {
+	.refresh	= 7800,
+};
+
 static void __init jive_machine_init(void)
 {
 	/* register system devices for managing low level suspend */
@@ -726,6 +731,8 @@ static void __init jive_machine_init(void)
 	s3c_device_sdi.dev.platform_data = &jive_mmc_cfg;
 
 	pm_power_off = jive_power_off;
+
+	s3c24xx_cpufreq_setboard(&jive_cpufreq);
 
 	platform_add_devices(jive_devices, ARRAY_SIZE(jive_devices));
 }

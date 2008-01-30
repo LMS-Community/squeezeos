@@ -50,6 +50,8 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
+#include <asm/plat-s3c24xx/cpu-freq.h>
+
 #include <asm/arch/map.h>
 
 #undef S3C24XX_VA_WATCHDOG
@@ -152,12 +154,19 @@ static int s3c2410wdt_start(void)
 	return 0;
 }
 
-static int s3c2410wdt_set_heartbeat(int timeout)
+static inline int s3c2410wdt_is_running(void)
 {
-	unsigned int freq = clk_get_rate(wdt_clock);
+	return readl(wdt_base + S3C2410_WTCON) & S3C2410_WTCON_ENABLE;
+}
+
+static int s3c2410wdt_set_heartbeat(int timeout, unsigned int freq)
+{
 	unsigned int count;
 	unsigned int divisor = 1;
 	unsigned long wtcon;
+
+	if (freq == 0)
+		freq = clk_get_rate(wdt_clock);
 
 	if (timeout < 1)
 		return -EINVAL;
@@ -306,7 +315,7 @@ static int s3c2410wdt_ioctl(struct inode *inode, struct file *file,
 			if (get_user(new_margin, p))
 				return -EFAULT;
 
-			if (s3c2410wdt_set_heartbeat(new_margin))
+			if (s3c2410wdt_set_heartbeat(new_margin, 0))
 				return -EINVAL;
 
 			s3c2410wdt_keepalive();
@@ -343,6 +352,70 @@ static irqreturn_t s3c2410wdt_irq(int irqno, void *param)
 	s3c2410wdt_keepalive();
 	return IRQ_HANDLED;
 }
+
+
+#ifdef CONFIG_CPU_FREQ
+
+static int s3c2410wdt_cpufreq_transition(struct notifier_block *nb,
+					  unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freqs = data;
+	struct s3c24xx_cpufreq_freqs *s3c_freqs = to_s3c_cpufreq(freqs);
+	int ret;
+
+	if ((val == CPUFREQ_POSTCHANGE &&
+	     s3c_freqs->new.pclk < s3c_freqs->old.pclk) ||
+	    (val == CPUFREQ_PRECHANGE &&
+	     s3c_freqs->new.pclk > s3c_freqs->old.pclk)) {
+
+		if (!s3c2410wdt_is_running())
+			goto done;
+		
+		s3c2410wdt_stop();
+		
+		ret = s3c2410wdt_set_heartbeat(tmr_margin, s3c_freqs->new.pclk);
+		
+		if (ret >= 0)
+			s3c2410wdt_start();
+		else {
+			printk(KERN_ERR "%s: cannot set timeout of %d for pclk %lu\n",
+			       __func__, tmr_margin, s3c_freqs->new.pclk);
+		}		
+	}
+
+done:
+	return 0;
+}
+
+static struct notifier_block s3c2410wdt_cpufreq_transition_nb = {
+	.notifier_call	= s3c2410wdt_cpufreq_transition,
+};
+
+static inline int s3c2410wdt_cpufreq_register(void)
+{
+	return cpufreq_register_notifier(&s3c2410wdt_cpufreq_transition_nb,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void s3c2410wdt_cpufreq_deregister(void)
+{
+	cpufreq_unregister_notifier(&s3c2410wdt_cpufreq_transition_nb,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+#else
+static inline int s3c2410wdt_cpufreq_register(void)
+{
+	return 0;
+}
+
+static inline void s3c2410wdt_cpufreq_deregister(void)
+{
+}
+#endif
+
+
+
 /* device interface */
 
 static int s3c2410wdt_probe(struct platform_device *pdev)
@@ -401,11 +474,16 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 
 	clk_enable(wdt_clock);
 
+	if (s3c2410wdt_cpufreq_register() < 0) {
+		printk(KERN_ERR PFX "failed to register cpufreq\n");
+		goto err_clk;
+	}
+
 	/* see if we can actually set the requested timer margin, and if
 	 * not, try the default value */
 
-	if (s3c2410wdt_set_heartbeat(tmr_margin)) {
-		started = s3c2410wdt_set_heartbeat(CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME);
+	if (s3c2410wdt_set_heartbeat(tmr_margin, 0)) {
+		started = s3c2410wdt_set_heartbeat(CONFIG_S3C2410_WATCHDOG_DEFAULT_TIME, 0);
 
 		if (started == 0) {
 			printk(KERN_INFO PFX "tmr_margin value out of range, default %d used\n",
@@ -419,7 +497,7 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 	if (ret) {
 		printk (KERN_ERR PFX "cannot register miscdev on minor=%d (%d)\n",
 			WATCHDOG_MINOR, ret);
-		goto err_clk;
+		goto err_cpufreq;
 	}
 
 	if (tmr_atboot && started == 0) {
@@ -434,6 +512,9 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 	}
 
 	return 0;
+
+ err_cpufreq:
+	s3c2410wdt_cpufreq_deregister();
 
  err_clk:
 	clk_disable(wdt_clock);
@@ -454,6 +535,8 @@ static int s3c2410wdt_probe(struct platform_device *pdev)
 
 static int s3c2410wdt_remove(struct platform_device *dev)
 {
+	s3c2410wdt_cpufreq_deregister();
+	
 	release_resource(wdt_mem);
 	kfree(wdt_mem);
 	wdt_mem = NULL;

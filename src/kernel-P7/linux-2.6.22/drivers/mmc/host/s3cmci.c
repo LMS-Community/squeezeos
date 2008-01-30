@@ -19,6 +19,8 @@
 #include <asm/dma.h>
 #include <asm/dma-mapping.h>
 
+#include <asm/plat-s3c24xx/cpu-freq.h>
+
 #include <asm/io.h>
 #include <asm/arch/regs-sdi.h>
 #include <asm/arch/regs-gpio.h>
@@ -998,10 +1000,33 @@ static void s3cmci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	s3cmci_send_request(mmc);
 }
 
+static void s3cmci_set_clock(struct s3cmci_host *host, struct mmc_ios *ios)
+{
+	u32 mci_psc;
+
+	for (mci_psc = 0; mci_psc < 255; mci_psc++) {
+		host->real_rate = host->clk_rate / (host->clk_div*(mci_psc+1));
+
+		if (host->real_rate <= ios->clock)
+			break;
+	}
+
+	if (mci_psc > 255)
+		mci_psc = 255;
+
+	host->prescaler = mci_psc;
+
+	writel(host->prescaler, host->base + S3C2410_SDIPRE);
+
+	//If requested clock is 0, real_rate will be 0, too
+	if (ios->clock == 0)
+		host->real_rate = 0;
+}
+
 static void s3cmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 {
 	struct s3cmci_host *host = mmc_priv(mmc);
-	u32 mci_psc, mci_con;
+	u32 mci_con;
 
 	//Set power
 	mci_con = readl(host->base + S3C2410_SDICON);
@@ -1036,23 +1061,8 @@ static void s3cmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 
 			break;
 	}
-
-	//Set clock
-	for (mci_psc=0; mci_psc<255; mci_psc++) {
-		host->real_rate = host->clk_rate / (host->clk_div*(mci_psc+1));
-
-		if (host->real_rate <= ios->clock)
-			break;
-	}
-
-	if(mci_psc > 255) mci_psc = 255;
-	host->prescaler = mci_psc;
-
-	writel(host->prescaler, host->base + S3C2410_SDIPRE);
-
-	//If requested clock is 0, real_rate will be 0, too
-	if (ios->clock == 0)
-		host->real_rate = 0;
+	
+	s3cmci_set_clock(host, ios);
 
 	//Set CLOCK_ENABLE
 	if (ios->clock)
@@ -1099,6 +1109,65 @@ static int s3cmci_get_ro(struct mmc_host *mmc)
 
 	return ret;
 }
+
+#ifdef CONFIG_CPU_FREQ
+
+static int s3cmci_cpufreq_transition(struct notifier_block *nb,
+					  unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freqs = data;
+	struct s3c24xx_cpufreq_freqs *s3c_freqs = to_s3c_cpufreq(freqs);
+	struct s3cmci_host *host;
+	struct mmc_ios *ios;
+
+	host = container_of(nb, struct s3cmci_host, freq_transition);
+	ios = &host->mmc->ios;
+
+	if ((val == CPUFREQ_POSTCHANGE &&
+	     s3c_freqs->new.pclk < s3c_freqs->old.pclk) ||
+	    (val == CPUFREQ_PRECHANGE &&
+	     s3c_freqs->new.pclk > s3c_freqs->old.pclk)) {
+		
+		host->clk_rate = s3c_freqs->new.pclk;
+		
+		if (ios->power_mode == MMC_POWER_ON ||
+		    ios->power_mode == MMC_POWER_UP) {
+			unsigned long flags;
+			
+			spin_lock_irqsave(&host->mmc->lock, flags);
+			s3cmci_set_clock(host, ios);
+			spin_unlock_irqrestore(&host->mmc->lock, flags);
+		}
+	}
+
+	return 0;
+}
+
+static inline int s3cmci_cpufreq_register(struct s3cmci_host *host)
+{
+	host->freq_transition.notifier_call = s3cmci_cpufreq_transition;
+
+	return cpufreq_register_notifier(&host->freq_transition,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void s3cmci_cpufreq_deregister(struct s3cmci_host *host)
+{
+	cpufreq_unregister_notifier(&host->freq_transition,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+#else
+static inline int s3cmci_cpufreq_register(struct s3cmci_host *host)
+{
+	return 0;
+}
+
+static inline void s3cmci_cpufreq_deregister(struct s3cmci_host *host)
+{
+}
+#endif
+
 
 static struct mmc_host_ops s3cmci_ops = {
 	.request	= s3cmci_request,
@@ -1238,6 +1307,12 @@ static int s3cmci_probe(struct platform_device *pdev, int is2440)
 
 	host->clk_rate = clk_get_rate(host->clk);
 
+	ret = s3cmci_cpufreq_register(host);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "failed to register cpufreq notifier\n");
+		goto clk_disable;
+	}
+
 	mmc->ops 	= &s3cmci_ops;
 	mmc->ocr_avail	= host->pdata->ocr_avail;
 	mmc->caps	= MMC_CAP_4_BIT_DATA;
@@ -1258,7 +1333,7 @@ static int s3cmci_probe(struct platform_device *pdev, int is2440)
 
 	if ((ret = mmc_add_host(mmc))) {
 		dev_err(&pdev->dev, "failed to add mmc host.\n");
-		goto free_dmabuf;
+		goto free_cpufreq;
 	}
 
 	platform_set_drvdata(pdev, mmc);
@@ -1266,7 +1341,10 @@ static int s3cmci_probe(struct platform_device *pdev, int is2440)
 	dev_info(&pdev->dev,"initialisation done.\n");
 	return 0;
 
- free_dmabuf:
+ free_cpufreq:
+	s3cmci_cpufreq_deregister(host);
+
+ clk_disable:
 	clk_disable(host->clk);
 
  clk_free:
@@ -1296,6 +1374,7 @@ static int s3cmci_remove(struct platform_device *pdev)
 	struct mmc_host 	*mmc  = platform_get_drvdata(pdev);
 	struct s3cmci_host 	*host = mmc_priv(mmc);
 
+	s3cmci_cpufreq_deregister(host);
 	mmc_remove_host(mmc);
 	clk_disable(host->clk);
 	clk_put(host->clk);
