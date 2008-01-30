@@ -276,24 +276,23 @@ static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 		writeb(BIN2BCD(tm->tm_mon + 1), base + S3C2410_ALMMON);
 	}
 
-	if (tm->tm_year >= 0 && tm->tm_year < 0xffff) {
+	if (tm->tm_year >= 100 && tm->tm_year < 200) {
 		alrm_en |= S3C2410_RTCALM_YEAREN;
 		writeb(BIN2BCD(tm->tm_year - 100), base + S3C2410_ALMYEAR);
 	}
 
-	if (alrm->enabled)
+	if (alrm->enabled) {
 		alrm_en |= S3C2410_RTCALM_ALMEN;
-	else
+		enable_irq_wake(s3c_rtc_alarmno);
+	}
+	else {
 		alrm_en &= ~S3C2410_RTCALM_ALMEN;
+		disable_irq_wake(s3c_rtc_alarmno);
+	}
 
 	pr_debug("setting S3C2410_RTCALM to %08x\n", alrm_en);
 
  	writeb(alrm_en, base + S3C2410_RTCALM);
-
-	if (alrm->enabled)
-		enable_irq_wake(s3c_rtc_alarmno);
-	else
-		disable_irq_wake(s3c_rtc_alarmno);
 
 	return 0;
 }
