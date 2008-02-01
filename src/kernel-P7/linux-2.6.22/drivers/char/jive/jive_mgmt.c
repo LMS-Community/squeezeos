@@ -27,6 +27,7 @@
 #include <linux/input.h>
 #include <linux/pm.h>
 #include <linux/clk.h>
+#include <linux/reboot.h>
 
 #include <asm/arch/regs-adc.h>
 #include <asm/arch/regs-clock.h>
@@ -48,17 +49,16 @@
 
 #define IRQF_TRIGGER_BOTH	(IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING)
 
-static struct clk *adc_clock;
+static struct clk *adc_clock = NULL;
 
-static void __iomem *adc_regs;
+static void __iomem *adc_regs = NULL;
 
 static struct input_dev *bsp_dev;
 
-struct timer_list acpr_timer;
+static struct timer_list acpr_timer;
 
+static bool battery_flat = 0;
 
-extern void Init_LDI(void);
-extern void LCD_CMD(unsigned short address, unsigned short data);
 
 /* gone from input.h */
 #define SW_0	(0)
@@ -83,7 +83,6 @@ extern void LCD_CMD(unsigned short address, unsigned short data);
 #define JIVE_MGMT_IOCGBATTERY 		17
 #define JIVE_MGMT_IOCGPHONEDETECT	18
 
-#define JIVE_MGMT_IOCSSWPWOFF		21
 #define JIVE_MGMT_IOCSCHGSUSP		22
 #define JIVE_MGMT_IOCGCHGACPR		23
 #define JIVE_MGMT_IOCGUSBDETECT		24
@@ -92,14 +91,6 @@ extern void LCD_CMD(unsigned short address, unsigned short data);
 #define JIVE_MGMT_IOCGDOCKDETECT	27
 #define JIVE_MGMT_IOCSWM8750		28
 #define JIVE_MGMT_IOCSLCD		29
-
-#define JIVE_MGMT_IOCGCLKCON		40	// printk current clock
-#define JIVE_MGMT_IOCSCLKCONENABLE     	41	// enable clock X
-#define JIVE_MGMT_IOCSCLKCONDISABLE    	42	// disable clock X
-#define JIVE_MGMT_IOCGARMDIV		43	// get ARMDIV
-#define JIVE_MGMT_IOCSARMDIV		44	// set ARMDIV
-#define JIVE_MGMT_IOCGDSC0		45	// get DSC0 register
-#define JIVE_MGMT_IOCGDSC1		46	// get DSC1 register
 
 
 /*
@@ -113,14 +104,18 @@ extern void LCD_CMD(unsigned short address, unsigned short data);
 
 
 
-// When changing the pwm value, the led stays on for 1 full timer period.
-// If this timer period is MAX_DIMMER the light on can be seen. If the
-// period is 0 the light is off.
+/* When changing the pwm value, the led stays on for 1 full timer period.
+ * If this timer period is MAX_DIMMER the light on can be seen. If the
+ * period is 0 the light is off.
+ */
 #define MAX_DIMMER 0xFFFF
 
 
-// Number of battery samples
+/* Number of battery samples */
 #define N_BATTERY_SAMPLES 6
+
+/* Minimum battery flat to boot (see bug 5374): 20% 3.61 volts */
+#define BATTERY_FLAT_LEVEL 812
 
 
 #define RAW(var) (*(volatile unsigned int __force *)var)
@@ -131,6 +126,18 @@ static int get_battery(void) {
 	unsigned int sum = 0x00;
 	unsigned int adc_value;
 	unsigned long con;
+
+	if (adc_regs == NULL) {
+		// ADC clock, needed to read battery voltage
+		adc_clock = clk_get(NULL, "adc");
+		if (!adc_clock) {
+			printk(KERN_ERR "failed to get adc clock source\n");
+			return -ENOENT;
+		}
+
+		clk_enable(adc_clock);
+		adc_regs = ioremap(S3C2410_PA_ADC, S3C24XX_SZ_ADC);
+	}
 
 	con = readl(adc_regs + S3C2410_ADCCON);
 
@@ -183,7 +190,7 @@ static int get_battery(void) {
 }
 
 
-int slide_pwm_value(int _value)
+static int slide_pwm_value(int _value)
 {
 	if (_value == 0)
 		_value = MAX_DIMMER;
@@ -274,10 +281,6 @@ static int jive_mgmt_ioctl(struct inode *inode, struct file *filp, unsigned int 
 		val = get_battery();
 		break;
 
-	case JIVE_MGMT_IOCSSWPWOFF:
-		s3c2410_gpio_setpin(S3C2410_GPC5, val);
-		break;
-
 	case JIVE_MGMT_IOCSCHGSUSP:
 		s3c2410_gpio_setpin(S3C2410_GPG12, val);
 		break;
@@ -310,61 +313,6 @@ static int jive_mgmt_ioctl(struct inode *inode, struct file *filp, unsigned int 
 		s3c2410_gpio_cfgpin(S3C2410_GPG14, S3C2410_GPG14_INP);
 		val = (s3c2410_gpio_getpin(S3C2410_GPG14) > 0);
 		s3c2410_gpio_cfgpin(S3C2410_GPG14, S3C2410_GPG14_EINT22);
-		break;
-
-#if 0
-	case JIVE_MGMT_IOCSWM8750:
-		printk("WM8750_SEND_CMD(%x, %x)\n", (val >> 8), (val & 0xFF));
-		WM8750_SEND_CMD( (val >> 8), (val & 0xFF) );
-		break;
-#endif
-
-#if 0
-	case JIVE_MGMT_IOCSLCD:
-		LCD_CMD( (val >> 16), (val & 0xFFFF));
-		break;
-#endif
-
-	case JIVE_MGMT_IOCGCLKCON: {
-		int i;
-		unsigned int clkcon = RAW(S3C2410_CLKCON);
-
-		for (i=0; i<=28; i++) {
-			printk("CLKCON %d: %d\n", i, (clkcon & 1));
-			clkcon >>= 1;
-		}
-		break;
-
-	}
-	case JIVE_MGMT_IOCSCLKCONENABLE: {
-		unsigned int mask = 1 << val;
-		RAW(S3C2410_CLKCON) |= mask;
-		break;
-	}
-	case JIVE_MGMT_IOCSCLKCONDISABLE: {
-		unsigned int mask = 1 << val;
-		RAW(S3C2410_CLKCON) &= ~mask;
-		break;
-	}
-	case JIVE_MGMT_IOCGARMDIV:
-		val = (RAW(S3C2410_CLKDIVN) & S3C2412_CLKDIVN_ARMDIVN);
-		break;
-
-	case JIVE_MGMT_IOCSARMDIV:
-		if (val) {
-			RAW(S3C2410_CLKDIVN) |= S3C2412_CLKDIVN_ARMDIVN;
-		}
-		else {
-			RAW(S3C2410_CLKDIVN) &= ~S3C2412_CLKDIVN_ARMDIVN;
-		}
-		break;
-
-	case JIVE_MGMT_IOCGDSC0:
-		val = RAW(S3C2412_DSC0);
-		break;
-
-	case JIVE_MGMT_IOCGDSC1:
-		val = RAW(S3C2412_DSC1);
 		break;
 
 	default:
@@ -446,6 +394,15 @@ static irqreturn_t usbdetect_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/* runs at the end of the kernel boot */
+static void battery_flat_handler(void *arg) {
+	/* sleep 5 seconds and shutdown */
+	msleep(5000);
+	kernel_power_off();
+}
+
+DECLARE_WORK(jive_workqueue, battery_flat_handler);
+
 
 static struct file_operations jive_mgmt_fops = {
 	owner:		THIS_MODULE,
@@ -475,7 +432,6 @@ static int __init jive_mgmt_init(void) {
 		return 0;
 
 	printk("jive_mgmt_init\n");
-
 
 	// make the flash writeable on boot
 	// GPC6 => NAND_nWP
@@ -588,16 +544,6 @@ static int __init jive_mgmt_init(void) {
 	}
 
 
-	// ADC clock, needed to read battery voltage
-	adc_clock = clk_get(NULL, "adc");
-	if (!adc_clock) {
-		printk(KERN_ERR "failed to get adc clock source\n");
-		return -ENOENT;
-	}
-
-	clk_enable(adc_clock);
-	adc_regs = ioremap(S3C2410_PA_ADC, S3C24XX_SZ_ADC);
-
 	rc = misc_register (&jive_mgmt_miscdev);
 	if (rc) {
 		printk (KERN_ERR PFX "misc device register failed\n");
@@ -609,6 +555,11 @@ static int __init jive_mgmt_init(void) {
 	headphone_irq(0, NULL);
 	dockdetect_irq(0, NULL);
 	usbdetect_irq(0, NULL);
+
+	// schedule poweroff if the battery is flat
+	if (battery_flat) {
+		schedule_work(&jive_workqueue);
+	}
 
 	return 0;
 }
@@ -624,9 +575,18 @@ static void __exit jive_mgmt_exit(void) {
 }
 
 
+/* Called from logo.c to determine if the battery is flat during boot */
+bool jive_is_battery_flat(void) {
+	battery_flat = (get_battery() < BATTERY_FLAT_LEVEL);
+	return battery_flat;
+}
+
+
+
 module_init(jive_mgmt_init);
 module_exit(jive_mgmt_exit);
 
+EXPORT_SYMBOL_GPL(jive_is_battery_flat);
 
 MODULE_AUTHOR("richard@slimdevices.com");
 MODULE_DESCRIPTION("JIVE device management");
