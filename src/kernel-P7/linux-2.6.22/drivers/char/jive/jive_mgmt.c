@@ -114,8 +114,10 @@ static bool battery_flat = 0;
 /* Number of battery samples */
 #define N_BATTERY_SAMPLES 6
 
-/* Minimum battery flat to boot (see bug 5374): 20% 3.61 volts */
-#define BATTERY_FLAT_LEVEL 812
+/* Minimum battery level to boot. This will be equivalent to 10%
+ * capacity at full load.
+ */
+#define BATTERY_FLAT_LEVEL 845
 
 
 #define RAW(var) (*(volatile unsigned int __force *)var)
@@ -577,7 +579,11 @@ static void __exit jive_mgmt_exit(void) {
 
 /* Called from logo.c to determine if the battery is flat during boot */
 bool jive_is_battery_flat(void) {
-	battery_flat = (get_battery() < BATTERY_FLAT_LEVEL);
+	int bat = get_battery();
+	battery_flat = (bat < BATTERY_FLAT_LEVEL);
+
+	printk("battery flat? %s (level=%d)\n", battery_flat?"yes":"no", bat);
+
 	return battery_flat;
 }
 
