@@ -577,12 +577,21 @@ static void __exit jive_mgmt_exit(void) {
 }
 
 
-/* Called from logo.c to determine if the battery is flat during boot */
+/* Called from logo.c to determine if the battery is flat during boot.
+ * Note this is called before jive_mgmt_init.
+ */
 bool jive_is_battery_flat(void) {
-	int bat = get_battery();
-	battery_flat = (bat < BATTERY_FLAT_LEVEL);
+	int bat, nacpr;
 
-	printk("battery flat? %s (level=%d)\n", battery_flat?"yes":"no", bat);
+	bat = get_battery();
+
+	s3c2410_gpio_cfgpin(S3C2410_GPG3, S3C2410_GPG3_INP);
+	s3c2410_gpio_pullup(S3C2410_GPG3, 1);
+	nacpr = (s3c2410_gpio_getpin(S3C2410_GPG3) > 0);
+
+	battery_flat = (bat < BATTERY_FLAT_LEVEL) && nacpr;
+
+	printk("battery flat? %s (level=%d nacpr=%d)\n", battery_flat?"yes":"no", bat, nacpr);
 
 	return battery_flat;
 }
