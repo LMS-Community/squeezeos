@@ -473,6 +473,12 @@ static struct platform_device jive_device_wm8750 = {
 	.dev.platform_data = &jive_wm8750_spi,
 };
 
+static struct platform_device jive_device_bsp = {
+	.name		= "jive-bsp",
+	.id		= 3,
+	.num_resources  = 0,
+};
+
 /* I2C bus and device configuration. */
 
 static struct s3c2410_platform_i2c jive_i2c_cfg = {
@@ -512,6 +518,7 @@ static struct platform_device *jive_devices[] __initdata = {
 	&s3c_device_sdi,
 	&jive_device_lcdspi,
 	&jive_device_wm8750,
+	&jive_device_bsp,
 	&s3c_device_nand,
 	&s3c_device_usbgadget,
 };

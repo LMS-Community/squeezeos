@@ -19,6 +19,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/init.h>
@@ -26,6 +27,7 @@
 #include <linux/interrupt.h>
 #include <linux/input.h>
 #include <linux/pm.h>
+#include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/reboot.h>
 
@@ -407,21 +409,23 @@ DECLARE_WORK(jive_workqueue, battery_flat_handler);
 
 
 static struct file_operations jive_mgmt_fops = {
-	owner:		THIS_MODULE,
-	open:		jive_mgmt_open,
-	release:	jive_mgmt_release,
-	ioctl:		jive_mgmt_ioctl,
+	.owner		= THIS_MODULE,
+	.open		= jive_mgmt_open,
+	.release	= jive_mgmt_release,
+	.ioctl		= jive_mgmt_ioctl,
 };
 
 static struct miscdevice jive_mgmt_miscdev = {
-	JIVE_MGMT_MISCDEV_MINOR,
-	JIVE_MGMT_MODULE_NAME,
-	&jive_mgmt_fops,
+	.minor		= JIVE_MGMT_MISCDEV_MINOR,
+	.name		= JIVE_MGMT_MODULE_NAME,
+	.fops		= &jive_mgmt_fops,
 };
 
-static int __init jive_mgmt_init(void) {
+
+static int jive_mgmt_probe(struct platform_device *dev) {
 	unsigned long flags;
 	int rc;
+
 
 	/* For compatibility with the old bootloader allow s3c2413 machines
 	 * to work here too. We can't use machine_is_s3c2413() here as that
@@ -431,7 +435,7 @@ static int __init jive_mgmt_init(void) {
 	 * been phased out.
 	 */
 	if (!(machine_is_jive() || machine_arch_type == MACH_TYPE_S3C2413))
-		return 0;
+		return -ENOENT;;
 
 	printk("jive_mgmt_init\n");
 
@@ -566,7 +570,7 @@ static int __init jive_mgmt_init(void) {
 	return 0;
 }
 
-static void __exit jive_mgmt_exit(void) {
+static int jive_mgmt_remove(struct platform_device *dev) {
 	free_irq(IRQ_EINT9, bsp_dev);
 	free_irq(IRQ_EINT15, bsp_dev);
 	free_irq(IRQ_EINT22, bsp_dev);
@@ -574,7 +578,62 @@ static void __exit jive_mgmt_exit(void) {
 
 	input_unregister_device(bsp_dev);
 	misc_deregister(&jive_mgmt_miscdev);
+
+	return 0;
 }
+
+#ifdef CONFIG_PM
+
+static int pwm0;
+static int pwm2;
+
+static int jive_mgmt_suspend(struct platform_device *dev, pm_message_t state)
+{
+	/* GPIOs are saved in the platform */
+
+	pwm0 = get_pwm(0);
+	pwm2 = get_pwm(2);
+
+	return 0;
+}
+
+static int jive_mgmt_resume(struct platform_device *dev)
+{
+	init_pwm(0, pwm0);
+	init_pwm(2, pwm2);
+
+	return 0;
+}
+
+#else
+#define jive_mgmt_suspend NULL
+#define jive_mgmt_resume  NULL
+#endif /* CONFIG_PM */
+
+static struct platform_driver jive_mgmt_driver = {
+	.probe		= jive_mgmt_probe,
+	.remove		= jive_mgmt_remove,
+	.suspend	= jive_mgmt_suspend,
+	.resume		= jive_mgmt_resume,
+	.driver		= {
+		.owner	= THIS_MODULE,
+		.name	= "jive-bsp",
+	},
+};
+
+static int __init jive_mgmt_init(void)
+{
+	return platform_driver_register(&jive_mgmt_driver);
+}
+
+static void __exit jive_mgmt_exit(void)
+{
+	platform_driver_unregister(&jive_mgmt_driver);
+}
+
+module_init(jive_mgmt_init);
+module_exit(jive_mgmt_exit);
+
 
 
 /* Called from logo.c to determine if the battery is flat during boot.
@@ -597,12 +656,8 @@ bool jive_is_battery_flat(void) {
 }
 
 
-
-module_init(jive_mgmt_init);
-module_exit(jive_mgmt_exit);
-
 EXPORT_SYMBOL_GPL(jive_is_battery_flat);
 
-MODULE_AUTHOR("richard@slimdevices.com");
+MODULE_AUTHOR("richard_titmuss@logitech.com");
 MODULE_DESCRIPTION("JIVE device management");
 MODULE_LICENSE("GPL");
