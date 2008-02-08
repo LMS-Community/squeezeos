@@ -48,6 +48,11 @@ struct s3c2410fb_info {
 	struct notifier_block	freq_transition;
 #endif
 
+#ifdef CONFIG_PM
+	unsigned long		lcdsaddr1;
+	unsigned long		lcdsaddr2;
+#endif
+
 	/* keep these registers in case we need to re-write palette */
 	u32			palette_buffer[256];
 	u32			pseudo_pal[16];

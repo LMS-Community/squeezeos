@@ -1153,8 +1153,12 @@ static int s3c2410fb_suspend(struct platform_device *dev, pm_message_t state)
 {
 	struct fb_info	   *fbinfo = platform_get_drvdata(dev);
 	struct s3c2410fb_info *info = fbinfo->par;
+	void __iomem *regs = info->io;
 
 	s3c2410fb_stop_lcd(info);
+
+	info->lcdsaddr1 = readl(regs + S3C2410_LCDSADDR1);
+	info->lcdsaddr2 = readl(regs + S3C2410_LCDSADDR2);
 
 	/* sleep before disabling the clock, we need to ensure
 	 * the LCD DMA engine is not going to get back on the bus
@@ -1170,6 +1174,7 @@ static int s3c2410fb_resume(struct platform_device *dev)
 {
 	struct fb_info	   *fbinfo = platform_get_drvdata(dev);
 	struct s3c2410fb_info *info = fbinfo->par;
+	void __iomem *regs = info->io;
 
 	clk_enable(info->clk);
 	msleep(1);
@@ -1178,6 +1183,10 @@ static int s3c2410fb_resume(struct platform_device *dev)
 
 	/* re-activate our display after resume */
 	s3c2410fb_activate_var(fbinfo);
+
+	writel(info->lcdsaddr1, regs + S3C2410_LCDSADDR1);
+	writel(info->lcdsaddr2, regs + S3C2410_LCDSADDR2);
+
 	s3c2410fb_blank(FB_BLANK_UNBLANK, fbinfo);
 
 	return 0;
