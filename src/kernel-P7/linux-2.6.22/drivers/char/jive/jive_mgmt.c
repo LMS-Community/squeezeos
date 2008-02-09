@@ -119,7 +119,7 @@ static bool battery_flat = 0;
 /* Minimum battery level to boot. This will be equivalent to 10%
  * capacity at full load.
  */
-#define BATTERY_FLAT_LEVEL 845
+#define BATTERY_FLAT_LEVEL 812
 
 
 #define RAW(var) (*(volatile unsigned int __force *)var)
