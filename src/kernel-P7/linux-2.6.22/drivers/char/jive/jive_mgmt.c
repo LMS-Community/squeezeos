@@ -112,6 +112,8 @@ static bool battery_flat = 0;
  */
 #define MAX_DIMMER 0xFFFF
 
+#define DEFAULT_BACKLIGHT_VALUE MAX_DIMMER
+#define DEFAULT_KEY_VALUE 0x4000
 
 /* Number of battery samples */
 #define N_BATTERY_SAMPLES 6
@@ -446,12 +448,12 @@ static int jive_mgmt_probe(struct platform_device *dev) {
 	// TOUT0 => BACKLIGHT_PWM
 
 	local_irq_save(flags);
-	init_pwm(0, MAX_DIMMER);
+	init_pwm(0, DEFAULT_BACKLIGHT_VALUE);
 	local_irq_restore(flags);
 
 	// TOUT2 => LED0
 	local_irq_save(flags);
-	init_pwm(2, MAX_DIMMER - (MAX_DIMMER / 16)); // XXXX so not to blind me
+	init_pwm(2, DEFAULT_KEY_VALUE);
 	local_irq_restore(flags);
 
 	// Set by the video driver, don't change them:
@@ -496,6 +498,9 @@ static int jive_mgmt_probe(struct platform_device *dev) {
 			"SW_0", bsp_dev)) {
                  printk(KERN_ERR "Could not allocate acpower IRQ_EINT11\n");
 	}
+
+	/* Enable AC power as a wakeup source */
+	enable_irq_wake(IRQ_EINT11);
 
 
 	// GPG1 <= USB_DET
@@ -577,15 +582,9 @@ static int jive_mgmt_remove(struct platform_device *dev) {
 
 #ifdef CONFIG_PM
 
-static int pwm0;
-static int pwm2;
-
 static int jive_mgmt_suspend(struct platform_device *dev, pm_message_t state)
 {
 	/* GPIOs are saved in the platform */
-
-	pwm0 = get_pwm(0);
-	pwm2 = get_pwm(2);
 
 	/* Turn off backlight and LEDs, so they remain off during resume */
 	s3c2410_gpio_setpin(S3C2410_GPB0, 0);
@@ -599,10 +598,11 @@ static int jive_mgmt_suspend(struct platform_device *dev, pm_message_t state)
 
 static int jive_mgmt_resume(struct platform_device *dev)
 {
-	init_pwm(0, pwm0);
-	init_pwm(2, pwm2);
+	/* Turn on lcd and key backlights for visual feedback */
+	init_pwm(0, DEFAULT_BACKLIGHT_VALUE);
+	init_pwm(2, DEFAULT_KEY_VALUE);
 
-	s3c2410_gpio_cfgpin(S3C2410_GPB0, S3C2410_GPB0_TOUT0);
+	/* Lcd TOUT enabled after framebuffer is resumed */
 	s3c2410_gpio_cfgpin(S3C2410_GPB2, S3C2410_GPB2_TOUT2);
 
 	return 0;
