@@ -40,6 +40,7 @@
 #include <asm/arch/regs-gpio.h>
 #include <asm/arch/regs-mem.h>
 #include <asm/arch/regs-lcd.h>
+#include <asm/arch/regs-timer.h>
 
 #include <asm/mach-types.h>
 
@@ -377,6 +378,12 @@ static void jive_backlight_powercb(struct device *dev,
 		s3c2410_gpio_setpin(S3C2410_GPB0, 0);
 		s3c2410_gpio_cfgpin(S3C2410_GPB0, S3C2410_GPIO_OUTPUT);
 	} else if (pre == 0 && to == 1) {
+		/*
+		 * delay to make sure framebuffer flip is complete,
+		 * this avoids a bright flash on boot.
+		 */
+		msleep(50);
+
 		s3c2410_gpio_cfgpin(S3C2410_GPB0, S3C2410_GPB0_TOUT0);
 	}	
 }

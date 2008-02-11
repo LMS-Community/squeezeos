@@ -197,7 +197,7 @@ static int get_battery(void) {
 static int slide_pwm_value(int _value)
 {
 	if (_value == 0)
-		_value = MAX_DIMMER;
+		_value = 0;
 	else if (_value > MAX_DIMMER)
 		_value = MAX_DIMMER-1;
 	else _value--;
@@ -205,7 +205,6 @@ static int slide_pwm_value(int _value)
 }
 
 static void init_pwm(int pin, int val) {
-
 	if (pin==0) {
 	  //RAW(S3C2410_GPBCON) &= ~(S3C2410_GPB0_TOUT0|S3C2410_GPB0_OUTP);
 	  //RAW(S3C2410_GPBCON) |= S3C2410_GPB0_TOUT0;			     // GPB0 - TOUT0
@@ -266,7 +265,6 @@ static int jive_mgmt_ioctl(struct inode *inode, struct file *filp, unsigned int 
 
 	case JIVE_MGMT_IOCSLCDBACKLIGHT:
 		set_pwm(0, val);
-		s3c2410_gpio_setpin(S3C2410_GPB6, (val > 0));	
 		break;
 
 	case JIVE_MGMT_IOCGLCDBACKLIGHT:
@@ -451,11 +449,6 @@ static int jive_mgmt_probe(struct platform_device *dev) {
 	init_pwm(0, MAX_DIMMER);
 	local_irq_restore(flags);
 
-	// GPB6 => BACKLIGHT_ENABLE
-	s3c2410_gpio_cfgpin(S3C2410_GPB6, S3C2410_GPB6_OUTP);
-	s3c2410_gpio_pullup(S3C2410_GPB6, 0);
-	s3c2410_gpio_setpin(S3C2410_GPB6, 1);	
-
 	// TOUT2 => LED0
 	local_irq_save(flags);
 	init_pwm(2, MAX_DIMMER - (MAX_DIMMER / 16)); // XXXX so not to blind me
@@ -594,6 +587,13 @@ static int jive_mgmt_suspend(struct platform_device *dev, pm_message_t state)
 	pwm0 = get_pwm(0);
 	pwm2 = get_pwm(2);
 
+	/* Turn off backlight and LEDs, so they remain off during resume */
+	s3c2410_gpio_setpin(S3C2410_GPB0, 0);
+	s3c2410_gpio_cfgpin(S3C2410_GPB0, S3C2410_GPIO_OUTPUT);
+
+	s3c2410_gpio_setpin(S3C2410_GPB2, 1);
+	s3c2410_gpio_cfgpin(S3C2410_GPB2, S3C2410_GPIO_OUTPUT);
+
 	return 0;
 }
 
@@ -601,6 +601,9 @@ static int jive_mgmt_resume(struct platform_device *dev)
 {
 	init_pwm(0, pwm0);
 	init_pwm(2, pwm2);
+
+	s3c2410_gpio_cfgpin(S3C2410_GPB0, S3C2410_GPB0_TOUT0);
+	s3c2410_gpio_cfgpin(S3C2410_GPB2, S3C2410_GPB2_TOUT2);
 
 	return 0;
 }
