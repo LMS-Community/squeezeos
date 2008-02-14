@@ -74,7 +74,7 @@ struct nand_oobinfo autoplace_oobinfo = {
 
 void display_help (void)
 {
-	printf("Usage: nandwrite [OPTION] MTD_DEVICE INPUTFILE\n"
+	printf("Usage: nandwrite [OPTION] [MTD_DEVICE INPUTFILE|-]\n"
 			"Writes to the specified MTD device.\n"
 			"\n"
 			"  -a, --autoplace	Use auto oob layout\n"
@@ -214,6 +214,7 @@ int main(int argc, char **argv)
 	int ret, readlen;
 	int oobinfochanged = 0;
 	struct nand_oobinfo old_oobinfo;
+	int read_from_stdin = 0;
 
 	process_options(argc, argv);
 
@@ -330,15 +331,29 @@ int main(int argc, char **argv)
 	oob.length = meminfo.oobsize;
 	oob.ptr = noecc ? oobreadbuf : oobbuf;
 
-	/* Open the input file */
-	if ((ifd = open(img, O_RDONLY)) == -1) {
-		perror("open input file");
-		goto restoreoob;
-	}
+	// Check if we read from stdin
+	if (strcmp(img, "-") == 0) {
+		// FIXME OOB data and stdin
+		if( writeoob) {
+			fprintf(stderr, "Can't use oob data when stdin is used.\n");
+			exit(-1);
+		}
 
-	// get image length
-	imglen = lseek(ifd, 0, SEEK_END);
-	lseek (ifd, 0, SEEK_SET);
+		ifd = STDIN_FILENO;
+		read_from_stdin = 1;
+		imglen = pagelen;	// used as flag in stdin case
+	}
+	else {
+		/* Open the input file */
+		if ((ifd = open(img, O_RDONLY)) == -1) {
+			perror("open input file");
+			goto restoreoob;
+		}
+
+		// get image length
+		imglen = lseek(ifd, 0, SEEK_END);
+		lseek (ifd, 0, SEEK_SET);
+	}
 
 	pagelen = meminfo.writesize + ((writeoob == 1) ? meminfo.oobsize : 0);
 
@@ -357,6 +372,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Get data from input and write to the device */
+	/* imglen is used as flag in stdin case */
 	while (imglen && (mtdoffset < meminfo.size)) {
 		// new eraseblock , check for bad block(s)
 		// Stay in the loop to be sure if the mtdoffset changes because
@@ -394,18 +410,51 @@ int main(int argc, char **argv)
 		}
 
 		readlen = meminfo.writesize;
-		if (pad && (imglen < readlen))
-		{
-			readlen = imglen;
-			memset(writebuf + readlen, 0xff, meminfo.writesize - readlen);
-		}
 
-		/* Read Page Data from input file */
-		if ((cnt = read(ifd, writebuf, readlen)) != readlen) {
-			if (cnt == 0)	// EOF
+		if( !read_from_stdin) {	
+			if (pad && (imglen < readlen))
+			{
+				readlen = imglen;
+				memset(writebuf + readlen, 0xff, meminfo.writesize - readlen);
+			}
+
+			/* Read Page Data from input file */
+			if ((cnt = read(ifd, writebuf, readlen)) != readlen) {
+				if (cnt == 0)	// EOF
+					break;
+				perror ("File I/O error on input file");
+				goto closeall;
+			}
+		} else {
+			/* Read Page Data from stdin */
+			int tinycnt = 0;
+			while(tinycnt < readlen) {
+				cnt = read(ifd, writebuf + tinycnt, readlen - tinycnt);
+				if (cnt == 0) { // EOF
+					break;
+				}
+				else if (cnt < 0) {
+					perror ("File I/O error on stdin");
+					goto closeall;
+				}
+				tinycnt += cnt;
+			}
+
+			/* No padding needed - we are done */
+			if (tinycnt == 0) {
+				imglen = 0;
 				break;
-			perror ("File I/O error on input file");
-			goto closeall;
+			}
+
+			/* No more bytes - we are done after writing the remaining bytes */
+			if (cnt == 0) {
+				imglen = 0;
+			}
+
+			/* Padding */
+			if (pad && (tinycnt < readlen)) {
+				memset( writebuf + tinycnt, 0xff, meminfo.writesize - tinycnt);
+			}
 		}
 
 		if (writeoob) {
@@ -455,7 +504,10 @@ int main(int argc, char **argv)
 			perror ("pwrite");
 			goto closeall;
 		}
-		imglen -= readlen;
+
+		if (!read_from_stdin) {	
+			imglen -= readlen;
+		}
 		mtdoffset += meminfo.writesize;
 	}
 
