@@ -3,6 +3,8 @@
 SRCDIR = $(realpath ${PWD}/..)
 TOPDIR = $(dir ${SRCDIR})
 
+IMAGEDIR=${TOPDIR}image
+
 export BUILDTOP=$(TOPDIR)build
 export PREFIX=${BUILDTOP}/usr
 
@@ -20,26 +22,41 @@ export HOST=${TARGET}
 export TOOLPATH = $(shell dirname `which gcc`)
 
 
-# EXTRAVERSION passed from top-level Makefile
-KERNEL_SRC=${TOPDIR}/src/kernel${EXTRAVERSION}/linux-2.6.22
+EXTRAVERSION=-P7
+KERNEL_SRC=${TOPDIR}/src/s3c2412/linux-2.6.22
+BOOTLOADER_SRC=${TOPDIR}/src/s3c2412/s3c24x0_uboot
 MODDIR=${BUILDTOP}/lib/modules/2.6.22${EXTRAVERSION}
 
 
-.PHONY: all clean kernel kernel-modules mini_fo
+.PHONY: all clean bootloader fw_env kernel kernel-modules mini_fo
 
-all: kernel kernel-modules
-clean: kernel-clean modules-clean
+all: bootloader fw_env kernel kernel-modules
+
+
+#
+# Bootloader
+#
+bootloader: ${IMAGEDIR}/u-boot.bin
+
+${IMAGEDIR}/u-boot.bin: ${IMAGEDIR}
+	cd ${BOOTLOADER_SRC} && ${MAKE} smdk2413_config && ${MAKE} && cp u-boot.bin ${IMAGEDIR}
+
+
+#
+# Bootloader utilities
+#
+fw_env:
+	cd ${BOOTLOADER_SRC}/tools/env && ${MAKE} CFLAGS="${CFLAGS} -I ${KERNEL_SRC}/include"
+	install ${BOOTLOADER_SRC}/tools/env/fw_printenv ${BUILDDIR}/usr/sbin/fw_printenv
+	cd ${BUILDDIR}/usr/sbin && ln -fs fw_printenv fw_setenv
 
 
 #
 # Kernel
 #
 kernel:
-	cd ${KERNEL_SRC}; make zImage
+	cd ${KERNEL_SRC}; make zImage EXTRAVERSION=${EXTRAVERSION}
 	install ${KERNEL_SRC}/arch/arm/boot/zImage ${TOPDIR}/image/zImage${EXTRAVERSION}
-
-kernel-clean:
-	cd ${KERNEL_SRC}; make clean
 
 
 #
@@ -59,4 +76,7 @@ kernel-modules:
 	install modules/usr/sbin/wlanconfig ${BUILDTOP}/usr/sbin/wlanconfig
 
 
-modules-clean:
+# Clean
+clean:
+	cd ${KERNEL_SRC}; make clean
+	cd ${BOOTLOADER_SRC} ; make clean

@@ -1,5 +1,5 @@
 
-# Absolute path to top of JIVE directories
+# Absolute path to top of Squeezeos directories
 TOPDIR = $(dir ${PWD})
 
 IMAGEDIR=${TOPDIR}image
@@ -20,37 +20,10 @@ export AR=$(TARGET)-ar
 export HOST=${TARGET}
 
 
-KERNEL_SRC=${TOPDIR}/src/kernel-P7/linux-2.6.22
-BOOTLOADER_SRC=${TOPDIR}/src/bootloader/s3c24x0_uboot
 
+.PHONY: all s3c2412 system debug squeezeplay image clean distclean
 
-.PHONY: all bootloader fw_env kernel kernel-P7 system debug jive image clean distclean
-
-all: bootloader system debug kernel fw_env jive image
-
-
-#
-# Bootloader
-#
-bootloader: ${IMAGEDIR}/u-boot.bin
-
-${IMAGEDIR}/u-boot.bin: ${IMAGEDIR}
-	cd ${BOOTLOADER_SRC} && ${MAKE} smdk2413_config && ${MAKE} && cp u-boot.bin ${IMAGEDIR}
-
-
-#
-# Bootloader utilities
-#
-fw_env:
-	cd ${BOOTLOADER_SRC}/tools/env && ${MAKE} CFLAGS="${CFLAGS} -I ${KERNEL_SRC}/include"
-	install ${BOOTLOADER_SRC}/tools/env/fw_printenv ${BUILDDIR}/usr/sbin/fw_printenv
-	cd ${BUILDDIR}/usr/sbin && ln -fs fw_printenv fw_setenv
-
-
-kernel: kernel-P7
-
-kernel-P7: $(IMAGEDIR)
-	cd kernel-P7; make -f Makefile EXTRAVERSION=-P7
+all: system debug s3c2412 squeezeplay image
 
 
 #
@@ -63,11 +36,16 @@ debug:
 	cd system; ${MAKE} -f Makefile debug
 
 
+# Jive BSP
+s3c2412:
+	cd s3c2412; ${MAKE} -f Makefile
+
+
 #
-# Jive Apps
+# Squeezeplay
 #
-jive:
-	cd ../../jive/src/pkg; ${MAKE} -f Makefile.squeezeboxjive TOPDIR=${TOPDIR}
+squeezeplay:
+	cd ../../squeezeplay/src; ${MAKE} -f Makefile.squeezeos TOPDIR=${TOPDIR}
 
 
 #
@@ -100,10 +78,9 @@ ${IMAGEDIR}:
 # Clean
 #
 clean:
-	cd bootloader/s3c24x0_uboot; ${MAKE} clean
-	cd kernel-P7; ${MAKE} clean EXTRAVERSION=-P7
 	cd system; ${MAKE} -f Makefile clean
-	cd ../../jive/src/pkg; ${MAKE} -f Makefile.squeezeboxjive TOPDIR=${TOPDIR} clean
+	cd s3c2412; ${MAKE} clean
+	cd ../../squeezeplay/src; ${MAKE} -f Makefile.squeezeos TOPDIR=${TOPDIR} clean
 
 distclean: clean
 	rm -rf ${BUILDDIR}
