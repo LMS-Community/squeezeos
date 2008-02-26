@@ -1,1 +1,0 @@
-#define CONFIG_CHG_SUSP 1
