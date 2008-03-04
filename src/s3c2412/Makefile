@@ -38,7 +38,7 @@ all: bootloader fw_env kernel kernel-modules
 #
 bootloader: ${IMAGEDIR}/u-boot.bin
 
-${IMAGEDIR}/u-boot.bin: ${IMAGEDIR}
+${IMAGEDIR}/u-boot.bin:
 	cd ${BOOTLOADER_SRC} && ${MAKE} smdk2413_config && ${MAKE} && cp u-boot.bin ${IMAGEDIR}
 
 

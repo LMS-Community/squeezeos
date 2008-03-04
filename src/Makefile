@@ -37,7 +37,7 @@ debug:
 
 
 # Jive BSP
-s3c2412:
+s3c2412: ${IMAGEDIR}
 	cd s3c2412; ${MAKE} -f Makefile
 
 
