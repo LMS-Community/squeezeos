@@ -19,6 +19,7 @@ export RANLIB=$(TARGET)-ranlib
 export AR=$(TARGET)-ar
 export HOST=${TARGET}
 
+SQUEEZEPLAY_SRC=${TOPDIR}/../squeezeplay/src
 
 
 .PHONY: all s3c2412 system debug squeezeplay image clean distclean
@@ -45,7 +46,7 @@ s3c2412: ${IMAGEDIR}
 # Squeezeplay
 #
 squeezeplay:
-	cd ../../squeezeplay/src; ${MAKE} -f Makefile.squeezeos TOPDIR=${TOPDIR}
+	cd ${SQUEEZEPLAY_SRC}; ${MAKE} -f Makefile.squeezeos TOPDIR=${TOPDIR}
 
 
 #
@@ -67,7 +68,7 @@ image: ${IMAGEDIR}
 	# Create upgrade.md5
 	cd ${IMAGEDIR} && md5sum zImage-P7 root.cramfs > upgrade.md5
 	# Create jive.bin
-	cd ${IMAGEDIR} && zip ${IMAGEDIR}/jive.bin jive.version upgrade.md5 zImage zImage-P7 root.cramfs
+	VERSION=`cat ${SQUEEZEPLAY_SRC}/squeezeplay/src/version.h | cut -sd\" -f 2 | sed -e 's/ /_/'` && cd ${IMAGEDIR} && echo $$VERSION && zip ${IMAGEDIR}/jive_$$VERSION.bin jive.version upgrade.md5 zImage-P7 root.cramfs
 	@cat ${IMAGEDIR}/jive.version
 
 
