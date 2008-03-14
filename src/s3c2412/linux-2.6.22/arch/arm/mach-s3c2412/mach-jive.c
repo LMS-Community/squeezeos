@@ -404,7 +404,7 @@ static struct ili9320_platdata jive_lcm_config = {
 			   ILI9320_DISPLAY2_BP(LCD_LOWER_MARGIN)),
 	.display3	= 0x0,
 	.display4	= 0x0,
-	.rgb_if1	= (ILI9320_RGBIF1_RIM_RGB18 |
+	.rgb_if1	= (ILI9320_RGBIF1_RIM_RGB16 |
 			   ILI9320_RGBIF1_RM | ILI9320_RGBIF1_CLK_RGBIF),
 	.rgb_if2	= ILI9320_RGBIF2_DPL,
 	.interface2	= 0x0,
