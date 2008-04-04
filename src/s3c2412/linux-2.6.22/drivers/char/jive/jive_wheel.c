@@ -61,31 +61,45 @@
 
 static int pos;
 
-static int lastAB;
+static unsigned int lastAB;
 
 static unsigned int state[PRESS_TIME_MS / DEBOUNCE_PERIOD_MS];
+
+static unsigned int last_button;
 
 static unsigned int count;
 
 static unsigned int index;
+
+static unsigned long click_jiffies;
 
 static struct input_dev *wheel_dev;
 
 struct timer_list wheel_timer;
 
 
+static unsigned int wheel_irqs[] = {
+	[0] = IRQ_EINT12,
+	[1] = IRQ_EINT13,
+	[2] = IRQ_EINT7,
+};
+
+
 static void wheel_scan(unsigned long data)
 {		
-	int i, AB, ABCD;
+	unsigned int i, AB, ABCD, button;
 
 	if (++index >= ARRAY_SIZE(state)) {
 		index = 0;
 	}
 
-	// read A and B
+	/* read A and B */
 	state[index] = s3c2410_gpio_getpin(S3C2410_GPG4) ? (1 << 0) : 0;
 	state[index] |= s3c2410_gpio_getpin(S3C2410_GPG5) ? (1 << 1) : 0;
 
+	/* read center button */
+	button = last_button << 1;
+	button |= s3c2410_gpio_getpin(S3C2410_GPF7) ? 1 : 0;
 
 	/* debounce switches */
 	AB = 0xFF;
@@ -93,6 +107,12 @@ static void wheel_scan(unsigned long data)
 		AB &= state[i];
 	}
 
+	/* reset after a second */
+	if (jiffies > click_jiffies + HZ/2) {
+		pos = 0;
+		click_jiffies = jiffies;
+	}
+	
 
 	/* CW rotation:
 	 * A B  C D (CD are previous AB state)
@@ -122,7 +142,7 @@ static void wheel_scan(unsigned long data)
 		pos += 1;
 		count = 0;
 		lastAB = AB;
-		//printk(KERN_DEBUG "\tAB %x ABCD %x  1\n", AB, ABCD);
+		click_jiffies = jiffies;
 		break;
 
 	case 0xB:
@@ -133,7 +153,7 @@ static void wheel_scan(unsigned long data)
 		pos -= 1;
 		count = 0;
 		lastAB = AB;
-		//printk(KERN_DEBUG "\tAB %x ABCD %x  -1\n", AB, ABCD);
+		click_jiffies = jiffies;
 		break;
 
 	case 0x0:
@@ -145,8 +165,17 @@ static void wheel_scan(unsigned long data)
 
 	default:
 		/* impossible state */
-		printk(KERN_INFO "bad wheel state %x\n", ABCD);
+		break;
 	}
+
+
+	/* button press? */
+	if ((button & 0xFF) != (last_button & 0xFF)) {
+		input_report_key(wheel_dev, KEY_RIGHT, (button & 0xFF) > 0);
+		input_sync(wheel_dev);
+		pos = 0;
+	}
+	last_button = button;
 
 
 	/* update detent */
@@ -162,7 +191,7 @@ static void wheel_scan(unsigned long data)
 		pos = 0;
 	}
 
-	if (count++ < (RELEASE_TIME_MS / DEBOUNCE_PERIOD_MS)) {
+	if (count++ < (RELEASE_TIME_MS / DEBOUNCE_PERIOD_MS) || button > 0) {
 		/* keep scanning while wheel is rotating */
 		mod_timer(&wheel_timer, jiffies + (DEBOUNCE_PERIOD_MS * HZ/1000));
 	}
@@ -170,6 +199,7 @@ static void wheel_scan(unsigned long data)
 		/* return the lines to interrupt */
 		s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_SFN2);
 		s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_SFN2);
+		s3c2410_gpio_cfgpin(S3C2410_GPF7, S3C2410_GPIO_SFN2);
 	}
 
 	return;
@@ -179,6 +209,7 @@ static irqreturn_t wheel_irq(int irq, void *dev_id)
 {
 	s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_INPUT);
 	s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_INPUT);
+	s3c2410_gpio_cfgpin(S3C2410_GPF7, S3C2410_GPIO_INPUT);
 
 	/* scan wheel */
 	mod_timer(&wheel_timer, jiffies); // now
@@ -186,12 +217,16 @@ static irqreturn_t wheel_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }		
 
+#define IRQF_TRIGGER_BOTH (IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING)
 
-#define IRQ_FLAGS IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_SAMPLE_RANDOM
+/* use IRQF_DISABLED to ensure that we aren't re-entered */
+#define IRQ_FLAGS IRQF_SAMPLE_RANDOM | IRQF_TRIGGER_BOTH | IRQF_DISABLED
+
 
 static int __init wheel_init(void)
 {
-	int i;
+	unsigned int gpio;
+	int i, ret;
 
 	/* For compatibility with the old bootloader allow s3c2413 machines
 	 * to work here too. We can't use machine_is_s3c2413() here as that
@@ -211,9 +246,11 @@ static int __init wheel_init(void)
 		return -ENOMEM;
 	}
 
-	wheel_dev->evbit[0] = BIT(EV_REL);
+	wheel_dev->evbit[0] = BIT(EV_REL) | BIT(EV_KEY) | BIT(EV_REP);
 	wheel_dev->relbit[0] = BIT(REL_WHEEL);
 	wheel_dev->name = "Wheel";
+
+	set_bit(KEY_RIGHT, wheel_dev->keybit); // Go
 
 	input_register_device(wheel_dev);
 
@@ -227,26 +264,49 @@ static int __init wheel_init(void)
 	init_timer(&wheel_timer);
 	wheel_timer.function = wheel_scan;
 
+	for (gpio = 0; gpio < ARRAY_SIZE(wheel_irqs); gpio++) {
+		int irq = wheel_irqs[gpio];
 
-        if (request_irq(IRQ_EINT12, wheel_irq, IRQ_FLAGS, "CCW_B", NULL)) {
-                 printk(KERN_ERR "Could not allocate CCW_B on IRQ_EINT12 !\n");
-                 return -EIO;
+		ret = request_irq(irq, wheel_irq, IRQ_FLAGS,
+				  "wheel", NULL);
+		if (ret < 0) {
+			printk(KERN_ERR "Failed to request IRQ %d (error %d)\n", gpio, ret);
+			goto err;
+		}
+
+		ret = set_irq_wake(irq, 1);
+		if (ret < 0) {
+			printk(KERN_ERR "Failed to set wake on IRQ %d (error %d)\n",
+			       gpio, ret);
+			goto err;
+		}
+
+		s3c2410_gpio_irqfilter(s3c2410_gpio_irq2pin(irq), 1, 0);
 	}
-
-        if (request_irq(IRQ_EINT13, wheel_irq, IRQ_FLAGS, "CW_A", NULL)) {
-                 printk(KERN_ERR "Could not allocate CW_A on IRQ_EINT13 !\n");
-                 return -EIO;
-	}
-
-	s3c2410_gpio_irqfilter(S3C2410_GPG4, 1, 0);
-	s3c2410_gpio_irqfilter(S3C2410_GPG5, 1, 0);
 
     	return 0;
+
+ err:
+	for (gpio = 0; gpio < ARRAY_SIZE(wheel_irqs); gpio++) {
+		int irq = wheel_irqs[gpio];
+
+		set_irq_wake(irq, 0);
+		free_irq(irq, NULL);
+	}
+
+	input_unregister_device(wheel_dev);
+	return -EIO;
 }
 
 static void __exit wheel_exit(void) {
-	free_irq(IRQ_EINT12, NULL);
-	free_irq(IRQ_EINT13, NULL);
+	unsigned int gpio;
+
+	for (gpio = 0; gpio < ARRAY_SIZE(wheel_irqs); gpio++) {
+		int irq = wheel_irqs[gpio];
+
+		set_irq_wake(irq, 0);
+		free_irq(irq, NULL);
+	}
 
 	input_unregister_device(wheel_dev);
 }

@@ -49,28 +49,24 @@ static unsigned int keymap[] = {
 	//  KEY_INPUT0
 	//  KEY_INPUT1
 	//  KEY_INPUT2
-	//  KEY_INPUT3
 
 	// KEY_OUTPUT2
 	KEY_UNKNOWN,
 	KEY_B, // SW10 Fwd
 	KEY_Z, // SW9 Rew
 	KEY_C, // SW8 Pause
-	KEY_UNKNOWN,
 
 	// KEY_OUTPUT1
 	KEY_UNKNOWN,
 	KEY_X, // SW5 Play
 	KEY_A, // SW6 Add
 	KEY_EQUAL, // SW7 Volume Up
-	KEY_UNKNOWN,
 
 	// KEY_OUTPUT0
 	KEY_H, // SW1 Home
 	KEY_UNKNOWN,
 	KEY_LEFT, // SW2 Back
 	KEY_MINUS, // SW3 Volume Down
-	KEY_RIGHT, // SW16 Go
 };
 
 #define IRQF_TRIGGER_BOTH (IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING)
@@ -83,7 +79,6 @@ static unsigned int matrix_irqs[] = {
 	[1] = IRQ_EINT4,
 	[2] = IRQ_EINT5,
 	[3] = IRQ_EINT6,
-	[4] = IRQ_EINT7,
 };
 
 static inline unsigned int matrix_read_gpio(void)
@@ -95,7 +90,6 @@ static inline unsigned int matrix_read_gpio(void)
 	ret |= s3c2410_gpio_getpin(S3C2410_GPF4) ? (1 << 1) : 0;
 	ret |= s3c2410_gpio_getpin(S3C2410_GPF5) ? (1 << 2) : 0;
 	ret |= s3c2410_gpio_getpin(S3C2410_GPF6) ? (1 << 3) : 0;
-	ret |= s3c2410_gpio_getpin(S3C2410_GPF7) ? (1 << 4) : 0;
 
 	return ret;
 }
@@ -116,7 +110,7 @@ static void matrix_scan(unsigned long data)
 		s3c2410_gpio_cfgpin(S3C2410_GPF1, (i == 1) ? S3C2410_GPIO_OUTPUT : S3C2410_GPIO_INPUT);
 		s3c2410_gpio_cfgpin(S3C2410_GPF2, (i == 2) ? S3C2410_GPIO_OUTPUT : S3C2410_GPIO_INPUT);
 
-		state[index] <<= 5;
+		state[index] <<= 4;
 		state[index] |= matrix_read_gpio();
 	}
 
@@ -155,7 +149,6 @@ static void matrix_scan(unsigned long data)
 		s3c2410_gpio_cfgpin(S3C2410_GPF4, S3C2410_GPIO_SFN2);
 		s3c2410_gpio_cfgpin(S3C2410_GPF5, S3C2410_GPIO_SFN2);
 		s3c2410_gpio_cfgpin(S3C2410_GPF6, S3C2410_GPIO_SFN2);
-		s3c2410_gpio_cfgpin(S3C2410_GPF7, S3C2410_GPIO_SFN2);
 	}
 }
 
@@ -165,7 +158,6 @@ static irqreturn_t matrix_irq(int irq, void *dev_id)
 	s3c2410_gpio_cfgpin(S3C2410_GPF4, S3C2410_GPIO_INPUT);
 	s3c2410_gpio_cfgpin(S3C2410_GPF5, S3C2410_GPIO_INPUT);
 	s3c2410_gpio_cfgpin(S3C2410_GPF6, S3C2410_GPIO_INPUT);
-	s3c2410_gpio_cfgpin(S3C2410_GPF7, S3C2410_GPIO_INPUT);
 
 	/* scan matrix */
 	mod_timer(&matrix_timer, jiffies); // now
@@ -218,7 +210,7 @@ static int __init matrix_init(void)
 	/* Remove pull-down on all pins, either outputs or are being
 	 * driven from an external source. */
 
-	for (gpio = S3C2410_GPF0; gpio <= S3C2410_GPF7; gpio++) {
+	for (gpio = S3C2410_GPF0; gpio <= S3C2410_GPF6; gpio++) {
 		s3c2410_gpio_pullup(gpio, 1);
 	}
 
