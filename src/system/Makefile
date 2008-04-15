@@ -79,7 +79,7 @@ glib-2.12.13-arm/Makefile:
 	cd glib-2.12.13-arm; ../glib-2.12.13/configure --cache-file=../glib-2.12.13/arm.cache --host=${TARGET} --target=${TARGET} --prefix=/usr
 
 glib: glib-2.12.13-arm/Makefile
-	cd glib-2.12.13-arm; make && make DESTDIR=${BUILDDIR} install
+	cd glib-2.12.13-arm; make && make DESTDIR=${BUILDDIR} install-strip
 
 
 # oprofile
@@ -108,10 +108,10 @@ oprofileui-host: oprofileui-host/Makefile
 
 # popt
 popt-1.7/Makefile:
-	cd popt-1.7; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr
+	cd popt-1.7; ./configure --host=${TARGET} --target=${TARGET} --prefix=/usr --disable-nls
 
 popt: popt-1.7/Makefile
-	cd popt-1.7; make; make DESTDIR=${BUILDDIR} install
+	cd popt-1.7; make; make DESTDIR=${BUILDDIR} install-strip
 
 
 # binutils
@@ -171,7 +171,7 @@ netperf-2.4.3/Makefile:
 	cd netperf-2.4.3 && ./configure --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
 
 netperf:netperf-2.4.3/Makefile
-	cd netperf-2.4.3 && make && make install DESTDIR=${BUILDDIR}
+	cd netperf-2.4.3 && make && make install-strip DESTDIR=${BUILDDIR}
 
 
 # jpeg
@@ -180,7 +180,7 @@ jpeg-6b/Makefile:
 
 jpeg: jpeg-6b/Makefile
 	mkdir -p ${PREFIX}/man/man1
-	cd jpeg-6b; make; make install; make install-lib; make install-headers
+	cd jpeg-6b; make; make install-lib; make install-headers
 
 
 # png (requires zlib)
@@ -188,7 +188,7 @@ libpng-1.2.12/Makefile:
 	cd libpng-1.2.12; ./configure --enable-shared --host=${TARGET} --target=${TARGET} --prefix=${PREFIX}
 
 png: libpng-1.2.12/Makefile
-	cd libpng-1.2.12; make; make DESTDIR= install
+	cd libpng-1.2.12; make; make DESTDIR= install-strip
 
 
 # freetype
@@ -205,7 +205,7 @@ expat-2.0.0/Makefile:
 
 .PHONY: expat
 expat: expat-2.0.0/Makefile
-	cd expat-2.0.0; make; make DESTDIR=${BUILDDIR} install
+	cd expat-2.0.0; make; make DESTDIR=${BUILDDIR} installlib
 
 
 # opensll
@@ -218,14 +218,14 @@ alsa-lib-1.0.9/Makefile:
 	cd alsa-lib-1.0.9; ./configure --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
 
 alsa-lib: alsa-lib-1.0.9/Makefile
-	cd alsa-lib-1.0.9; make; make DESTDIR=${BUILDDIR} install
+	cd alsa-lib-1.0.9; make; make DESTDIR=${BUILDDIR} install-strip
 
 # alsa-utils
 alsa-utils-1.0.9/Makefile:
 	cd alsa-utils-1.0.9; ./configure --disable-alsamixer --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
 
 alsa-utils: alsa-utils-1.0.9/Makefile
-	cd alsa-utils-1.0.9; make; make DESTDIR=${BUILDDIR} install
+	cd alsa-utils-1.0.9; make; make DESTDIR=${BUILDDIR} install-strip
 
 # wavplay
 wavplay:
