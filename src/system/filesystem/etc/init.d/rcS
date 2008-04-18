@@ -11,10 +11,10 @@ mkdir /var/shm /var/log /var/run
 # Mount SD card
 if [ -b /dev/mmcblk0p1 ]; then
 	echo "Mounting MMC/SD card (partition 1)"
-	mount -t vfat /dev/mmcblk0p1 /mnt/mmc
+	mount -t vfat -o sync -o noatime /dev/mmcblk0p1 /mnt/mmc
 elif [ -b /dev/mmcblk0 ]; then
 	echo "Mounting MMC/SD card (whole device)"
-	mount -t vfat /dev/mmcblk0 /mnt/mmc
+	mount -t vfat -o sync -o noatime /dev/mmcblk0 /mnt/mmc
 fi
 
 
@@ -56,8 +56,12 @@ if ! [ -f /etc/firstboot ]; then
 	echo "First boot"
 	touch /etc/firstboot
 
-	if [ -x /mnt/mmc/firstboot.sh ]; then
-		(cd /mnt/mmc; ./firstboot.sh)
+	if [ -r /mnt/mmc/squeezeos.patch ]; then
+		/usr/bin/patch -i /mnt/mmc/squeezeos.patch
+	fi
+
+	if [ -x /mnt/mmc/squeezeos-post-reset.sh ]; then
+		(cd /mnt/mmc; ./squeezeos-post-reset.sh)
 	fi
 fi
 
@@ -91,8 +95,8 @@ if [ -x /etc/init.d/rcS.local ]; then
 	/etc/init.d/rcS.local
 fi
 
-if [ -x /mnt/mmc/jiveboot.sh ]; then
-    (cd /mnt/mmc; ./jiveboot.sh)
+if [ -x /mnt/mmc/squeezeos-boot.sh ]; then
+    (cd /mnt/mmc; ./squeezeos-boot.sh)
 fi
 
 echo "Starting jive applications"

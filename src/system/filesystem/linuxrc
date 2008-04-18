@@ -20,15 +20,22 @@ JFFS2_OK=$?
 # Factory reset
 if [ $JFFS2_OK -ne 0 -o -f /mnt/storage/.factoryreset ]
 then
-	/bin/echo "*** FACTORY RESET ***"
+	/bin/echo "Factory Reset"
 
 	/bin/umount /mnt/storage
 	/usr/sbin/flash_eraseall -q /dev/mtd/2
 	/bin/mount -t jffs2 -o noatime /dev/mtdblock/2 /mnt/storage
 else
-	# Delete wireless lan firmware
-	/bin/rm -f /mnt/storage/lib/firmware/gspi8686.bin
-	/bin/rm -f /mnt/storage/lib/firmware/helper_gspi.bin
+	# Upgraded?
+	/usr/bin/diff -N /etc/jive.version /mnt/storage/etc/jive.version > /dev/null 2> /dev/null
+	if [ $? -ne 0 ]
+	then
+		# Remove modified files
+		/bin/echo "SqueezeOS Upgraded"
+		/usr/bin/find /mnt/storage/ -type f | /bin/grep -v -f /etc/keep-after-upgrade | /usr/bin/xargs /bin/rm -f
+	fi
+
+	cp /etc/jive.version /mnt/storage/etc/jive.version
 fi
 
 # Mount overlay filesystem
