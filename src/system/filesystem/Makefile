@@ -23,6 +23,7 @@ install:
 	install etc/group ${PREFIX}/etc
 	install etc/motd ${PREFIX}/etc
 	install etc/mdev.conf ${PREFIX}/etc
+	install etc/keep-after-upgrade ${PREFIX}/etc
 	cd ${PREFIX}/etc; ln -sf /proc/mounts mtab
 	install ${LIB_DIR}/ld-2.6.1.so ${PREFIX}/lib
 	cd ${PREFIX}/lib; ln -sf ld-2.6.1.so ld-linux.so.3
