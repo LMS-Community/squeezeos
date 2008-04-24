@@ -24,13 +24,13 @@ export HOST=${TARGET}
 LIB_DIR=$(TOPDIR)/toolchain/gcc-4.2.2-glibc-2.6.1/$(TARGET)/$(TARGET)/lib
 
 
-.PHONY: all debug clean filesystem busybox strace oprofile oprofileui-arm popt bfd libiberty jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl wavplay glib alsa-lib alsa-utils
+.PHONY: all debug clean filesystem busybox strace oprofile oprofileui-arm popt bfd libiberty jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl wavplay glib alsa-lib alsa-utils patch
 
 
 #
 # Top level targets
 #
-all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl alsa-lib alsa-utils wavplay
+all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl alsa-lib alsa-utils wavplay patch
 
 
 # debugging targets
@@ -231,6 +231,12 @@ alsa-utils: alsa-utils-1.0.9/Makefile
 wavplay:
 	cd wavplay-1.0; CPU= INSTDIR=${PREFIX}/bin make no_x install_no_x
 
+# patch
+patch-2.5.4/Makefile:
+	cd patch-2.5.4; ./configure --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=${PREFIX}
+
+patch: patch-2.5.4/Makefile
+	cd patch-2.5.4; make; make DESTDIR= install
 
 
 .PHONY: clean
@@ -253,3 +259,6 @@ clean:
 	-cd expat-2.0.0; make distclean
 	-cd openssl-0.9.7l; make clean
 	-cd wavplay-1.0; make real_clean
+	-cd alsa-lib-1.0.9; make distclean
+	-cd alsa-utils-1.0.9; make distclean
+	-cd patch-2.5.4; make distclean
