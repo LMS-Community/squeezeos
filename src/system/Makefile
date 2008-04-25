@@ -9,6 +9,7 @@ export PREFIX=${BUILDDIR}/usr
 
 export CFLAGS=-I${PREFIX}/include -Os
 export LDFLAGS=-L${PREFIX}/lib
+export LD_LIBRARY_PATH=${PREFIX}/lib
 
 export DEBUG_CFLAGS=-I${DEBUG_BUILDDIR}/usr/include ${CFLAGS}
 export DEBUG_LDFLAGS=-L${DEBUG_BUILDDIR}/usr/lib ${LDFLAGS}
@@ -215,17 +216,17 @@ openssl:
 
 # alsa-lib
 alsa-lib-1.0.9/Makefile:
-	cd alsa-lib-1.0.9; ./configure --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
+	cd alsa-lib-1.0.9; ./configure --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=${PREFIX}
 
 alsa-lib: alsa-lib-1.0.9/Makefile
-	cd alsa-lib-1.0.9; make; make DESTDIR=${BUILDDIR} install-strip
+	cd alsa-lib-1.0.9; make; make DESTDIR= install-strip
 
 # alsa-utils
 alsa-utils-1.0.9/Makefile:
-	cd alsa-utils-1.0.9; ./configure --disable-alsamixer --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
+	cd alsa-utils-1.0.9; ./configure --disable-alsamixer --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=${PREFIX}
 
 alsa-utils: alsa-utils-1.0.9/Makefile
-	cd alsa-utils-1.0.9; make; make DESTDIR=${BUILDDIR} install-strip
+	cd alsa-utils-1.0.9; make; make DESTDIR= install-strip
 
 # wavplay
 wavplay:
