@@ -54,8 +54,8 @@ squeezeplay:
 #
 image: ${IMAGEDIR}
 	# Bump version number
-	scripts/mkversion > ${BUILDDIR}/etc/jive.version
-	cp ${BUILDDIR}/etc/jive.version ${IMAGEDIR}/jive.version
+	scripts/mkversion > ${BUILDDIR}/etc/squeezeos.version
+	cp ${BUILDDIR}/etc/squeezeos.version ${IMAGEDIR}/jive.version
 	# Copy files for cramfs
 	-rm -rf ${STAGE}
 	mkdir -p ${STAGE}
