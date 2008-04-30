@@ -55,7 +55,7 @@
 
 #define PULSES_PER_DETENT 2
 
-#define DEBOUNCE_PERIOD_MS 2
+#define DEBOUNCE_PERIOD_MS 4
 #define PRESS_TIME_MS 4
 #define RELEASE_TIME_MS 40
 
@@ -66,8 +66,6 @@ static unsigned int lastAB;
 static unsigned int state[PRESS_TIME_MS / DEBOUNCE_PERIOD_MS];
 
 static unsigned int last_button;
-
-static unsigned int count;
 
 static unsigned int index;
 
@@ -107,12 +105,6 @@ static void wheel_scan(unsigned long data)
 		AB &= state[i];
 	}
 
-	/* reset after a second */
-	if (jiffies > click_jiffies + HZ/2) {
-		pos = 0;
-		click_jiffies = jiffies;
-	}
-	
 
 	/* CW rotation:
 	 * A B  C D (CD are previous AB state)
@@ -140,7 +132,6 @@ static void wheel_scan(unsigned long data)
 	case 0xE:
 		/* CW rotation */
 		pos += 1;
-		count = 0;
 		lastAB = AB;
 		click_jiffies = jiffies;
 		break;
@@ -151,7 +142,6 @@ static void wheel_scan(unsigned long data)
 	case 0xD:
 		/* CCW rotation */
 		pos -= 1;
-		count = 0;
 		lastAB = AB;
 		click_jiffies = jiffies;
 		break;
@@ -191,11 +181,17 @@ static void wheel_scan(unsigned long data)
 		pos = 0;
 	}
 
-	if (count++ < (RELEASE_TIME_MS / DEBOUNCE_PERIOD_MS) || button > 0) {
+	/* scan until 0.5 seconds of inactiviy */
+	if (jiffies < click_jiffies + HZ/2 || button > 0) {
+
 		/* keep scanning while wheel is rotating */
 		mod_timer(&wheel_timer, jiffies + (DEBOUNCE_PERIOD_MS * HZ/1000));
 	}
 	else {
+
+		/* reset wheel to center of detent */
+		pos = 0;
+
 		/* return the lines to interrupt */
 		s3c2410_gpio_cfgpin(S3C2410_GPG4, S3C2410_GPIO_SFN2);
 		s3c2410_gpio_cfgpin(S3C2410_GPG5, S3C2410_GPIO_SFN2);
