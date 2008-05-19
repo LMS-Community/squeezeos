@@ -24,13 +24,13 @@ export HOST=${TARGET}
 LIB_DIR=$(TOPDIR)/toolchain/gcc-4.2.2-glibc-2.6.1/$(TARGET)/$(TARGET)/lib
 
 
-.PHONY: all debug clean filesystem busybox strace oprofile oprofileui-arm popt bfd libiberty jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl wavplay glib alsa-lib alsa-utils patch
+.PHONY: all debug clean filesystem busybox strace oprofile oprofileui-arm popt bfd libiberty jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat wavplay glib alsa-lib alsa-utils patch
 
 
 #
 # Top level targets
 #
-all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat openssl alsa-lib alsa-utils wavplay patch
+all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat alsa-lib alsa-utils wavplay patch
 
 
 # debugging targets
@@ -214,18 +214,18 @@ openssl:
 
 
 # alsa-lib
-alsa-lib-1.0.9/Makefile:
-	cd alsa-lib-1.0.9; ./configure --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
+alsa-lib-1.0.16/Makefile:
+	cd alsa-lib-1.0.16; ./configure --enable-shared --disable-aload --disable-rawmidi --disable-hwdep --disable-seq --disable-instr --disable-alip --disable-python --with-configdir=/usr/share/alsa --host=${TARGET} --target=${TARGET}
 
-alsa-lib: alsa-lib-1.0.9/Makefile
-	cd alsa-lib-1.0.9; make; make DESTDIR=${BUILDDIR} install-strip
+alsa-lib: alsa-lib-1.0.16/Makefile
+	cd alsa-lib-1.0.16; make && make DESTDIR=${BUILDDIR} install-strip
 
 # alsa-utils
-alsa-utils-1.0.9/Makefile:
-	cd alsa-utils-1.0.9; ./configure --disable-alsamixer --enable-shared --host=${TARGET} --target=${TARGET} --program-prefix= --prefix=/usr
+alsa-utils-1.0.16/Makefile:
+	cd alsa-utils-1.0.16; ./configure --disable-alsamixer --enable-shared --host=${TARGET} --target=${TARGET}
 
-alsa-utils: alsa-utils-1.0.9/Makefile
-	cd alsa-utils-1.0.9; make; make DESTDIR=${BUILDDIR} install-strip
+alsa-utils: alsa-utils-1.0.16/Makefile
+	cd alsa-utils-1.0.16; make SUBDIRS="aplay amixer" && make SUBDIRS="aplay amixer" DESTDIR=${BUILDDIR} install-strip
 
 # wavplay
 wavplay:
