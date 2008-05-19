@@ -61,6 +61,7 @@ image: ${IMAGEDIR}
 	mkdir -p ${STAGE}
 	cd ${BUILDDIR}; find * -type d -exec mkdir ${STAGE}/{} \;
 	cd ${BUILDDIR}; find * \( -name man -or -name include \) -prune -or \! \( -name *.a -or -name *.la -or -type d \) -exec cp -rp {} ${STAGE}/{} \;
+	ldconfig -r ${STAGE}
 	mknod ${STAGE}/dev/console c 5 1
 	mknod ${STAGE}/dev/ttySAC0 c 204 64
 	# Create cramfs
