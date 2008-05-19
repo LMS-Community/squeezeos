@@ -1,14 +1,13 @@
 
 # -*- sh -*-
 
-# $Id: Makefile,v 1.60 2005/11/07 11:15:09 gleixner Exp $
-
+OPTFLAGS := -O2 -Wall
 SBINDIR=/usr/sbin
-MANDIR=/usr/man
+MANDIR=/usr/share/man
 INCLUDEDIR=/usr/include
 #CROSS=arm-linux-
-#CC := $(CROSS)gcc
-CFLAGS := $(CFLAGS) -I./include -O2 -Wall
+CC := $(CROSS)gcc
+CFLAGS := -I./include $(OPTFLAGS)
 
 ifeq ($(origin CROSS),undefined)
   BUILDDIR := .
@@ -22,12 +21,13 @@ ifeq ($(WITHOUT_XATTR), 1)
 endif
 
 RAWTARGETS = ftl_format flash_erase flash_eraseall nanddump doc_loadbios \
-	mkfs.jffs ftl_check flash_lock flash_unlock flash_info \
-	flash_otp_info flash_otp_dump mtd_debug flashcp nandwrite \
+	ftl_check mkfs.jffs2 flash_lock flash_unlock flash_info \
+	flash_otp_info flash_otp_dump mtd_debug flashcp nandwrite nandtest \
 	jffs2dump \
 	nftldump nftl_format docfdisk \
 	rfddump rfdformat \
-	sumtool nandtest #jffs2reader mkfs.jffs2
+	serve_image recv_image \
+	sumtool #jffs2reader
 
 TARGETS = $(foreach target,$(RAWTARGETS),$(BUILDDIR)/$(target))
 
@@ -43,6 +43,7 @@ $(BUILDDIR)/%.o: %.c
 .SUFFIXES:
 
 all: $(TARGETS)
+	make -C $(BUILDDIR)/ubi-utils
 
 IGNORE=${wildcard $(BUILDDIR)/.*.c.dep}
 -include ${IGNORE}
@@ -50,6 +51,7 @@ IGNORE=${wildcard $(BUILDDIR)/.*.c.dep}
 clean:
 	rm -f $(BUILDDIR)/*.o $(TARGETS) $(BUILDDIR)/.*.c.dep $(SYMLINKS)
 	if [ "$(BUILDDIR)x" != ".x" ]; then rm -rf $(BUILDDIR); fi
+	make -C $(BUILDDIR)/ubi-utils clean
 
 $(SYMLINKS):
 	ln -sf ../fs/jffs2/$@ $@
@@ -58,8 +60,10 @@ $(BUILDDIR)/mkfs.jffs2: $(BUILDDIR)/crc32.o \
 			$(BUILDDIR)/compr_rtime.o \
 			$(BUILDDIR)/mkfs.jffs2.o \
 			$(BUILDDIR)/compr_zlib.o \
-			$(BUILDDIR)/compr.o
-	$(CC) $(LDFLAGS) -o $@ $^ -lz
+			$(BUILDDIR)/compr_lzo.o \
+			$(BUILDDIR)/compr.o \
+			$(BUILDDIR)/rbtree.o
+	$(CC) $(LDFLAGS) -o $@ $^ -lz -llzo2
 
 $(BUILDDIR)/flash_eraseall: $(BUILDDIR)/crc32.o $(BUILDDIR)/flash_eraseall.o
 	$(CC) $(LDFLAGS) -o $@ $^
@@ -73,8 +77,20 @@ $(BUILDDIR)/jffs2dump: $(BUILDDIR)/jffs2dump.o $(BUILDDIR)/crc32.o
 $(BUILDDIR)/sumtool: $(BUILDDIR)/sumtool.o $(BUILDDIR)/crc32.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
+$(BUILDDIR)/serve_image: $(BUILDDIR)/serve_image.o $(BUILDDIR)/crc32.o $(BUILDDIR)/fec.o
+	$(CC) $(LDFLAGS) -o $@ $^
+
+$(BUILDDIR)/recv_image: $(BUILDDIR)/recv_image.o $(BUILDDIR)/crc32.o $(BUILDDIR)/fec.o
+	$(CC) $(LDFLAGS) -o $@ $^
+
+$(BUILDDIR)/fectest: $(BUILDDIR)/fectest.o $(BUILDDIR)/crc32.o $(BUILDDIR)/fec.o
+	$(CC) $(LDFLAGS) -o $@ $^
+
+
+
 install: ${TARGETS}
 	mkdir -p ${DESTDIR}/${SBINDIR}
 	install -m0755 ${TARGETS} ${DESTDIR}/${SBINDIR}/
 	mkdir -p ${DESTDIR}/${MANDIR}/man1
-	gzip -c mkfs.jffs2.1 > ${DESTDIR}/${MANDIR}/man1/mkfs.jffs2.1.gz
+	gzip -9c mkfs.jffs2.1 > ${DESTDIR}/${MANDIR}/man1/mkfs.jffs2.1.gz
+	make -C $(BUILDDIR)/ubi-utils install

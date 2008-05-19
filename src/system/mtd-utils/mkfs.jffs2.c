@@ -73,8 +73,9 @@
 #include <zlib.h>
 #undef crc32
 #include "crc32.h"
+#include "rbtree.h"
 
-/* Do not use the wierd XPG version of basename */
+/* Do not use the weird XPG version of basename */
 #undef basename
 
 //#define DMALLOC
@@ -89,15 +90,17 @@ struct filesystem_entry {
 	char *path;					/* Path of this directory (think dirname) */
 	char *fullname;				/* Full name of this directory (i.e. path+name) */
 	char *hostname;				/* Full path to this file on the host filesystem */
+	uint32_t ino;				/* Inode number of this file in JFFS2 */
 	struct stat sb;				/* Stores directory permissions and whatnot */
 	char *link;					/* Target a symlink points to. */
 	struct filesystem_entry *parent;	/* Parent directory */
 	struct filesystem_entry *prev;	/* Only relevant to non-directories */
 	struct filesystem_entry *next;	/* Only relevant to non-directories */
 	struct filesystem_entry *files;	/* Only relevant to directories */
+	struct rb_node hardlink_rb;
 };
 
-
+struct rb_root hardlinks;
 static int out_fd = -1;
 static int in_fd = -1;
 static char default_rootdir[] = ".";
@@ -109,6 +112,33 @@ static int fake_times = 0;
 int target_endian = __BYTE_ORDER;
 static const char *const app_name = "mkfs.jffs2";
 static const char *const memory_exhausted = "memory exhausted";
+
+uint32_t find_hardlink(struct filesystem_entry *e)
+{
+	struct filesystem_entry *f;
+	struct rb_node **n = &hardlinks.rb_node;
+	struct rb_node *parent = NULL;
+
+	while (*n) {
+		parent = *n;
+		f = rb_entry(parent, struct filesystem_entry, hardlink_rb);
+
+		if ((f->sb.st_dev < e->sb.st_dev) ||
+		    (f->sb.st_dev == e->sb.st_dev && 
+		     f->sb.st_ino < e->sb.st_ino))
+			n = &parent->rb_left;
+		else if ((f->sb.st_dev > e->sb.st_dev) ||
+			 (f->sb.st_dev == e->sb.st_dev && 
+			  f->sb.st_ino > e->sb.st_ino)) {
+			n = &parent->rb_right;
+		} else
+			return f->ino;
+	}
+
+	rb_link_node(&e->hardlink_rb, parent, n);
+	rb_insert_color(&e->hardlink_rb, &hardlinks);
+	return 0;
+}
 
 static void verror_msg(const char *s, va_list p)
 {
@@ -331,6 +361,10 @@ static struct filesystem_entry *add_host_filesystem_entry(
 	tmp = xstrdup(name);
 	entry->path = xstrdup(dirname(tmp));
 	free(tmp);
+	
+	entry->sb.st_ino = sb.st_ino;
+	entry->sb.st_dev = sb.st_dev;
+	entry->sb.st_nlink = sb.st_nlink;
 
 	entry->sb.st_uid = uid;
 	entry->sb.st_gid = gid;
@@ -672,9 +706,9 @@ static unsigned char ffbuf[16] =
 	0xff, 0xff, 0xff, 0xff, 0xff
 };
 
-/* We default to 4096, per x86.  When building a fs for
- * 64-bit arches and whatnot, use the --pagesize=SIZE option */
-int page_size = 4096;
+/* We set this at start of main() using sysconf(), -1 means we don't know */
+/* When building an fs for non-native systems, use --pagesize=SIZE option */
+int page_size = -1;
 
 #include "compr.h"
 
@@ -760,9 +794,9 @@ static void write_dirent(struct filesystem_entry *e)
 	rd.totlen = cpu_to_je32(sizeof(rd) + strlen(name));
 	rd.hdr_crc = cpu_to_je32(crc32(0, &rd,
 				sizeof(struct jffs2_unknown_node) - 4));
-	rd.pino = cpu_to_je32((e->parent) ? e->parent->sb.st_ino : 1);
+	rd.pino = cpu_to_je32((e->parent) ? e->parent->ino : 1);
 	rd.version = cpu_to_je32(version++);
-	rd.ino = cpu_to_je32(statbuf->st_ino);
+	rd.ino = cpu_to_je32(e->ino);
 	rd.mctime = cpu_to_je32(statbuf->st_mtime);
 	rd.nsize = strlen(name);
 	rd.type = IFTODT(statbuf->st_mode);
@@ -797,10 +831,10 @@ static unsigned int write_regular_file(struct filesystem_entry *e)
 		perror_msg_and_die("%s: open file", e->hostname);
 	}
 
-	statbuf->st_ino = ++ino;
+	e->ino = ++ino;
 	mkfs_debug_msg("writing file '%s'  ino=%lu  parent_ino=%lu",
-			e->name, (unsigned long) statbuf->st_ino,
-			(unsigned long) e->parent->sb.st_ino);
+			e->name, (unsigned long) e->ino,
+			(unsigned long) e->parent->ino);
 	write_dirent(e);
 
 	buf = xmalloc(page_size);
@@ -813,7 +847,7 @@ static unsigned int write_regular_file(struct filesystem_entry *e)
 	ri.magic = cpu_to_je16(JFFS2_MAGIC_BITMASK);
 	ri.nodetype = cpu_to_je16(JFFS2_NODETYPE_INODE);
 
-	ri.ino = cpu_to_je32(statbuf->st_ino);
+	ri.ino = cpu_to_je32(e->ino);
 	ri.mode = cpu_to_jemode(statbuf->st_mode);
 	ri.uid = cpu_to_je16(statbuf->st_uid);
 	ri.gid = cpu_to_je16(statbuf->st_gid);
@@ -909,10 +943,10 @@ static void write_symlink(struct filesystem_entry *e)
 	struct jffs2_raw_inode ri;
 
 	statbuf = &(e->sb);
-	statbuf->st_ino = ++ino;
+	e->ino = ++ino;
 	mkfs_debug_msg("writing symlink '%s'  ino=%lu  parent_ino=%lu",
-			e->name, (unsigned long) statbuf->st_ino,
-			(unsigned long) e->parent->sb.st_ino);
+			e->name, (unsigned long) e->ino,
+			(unsigned long) e->parent->ino);
 	write_dirent(e);
 
 	len = strlen(e->link);
@@ -930,7 +964,7 @@ static void write_symlink(struct filesystem_entry *e)
 	ri.hdr_crc = cpu_to_je32(crc32(0,
 				&ri, sizeof(struct jffs2_unknown_node) - 4));
 
-	ri.ino = cpu_to_je32(statbuf->st_ino);
+	ri.ino = cpu_to_je32(e->ino);
 	ri.mode = cpu_to_jemode(statbuf->st_mode);
 	ri.uid = cpu_to_je16(statbuf->st_uid);
 	ri.gid = cpu_to_je16(statbuf->st_gid);
@@ -956,11 +990,11 @@ static void write_pipe(struct filesystem_entry *e)
 	struct jffs2_raw_inode ri;
 
 	statbuf = &(e->sb);
-	statbuf->st_ino = ++ino;
+	e->ino = ++ino;
 	if (S_ISDIR(statbuf->st_mode)) {
 		mkfs_debug_msg("writing dir '%s'  ino=%lu  parent_ino=%lu",
-				e->name, (unsigned long) statbuf->st_ino,
-				(unsigned long) (e->parent) ? e->parent->sb.  st_ino : 1);
+				e->name, (unsigned long) e->ino,
+				(unsigned long) (e->parent) ? e->parent->ino : 1);
 	}
 	write_dirent(e);
 
@@ -972,7 +1006,7 @@ static void write_pipe(struct filesystem_entry *e)
 	ri.hdr_crc = cpu_to_je32(crc32(0,
 				&ri, sizeof(struct jffs2_unknown_node) - 4));
 
-	ri.ino = cpu_to_je32(statbuf->st_ino);
+	ri.ino = cpu_to_je32(e->ino);
 	ri.mode = cpu_to_jemode(statbuf->st_mode);
 	ri.uid = cpu_to_je16(statbuf->st_uid);
 	ri.gid = cpu_to_je16(statbuf->st_gid);
@@ -998,7 +1032,7 @@ static void write_special_file(struct filesystem_entry *e)
 	struct jffs2_raw_inode ri;
 
 	statbuf = &(e->sb);
-	statbuf->st_ino = ++ino;
+	e->ino = ++ino;
 	write_dirent(e);
 
 	kdev = cpu_to_je16((major(statbuf->st_rdev) << 8) +
@@ -1012,7 +1046,7 @@ static void write_special_file(struct filesystem_entry *e)
 	ri.hdr_crc = cpu_to_je32(crc32(0,
 				&ri, sizeof(struct jffs2_unknown_node) - 4));
 
-	ri.ino = cpu_to_je32(statbuf->st_ino);
+	ri.ino = cpu_to_je32(e->ino);
 	ri.mode = cpu_to_jemode(statbuf->st_mode);
 	ri.uid = cpu_to_je16(statbuf->st_uid);
 	ri.gid = cpu_to_je16(statbuf->st_gid);
@@ -1251,7 +1285,7 @@ static void write_xattr_entry(struct filesystem_entry *e)
 		ref.nodetype = cpu_to_je16(JFFS2_NODETYPE_XREF);
 		ref.totlen = cpu_to_je32(sizeof(ref));
 		ref.hdr_crc = cpu_to_je32(crc32(0, &ref, sizeof(struct jffs2_unknown_node) - 4));
-		ref.ino = cpu_to_je32(e->sb.st_ino);
+		ref.ino = cpu_to_je32(e->ino);
 		ref.xid = cpu_to_je32(xe->xid);
 		ref.xseqno = cpu_to_je32(highest_xseqno += 2);
 		ref.node_crc = cpu_to_je32(crc32(0, &ref, sizeof(ref) - 4));
@@ -1278,8 +1312,17 @@ static void recursive_populate_directory(struct filesystem_entry *dir)
 
 	e = dir->files;
 	while (e) {
+		if (e->sb.st_nlink >= 1 &&
+		    (e->ino = find_hardlink(e))) {
 
-		switch (e->sb.st_mode & S_IFMT) {
+			write_dirent(e);
+			if (verbose) {
+				printf("\tL %04o %9lu             %5d:%-3d %s\n",
+				       e->sb.st_mode & ~S_IFMT, (unsigned long) e->ino,
+				       (int) (e->sb.st_uid), (int) (e->sb.st_gid),
+				       e->name);
+			}
+		} else switch (e->sb.st_mode & S_IFMT) {
 			case S_IFDIR:
 				if (verbose) {
 					printf("\td %04o %9lu             %5d:%-3d %s\n",
@@ -1378,7 +1421,7 @@ static void create_target_filesystem(struct filesystem_entry *root)
 	if (ino == 0)
 		ino = 1;
 
-	root->sb.st_ino = 1;
+	root->ino = 1;
 	recursive_populate_directory(root);
 
 	if (pad_fs_size == -1) {
@@ -1470,7 +1513,7 @@ static char *helptext =
 "  -V, --version           Display version information\n"
 "  -i, --incremental=FILE  Parse FILE and generate appendage output for it\n\n";
 
-static char *revtext = "$Revision: 1.50 $";
+static char *revtext = "1.60";
 
 int load_next_block() {
 
@@ -1617,6 +1660,13 @@ int main(int argc, char **argv)
 	struct filesystem_entry *root;
 	char *compr_name = NULL;
 	int compr_prior  = -1;
+	int warn_page_size = 0;
+
+	page_size = sysconf(_SC_PAGESIZE);
+	if (page_size < 0) /* System doesn't know so ... */
+		page_size = 4096; /* ... we make an educated guess */
+	if (page_size != 4096)
+		warn_page_size = 1; /* warn user if page size not 4096 */
 
 	jffs2_compressors_init();
 
@@ -1642,6 +1692,7 @@ int main(int argc, char **argv)
 
 			case 's':
 				page_size = strtol(optarg, NULL, 0);
+				warn_page_size = 0; /* set by user, so don't need to warn */
 				break;
 
 			case 'o':
@@ -1680,8 +1731,7 @@ int main(int argc, char **argv)
 				break;
 
 			case 'V':
-				error_msg_and_die("revision %.*s\n",
-						(int) strlen(revtext) - 13, revtext + 11);
+				error_msg_and_die("revision %s\n", revtext);
 
 			case 'e': {
 						  char *next;
@@ -1800,6 +1850,10 @@ int main(int argc, char **argv)
 					  break;
 #endif
 		}
+	}
+	if (warn_page_size) {
+		error_msg("Page size for this system is by default %d", page_size);
+		error_msg("Use the --pagesize=SIZE option if this is not what you want");
 	}
 	if (out_fd == -1) {
 		if (isatty(1)) {

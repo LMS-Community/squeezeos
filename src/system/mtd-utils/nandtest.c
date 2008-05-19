@@ -1,248 +1,281 @@
-/*
- *  nanddump.c
- *
- *  Copyright (C) 2007 Richard Titmuss (richard_titmuss@logitech.com)
- *
- * $Id: $
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- *  Overview:
- *   This utility writes test patterns to flash trying to find blocks
- *   that fail when erasing, writing or in verifying.
- */
-
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <stropts.h>
+#include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
+#include <getopt.h>
 
+#include <asm/types.h>
 #include "mtd/mtd-user.h"
 
+void usage(void)
+{
+	fprintf(stderr, "usage: nandtest [OPTIONS] <device>\n\n"
+		"  -h, --help		Display this help output\n"
+		"  -m, --markbad	Mark blocks bad if they appear so\n"
+		"  -s, --seed		Supply random seed\n"
+		"  -p, --passes		Number of passes\n"
+		"  -o, --offset		Start offset on flash\n"
+		"  -l, --length		Length of flash to test\n"
+		"  -k, --keep		Restore existing contents after test\n");
+	exit(1);
+}
 
-int fd;
 struct mtd_info_user meminfo;
-int *badblocks;
+struct mtd_ecc_stats oldstats, newstats;
+int fd;
+int markbad=0;
+int seed;
 
-
-void display_help(void)
+int erase_and_write(loff_t ofs, unsigned char *data, unsigned char *rbuf)
 {
-	printf("Usage: nandtest MTD-device\n");
-	exit(0);
-}
+	struct erase_info_user er;
+	ssize_t len;
+	int i;
 
+	printf("\r%08x: erasing... ", (unsigned)ofs);
+	fflush(stdout);
 
-int test_bad_blocks()
-{
-	unsigned long long offset;
-	int badblock, erasesize;
+	er.start = ofs;
+	er.length = meminfo.erasesize;
 
-	printf("check bad blocks...\n");
-
-	erasesize = meminfo.erasesize;
-	badblocks = malloc((meminfo.size / erasesize) * sizeof(int));
-
-	for (offset = 0; offset < meminfo.size; offset += erasesize) {
-		if ((badblock = ioctl(fd, MEMGETBADBLOCK, &offset)) < 0) {
-			perror("ioctl(MEMGETBADBLOCK)");
-			return 1;
+	if (ioctl(fd, MEMERASE, &er)) {
+		perror("MEMERASE");
+		if (markbad) {
+			printf("Mark block bad at %08lx\n", (long)ofs);
+			ioctl(fd, MEMSETBADBLOCK, &ofs);
 		}
-
-		badblocks[offset / erasesize] = badblock;
-		if (badblock) {
-			printf("bad block %llx\n", offset);
-		}
+		return 1;
 	}
 
-	return 0;
-}
+	printf("\r%08x: writing...", (unsigned)ofs);
+	fflush(stdout);
 
-
-int test_oob()
-{
-	struct mtd_oob_buf oob;
-	unsigned char oobbuf[64];
-	unsigned long long offset;
-	int i, writesize;
-
-	printf("check oob...\n");
-
-	oob.start = 0;
-	oob.length = 16;
-	oob.ptr = oobbuf;
-
-	writesize = meminfo.writesize;
-
-	for (offset = 0; offset < meminfo.size; offset += writesize) {
-		if (ioctl(fd, MEMREADOOB, &oob) < 0) {
-			perror("ioctl(MEMGETBADBLOCK)");
-			return 1;
-		}
-
-		for (i = 0; i < 16; i++) {
-			if (oobbuf[i] != 0xFF) {
-				goto dump_oob;
-			}
-		}
-		continue;
-
-	dump_oob:
-		printf("offset %llx: ", offset);
-		for (i = 0; i < 16; i++) {
-			printf("%x ", oobbuf[i]);
-		}
+	len = pwrite(fd, data, meminfo.erasesize, ofs);
+	if (len < 0) {
 		printf("\n");
+		perror("write");
+		if (markbad) {
+			printf("Mark block bad at %08lx\n", (long)ofs);
+			ioctl(fd, MEMSETBADBLOCK, &ofs);
+		}
+		return 1;
 	}
-
-	return 0;
-}
-
-int test_erase()
-{
-	struct erase_info_user erase;
-	unsigned long long offset;
-	int erasesize;
-
-	printf("erasing...\n");
-
-	erasesize = meminfo.erasesize;
-
-	for (offset = 0; offset < meminfo.size; offset += erasesize) {
-		if (badblocks[offset / erasesize]) {
-			continue;
-		}
-
-		erase.start = offset;
-		erase.length = erasesize;
-
-		if (ioctl(fd, MEMERASE, &erase) < 0) {
-			fprintf(stderr, "erase failed %llx: %s\n", offset, strerror(errno));
-			continue;
-		}
-	}
-
-	return 0;
-}
-
-
-int test_write(int pattern)
-{
-	unsigned long long offset;
-	int erasesize, writesize;
-	unsigned char buf[meminfo.writesize];
-
-	printf("writing %x ...\n", pattern);
-	memset(buf, pattern, meminfo.writesize);
-
-	erasesize = meminfo.erasesize;
-	writesize = meminfo.writesize;
-
-	for (offset = 0; offset < meminfo.size; offset += writesize) {
-		if (badblocks[(offset & (~meminfo.erasesize + 1)) / erasesize]) {
-			continue;
-		}
-
-		if (pwrite(fd, buf, writesize, offset) < 0) {
-			fprintf(stderr, "write failed %llx: %s\n", offset, strerror(errno));
-		}
-	}
-
-	return 0;
-}
-
-
-int test_verify(int pattern)
-{
-	unsigned long long offset;
-	int i, erasesize, writesize;
-	unsigned char buf[meminfo.writesize];
-
-	printf("verify %x ...\n", pattern);
-
-	erasesize = meminfo.erasesize;
-	writesize = meminfo.writesize;
-
-	for (offset = 0; offset < meminfo.size; offset += writesize) {
-		if (badblocks[(offset & (~meminfo.erasesize + 1)) / erasesize]) {
-			continue;
-		}
-
-		if (pread(fd, buf, writesize, offset) < 0) {
-			fprintf(stderr, "read failed %llx: %s\n", offset, strerror(errno));
-		}
-
-		for (i = 0; i < writesize; i++) {
-			if (buf[i] != pattern) {
-				fprintf(stderr, "verify failed %llx: %x != %x\n", offset, buf[i], pattern);
-				continue;
-			}
-		}
-	}
-
-	return 0;
-}
-
-
-int main(int argc, char **argv)
-{
-
-	if (argc <= 1) {
-		display_help();
-	}
-
-	/* Open the device */
-	if ((fd = open(argv[1], O_RDWR)) == -1) {
-		perror("open flash");
+	if (len < meminfo.erasesize) {
+		printf("\n");
+		fprintf(stderr, "Short write (%d bytes)\n", len);
 		exit(1);
 	}
 
-	/* Fill in MTD device capability structure */
-	if (ioctl(fd, MEMGETINFO, &meminfo) != 0) {
+	printf("\r%08x: reading...", (unsigned)ofs);
+	fflush(stdout);
+	
+	len = pread(fd, rbuf, meminfo.erasesize, ofs);
+	if (len < meminfo.erasesize) {
+		printf("\n");
+		if (len)
+			fprintf(stderr, "Short read (%d bytes)\n", len);
+		else
+			perror("read");
+		exit(1);
+	}
+		
+	if (ioctl(fd, ECCGETSTATS, &newstats)) {
+		printf("\n");
+		perror("ECCGETSTATS");
+		close(fd);
+		exit(1);
+	}
+
+	if (newstats.corrected > oldstats.corrected) {
+		printf("\nECC corrected at %08x\n", (unsigned) ofs);
+		oldstats.corrected = newstats.corrected;
+	}
+	if (newstats.failed > oldstats.failed) {
+		printf("\nECC failed at %08x\n", (unsigned) ofs);
+		oldstats.corrected = newstats.corrected;
+	}
+	if (len < meminfo.erasesize)
+		exit(1);
+
+	printf("\r%08x: checking...", (unsigned)ofs);
+	fflush(stdout);
+
+	if (memcmp(data, rbuf, meminfo.erasesize)) {
+		printf("\n");
+		fprintf(stderr, "compare failed. seed %d\n", seed);
+		for (i=0; i<meminfo.erasesize; i++) {
+			if (data[i] != rbuf[i])
+				printf("Byte 0x%x is %02x should be %02x\n",
+				       i, rbuf[i], data[i]);
+		}
+		exit(1);
+	}
+	return 0;
+}
+
+
+/*
+ * Main program
+ */
+int main(int argc, char **argv)
+{
+	int i;
+	unsigned char *wbuf, *rbuf, *kbuf;
+	int pass;
+	int nr_passes = 1;
+	int keep_contents = 0;
+	uint32_t offset = 0;
+	uint32_t length = -1;
+
+	for (;;) {
+		static const char *short_options="hkl:mo:p:s:";
+		static const struct option long_options[] = {
+			{ "help", no_argument, 0, 'h' },
+			{ "markbad", no_argument, 0, 'm' },
+			{ "seed", required_argument, 0, 's' },
+			{ "passes", required_argument, 0, 'p' },
+			{ "offset", required_argument, 0, 'o' },
+			{ "length", required_argument, 0, 'l' },
+			{ "keep", no_argument, 0, 'k' },
+			{0, 0, 0, 0},
+		};
+		int option_index = 0;
+		int c = getopt_long(argc, argv, short_options, long_options, &option_index);
+		if (c == EOF)
+			break;
+
+		switch (c) {
+		case 'h':
+		case '?':
+			usage();
+			break;
+
+		case 'm':
+			markbad = 1;
+			break;
+
+		case 'k':
+			keep_contents = 1;
+			break;
+
+		case 's':
+			seed = atol(optarg);
+			break;
+
+		case 'p':
+			nr_passes = atol(optarg);
+			break;
+
+		case 'o':
+			offset = atol(optarg);
+			break;
+
+		case 'l':
+			length = strtol(optarg, NULL, 0);
+			break;
+			
+		}
+	}
+	if (argc - optind != 1)
+		usage();
+
+	fd = open(argv[optind], O_RDWR);
+	if (fd < 0) {
+		perror("open");
+		exit(1);
+	}
+	
+	if (ioctl(fd, MEMGETINFO, &meminfo)) {
 		perror("MEMGETINFO");
 		close(fd);
 		exit(1);
 	}
 
-	if (meminfo.type != MTD_NANDFLASH) {
-		fprintf(stderr, "Not NAND flash\n");
+	if (length == -1)
+		length = meminfo.size;
+
+	if (offset % meminfo.erasesize) {
+		fprintf(stderr, "Offset %x not multiple of erase size %x\n", 
+			offset, meminfo.erasesize);
+		exit(1);
+	}
+	if (length % meminfo.erasesize) {
+		fprintf(stderr, "Length %x not multiple of erase size %x\n", 
+			length, meminfo.erasesize);
+		exit(1);
+	}
+	if (length + offset > meminfo.size) {
+		fprintf(stderr, "Length %x + offset %x exceeds device size %x\n", 
+			length, offset, meminfo.size);
+		exit(1);
+	}		
+
+	wbuf = malloc(meminfo.erasesize * 3);
+	if (!wbuf) {
+		fprintf(stderr, "Could not allocate %d bytes for buffer\n",
+			meminfo.erasesize * 2);
+		exit(1);
+	}
+	rbuf = wbuf + meminfo.erasesize;
+	kbuf = rbuf + meminfo.erasesize;
+
+	if (ioctl(fd, ECCGETSTATS, &oldstats)) {
+		perror("ECCGETSTATS");
+		close(fd);
 		exit(1);
 	}
 
-	printf("flags:\t\t0x%x\n", meminfo.flags);
-	printf("size:\t\t0x%x\n", meminfo.size);
-	printf("writesize:\t0x%x\n", meminfo.writesize);
-	printf("erasesize:\t0x%x\n", meminfo.erasesize);
-	printf("oobsize:\t0x%x\n", meminfo.oobsize);
-	printf("ecctype:\t%d\n", meminfo.ecctype);
-	printf("eccsize:\t0x%x\n", meminfo.eccsize);
+	printf("ECC corrections: %d\n", oldstats.corrected);
+	printf("ECC failures   : %d\n", oldstats.failed);
+	printf("Bad blocks     : %d\n", oldstats.badblocks);
+	printf("BBT blocks     : %d\n", oldstats.bbtblocks);
 
-	// tests
-	test_bad_blocks();
-	test_oob();
+	for (pass = 0; pass < nr_passes; pass++) {
+		loff_t test_ofs;
 
-	test_erase();
-	test_write(0x00);
-	test_verify(0x00);
+		for (test_ofs = offset; test_ofs < offset+length; test_ofs += meminfo.erasesize) {
+			ssize_t len;
 
-	test_erase();
-	test_write(0xFF);
-	test_verify(0xFF);
+			seed = rand();
+			srand(seed);
 
-	test_erase();
-	test_write(0xAA);
-	test_verify(0xAA);
+			if (ioctl(fd, MEMGETBADBLOCK, &test_ofs)) {
+				printf("\rBad block at 0x%08x\n", (unsigned)test_ofs);
+				continue;
+			}
 
-	test_erase();
-	test_write(0x55);
-	test_verify(0x55);
+			for (i=0; i<meminfo.erasesize; i++)
+				wbuf[i] = rand();
 
-	close(fd);
-	exit(0);
+			if (keep_contents) {
+				printf("\r%08x: reading... ", (unsigned)test_ofs);
+				fflush(stdout);
+
+				len = pread(fd, rbuf, meminfo.erasesize, test_ofs);
+				if (len < meminfo.erasesize) {
+					printf("\n");
+					if (len)
+						fprintf(stderr, "Short read (%d bytes)\n", len);
+					else
+						perror("read");
+					exit(1);
+				}
+			}
+			if (erase_and_write(test_ofs, wbuf, rbuf))
+				continue;
+			if (keep_contents)
+				erase_and_write(test_ofs, kbuf, rbuf);
+		}
+		printf("\nFinished pass %d successfully\n", pass+1);
+	}
+	/* Return happy */
+	return 0;
 }

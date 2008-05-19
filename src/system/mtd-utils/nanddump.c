@@ -4,8 +4,6 @@
  *  Copyright (C) 2000 David Woodhouse (dwmw2@infradead.org)
  *                     Steven J. Hill (sjhill@realitydiluted.com)
  *
- * $Id: nanddump.c,v 1.29 2005/11/07 11:15:13 gleixner Exp $
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -283,16 +281,8 @@ int main(int argc, char **argv)
 		}
 
 		if (badblock) {
-			if (omitbad) {
-				if (length) {
-					/* bad blocks don't count towards the length */
-					end_addr += bs;
-					if (end_addr > meminfo.size) {
-						end_addr = meminfo.size;
-					}
-				}
+			if (omitbad)
 				continue;
-			}
 			memset (readbuf, 0xff, bs);
 		} else {
 			/* Read page data and exit on failure */
@@ -300,11 +290,6 @@ int main(int argc, char **argv)
 				perror("pread");
 				goto closeall;
 			}
-		}
-
-		/* Adjust blocksize for last block */
-		if (bs > end_addr - ofs) {
-			bs = end_addr - ofs;
 		}
 
 		/* ECC stats available ? */

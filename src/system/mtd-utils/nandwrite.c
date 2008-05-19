@@ -4,8 +4,6 @@
  *  Copyright (C) 2000 Steven J. Hill (sjhill@realitydiluted.com)
  *		  2003 Thomas Gleixner (tglx@linutronix.de)
  *
- * $Id: nandwrite.c,v 1.32 2005/11/07 11:15:13 gleixner Exp $
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -74,13 +72,14 @@ struct nand_oobinfo autoplace_oobinfo = {
 
 void display_help (void)
 {
-	printf("Usage: nandwrite [OPTION] [MTD_DEVICE INPUTFILE|-]\n"
+	printf("Usage: nandwrite [OPTION] MTD_DEVICE INPUTFILE\n"
 			"Writes to the specified MTD device.\n"
 			"\n"
 			"  -a, --autoplace	Use auto oob layout\n"
 			"  -j, --jffs2		force jffs2 oob layout (legacy support)\n"
 			"  -y, --yaffs		force yaffs oob layout (legacy support)\n"
-			"  -f, --forcelegacy     force legacy support on autoplacement enabled mtd device\n"
+			"  -f, --forcelegacy	force legacy support on autoplacement enabled mtd device\n"
+			"  -m, --markbad		mark blocks bad if write fails\n"
 			"  -n, --noecc		write without ecc\n"
 			"  -o, --oob		image contains oob data\n"
 			"  -s addr, --start=addr set start address (default is 0)\n"
@@ -111,6 +110,7 @@ char	*mtd_device, *img;
 int	mtdoffset = 0;
 int	quiet = 0;
 int	writeoob = 0;
+int	markbad = 0;
 int	autoplace = 0;
 int	forcejffs2 = 0;
 int	forceyaffs = 0;
@@ -125,7 +125,7 @@ void process_options (int argc, char *argv[])
 
 	for (;;) {
 		int option_index = 0;
-		static const char *short_options = "ab:fjnopqs:y";
+		static const char *short_options = "ab:fjmnopqs:y";
 		static const struct option long_options[] = {
 			{"help", no_argument, 0, 0},
 			{"version", no_argument, 0, 0},
@@ -133,6 +133,7 @@ void process_options (int argc, char *argv[])
 			{"blockalign", required_argument, 0, 'b'},
 			{"forcelegacy", no_argument, 0, 'f'},
 			{"jffs2", no_argument, 0, 'j'},
+			{"markbad", no_argument, 0, 'm'},
 			{"noecc", no_argument, 0, 'n'},
 			{"oob", no_argument, 0, 'o'},
 			{"pad", no_argument, 0, 'p'},
@@ -177,6 +178,9 @@ void process_options (int argc, char *argv[])
 			case 'n':
 				noecc = 1;
 				break;
+			case 'm':
+				markbad = 1;
+				break;
 			case 'o':
 				writeoob = 1;
 				break;
@@ -214,7 +218,6 @@ int main(int argc, char **argv)
 	int ret, readlen;
 	int oobinfochanged = 0;
 	struct nand_oobinfo old_oobinfo;
-	int read_from_stdin = 0;
 
 	process_options(argc, argv);
 
@@ -331,29 +334,15 @@ int main(int argc, char **argv)
 	oob.length = meminfo.oobsize;
 	oob.ptr = noecc ? oobreadbuf : oobbuf;
 
-	// Check if we read from stdin
-	if (strcmp(img, "-") == 0) {
-		// FIXME OOB data and stdin
-		if( writeoob) {
-			fprintf(stderr, "Can't use oob data when stdin is used.\n");
-			exit(-1);
-		}
-
-		ifd = STDIN_FILENO;
-		read_from_stdin = 1;
-		imglen = pagelen;	// used as flag in stdin case
+	/* Open the input file */
+	if ((ifd = open(img, O_RDONLY)) == -1) {
+		perror("open input file");
+		goto restoreoob;
 	}
-	else {
-		/* Open the input file */
-		if ((ifd = open(img, O_RDONLY)) == -1) {
-			perror("open input file");
-			goto restoreoob;
-		}
 
-		// get image length
-		imglen = lseek(ifd, 0, SEEK_END);
-		lseek (ifd, 0, SEEK_SET);
-	}
+	// get image length
+	imglen = lseek(ifd, 0, SEEK_END);
+	lseek (ifd, 0, SEEK_SET);
 
 	pagelen = meminfo.writesize + ((writeoob == 1) ? meminfo.oobsize : 0);
 
@@ -372,7 +361,6 @@ int main(int argc, char **argv)
 	}
 
 	/* Get data from input and write to the device */
-	/* imglen is used as flag in stdin case */
 	while (imglen && (mtdoffset < meminfo.size)) {
 		// new eraseblock , check for bad block(s)
 		// Stay in the loop to be sure if the mtdoffset changes because
@@ -410,51 +398,18 @@ int main(int argc, char **argv)
 		}
 
 		readlen = meminfo.writesize;
+		if (pad && (imglen < readlen))
+		{
+			readlen = imglen;
+			memset(writebuf + readlen, 0xff, meminfo.writesize - readlen);
+		}
 
-		if( !read_from_stdin) {	
-			if (pad && (imglen < readlen))
-			{
-				readlen = imglen;
-				memset(writebuf + readlen, 0xff, meminfo.writesize - readlen);
-			}
-
-			/* Read Page Data from input file */
-			if ((cnt = read(ifd, writebuf, readlen)) != readlen) {
-				if (cnt == 0)	// EOF
-					break;
-				perror ("File I/O error on input file");
-				goto closeall;
-			}
-		} else {
-			/* Read Page Data from stdin */
-			int tinycnt = 0;
-			while(tinycnt < readlen) {
-				cnt = read(ifd, writebuf + tinycnt, readlen - tinycnt);
-				if (cnt == 0) { // EOF
-					break;
-				}
-				else if (cnt < 0) {
-					perror ("File I/O error on stdin");
-					goto closeall;
-				}
-				tinycnt += cnt;
-			}
-
-			/* No padding needed - we are done */
-			if (tinycnt == 0) {
-				imglen = 0;
+		/* Read Page Data from input file */
+		if ((cnt = read(ifd, writebuf, readlen)) != readlen) {
+			if (cnt == 0)	// EOF
 				break;
-			}
-
-			/* No more bytes - we are done after writing the remaining bytes */
-			if (cnt == 0) {
-				imglen = 0;
-			}
-
-			/* Padding */
-			if (pad && (tinycnt < readlen)) {
-				memset( writebuf + tinycnt, 0xff, meminfo.writesize - tinycnt);
-			}
+			perror ("File I/O error on input file");
+			goto closeall;
 		}
 
 		if (writeoob) {
@@ -501,13 +456,44 @@ int main(int argc, char **argv)
 
 		/* Write out the Page data */
 		if (pwrite(fd, writebuf, meminfo.writesize, mtdoffset) != meminfo.writesize) {
-			perror ("pwrite");
-			goto closeall;
-		}
+			int rewind_blocks;
+			off_t rewind_bytes;
+			erase_info_t erase;
 
-		if (!read_from_stdin) {	
-			imglen -= readlen;
+			perror ("pwrite");
+			/* Must rewind to blockstart if we can */
+			rewind_blocks = (mtdoffset - blockstart) / meminfo.writesize; /* Not including the one we just attempted */
+			rewind_bytes = (rewind_blocks * meminfo.writesize) + readlen;
+			if (writeoob)
+				rewind_bytes += (rewind_blocks + 1) * meminfo.oobsize;
+			if (lseek(ifd, -rewind_bytes, SEEK_CUR) == -1) {
+				perror("lseek");
+				fprintf(stderr, "Failed to seek backwards to recover from write error\n");
+				goto closeall;
+			}
+			erase.start = blockstart;
+			erase.length = meminfo.erasesize;
+			fprintf(stderr, "Erasing failed write from %08lx-%08lx\n",
+				(long)erase.start, (long)erase.start+erase.length-1);
+			if (ioctl(fd, MEMERASE, &erase) != 0) {
+				perror("MEMERASE");
+				goto closeall;
+			}
+
+			if (markbad) {
+				loff_t bad_addr = mtdoffset & (~(meminfo.erasesize / blockalign) + 1);
+				fprintf(stderr, "Marking block at %08lx bad\n", (long)bad_addr);
+				if (ioctl(fd, MEMSETBADBLOCK, &bad_addr)) {
+					perror("MEMSETBADBLOCK");
+					/* But continue anyway */
+				}
+			}
+			mtdoffset = blockstart + meminfo.erasesize;
+			imglen += rewind_blocks * meminfo.writesize;
+
+			continue;
 		}
+		imglen -= readlen;
 		mtdoffset += meminfo.writesize;
 	}
 
