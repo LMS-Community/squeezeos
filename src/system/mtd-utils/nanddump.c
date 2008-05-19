@@ -281,8 +281,16 @@ int main(int argc, char **argv)
 		}
 
 		if (badblock) {
-			if (omitbad)
+			if (omitbad) {
+				if (length) {
+					/* bad blocks don't count towards the length */
+					end_addr += bs;
+					if (end_addr > meminfo.size) {
+						end_addr = meminfo.size;
+					}
+				}
 				continue;
+			}
 			memset (readbuf, 0xff, bs);
 		} else {
 			/* Read page data and exit on failure */
@@ -290,6 +298,10 @@ int main(int argc, char **argv)
 				perror("pread");
 				goto closeall;
 			}
+		}
+
+		if (bs > end_addr - ofs) {
+			bs = end_addr - ofs;
 		}
 
 		/* ECC stats available ? */
