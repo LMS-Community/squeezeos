@@ -6,7 +6,7 @@ SBINDIR=/usr/sbin
 MANDIR=/usr/share/man
 INCLUDEDIR=/usr/include
 #CROSS=arm-linux-
-CC := $(CROSS)gcc
+#CC := $(CROSS)gcc
 CFLAGS := -I./include $(OPTFLAGS)
 
 ifeq ($(origin CROSS),undefined)
@@ -20,7 +20,7 @@ ifeq ($(WITHOUT_XATTR), 1)
   CFLAGS += -DWITHOUT_XATTR
 endif
 
-RAWTARGETS = ftl_format flash_erase flash_eraseall nanddump doc_loadbios \
+RAWTARGETS_ORIG = ftl_format flash_erase flash_eraseall nanddump doc_loadbios \
 	ftl_check mkfs.jffs2 flash_lock flash_unlock flash_info \
 	flash_otp_info flash_otp_dump mtd_debug flashcp nandwrite nandtest \
 	jffs2dump \
@@ -28,6 +28,8 @@ RAWTARGETS = ftl_format flash_erase flash_eraseall nanddump doc_loadbios \
 	rfddump rfdformat \
 	serve_image recv_image \
 	sumtool #jffs2reader
+
+RAWTARGETS = flash_erase flash_eraseall nanddump nandwrite
 
 TARGETS = $(foreach target,$(RAWTARGETS),$(BUILDDIR)/$(target))
 
@@ -43,7 +45,7 @@ $(BUILDDIR)/%.o: %.c
 .SUFFIXES:
 
 all: $(TARGETS)
-	make -C $(BUILDDIR)/ubi-utils
+	make -C $(BUILDDIR)/ubi-utils/new-utils
 
 IGNORE=${wildcard $(BUILDDIR)/.*.c.dep}
 -include ${IGNORE}
@@ -51,7 +53,7 @@ IGNORE=${wildcard $(BUILDDIR)/.*.c.dep}
 clean:
 	rm -f $(BUILDDIR)/*.o $(TARGETS) $(BUILDDIR)/.*.c.dep $(SYMLINKS)
 	if [ "$(BUILDDIR)x" != ".x" ]; then rm -rf $(BUILDDIR); fi
-	make -C $(BUILDDIR)/ubi-utils clean
+	make -C $(BUILDDIR)/ubi-utils/new-utils clean
 
 $(SYMLINKS):
 	ln -sf ../fs/jffs2/$@ $@
@@ -93,4 +95,4 @@ install: ${TARGETS}
 	install -m0755 ${TARGETS} ${DESTDIR}/${SBINDIR}/
 	mkdir -p ${DESTDIR}/${MANDIR}/man1
 	gzip -9c mkfs.jffs2.1 > ${DESTDIR}/${MANDIR}/man1/mkfs.jffs2.1.gz
-	make -C $(BUILDDIR)/ubi-utils install
+	make -C $(BUILDDIR)/ubi-utils/new-utils install
