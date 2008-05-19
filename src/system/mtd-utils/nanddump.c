@@ -4,8 +4,6 @@
  *  Copyright (C) 2000 David Woodhouse (dwmw2@infradead.org)
  *                     Steven J. Hill (sjhill@realitydiluted.com)
  *
- * $Id: nanddump.c,v 1.29 2005/11/07 11:15:13 gleixner Exp $
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -302,7 +300,6 @@ int main(int argc, char **argv)
 			}
 		}
 
-		/* Adjust blocksize for last block */
 		if (bs > end_addr - ofs) {
 			bs = end_addr - ofs;
 		}
