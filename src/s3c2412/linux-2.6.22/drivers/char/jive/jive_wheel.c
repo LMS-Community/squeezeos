@@ -224,14 +224,7 @@ static int __init wheel_init(void)
 	unsigned int gpio;
 	int i, ret;
 
-	/* For compatibility with the old bootloader allow s3c2413 machines
-	 * to work here too. We can't use machine_is_s3c2413() here as that
-	 * machine is not configured in the kernel.
-	 *
-	 * The S3C2413 hack should be removed when the old bootloader has
-	 * been phased out.
-	 */
-	if (!(machine_is_jive() || machine_arch_type == MACH_TYPE_S3C2413))
+	if (!machine_is_jive())
 		return 0;
 
 	// we need to register at least one button and two relative axes 

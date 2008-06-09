@@ -257,14 +257,7 @@ static int __init jive_init(void)
 
 	printk("JIVE WM8750 Audio support\n");
 
-	/* For compatibility with the old bootloader allow s3c2413 machines
-	 * to work here too. We can't use machine_is_s3c2413() here as that
-	 * machine is not configured in the kernel.
-	 *
-	 * The S3C2413 hack should be removed when the old bootloader has
-	 * been phased out.
-	 */
-	if (!(machine_is_jive() || machine_arch_type == MACH_TYPE_S3C2413))
+	if (!machine_is_jive())
 		return 0;
 
 	jive_snd_device = platform_device_alloc("soc-audio", -1);
