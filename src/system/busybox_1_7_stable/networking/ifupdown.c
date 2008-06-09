@@ -151,6 +151,15 @@ static char *get_var(const char *id, size_t idlen, struct interface_defn_t *ifd)
 			return ifd->option[i].value;
 		}
 	}
+
+	/* gethostname if it is not in the interface definition */
+	if (strncmpz(id, "hostname", idlen) == 0) {
+		static char hostname[HOST_NAME_MAX + 1];
+		if (gethostname(hostname, HOST_NAME_MAX) == 0) {
+			return hostname;
+		}
+	}
+
 	return NULL;
 }
 

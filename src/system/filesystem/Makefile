@@ -78,3 +78,4 @@ install:
 	install etc/network/if_mapping ${PREFIX}/etc/network
 	install etc/network/udhcpc_action ${PREFIX}/etc/network
 	install etc/network/wpa_action ${PREFIX}/etc/network
+	install etc/hostname ${PREFIX}/etc/hostname
