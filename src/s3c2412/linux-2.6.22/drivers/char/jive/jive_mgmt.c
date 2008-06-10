@@ -426,15 +426,7 @@ static int jive_mgmt_probe(struct platform_device *dev) {
 	unsigned long flags;
 	int rc;
 
-
-	/* For compatibility with the old bootloader allow s3c2413 machines
-	 * to work here too. We can't use machine_is_s3c2413() here as that
-	 * machine is not configured in the kernel.
-	 *
-	 * The S3C2413 hack should be removed when the old bootloader has
-	 * been phased out.
-	 */
-	if (!(machine_is_jive() || machine_arch_type == MACH_TYPE_S3C2413))
+	if (!machine_is_jive())
 		return -ENOENT;;
 
 	printk("jive_mgmt_init\n");
