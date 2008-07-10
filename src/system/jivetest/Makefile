@@ -1,6 +1,6 @@
 
 
-all: jivectl evtest testir testir
+all: jivectl evtest testir testdisplay draw IQCtest
 
 padtest: test.c
 	${CC} ${CFLAGS} test.c ${LDFLAGS} -o $@
@@ -17,6 +17,15 @@ jivectl: jivectl.c
 testir: testir.c
 	${CC} ${CFLAGS} testir.c ${LDFLAGS} -o $@
 
+testdisplay: testdisplay.c
+	${CC} ${CFLAGS} testdisplay.c ${LDFLAGS} -o $@ -l jpeg
+
+draw: draw.c
+	${CC} ${CFLAGS} draw.c ${LDFLAGS} -o $@ -l jpeg
+
+IQCtest: IQCtest.c
+	${CC} ${CFLAGS} IQCtest.c ${LDFLAGS} -o $@
+
 evtest: evtest.c
 	${CC} ${CFLAGS} evtest.c ${LDFLAGS} -o $@
 
@@ -31,4 +40,8 @@ install:
 	install jivectl ${PREFIX}/bin
 	install evtest ${PREFIX}/bin
 	install testir ${PREFIX}/bin
+	install testdisplay ${PREFIX}/bin
+	install draw ${PREFIX}/bin
+	install IQCtest ${PREFIX}/bin
+	
 
