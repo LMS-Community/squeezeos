@@ -111,8 +111,8 @@ class Svn(Fetch):
         if ud.pswd:
             options.append("--password %s" % ud.pswd)
 
-        if command is "info":
-            svncmd = "%s info %s %s://%s/%s/" % (basecmd, " ".join(options), proto, svnroot, ud.module)
+        if command is "log":
+            svncmd = "%s log --limit 1 %s %s://%s/%s/" % (basecmd, " ".join(options), proto, svnroot, ud.module)
         else:
             if ud.revision:
                 options.append("-r %s" % ud.revision)
@@ -184,12 +184,13 @@ class Svn(Fetch):
         """
         bb.msg.debug(2, bb.msg.domain.Fetcher, "SVN fetcher hitting network for %s" % url)
 
-        output = runfetchcmd("LANG=C LC_ALL=C " + self._buildsvncommand(ud, d, "info"), d, True)
+        output = runfetchcmd("LANG=C LC_ALL=C " + self._buildsvncommand(ud, d, "log"), d, True)
 
         revision = None
         for line in output.splitlines():
-            if "Last Changed Rev" in line:
-                revision = line.split(":")[1].strip()
+            revision = re.findall(r'^r(\d+)', line)
+            if len(revision) >= 1:
+                return revision[0]
 
         return revision
 
