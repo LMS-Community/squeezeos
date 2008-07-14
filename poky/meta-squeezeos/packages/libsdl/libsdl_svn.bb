@@ -2,7 +2,7 @@ DESCRIPTION = "SDL"
 SECTION = "libs"
 LICENSE = "LGPL"
 
-BV = "1.2.11"
+BV = "1.2.13"
 
 PV = "${BV}+svnr${SRCREV}"
 #PR = "r0"
