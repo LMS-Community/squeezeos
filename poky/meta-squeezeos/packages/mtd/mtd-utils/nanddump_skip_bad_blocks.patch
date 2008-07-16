@@ -1,0 +1,33 @@
+Index: mtd-utils/nanddump.c
+===================================================================
+--- mtd-utils/nanddump.c	(revision 2478)
++++ mtd-utils/nanddump.c	(revision 2479)
+@@ -281,8 +281,16 @@
+ 		}
+ 
+ 		if (badblock) {
+-			if (omitbad)
++			if (omitbad) {
++				if (length) {
++					/* bad blocks don't count towards the length */
++					end_addr += bs;
++					if (end_addr > meminfo.size) {
++						end_addr = meminfo.size;
++					}
++				}
+ 				continue;
++			}
+ 			memset (readbuf, 0xff, bs);
+ 		} else {
+ 			/* Read page data and exit on failure */
+@@ -292,6 +300,10 @@
+ 			}
+ 		}
+ 
++		if (bs > end_addr - ofs) {
++			bs = end_addr - ofs;
++		}
++
+ 		/* ECC stats available ? */
+ 		if (eccstats) {
+ 			if (ioctl(fd, ECCGETSTATS, &stat2)) {
