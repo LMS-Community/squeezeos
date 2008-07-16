@@ -1,0 +1,35 @@
+#!/bin/sh
+
+
+# (Optional) number of seconds before wakeup
+SECONDS=$1
+
+if [ "x$SECONDS" != "x" ]
+then
+    NOW=`cat /sys/devices/platform/s3c2410-rtc/rtc\:rtc0/since_epoch`
+    WAKEAT=$(($NOW + $SECONDS))
+
+    echo "Wakeat $WAKEAT"
+    echo $WAKEAT > /sys/devices/platform/s3c2410-rtc/rtc\:rtc0/wakealarm
+fi
+
+
+# Stop wlan
+/etc/init.d/wlan stop
+
+# Enable accelerometer as wakeup source
+DURATION=`cat /sys/bus/i2c/devices/0-001c/duration`
+THRESHOLD=`cat /sys/bus/i2c/devices/0-001c/threshold`
+echo "4" > /sys/bus/i2c/devices/0-001c/duration
+echo "20" > /sys/bus/i2c/devices/0-001c/threshold
+echo "1" > /sys/bus/i2c/devices/0-001c/resume
+
+# Suspend
+echo 'mem' > /sys/power/state
+
+# Restore accelerometer parameters
+echo $DURATION > /sys/bus/i2c/devices/0-001c/duration
+echo $THRESHOLD > /sys/bus/i2c/devices/0-001c/threshold
+
+# Start wlan (in the background)
+/etc/init.d/wlan start &

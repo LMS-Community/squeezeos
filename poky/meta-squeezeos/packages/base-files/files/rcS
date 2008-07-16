@@ -1,0 +1,114 @@
+#!/bin/sh
+
+/bin/mount -a
+
+echo "Mounting RAM Disk"
+/bin/mount -t ramfs ramfs /tmp
+/bin/mount -t ramfs ramfs /var
+mkdir /var/shm /var/log /var/run
+
+
+# Set hostname
+if [ -f /etc/hostname ]; then
+	/bin/hostname -F /etc/hostname
+fi
+
+
+# Mount SD card
+if [ -b /dev/mmcblk0p1 ]; then
+	echo "Mounting MMC/SD card (partition 1)"
+	mount -t vfat -o sync -o noatime /dev/mmcblk0p1 /mnt/mmc
+elif [ -b /dev/mmcblk0 ]; then
+	echo "Mounting MMC/SD card (whole device)"
+	mount -t vfat -o sync -o noatime /dev/mmcblk0 /mnt/mmc
+fi
+
+
+# Start syslogd
+grep /mnt/mmc /proc/mounts | cut -d' ' -f 4 | grep -q rw
+MMCRW=$?
+if [ $MMCRW = 0 -a -e /mnt/mmc/log  ]; then
+	# log and core files to mmc
+
+	echo "Starting syslogd (to mmc)"
+	/sbin/syslogd -s1000 -O /mnt/mmc/log/messages
+
+	echo "Enabling core files (to mmc)"
+	echo "/mnt/mmc/log/core-%e" > /proc/sys/kernel/core_pattern
+	ulimit -c unlimited
+elif [ $MMCRW = 0 -a -e /mnt/mmc/var  ]; then
+	# log and core files to mmc
+	/bin/mkdir -p /mnt/mmc/var/log /mnt/mmc/var/core
+
+	echo "Starting syslogd (to mmc)"
+	/sbin/syslogd -s1000 -O /mnt/mmc/var/log/messages
+
+	echo "Enabling core files (to mmc)"
+	echo "/mnt/mmc/var/core/core-%e" > /proc/sys/kernel/core_pattern
+	ulimit -c unlimited
+else
+	# log to /var
+	echo "Starting syslogd"
+	/sbin/syslogd
+fi
+
+
+# Start kernel logger
+/sbin/klogd
+
+
+# Execute firstboot script?
+if ! [ -f /etc/firstboot ]; then
+	echo "First boot"
+	touch /etc/firstboot
+
+	if [ -r /mnt/mmc/squeezeos.patch ]; then
+		/usr/bin/patch -i /mnt/mmc/squeezeos.patch
+	fi
+
+	if [ -x /mnt/mmc/squeezeos-post-reset.sh ]; then
+		(cd /mnt/mmc; ./squeezeos-post-reset.sh)
+	fi
+fi
+
+
+# Create ssh keys
+if ! [ -f /etc/dropbear/dropbear_rsa_host_key ] ; then
+	echo "Creating dropbear rsa host key"
+	/usr/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+fi
+
+if ! [ -f /etc/dropbear/dropbear_dss_host_key ]; then
+	echo "Creating dropbear dss host key"
+	/usr/bin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
+fi
+
+
+# Start network
+echo "Starting lo"
+/sbin/ifconfig lo up 127.0.0.1
+
+echo "Starting inetd"
+/usr/sbin/inetd
+
+
+# Start wlan
+/etc/init.d/wlan start
+
+
+if [ -x /etc/init.d/rcS.local ]; then
+	echo "Running rcS.local"
+	/etc/init.d/rcS.local
+fi
+
+if [ -x /mnt/mmc/squeezeos-boot.sh ]; then
+    (cd /mnt/mmc; ./squeezeos-boot.sh)
+fi
+
+echo "Starting jive applications"
+export SDL_NOMOUSE=1
+export ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf
+if [ -d /mnt/mmc/squeezeplay ]; then
+    export LUA_PATH=/mnt/mmc/squeezeplay/?.lua
+fi
+(cd /usr/bin; /usr/bin/jive &)
