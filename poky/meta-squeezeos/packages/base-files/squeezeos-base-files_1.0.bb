@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r5"
+PR = "r7"
 
 SRC_URI = " \
 	file://config \
@@ -33,6 +33,8 @@ SRC_URI = " \
 	file://wlan \
 	file://wpa_action \
 	file://wpa_supplicant.conf \
+	file://dropbear_dss_host_key \
+	file://dropbear_rsa_host_key \
 	"
 S = "${WORKDIR}"
 
@@ -46,9 +48,9 @@ dirs755 = "/bin /dev ${sysconfdir} ${sysconfdir}/default \
 	   ${localstatedir}/lib ${localstatedir}/log ${localstatedir}/run \
 	   /sys ${localstatedir}/lib/misc ${localstatedir}/spool \
 	   /mnt /media /media/card /media/cf /media/net /media/ram \
-	   /media/union /media/realroot /media/hdd \
-	   /media/mmc1 \
-	   /mnt/storage /mnt/overlay /mnt/mmc ${sysconfdir}/init.d"
+	   /media/union /media/realroot /media/hdd /media/mmc1 \
+	   /mnt/storage /mnt/overlay /mnt/mmc ${sysconfdir}/init.d \
+	   ${sysconfdir}/dropbear"
 
 
 do_install () {
@@ -85,6 +87,10 @@ do_install () {
 	install -m 0644 ${WORKDIR}/keep-after-upgrade ${D}${sysconfdir}/keep-after-upgrade
 	install -m 0644 ${WORKDIR}/hostname ${D}${sysconfdir}/hostname
 	ln -sf /proc/mounts ${D}${sysconfdir}/mtab
+
+	# dropbear keys - these should be dynamically generated, but it takes too long
+	install -m 0600 ${WORKDIR}/dropbear_dss_host_key ${D}${sysconfdir}/dropbear/dropbear_dss_host_key
+	install -m 0600 ${WORKDIR}/dropbear_rsa_host_key ${D}${sysconfdir}/dropbear/dropbear_rsa_host_key
 
 	# network scripts
 	install -m 0755 -d ${D}${sysconfdir}/network/if-down.d

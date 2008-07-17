@@ -2,7 +2,7 @@ DESCRIPTION = "Linux kernel for jive devices"
 SECTION = "kernel"
 LICENSE = "GPL"
 
-#PR = "r0"
+PR = "r1"
 
 inherit kernel
 
@@ -34,6 +34,13 @@ do_configure_prepend() {
         yes '' | oe_runmake oldconfig
 
 }
+
+# jive needs EXTRAVERSION -P7 for legacy reasons
+EXTRA_OEMAKE = "EXTRAVERSION=-P7"
+
+# adjust the package names to remove the -P7
+PKG_kernel-image = "kernel-image-${PV}"
+PKG_kernel-base = "kernel-${PV}"
 
 do_deploy() {
 	install -d ${DEPLOY_DIR_IMAGE}

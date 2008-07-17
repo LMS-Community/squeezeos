@@ -5,7 +5,7 @@ PR = "r1"
 
 inherit image squeezeos-upgrade-image
 
-IMAGE_INSTALL = " \
+IMAGE_INSTALL += " \
 	squeezeos-base-files \
 	busybox \
 	mtd-utils \

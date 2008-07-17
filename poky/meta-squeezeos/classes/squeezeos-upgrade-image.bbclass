@@ -22,7 +22,7 @@ do_squeezeos_image() {
 	zip ${DEPLOY_DIR_IMAGE}/jive_${VERSION}.bin *
 	cd ${DEPLOY_DIR_IMAGE}
 
-	rm jive.bin
+	rm -f jive.bin
 	ln -s jive_${VERSION}.bin jive.bin
 
 	# Cleanup
