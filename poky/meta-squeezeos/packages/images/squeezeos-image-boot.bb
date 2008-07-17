@@ -3,7 +3,7 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 DEPENDS = "virtual/kernel"
 PR = "r1"
 
-inherit image
+inherit image squeezeos-upgrade-image
 
 IMAGE_INSTALL = " \
 	squeezeos-base-files \
