@@ -15,3 +15,10 @@ IMAGE_LINGUAS = " "
 
 # remove not needed ipkg informations
 ROOTFS_POSTPROCESS_COMMAND += "remove_packaging_data_files"
+IMAGE_PREPROCESS_COMMAND += "squeezeos_version"
+
+# write squeezeos.version file
+do_rootfs_prepend() {
+	echo "${DISTRO_VERSION} ${DATETIME}" 
+
+}
