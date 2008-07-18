@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "7.2+svnr${SRCREV}"
-PR = "r1"
+PR = "r2"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
@@ -20,5 +20,7 @@ SRC_URI="${SQUEEZEPLAY_SCM};module=squeezeplay"
 S = "${WORKDIR}/squeezeplay"
 
 inherit autotools
+
+CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_REVISION=\\"${SQUEEZEOS_REVISION}\\"'
 
 FILES_${PN} += "${datadir}"
