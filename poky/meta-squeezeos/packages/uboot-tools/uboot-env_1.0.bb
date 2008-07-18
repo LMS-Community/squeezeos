@@ -2,7 +2,7 @@ DESCRIPTION = "uboot fw-env tools"
 SECTION = "base"
 LICENSE = "GPL"
 
-PR = "r1"
+PR = "r2"
 
 SRC_URI=" \
 	file://Makefile \
@@ -18,5 +18,5 @@ S = ${WORKDIR}
 do_install() {
 	install -m 0755 -d ${D}${sbindir}
 	install -m 0755 ${WORKDIR}/fw_printenv ${D}${sbindir}/fw_printenv
-	ln -s fw_printenv.c ${D}${sbindir}/fw_setenv
+	ln -s fw_printenv ${D}${sbindir}/fw_setenv
 }

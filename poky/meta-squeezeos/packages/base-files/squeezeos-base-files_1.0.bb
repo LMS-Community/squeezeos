@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r7"
+PR = "r8"
 
 SRC_URI = " \
 	file://config \
@@ -99,7 +99,7 @@ do_install () {
 	install -m 0755 -d ${D}${sysconfdir}/network/if-pre-up.d
 	install -m 0644 ${WORKDIR}/config ${D}${sysconfdir}/network/config
 	install -m 0644 ${WORKDIR}/interfaces ${D}${sysconfdir}/network/interfaces
-	install -m 0644 ${WORKDIR}/if_mapping ${D}${sysconfdir}/network/if_mapping
+	install -m 0755 ${WORKDIR}/if_mapping ${D}${sysconfdir}/network/if_mapping
 	install -m 0755 ${WORKDIR}/udhcpc_action ${D}${sysconfdir}/network/udhcpc_action
 	install -m 0755 ${WORKDIR}/wpa_action ${D}${sysconfdir}/network/wpa_action
 
