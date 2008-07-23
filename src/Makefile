@@ -69,7 +69,7 @@ image: ${IMAGEDIR}
 	# Create upgrade.md5
 	cd ${IMAGEDIR} && md5sum zImage-P7 root.cramfs > upgrade.md5
 	# Create jive.bin
-	VERSION=`cat ${SQUEEZEPLAY_SRC}/squeezeplay/src/version.h | cut -sd\" -f 2 | sed -e 's/ /_/'` && cd ${IMAGEDIR} && echo $$VERSION && zip ${IMAGEDIR}/jive_$$VERSION.bin jive.version upgrade.md5 zImage-P7 root.cramfs
+	SPREL=`cat ${SQUEEZEPLAY_SRC}/squeezeplay/src/version.h | grep "define SQUEEZEPLAY_RELEASE" | cut -sd\" -f 2` && SPREV=`cat ${SQUEEZEPLAY_SRC}/squeezeplay/src/version.h | grep "define SQUEEZEPLAY_REVISION" | cut -sd\" -f 2` && VERSION=`cat ${SQUEEZEPLAY_SRC}/squeezeplay/src/version.h | grep "JIVE_VERSION" | sed -e "s/SQUEEZEPLAY_RELEASE/$$SPREL/" -e "s/SQUEEZEPLAY_REVISION/$$SPREV/" | tr -d \" | cut -d" " -f3,4 | sed -e 's/ /_/'` && cd ${IMAGEDIR} && echo $$VERSION && zip ${IMAGEDIR}/jive_$$VERSION.bin jive.version upgrade.md5 zImage-P7 root.cramfs
 	@cat ${IMAGEDIR}/jive.version
 
 
