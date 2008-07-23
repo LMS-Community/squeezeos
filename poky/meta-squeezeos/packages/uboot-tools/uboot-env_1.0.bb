@@ -2,6 +2,8 @@ DESCRIPTION = "uboot fw-env tools"
 SECTION = "base"
 LICENSE = "GPL"
 
+DEPENDS = "mtd-utils"
+
 PR = "r2"
 
 SRC_URI=" \
