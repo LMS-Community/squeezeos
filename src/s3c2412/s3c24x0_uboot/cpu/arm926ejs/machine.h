@@ -1,1 +1,0 @@
-#include "smdk.h"
