@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-#PR = "r0"
+PR = "r1"
 
 PROVIDES = "marvell-gspi-module"
 
@@ -15,6 +15,8 @@ SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686"
 S = "${WORKDIR}/src_gspi8686"
 
 inherit module-base
+
+INHIBIT_PACKAGE_STRIP = 1
 
 CFLAGS_prepend += "-I${S}/os/linux"
 CFLAGS_prepend += "-I${S}/wlan"
