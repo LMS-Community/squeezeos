@@ -2,7 +2,7 @@ DESCRIPTION = "FLAC"
 SECTION = "libs"
 LICENSE = "Xiph"
 
-PR = "r1"
+PR = "r2"
 
 SRC_URI="${SOURCEFORGE_MIRROR}/flac/flac-${PV}.tar.gz"
 
@@ -16,3 +16,9 @@ do_stage() {
 	autotools_stage_all
 }
 
+PACKAGES += "libflac libflac++ liboggflac liboggflac++"
+FILES_${PN} = "${bindir}/*"
+FILES_libflac = "${libdir}/libFLAC.so.*"
+FILES_libflac++ = "${libdir}/libFLAC++.so.*"
+FILES_liboggflac = "${libdir}/libOggFLAC.so.*"
+FILES_liboggflac++ = "${libdir}/libOggFLAC++.so.*"
