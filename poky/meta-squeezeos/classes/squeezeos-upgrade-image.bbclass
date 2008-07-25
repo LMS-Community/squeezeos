@@ -4,7 +4,14 @@
 KERNEL_IMAGE_NAME ?= "zImage-${MACHINE}.bin"
 ROOTFS_IMAGE_NAME ?= "${IMAGE_NAME}.rootfs.cramfs"
 
+# export IMAGE_SQUEEZEOS_UPGRADE
+IMAGE_SQUEEZEOS_UPGRADE[export] = "1"
+
 do_squeezeos_image() {
+	if [ "x$IMAGE_SQUEEZEOS_UPGRADE" == "x" ]; then
+		exit 0
+	fi
+
 	tmpdir=`mktemp -d /tmp/squeezeos-XXXXXX`
 
 	# Copy image files
