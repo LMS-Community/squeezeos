@@ -30,7 +30,7 @@ LIB_DIR=$(TOPDIR)/toolchain/gcc-4.2.2-glibc-2.6.1/$(TARGET)/$(TARGET)/lib
 #
 # Top level targets
 #
-all: filesystem busybox jivepowerd jivetest wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat alsa-lib alsa-utils wavplay patch
+all: filesystem busybox jivepowerd wireless-tools mtdutils zlib dropbear netperf jpeg png freetype expat alsa-lib alsa-utils wavplay patch jivetest
 
 
 # debugging targets
