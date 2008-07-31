@@ -2,7 +2,7 @@ DESCRIPTION = "Marvell 88W8686 gspi wlan drivers"
 SECTION = "base"
 LICENSE = "binary only"
 
-#PR = "r0"
+PR = "r1"
 
 PROVIDES = "marvell-gspi-module"
 
@@ -16,6 +16,8 @@ SRC_URI=" \
 	"
 
 inherit module-base
+
+INHIBIT_PACKAGE_STRIP = 1
 
 dirs = "/lib /lib/modules /lib/modules/${KERNEL_VERSION} /lib/firmware"
 
