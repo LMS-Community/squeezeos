@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r8"
+PR = "r10"
 
 SRC_URI = " \
 	file://config \
@@ -41,7 +41,7 @@ S = "${WORKDIR}"
 dirs1777 = "/tmp"
 dirs2775 = ""
 dirs755 = "/bin /dev ${sysconfdir} ${sysconfdir}/default \
-	   ${sysconfdir}/skel /lib /mnt /proc /home/root /sbin \
+	   ${sysconfdir}/skel /lib /mnt /proc /root /sbin \
 	   ${prefix} ${bindir} ${docdir} \
 	   ${libdir} ${sbindir} ${datadir} \
 	   ${localstatedir} \
