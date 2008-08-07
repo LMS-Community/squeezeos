@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "7.2+svnr${SRCREV}"
-PR = "r4"
+PR = "r5"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
@@ -20,7 +20,7 @@ S = "${WORKDIR}/squeezeplay"
 
 inherit autotools
 
-CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_REVISION=\\"r${SQUEEZEOS_REVISION}\\"'
+CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_REVISION=\\"${SQUEEZEOS_REVISION}\\"'
 
 EXTRA_OEMAKE = "all lua-lint"
 
