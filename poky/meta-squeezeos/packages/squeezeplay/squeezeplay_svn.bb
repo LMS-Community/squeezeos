@@ -10,15 +10,17 @@ RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 DEPENDS += "lua lua-native luatolua++"
 RDEPENDS += "liblua5.1-socket liblua5.1-json liblua5.1-zipfilter liblua5.1-loop liblua5.1-logging liblua5.1-syslog liblua5.1-filesystem liblua5.1-profiler liblua5.1-tolua++"
 
-DEPENDS += "portaudio flac libmad tremor"
+DEPENDS += "flac libmad tremor"
 
 RDEPENDS += "freefont"
 
-SRC_URI="${SQUEEZEPLAY_SCM};module=squeezeplay"
+SRC_URI = "${SQUEEZEPLAY_SCM};module=squeezeplay"
 
 S = "${WORKDIR}/squeezeplay"
 
 inherit autotools
+
+EXTRA_OECONF = "--disable-portaudio"
 
 CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_REVISION=\\"${SQUEEZEOS_REVISION}\\"'
 

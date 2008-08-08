@@ -25,11 +25,11 @@ do_squeezeos_image() {
 	VERSION=${DISTRO_VERSION}_r${SQUEEZEOS_REVISION}
 
 	# Create zip
-	zip ${DEPLOY_DIR_IMAGE}/jive_${VERSION}.bin *
+	zip ${DEPLOY_DIR_IMAGE}/${MACHINE}_${VERSION}.bin *
 	cd ${DEPLOY_DIR_IMAGE}
 
-	rm -f jive.bin
-	ln -s jive_${VERSION}.bin jive.bin
+	rm -f ${MACHINE}.bin
+	ln -s ${MACHINE}_${VERSION}.bin ${MACHINE}.bin
 
 	# Cleanup
 	rm -rf ${tmpdir}
