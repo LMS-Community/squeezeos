@@ -152,6 +152,9 @@ static char *get_var(const char *id, size_t idlen, struct interface_defn_t *ifd)
 		}
 	}
 
+#if 0
+	/* Disabled due to Bug 8984 - this may break dhcp with Microsoft MN-700 AP */
+
 	/* gethostname if it is not in the interface definition */
 	if (strncmpz(id, "hostname", idlen) == 0) {
 		static char hostname[HOST_NAME_MAX + 1];
@@ -159,6 +162,7 @@ static char *get_var(const char *id, size_t idlen, struct interface_defn_t *ifd)
 			return hostname;
 		}
 	}
+#endif
 
 	return NULL;
 }
