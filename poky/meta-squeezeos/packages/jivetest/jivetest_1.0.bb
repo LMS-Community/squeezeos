@@ -1,7 +1,7 @@
 DESCRIPTION = "Jive test software"
 
-PV = "7.2+svnr${SRCREV}"
-PR = "r1"
+PV = "${DISTRO_VERSION}+svnr${SRCREV}"
+PR = "r2"
 
 SRC_URI="${SQUEEZEOS_SVN};module=jivetest;proto=http"
 

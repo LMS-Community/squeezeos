@@ -1,8 +1,8 @@
 DESCRIPTION = "SqueezePlay - Jive specific code"
 LICENSE = "Logitech Public Source License"
 
-PV = "7.2+svnr${SRCREV}"
-PR = "r5"
+PV = "${DISTRO_VERSION}+svnr${SRCREV}"
+PR = "r6"
 
 DEPENDS += "squeezeplay"
 
