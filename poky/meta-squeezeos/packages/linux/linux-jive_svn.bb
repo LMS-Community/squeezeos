@@ -2,16 +2,18 @@ DESCRIPTION = "Linux kernel for jive devices"
 SECTION = "kernel"
 LICENSE = "GPL"
 
+LINUX_VERSION = "2.6.22"
+PV = "${LINUX_VERSION}+${DISTRO_VERSION}+svnr${SRCREV}"
 PR = "r1"
 
 inherit kernel
 
 SRC_URI = " \
-          ${SQUEEZEOS_SVN}/s3c2412;proto=http;module=linux-${PV} \
+          ${SQUEEZEOS_SVN}/s3c2412;proto=http;module=linux-${LINUX_VERSION} \
           file://defconfig-jive \
           "
 
-S = "${WORKDIR}/linux-${PV}"
+S = "${WORKDIR}/linux-${LINUX_VERSION}"
 
 COMPATIBLE_MACHINE = "(jive)"
 

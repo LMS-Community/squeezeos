@@ -101,7 +101,7 @@ static struct s3c2410_uartcfg jive_uartcfgs[] = {
  * 0x00200000-0x01600000 : cramfs A
  * 0x01600000-0x017d0000 : zimage B
  * 0x017d0000-0x02bd0000 : cramfs B
- * 0x02c00000-0x04000000 : yaffs
+ * 0x02c00000-0x04000000 : jffs2
  */
 static struct mtd_partition jive_imageA_nand_part[] = {
 
@@ -130,9 +130,9 @@ static struct mtd_partition jive_imageA_nand_part[] = {
 		.mask_flags	= MTD_WRITEABLE, /* force read-only */
         },
 
-	/* yaffs */
+	/* jffs2 */
         {
-                .name           = "yaffs",
+                .name           = "jffs2",
                 .offset         = (44*SZ_1M),
                 .size           = (20*SZ_1M),
         },
@@ -185,9 +185,9 @@ static struct mtd_partition jive_imageB_nand_part[] = {
 		.mask_flags	= MTD_WRITEABLE, /* force read-only */
         },
 
-	/* yaffs */
+	/* jffs2 */
         {
-                .name           = "yaffs",
+                .name           = "jffs2",
                 .offset         = (44*SZ_1M),
                 .size           = (20*SZ_1M),
         },
