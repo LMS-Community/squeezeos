@@ -14,7 +14,11 @@ echo /sbin/mdev > /proc/sys/kernel/hotplug
 /sbin/mdev -s
 
 # Mount read/write filesystem
-/bin/mount -t jffs2 -o noatime /dev/mtdblock/2 /mnt/storage
+JFFS2_DEV=`grep jffs2 /proc/mtd | cut -c4`
+JFFS2_MTD=/dev/mtd/${JFFS2_DEV}
+JFFS2_MTDBLOCK=/dev/mtdblock/${JFFS2_DEV}
+
+/bin/mount -t jffs2 -o noatime ${JFFS2_MTDBLOCK} /mnt/storage
 JFFS2_OK=$?
 
 # Factory reset
@@ -23,8 +27,8 @@ then
 	/bin/echo "Factory Reset"
 
 	/bin/umount /mnt/storage
-	/usr/sbin/flash_eraseall -q /dev/mtd/2
-	/bin/mount -t jffs2 -o noatime /dev/mtdblock/2 /mnt/storage
+	/usr/sbin/flash_eraseall -q ${JFFS2_MTD}
+	/bin/mount -t jffs2 -o noatime ${JFFS2_MTDBLOCK} /mnt/storage
 else
 	# Upgraded?
 	/usr/bin/diff -N /etc/squeezeos.version /mnt/storage/etc/squeezeos.version > /dev/null 2> /dev/null
