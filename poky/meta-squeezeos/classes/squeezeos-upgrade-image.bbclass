@@ -17,6 +17,7 @@ do_squeezeos_image() {
 	# Copy image files
 	cp ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE_NAME} ${tmpdir}/zImage-P7
 	cp ${DEPLOY_DIR_IMAGE}/${ROOTFS_IMAGE_NAME} ${tmpdir}/root.cramfs
+	cp ${TMPDIR}/rootfs/etc/squeezeos.version ${tmpdir}/jive.version
 
 	# Prepare files
 	cd ${tmpdir}
