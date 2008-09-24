@@ -13,22 +13,39 @@
 echo /sbin/mdev > /proc/sys/kernel/hotplug
 /sbin/mdev -s
 
-# Mount read/write filesystem
+# Mount read/write filesystem, we support ubifs or jffs2
+UBIFS_DEV=`grep ubifs /proc/mtd | cut -c4`
 JFFS2_DEV=`grep jffs2 /proc/mtd | cut -c4`
-JFFS2_MTD=/dev/mtd/${JFFS2_DEV}
-JFFS2_MTDBLOCK=/dev/mtdblock/${JFFS2_DEV}
 
-/bin/mount -t jffs2 -o noatime ${JFFS2_MTDBLOCK} /mnt/storage
-JFFS2_OK=$?
+if [ ! -z $UBIFS_DEV ]
+then
+	# ubifs filesystem
+	MOUNT_TYPE=ubifs
+       	MOUNT_MTD=/dev/mtd/${UBIFS_DEV}
+	MOUNT_DEVICE=ubi0:ubifs
+elif  [ ! -z $JFFS2_DEV ]
+then
+	# jffs2 filesystem
+	MOUNT_TYPE=jffs2
+	MOUNT_MTD=/dev/mtd/${JFFS2_DEV}
+	MOUNT_DEVICE=/dev/mtdblock/${JFFS2_DEV}
+fi
+
+/bin/mount -t ${MOUNT_TYPE} -o noatime ${MOUNT_DEVICE} /mnt/storage
+MOUNT_OK=$?
 
 # Factory reset
-if [ $JFFS2_OK -ne 0 -o -f /mnt/storage/.factoryreset ]
+if [ $MOUNT_OK -ne 0 -o -f /mnt/storage/.factoryreset ]
 then
 	/bin/echo "Factory Reset"
 
 	/bin/umount /mnt/storage
-	/usr/sbin/flash_eraseall -q ${JFFS2_MTD}
-	/bin/mount -t jffs2 -o noatime ${JFFS2_MTDBLOCK} /mnt/storage
+	/usr/sbin/flash_eraseall -q ${MOUNT_MTD}
+	/bin/mount -t ${MOUNT_TYPE} -o noatime ${MOUNT_DEVICE} /mnt/storage
+
+	# Store version
+	/bin/mkdir -p /mnt/storage/etc
+	/bin/cp /etc/squeezeos.version /mnt/storage/etc/squeezeos.version
 else
 	# Upgraded?
 	/usr/bin/diff -N /etc/squeezeos.version /mnt/storage/etc/squeezeos.version > /dev/null 2> /dev/null
@@ -37,10 +54,13 @@ else
 		# Remove modified files
 		/bin/echo "SqueezeOS Upgraded"
 		/usr/bin/find /mnt/storage/ -type f | /bin/grep -v -f /etc/keep-after-upgrade | /usr/bin/xargs /bin/rm -f
-	fi
 
-	cp /etc/squeezeos.version /mnt/storage/etc/squeezeos.version
+		# Store version
+		/bin/mkdir -p /mnt/storage/etc
+		/bin/cp /etc/squeezeos.version /mnt/storage/etc/squeezeos.version
+	fi
 fi
+
 
 # Mount overlay filesystem
 /bin/mount -t mini_fo -o base=/,sto=/mnt/storage / /mnt/overlay

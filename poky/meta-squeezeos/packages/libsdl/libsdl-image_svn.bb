@@ -5,7 +5,7 @@ LICENSE = "LGPL"
 BV = "1.2.5"
 
 PV = "${BV}+svnr${SRCREV}"
-PR = "r1"
+PR = "r2"
 
 SRC_URI="${SQUEEZEPLAY_SCM};module=SDL_image-${BV}"
 
@@ -18,7 +18,7 @@ export SDL_CONFIG = "${STAGING_BINDIR_CROSS}/sdl-config"
 
 inherit autotools
 
-EXTRA_OECONF = "--disable-tif"
+EXTRA_OECONF = "--disable-tif --disable-jpg-shared --disable-png-shared"
 
 autotools_do_configure() {
 	${S}/autogen.sh
