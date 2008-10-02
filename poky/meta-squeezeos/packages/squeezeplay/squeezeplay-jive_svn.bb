@@ -16,6 +16,8 @@ CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_RE
 
 EXTRA_OEMAKE = "all lua-lint"
 
+export PREFIX=%{D}
+
 do_install() {
 	autotools_do_install
 
