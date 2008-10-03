@@ -26,6 +26,8 @@ CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_RE
 
 EXTRA_OEMAKE = "all lua-lint"
 
+export PREFIX = ${D}
+
 do_stage() {
 	install -m 0644 src/ui/jive.h ${STAGING_INCDIR}/
 }
