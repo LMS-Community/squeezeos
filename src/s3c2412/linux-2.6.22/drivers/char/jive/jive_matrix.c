@@ -52,21 +52,21 @@ static unsigned int keymap[] = {
 
 	// KEY_OUTPUT2
 	KEY_UNKNOWN,
-	KEY_B, // SW10 Fwd
-	KEY_Z, // SW9 Rew
-	KEY_C, // SW8 Pause
+	KEY_NEXTSONG, // SW10 Fwd
+	KEY_PREVIOUSSONG, // SW9 Rew
+	KEY_PLAYPAUSE, // SW8 Pause
 
 	// KEY_OUTPUT1
 	KEY_UNKNOWN,
-	KEY_X, // SW5 Play
-	KEY_A, // SW6 Add
-	KEY_EQUAL, // SW7 Volume Up
+	KEY_PLAY, // SW5 Play
+	KEY_KPPLUS, // SW6 Add
+	KEY_VOLUMEUP, // SW7 Volume Up
 
 	// KEY_OUTPUT0
-	KEY_H, // SW1 Home
+	KEY_HOME, // SW1 Home
 	KEY_UNKNOWN,
 	KEY_LEFT, // SW2 Back
-	KEY_MINUS, // SW3 Volume Down
+	KEY_VOLUMEDOWN, // SW3 Volume Down
 };
 
 #define IRQF_TRIGGER_BOTH (IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING)
