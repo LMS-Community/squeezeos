@@ -15,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/timer.h>
-#include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 
@@ -26,11 +25,21 @@
 #include <sound/soc-dapm.h>
 
 #include <asm/mach-types.h>
+#include <asm/arch/regs-gpio.h>
+#include <asm/arch/regs-irq.h>
+
+#include <asm/hardware.h>
 
 #include "s3c24xx-pcm.h"
 #include "s3c2412-i2s.h"
 
 #include "../codecs/wm8750.h"
+
+/* define the scenarios */
+#define JIVE_AUDIO_OFF                  0
+#define JIVE_SPEAKER                    1
+#define JIVE_HEADPHONE                  2
+#define JIVE_SPEAKER_HEADPHONE          3
 
 static const char *audio_map[][2] = {
 	[0]	= { "Headphone Jack", "LOUT1" },
@@ -48,16 +57,71 @@ static const struct snd_soc_dapm_widget wm8750_dapm_widgets[] = {
 	SND_SOC_DAPM_LINE("Line In", NULL),
 };
 
+static const char *jive_scenarios[] = { "Off", "Speaker", "Headphone", "Speaker+Headphone" };
+
+static const struct soc_enum jive_scenarios_enum[] = {
+	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(jive_scenarios),jive_scenarios),
+};
+
+static int jive_scenario = 1; /* default speaker on */
+
+static int jive_get_scenario(struct snd_kcontrol *kcontrol,
+        struct snd_ctl_elem_value *ucontrol)
+{
+        ucontrol->value.integer.value[0] = jive_scenario;
+        return 0;
+}
+
+static void set_scenario_endpoints(struct snd_soc_codec *codec)
+{
+        switch(jive_scenario) {
+        case JIVE_SPEAKER:
+		snd_soc_dapm_set_endpoint(codec, "Headphone Jack", 0);
+		snd_soc_dapm_set_endpoint(codec, "Internal Speaker", 1);
+		break;
+        case JIVE_HEADPHONE:
+		snd_soc_dapm_set_endpoint(codec, "Headphone Jack", 1);
+		snd_soc_dapm_set_endpoint(codec, "Internal Speaker", 0);
+		break;
+        case JIVE_SPEAKER_HEADPHONE:
+		snd_soc_dapm_set_endpoint(codec, "Headphone Jack", 1);
+		snd_soc_dapm_set_endpoint(codec, "Internal Speaker", 1);
+		break;
+	default:
+		snd_soc_dapm_set_endpoint(codec, "Headphone Jack", 0);
+		snd_soc_dapm_set_endpoint(codec, "Internal Speaker", 0);
+		break;
+	}
+
+	snd_soc_dapm_sync_endpoints(codec);
+}
+
+static int jive_set_scenario(struct snd_kcontrol *kcontrol,
+        struct snd_ctl_elem_value *ucontrol)
+{
+        struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+
+        if (jive_scenario == ucontrol->value.integer.value[0])
+                return 0;
+
+        jive_scenario = ucontrol->value.integer.value[0];
+        set_scenario_endpoints(codec);
+        return 1;
+}
+
+
 static int jive_startup(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_codec *codec = rtd->socdev->codec;
+	int val;
 
-	snd_soc_dapm_set_endpoint(codec, "Headphone Jack", 1);
-	snd_soc_dapm_set_endpoint(codec, "Internal Speaker", 1);
+	s3c2410_gpio_cfgpin(S3C2410_GPG14, S3C2410_GPG14_INP);
+	val = (s3c2410_gpio_getpin(S3C2410_GPG14) > 0);
+	s3c2410_gpio_cfgpin(S3C2410_GPG14, S3C2410_GPG14_EINT22);
+
 	snd_soc_dapm_set_endpoint(codec, "Line In", 1);
-
-	snd_soc_dapm_sync_endpoints(codec);
+        set_scenario_endpoints(codec);
 
 	return 0;
 }
@@ -161,7 +225,8 @@ static struct snd_soc_ops jive_ops = {
 };
 
 static const struct snd_kcontrol_new wm8750_jive_controls[] = {
-
+        SOC_ENUM_EXT("Endpoint", jive_scenarios_enum[0],
+                jive_get_scenario, jive_set_scenario),
 };
 
 static int jive_wm8750_init(struct snd_soc_codec *codec)
@@ -197,6 +262,7 @@ static int jive_wm8750_init(struct snd_soc_codec *codec)
 	}
 
 	snd_soc_dapm_sync_endpoints(codec);
+
 	return 0;
 }
 
