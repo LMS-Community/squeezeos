@@ -1,15 +1,6 @@
 
 
-all: jivectl evtest testir testdisplay draw IQCtest
-
-padtest: test.c
-	${CC} ${CFLAGS} test.c ${LDFLAGS} -o $@
-
-padtest2: test2.c
-	${CC} ${CFLAGS} test2.c ${LDFLAGS} -o $@
-
-padtest3: test3.c
-	${CC} ${CFLAGS} test3.c ${LDFLAGS} -o $@
+all: evtest memtool jivectl testir testdisplay draw IQCtest
 
 jivectl: jivectl.c
 	${CC} ${CFLAGS} jivectl.c ${LDFLAGS} -o $@
@@ -29,19 +20,15 @@ IQCtest: IQCtest.c
 evtest: evtest.c
 	${CC} ${CFLAGS} evtest.c ${LDFLAGS} -o $@
 
-padtest-2.0: test_v2.0.c
-	${CC} ${CFLAGS} test_v2.0.c ${LDFLAGS} -o $@
+memtool: memtool.c
+	${CC} ${CFLAGS} memtool.c ${LDFLAGS} -o $@
 
 install:
-#	install padtest ${PREFIX}/bin
-#	install padtest2 ${PREFIX}/bin
-#	install padtest3 ${PREFIX}/bin
-#	install padtest-2.0 ${PREFIX}/bin
-	install jivectl ${PREFIX}/bin
 	install evtest ${PREFIX}/bin
+	install memtool ${PREFIX}/bin
+	install jivectl ${PREFIX}/bin
 	install testir ${PREFIX}/bin
 	install testdisplay ${PREFIX}/bin
 	install draw ${PREFIX}/bin
 	install IQCtest ${PREFIX}/bin
-	
 
