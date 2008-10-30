@@ -260,9 +260,10 @@ def filterProvidersRunTime(providers, item, cfgData, dataCache):
         pn = dataCache.pkg_fn[p]
         provides = dataCache.pn_provides[pn]
         for provide in provides:
+            bb.msg.note(2, bb.msg.domain.Provider, "checking PREFERRED_PROVIDER_%s" % (provide))
             prefervar = bb.data.getVar('PREFERRED_PROVIDER_%s' % provide, cfgData, 1)
             if prefervar == pn:
-                var = "PREFERRED_PROVIDERS_%s = %s" % (provide, prefervar)
+                var = "PREFERRED_PROVIDER_%s = %s" % (provide, prefervar)
                 bb.msg.note(2, bb.msg.domain.Provider, "selecting %s to satisfy runtime %s due to %s" % (pn, item, var))
                 preferred_vars.append(var)
                 eligible.remove(p)
@@ -273,7 +274,7 @@ def filterProvidersRunTime(providers, item, cfgData, dataCache):
     numberPreferred = len(preferred)
 
     if numberPreferred > 1:
-        bb.msg.error(bb.msg.domain.Provider, "Conflicting PREFERRED_PROVIDERS entries were found which resulted in an attempt to select multiple providers (%s) for runtime dependecy %s\nThe entries resulting in this conflict were: %s" % (preferred, item, preferred_vars))
+        bb.msg.error(bb.msg.domain.Provider, "Conflicting PREFERRED_PROVIDER entries were found which resulted in an attempt to select multiple providers (%s) for runtime dependecy %s\nThe entries resulting in this conflict were: %s" % (preferred, item, preferred_vars))
 
     bb.msg.debug(1, bb.msg.domain.Provider, "sorted providers for %s are: %s" % (item, eligible))
 
@@ -296,7 +297,12 @@ def getRuntimeProviders(dataCache, rdepend):
 
     # Only search dynamic packages if we can't find anything in other variables
     for pattern in dataCache.packages_dynamic:
-        regexp = re.compile(pattern)
+        pattern = pattern.replace('+', "\+")
+        try:
+            regexp = re.compile(pattern)
+        except:
+            bb.msg.error(bb.msg.domain.Provider, "Error parsing re expression: %s" % pattern)
+            raise
         if regexp.match(rdepend):
             rproviders += dataCache.packages_dynamic[pattern]
 

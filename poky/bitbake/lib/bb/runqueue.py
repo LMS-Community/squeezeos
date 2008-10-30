@@ -805,7 +805,7 @@ class RunQueue:
             return False
         # If its a 'nostamp' task, it's not current
         taskdep = self.dataCache.task_deps[fn]
-        if 'nostamp' in taskdep and task in taskdep['nostamp']:
+        if 'nostamp' in taskdep and taskname in taskdep['nostamp']:
             bb.msg.debug(2, bb.msg.domain.RunQueue, "%s.%s is nostamp\n" % (fn, taskname))
             return False
 
@@ -845,7 +845,7 @@ class RunQueue:
                     failed_fnids = self.finish_runqueue()
             if len(failed_fnids) == 0:
                 return failures
-            if self.taskData.abort:
+            if not self.taskData.tryaltconfigs:
                 raise bb.runqueue.TaskFailure(failed_fnids)
             for fnid in failed_fnids:
                 #print "Failure: %s %s %s" % (fnid, self.taskData.fn_index[fnid],  self.runq_task[fnid])
@@ -970,6 +970,8 @@ class RunQueue:
                     bb.msg.error(bb.msg.domain.RunQueue, "Task %s (%s) failed" % (task, self.get_user_idstring(task)))
                     self.failed_fnids.append(self.runq_fnid[task])
                     self.stats.taskFailed()
+                    if not self.taskData.abort:
+                        continue
                     break
                 self.task_complete(task)
                 self.stats.taskCompleted()
