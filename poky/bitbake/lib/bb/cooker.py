@@ -59,6 +59,10 @@ class BBCooker:
 
         self.configuration.data = bb.data.init()
 
+    def parseConfiguration(self):
+
+        bb.data.inheritFromOS(self.configuration.data)
+
         for f in self.configuration.file:
             self.parseConfigurationFile( f )
 
@@ -190,7 +194,7 @@ class BBCooker:
             bb.data.update_data(localdata)
             bb.data.expandKeys(localdata)
 
-            taskdata = bb.taskdata.TaskData(self.configuration.abort)
+            taskdata = bb.taskdata.TaskData(self.configuration.abort, self.configuration.tryaltconfigs)
 
             try:
                 taskdata.add_provider(localdata, self.status, pkgs_to_build[0])
@@ -239,7 +243,7 @@ class BBCooker:
         localdata = data.createCopy(self.configuration.data)
         bb.data.update_data(localdata)
         bb.data.expandKeys(localdata)
-        taskdata = bb.taskdata.TaskData(self.configuration.abort)
+        taskdata = bb.taskdata.TaskData(self.configuration.abort, self.configuration.tryaltconfigs)
 
         runlist = []
         try:
@@ -496,7 +500,7 @@ class BBCooker:
             bb.build.del_stamp('do_%s' % self.configuration.cmd, self.configuration.data)
 
         # Setup taskdata structure
-        taskdata = bb.taskdata.TaskData(self.configuration.abort)
+        taskdata = bb.taskdata.TaskData(self.configuration.abort, self.configuration.tryaltconfigs)
         taskdata.add_provider(self.configuration.data, self.status, item)
 
         buildname = bb.data.getVar("BUILDNAME", self.configuration.data)
@@ -530,7 +534,7 @@ class BBCooker:
         bb.data.update_data(localdata)
         bb.data.expandKeys(localdata)
 
-        taskdata = bb.taskdata.TaskData(self.configuration.abort)
+        taskdata = bb.taskdata.TaskData(self.configuration.abort, self.configuration.tryaltconfigs)
 
         runlist = []
         try:
@@ -591,6 +595,9 @@ class BBCooker:
         from here. By default we try to execute task
         build.
         """
+
+        # Wipe the OS environment
+        bb.utils.empty_environment()
 
         if self.configuration.show_environment:
             self.showEnvironment(self.configuration.buildfile, self.configuration.pkgs_to_build)

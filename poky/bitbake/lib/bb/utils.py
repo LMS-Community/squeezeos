@@ -96,7 +96,34 @@ def explode_deps(s):
             #r[-1] += ' ' + ' '.join(j)
     return r
 
+def explode_dep_versions(s):
+    """
+    Take an RDEPENDS style string of format:
+    "DEPEND1 (optional version) DEPEND2 (optional version) ..."
+    and return a dictonary of dependencies and versions.
+    """
+    r = {}
+    l = s.split()
+    lastdep = None
+    lastver = ""
+    inversion = False
+    for i in l:
+        if i[0] == '(':
+            inversion = True
+            lastver = i[1:] or ""
+            #j = []
+        elif inversion and i.endswith(')'):
+            inversion = False
+            lastver = lastver + " " + (i[:-1] or "")
+            r[lastdep] = lastver
+        elif not inversion:
+            r[i] = None
+            lastdep = i
+            lastver = ""
+        elif inversion:
+            lastver = lastver + " " + i
 
+    return r
 
 def _print_trace(body, line):
     """
@@ -149,7 +176,7 @@ def better_exec(code, context, text, realfile):
             raise
 
         # print the Header of the Error Message
-        bb.msg.error(bb.msg.domain.Util, "Error in executing: ", realfile)
+        bb.msg.error(bb.msg.domain.Util, "Error in executing: %s" % realfile)
         bb.msg.error(bb.msg.domain.Util, "Exception:%s Message:%s" % (t,value) )
 
         # let us find the line number now
@@ -208,6 +235,12 @@ def lockfile(name):
     Use the file fn as a lock file, return when the lock has been acquired.
     Returns a variable to pass to unlockfile().
     """
+    path = os.path.dirname(name)
+    if not os.path.isdir(path):
+        import bb, sys
+        bb.msg.error(bb.msg.domain.Util, "Error, lockfile path does not exist!: %s" % path)
+        sys.exit(1)
+
     while True:
         # If we leave the lockfiles lying around there is no problem
         # but we should clean up after ourselves. This gives potential
@@ -219,15 +252,18 @@ def lockfile(name):
         # This implementation is unfair since the last person to request the 
         # lock is the most likely to win it.
 
-        lf = open(name, "a+")
-        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-        statinfo = os.fstat(lf.fileno())
-        if os.path.exists(lf.name):
-           statinfo2 = os.stat(lf.name)
-           if statinfo.st_ino == statinfo2.st_ino:
-               return lf
-        # File no longer exists or changed, retry
-        lf.close
+        try:
+            lf = open(name, "a+")
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            statinfo = os.fstat(lf.fileno())
+            if os.path.exists(lf.name):
+               statinfo2 = os.stat(lf.name)
+               if statinfo.st_ino == statinfo2.st_ino:
+                   return lf
+            # File no longer exists or changed, retry
+            lf.close
+        except Exception, e:
+            continue
 
 def unlockfile(lf):
     """
@@ -268,3 +304,94 @@ def sha256_file(filename):
     for line in open(filename):
         s.update(line)
     return s.hexdigest()
+
+def preserved_envvars_list():
+    return [
+        'BBPATH',
+        'BB_PRESERVE_ENV',
+        'BB_ENV_WHITELIST',
+        'BB_ENV_EXTRAWHITE',
+        'COLORTERM',
+        'DBUS_SESSION_BUS_ADDRESS',
+        'DESKTOP_SESSION',
+        'DESKTOP_STARTUP_ID',
+        'DISPLAY',
+        'GNOME_KEYRING_PID',
+        'GNOME_KEYRING_SOCKET',
+        'GPG_AGENT_INFO',
+        'GTK_RC_FILES',
+        'HOME',
+        'LANG',
+        'LOGNAME',
+        'OEROOT',
+        'PATH',
+        'PWD',
+        'SESSION_MANAGER',
+        'SHELL',
+        'SSH_AUTH_SOCK',
+        'TERM',
+        'USER',
+        'USERNAME',
+        '_',
+        'XAUTHORITY',
+        'XDG_DATA_DIRS',
+        'XDG_SESSION_COOKIE',
+    ]
+
+def filter_environment(good_vars):
+    """
+    Create a pristine environment for bitbake. This will remove variables that
+    are not known and may influence the build in a negative way.
+    """
+
+    import bb
+
+    removed_vars = []
+    for key in os.environ.keys():
+        if key in good_vars:
+            continue
+        
+        removed_vars.append(key)
+        os.unsetenv(key)
+        del os.environ[key]
+
+    if len(removed_vars):
+        bb.debug(1, "Removed the following variables from the environment:", ",".join(removed_vars))
+
+    return removed_vars
+
+def clean_environment():
+    """
+    Clean up any spurious environment variables. This will remove any
+    variables the user hasn't chose to preserve.
+    """
+    if 'BB_PRESERVE_ENV' not in os.environ:
+        if 'BB_ENV_WHITELIST' in os.environ:
+            good_vars = os.environ['BB_ENV_WHITELIST'].split()
+        else:
+            good_vars = preserved_envvars_list()
+        if 'BB_ENV_EXTRAWHITE' in os.environ:
+            good_vars.extend(os.environ['BB_ENV_EXTRAWHITE'].split())
+        filter_environment(good_vars)
+
+def empty_environment():
+    """
+    Remove all variables from the environment.
+    """
+    for s in os.environ.keys():
+        os.unsetenv(s)
+        del os.environ[s]
+
+def prunedir(topdir):
+    # Delete everything reachable from the directory named in 'topdir'.
+    # CAUTION:  This is dangerous!
+    for root, dirs, files in os.walk(topdir, topdown=False):
+        for name in files:
+            os.remove(os.path.join(root, name))
+        for name in dirs:
+            if os.path.islink(os.path.join(root, name)):
+                os.remove(os.path.join(root, name))
+            else:
+                os.rmdir(os.path.join(root, name))
+    os.rmdir(topdir)
+

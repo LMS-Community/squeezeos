@@ -49,6 +49,9 @@ class ParameterError(Exception):
 class MD5SumError(Exception):
     """Exception raised when a MD5SUM of a file does not match the expected one"""
 
+class InvalidSRCREV(Exception):
+    """Exception raised when an invalid SRCREV is encountered"""
+
 def uri_replace(uri, uri_find, uri_replace, d):
 #   bb.msg.note(1, bb.msg.domain.Fetcher, "uri_replace: operating on %s" % uri)
     if not uri or not uri_find or not uri_replace:
@@ -229,6 +232,8 @@ def get_srcrev(d):
         bb.msg.error(bb.msg.domain.Fetcher, "SRCREV was used yet no valid SCM was found in SRC_URI")
         raise ParameterError
 
+    bb.data.setVar('__BB_DONT_CACHE','1', d)
+
     if len(scms) == 1:
         return urldata[scms[0]].method.sortable_revision(scms[0], urldata[scms[0]], d)
 
@@ -269,7 +274,7 @@ def runfetchcmd(cmd, d, quiet = False):
     # rather than host provided
     # Also include some other variables.
     # FIXME: Should really include all export varaiables?
-    exportvars = ['PATH', 'GIT_PROXY_HOST', 'GIT_PROXY_PORT', 'GIT_PROXY_COMMAND']
+    exportvars = ['PATH', 'GIT_PROXY_HOST', 'GIT_PROXY_PORT', 'GIT_PROXY_COMMAND', 'http_proxy', 'ftp_proxy']
 
     for var in exportvars:
         val = data.getVar(var, d, True)
@@ -425,6 +430,8 @@ class Fetch(object):
             rev = data.getVar("SRCREV_pn-" + pn + "_" + ud.parm['name'], d, 1)
         if not rev:
             rev = data.getVar("SRCREV", d, 1)
+        if rev == "INVALID":
+            raise InvalidSRCREV("Please set SRCREV to a valid value")
         if not rev:
             return False
         if rev is "SRCREVINACTION":
@@ -458,6 +465,12 @@ class Fetch(object):
             uri = stash + tarfn
             bb.msg.note(1, bb.msg.domain.Fetcher, "fetch " + uri)
             fetchcmd = fetchcmd.replace("${URI}", uri)
+            httpproxy = data.getVar("http_proxy", d, True)
+            ftpproxy = data.getVar("ftp_proxy", d, True)
+            if httpproxy:
+                fetchcmd = "http_proxy=" + httpproxy + " " + fetchcmd
+            if ftpproxy:
+                fetchcmd = "ftp_proxy=" + ftpproxy + " " + fetchcmd
             ret = os.system(fetchcmd)
             if ret == 0:
                 bb.msg.note(1, bb.msg.domain.Fetcher, "Fetched %s from tarball stash, skipping checkout" % tarfn)
@@ -543,6 +556,7 @@ import ssh
 import perforce
 import bzr
 import hg
+import osc
 
 methods.append(local.Local())
 methods.append(wget.Wget())
@@ -554,3 +568,4 @@ methods.append(ssh.SSH())
 methods.append(perforce.Perforce())
 methods.append(bzr.Bzr())
 methods.append(hg.Hg())
+methods.append(osc.Osc())
