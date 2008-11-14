@@ -183,6 +183,7 @@ static int jive_hw_params(struct snd_pcm_substream *substream,
 	case 11025:
 	case 22050:
 	case 44100:
+	case 88200:
 		clk = 11289600;
 		break;
 	}
