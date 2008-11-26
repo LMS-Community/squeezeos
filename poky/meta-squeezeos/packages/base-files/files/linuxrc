@@ -5,14 +5,6 @@
 # Mount /proc and /sys filesystems
 /bin/mount -a
 
-# Create /dev using mdev
-/bin/echo "Creating /dev"
-/bin/mount -t ramfs mdev /dev
-/bin/mkdir /dev/pts
-/bin/mount -t devpts devpts /dev/pts
-echo /sbin/mdev > /proc/sys/kernel/hotplug
-/sbin/mdev -s
-
 # Mount read/write filesystem, we support ubifs or jffs2
 UBIFS_DEV=`grep ubifs /proc/mtd | cut -c4`
 JFFS2_DEV=`grep jffs2 /proc/mtd | cut -c4`
@@ -21,14 +13,14 @@ if [ ! -z $UBIFS_DEV ]
 then
 	# ubifs filesystem
 	MOUNT_TYPE=ubifs
-       	MOUNT_MTD=/dev/mtd/${UBIFS_DEV}
+       	MOUNT_MTD=/dev/mtd${UBIFS_DEV}
 	MOUNT_DEVICE=ubi0:ubifs
 elif  [ ! -z $JFFS2_DEV ]
 then
 	# jffs2 filesystem
 	MOUNT_TYPE=jffs2
-	MOUNT_MTD=/dev/mtd/${JFFS2_DEV}
-	MOUNT_DEVICE=/dev/mtdblock/${JFFS2_DEV}
+	MOUNT_MTD=/dev/mtd${JFFS2_DEV}
+	MOUNT_DEVICE=/dev/mtdblock${JFFS2_DEV}
 fi
 
 /bin/mount -t ${MOUNT_TYPE} -o noatime ${MOUNT_DEVICE} /mnt/storage
@@ -64,9 +56,6 @@ fi
 
 # Mount overlay filesystem
 /bin/mount -t mini_fo -o base=/,sto=/mnt/storage / /mnt/overlay
-
-# Mount devfs filesystem in overlay
-/bin/mount -o move /dev /mnt/overlay/dev
 
 # Run init process
 exec /usr/sbin/chroot /mnt/overlay /sbin/init

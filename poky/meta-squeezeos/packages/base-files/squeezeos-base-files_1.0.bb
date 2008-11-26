@@ -3,9 +3,11 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r15"
+PR = "r17"
 
 SRC_URI = " \
+	file://85-mtd.rules \
+	file://85-squeezeos.rules \
 	file://config \
 	file://firstboot \
 	file://fstab \
@@ -47,10 +49,9 @@ dirs755 = "/bin /dev ${sysconfdir} ${sysconfdir}/default \
 	   ${localstatedir} \
 	   ${localstatedir}/lib ${localstatedir}/log ${localstatedir}/run \
 	   /sys ${localstatedir}/lib/misc ${localstatedir}/spool \
-	   /mnt /media /media/card /media/cf /media/net /media/ram \
-	   /media/union /media/realroot /media/hdd /media/mmc1 \
-	   /mnt/storage /mnt/overlay /mnt/mmc ${sysconfdir}/init.d \
-	   ${sysconfdir}/dropbear"
+	   /mnt /mnt/storage /mnt/overlay /media \
+	   ${sysconfdir}/init.d ${sysconfdir}/dropbear \
+	   ${sysconfdir}/udev/rules.d"
 
 
 do_install () {
@@ -87,6 +88,8 @@ do_install () {
 	install -m 0644 ${WORKDIR}/keep-after-upgrade ${D}${sysconfdir}/keep-after-upgrade
 	install -m 0644 ${WORKDIR}/hostname ${D}${sysconfdir}/hostname
 	ln -sf /proc/mounts ${D}${sysconfdir}/mtab
+	install -m 0644 ${WORKDIR}/85-mtd.rules ${D}${sysconfdir}/udev/rules.d/85-mtd.rules
+	install -m 0644 ${WORKDIR}/85-squeezeos.rules ${D}${sysconfdir}/udev/rules.d/85-squeezeos.rules
 
 	# dropbear keys - these should be dynamically generated, but it takes too long
 	install -m 0600 ${WORKDIR}/dropbear_dss_host_key ${D}${sysconfdir}/dropbear/dropbear_dss_host_key

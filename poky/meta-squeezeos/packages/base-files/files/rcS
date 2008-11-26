@@ -2,6 +2,9 @@
 
 /bin/mount -a
 
+# Create /dev using udev
+/etc/init.d/udev start
+
 echo "Mounting RAM Disk"
 /bin/mount -t ramfs ramfs /tmp
 /bin/mount -t ramfs ramfs /var
@@ -14,37 +17,16 @@ if [ -f /etc/hostname ]; then
 fi
 
 
-# Mount SD card
-if [ -b /dev/mmcblk0p1 ]; then
-	echo "Mounting MMC/SD card (partition 1)"
-	mount -t vfat -o sync -o noatime /dev/mmcblk0p1 /mnt/mmc
-elif [ -b /dev/mmcblk0 ]; then
-	echo "Mounting MMC/SD card (whole device)"
-	mount -t vfat -o sync -o noatime /dev/mmcblk0 /mnt/mmc
-fi
-
-
 # Start syslogd
-grep /mnt/mmc /proc/mounts | cut -d' ' -f 4 | grep -q rw
-MMCRW=$?
-if [ $MMCRW = 0 -a -e /mnt/mmc/log  ]; then
-	# log and core files to mmc
+if [ -e /media/*/log ]; then
+	# log and core files to media
+	LOG_DIR=/media/*/log
 
-	echo "Starting syslogd (to mmc)"
-	/sbin/syslogd -s1000 -O /mnt/mmc/log/messages
+	echo "Starting syslogd (to $LOG_DIR)"
+	/sbin/syslogd -s1000 -O $LOG_DIR/messages
 
-	echo "Enabling core files (to mmc)"
-	echo "/mnt/mmc/log/core-%e" > /proc/sys/kernel/core_pattern
-	ulimit -c unlimited
-elif [ $MMCRW = 0 -a -e /mnt/mmc/var  ]; then
-	# log and core files to mmc
-	/bin/mkdir -p /mnt/mmc/var/log /mnt/mmc/var/core
-
-	echo "Starting syslogd (to mmc)"
-	/sbin/syslogd -s1000 -O /mnt/mmc/var/log/messages
-
-	echo "Enabling core files (to mmc)"
-	echo "/mnt/mmc/var/core/core-%e" > /proc/sys/kernel/core_pattern
+	echo "Enabling core files (to $LOG_DIR)"
+	echo "$LOG_DIR/core-%e" > /proc/sys/kernel/core_pattern
 	ulimit -c unlimited
 else
 	# log to /var
@@ -62,13 +44,17 @@ if ! [ -f /etc/firstboot ]; then
 	echo "First boot"
 	touch /etc/firstboot
 
-	if [ -r /mnt/mmc/squeezeos.patch ]; then
-		/usr/bin/patch -i /mnt/mmc/squeezeos.patch
-	fi
+	for patch in /media/*/squeezeos.patch; do
+		echo "Applying patch: $patch"
+		/usr/bin/patch -i $patch
+	done
 
-	if [ -x /mnt/mmc/squeezeos-post-reset.sh ]; then
-		(cd /mnt/mmc; ./squeezeos-post-reset.sh)
-	fi
+	for script in /media/*/squeezeos-post-reset.sh; do
+		if [ -x $script ]; then
+			echo "Executing: $script"
+			$script
+		fi
+	done
 fi
 
 
@@ -101,15 +87,23 @@ if [ -x /etc/init.d/rcS.local ]; then
 	/etc/init.d/rcS.local
 fi
 
-if [ -x /mnt/mmc/squeezeos-boot.sh ]; then
-    (cd /mnt/mmc; ./squeezeos-boot.sh)
-fi
+for script in /media/*/squeezeos-boot.sh; do
+	if [ -x $script ]; then
+		echo "Executing: $script"
+		$script
+	fi
+done
+
 
 echo "Starting jive applications"
 export SDL_NOMOUSE=1
 export ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf
 export SQUEEZEPLAY_HOME=/etc/squeezeplay
-if [ -d /mnt/mmc/squeezeplay ]; then
-    export LUA_PATH=/mnt/mmc/squeezeplay/?.lua
-fi
+for dir in /media/*/squeezeplay; do
+	if [ -d $dir ]; then
+		LUA_PATH=$LUA_PATH;$dir/?.lua
+	fi
+done
+export LUA_PATH
+
 (cd /usr/bin; /usr/bin/jive &)

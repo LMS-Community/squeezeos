@@ -1,9 +1,8 @@
 require busybox.inc
-#PR = "r0"
+PR = "r2"
 
 SRC_URI = "http://www.busybox.net/downloads/busybox-${PV}.tar.gz \
 	   file://busybox_zeroconf.patch;patch=1 \
-	   file://busybox_mdev_subdir.patch;patch=1 \
 	   file://busybox_udhcpd_syslog.patch;patch=1 \
 	   file://busybox_ifupdown_hostname.patch;patch=1 \
            file://defconfig"

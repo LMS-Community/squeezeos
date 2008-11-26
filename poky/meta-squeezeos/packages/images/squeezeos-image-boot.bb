@@ -8,6 +8,7 @@ inherit image squeezeos-upgrade-image
 IMAGE_INSTALL += " \
 	squeezeos-base-files \
 	busybox \
+	udev \
 	mtd-utils \
 	ubi-utils"
 

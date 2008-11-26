@@ -4,7 +4,7 @@ inherit image
 
 IMAGE_LINGUAS = " "
 
-IMAGE_INSTALL += "strace oprofile"
+IMAGE_INSTALL += "strace oprofile gdbserver"
 
 IMAGE_FSTYPES = "tar.gz"
 
