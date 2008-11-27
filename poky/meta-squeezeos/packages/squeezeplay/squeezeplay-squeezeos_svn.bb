@@ -1,14 +1,14 @@
-DESCRIPTION = "SqueezePlay - Jive specific code"
+DESCRIPTION = "SqueezePlay - SqueezeOS specific code"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r7"
+#PR = "r0"
 
 DEPENDS += "squeezeplay"
 
-SRC_URI="${SQUEEZEPLAY_SCM};module=squeezeplay_jive"
+SRC_URI="${SQUEEZEPLAY_SCM};module=squeezeplay_squeezeos"
 
-S = "${WORKDIR}/squeezeplay_jive"
+S = "${WORKDIR}/squeezeplay_squeezeos"
 
 inherit autotools
 
@@ -23,7 +23,8 @@ do_install() {
 	# move lua libraries to correct location
 	rm ${D}${libdir}/* 
 	mkdir -p ${D}${libdir}/lua/5.1
-	install -m 0755 .libs/jiveBSP.so ${D}${libdir}/lua/5.1/jiveBSP.so
+	install -m 0755 .libs/jiveWireless.so ${D}${libdir}/lua/5.1/jiveWireless.so
+	install -m 0755 .libs/jiveWatchdog.so ${D}${libdir}/lua/5.1/jiveWatchdog.so
 }
 
 
