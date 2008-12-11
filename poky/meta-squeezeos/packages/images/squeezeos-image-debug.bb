@@ -1,12 +1,5 @@
-DESCRIPTION = "SqueezeOS - debugging tools"
+DESCRIPTION = "SqueezeOS - base image with debugging"
 
-inherit image
+require squeezeos-image-boot.bb
 
-IMAGE_LINGUAS = " "
-
-IMAGE_INSTALL += "strace oprofile gdbserver"
-
-IMAGE_FSTYPES = "tar.gz"
-
-# remove not needed ipkg informations
-ROOTFS_POSTPROCESS_COMMAND += "remove_packaging_data_files"
+IMAGE_INSTALL += "squeezeplay-dbg dropbear patch wireless-tools alsa-utils-aplay alsa-utils-amixer"
