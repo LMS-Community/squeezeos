@@ -3,13 +3,14 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r17"
+PR = "r18"
 
 SRC_URI = " \
 	file://85-mtd.rules \
 	file://85-squeezeos.rules \
 	file://config \
 	file://firstboot \
+	file://fonts.conf \
 	file://fstab \
 	file://group \
 	file://hostname \
@@ -24,6 +25,7 @@ SRC_URI = " \
 	file://mdev.conf \
 	file://motd \
 	file://nsswitch.conf \
+	file://pango.modules \
 	file://passwd \
 	file://protocols \
 	file://rcS \
@@ -50,7 +52,7 @@ dirs755 = "/bin /dev ${sysconfdir} ${sysconfdir}/default \
 	   ${localstatedir}/lib ${localstatedir}/log ${localstatedir}/run \
 	   /sys ${localstatedir}/lib/misc ${localstatedir}/spool \
 	   /mnt /mnt/storage /mnt/overlay /media \
-	   ${sysconfdir}/init.d ${sysconfdir}/dropbear \
+	   ${sysconfdir}/init.d ${sysconfdir}/fontconfig ${sysconfdir}/pango ${sysconfdir}/dropbear \
 	   ${sysconfdir}/udev/rules.d"
 
 
@@ -69,6 +71,7 @@ do_install () {
 	install -m 0755 ${WORKDIR}/linuxrc ${D}/linuxrc
 
 	# base config
+	install -m 0644 ${WORKDIR}/fonts.conf ${D}${sysconfdir}/fonts.conf
 	install -m 0644 ${WORKDIR}/fstab ${D}${sysconfdir}/fstab
 	install -m 0644 ${WORKDIR}/inetd.conf ${D}${sysconfdir}/inetd.conf
 	install -m 0644 ${WORKDIR}/inittab ${D}${sysconfdir}/inittab
@@ -80,6 +83,7 @@ do_install () {
 	install -m 0644 ${WORKDIR}/services ${D}${sysconfdir}/services
 	install -m 0644 ${WORKDIR}/hosts ${D}${sysconfdir}/hosts
 	install -m 0644 ${WORKDIR}/nsswitch.conf ${D}${sysconfdir}/nsswitch.conf
+	install -m 0644 ${WORKDIR}/pango.modules ${D}${sysconfdir}/pango.modules
 	install -m 0644 ${WORKDIR}/passwd ${D}${sysconfdir}/passwd
 	install -m 0644 ${WORKDIR}/shadow ${D}${sysconfdir}/shadow
 	install -m 0644 ${WORKDIR}/group ${D}${sysconfdir}/group

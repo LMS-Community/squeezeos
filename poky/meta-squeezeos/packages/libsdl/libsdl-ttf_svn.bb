@@ -5,13 +5,12 @@ LICENSE = "LGPL"
 BV = "2.0.8"
 
 PV = "${BV}+svnr${SRCREV}"
-PR = "r1"
+PR = "r4"
 
 DEPENDS = "libsdl freetype"
 RDEPENDS = "libsdl freetype"
 
-SRC_URI="${SQUEEZEPLAY_SCM};module=SDL_ttf-${BV} \
-	file://SDL_ttf-no-internals.patch;patch=1"
+SRC_URI="${SQUEEZEPLAY_SCM};module=SDL_ttf-${BV}"
 
 S = "${WORKDIR}/SDL_ttf-${BV}"
 
