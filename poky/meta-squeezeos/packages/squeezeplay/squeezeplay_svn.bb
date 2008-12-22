@@ -2,17 +2,15 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r8"
+PR = "r9"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image pango libsdl-pango"
-RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image pango libsdl-pango"
-
-RDEPENDS += "pango-module-arabic-fc pango-module-hangul-fc pango-module-hebrew-fc pango-module-indic-fc pango-module-khmer-fc pango-module-syriac-fc pango-module-thai-fc pango-module-tibetan-fc"
-
 DEPENDS += "lua lua-native luatolua++"
+DEPENDS += "flac libmad tremor"
+
 RDEPENDS += "liblua5.1-socket liblua5.1-json liblua5.1-zipfilter liblua5.1-loop liblua5.1-logging liblua5.1-syslog liblua5.1-filesystem liblua5.1-profiler liblua5.1-tolua++"
 
-DEPENDS += "flac libmad tremor"
+RDEPENDS += "pango-module-arabic-fc pango-module-hangul-fc pango-module-hebrew-fc pango-module-indic-fc pango-module-khmer-fc pango-module-syriac-fc pango-module-thai-fc pango-module-tibetan-fc"
 
 RDEPENDS += "freefont"
 
