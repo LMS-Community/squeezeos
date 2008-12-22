@@ -29,7 +29,7 @@ EXTRA_OECONF = "--enable-explicit-deps=no"
 do_configure_append() {
 	for i in $(find ${S} -name Makefile) ; do
 		sed -i -e s:/usr/include/SDL:${STAGING_INCDIR}/SDL:g $i
-		sed -i -e s:-L/usr/lib:${STAGING_LIBDIR}:g $i
+		sed -i -e s:-L/usr/lib:-L${STAGING_LIBDIR}:g $i
 	done
 }
 

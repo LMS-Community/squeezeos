@@ -7,7 +7,7 @@ PR = "r8"
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image pango libsdl-pango"
 RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image pango libsdl-pango"
 
-RDEPENDS += "pango-module-arabic pango-module-hangul pango-module-hebrew pango-module-indic pango-module-khmer pango-module-syriac pango-module-thai pango-module-tibetan"
+RDEPENDS += "pango-module-arabic-fc pango-module-hangul-fc pango-module-hebrew-fc pango-module-indic-fc pango-module-khmer-fc pango-module-syriac-fc pango-module-thai-fc pango-module-tibetan-fc"
 
 DEPENDS += "lua lua-native luatolua++"
 RDEPENDS += "liblua5.1-socket liblua5.1-json liblua5.1-zipfilter liblua5.1-loop liblua5.1-logging liblua5.1-syslog liblua5.1-filesystem liblua5.1-profiler liblua5.1-tolua++"

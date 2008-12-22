@@ -6,13 +6,11 @@ LICENSE = "LGPL"
 inherit gnome
 EXTRA_AUTORECONF = ""
 
-SECTION = "x11/libs"
-
-DEPENDS = "glib-2.0 fontconfig freetype zlib virtual/libiconv virtual/libx11 libxft gtk-doc-native cairo"
+DEPENDS = "glib-2.0 fontconfig freetype zlib virtual/libiconv"
 
 PACKAGES_DYNAMIC = "pango-module-*"
 
-RRECOMMENDS_${PN} = "pango-module-basic-x pango-module-basic-fc" 
+RRECOMMENDS_${PN} = "pango-module-basic-fc" 
 
 # seems to go wrong with default cflags
 FULL_OPTIMIZATION_arm = "-O2"
