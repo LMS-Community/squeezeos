@@ -2,7 +2,7 @@ DESCRIPTION = "SDL Pango library"
 SECTION = "libs"
 LICENSE = "LGPL"
 
-PR = "r13"
+PR = "r14"
 
 DEPENDS = "glib-2.0 fontconfig freetype libsdl pango"
 RDEPENDS = "libsdl pango"
@@ -12,7 +12,8 @@ SRC_URI = "${SOURCEFORGE_MIRROR}/sdlpango/SDL_Pango-${PV}.tar.gz \
 	file://matrix_declarations.patch;patch=1 \
 	file://fillrect_crash.patch;patch=1 \
 	file://blit_overflow.patch;patch=1 \
-	file://sp-performance1.patch;patch=1"
+	file://sp-performance1.patch;patch=1 \
+	file://layoutcontext.patch;patch=1"
 
 S = "${WORKDIR}/SDL_Pango-${PV}"
 
