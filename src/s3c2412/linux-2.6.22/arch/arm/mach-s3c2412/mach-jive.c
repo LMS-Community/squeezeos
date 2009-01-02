@@ -400,6 +400,8 @@ static struct ili9320_platdata jive_lcm_config = {
 	.suspend	= ILI9320_SUSPEND_DEEP,
 
 	.entry_mode	= ILI9320_ENTRYMODE_ID(3) | ILI9320_ENTRYMODE_BGR,
+
+#if 0
 	.display2	= (ILI9320_DISPLAY2_FP(LCD_UPPER_MARGIN) |
 			   ILI9320_DISPLAY2_BP(LCD_LOWER_MARGIN)),
 	.display3	= 0x0,
@@ -413,10 +415,26 @@ static struct ili9320_platdata jive_lcm_config = {
 			   ILI9320_INTERFACE4_DIVE(1)),
 	.interface5	= 0x0,
 	.interface6	= 0x0,
+#else
+	.display2	= (ILI9320_DISPLAY2_FP(LCD_UPPER_MARGIN) |
+			   ILI9320_DISPLAY2_BP(LCD_LOWER_MARGIN)),
+	.display3	= 0x0,
+	.display4	= 0x0,
+	.rgb_if1	= (ILI9320_RGBIF1_RIM_RGB16 |
+			   ILI9320_RGBIF1_RM | ILI9320_RGBIF1_CLK_RGBIF),
+	.rgb_if2	= ILI9320_RGBIF2_DPL,
+	.interface2	= 0x0,
+#endif
 };
 
 /* LCD SPI support */
 
+static void jive_lcd_spi_chipselect(struct s3c2410_spigpio_info *spi, int cs)
+{
+	s3c2410_gpio_setpin(S3C2410_GPB7, cs ? 0 : 1);
+}
+
+#if 0
 static struct spi_board_info jive_lcd_spi_board[] = {
 	[0] = {
 		.modalias	= "VGG2432A4",
@@ -427,10 +445,24 @@ static struct spi_board_info jive_lcd_spi_board[] = {
 	},
 };
 
-static void jive_lcd_spi_chipselect(struct s3c2410_spigpio_info *spi, int cs)
-{
-	s3c2410_gpio_setpin(S3C2410_GPB7, cs ? 0 : 1);
-}
+static struct s3c2410_spigpio_info jive_lcd_spi = {
+	.bus_num	= 0,
+	.pin_clk	= S3C2410_GPG8,
+	.pin_mosi	= S3C2410_GPB8,
+	.chip_select	= jive_lcd_spi_chipselect,
+	.board_info	= jive_lcd_spi_board,
+	.board_size	= ARRAY_SIZE(jive_lcd_spi_board),
+};
+#else
+static struct spi_board_info jive_lcd_spi_board[] = {
+	[0] = {
+		.modalias	= "VGG243271",
+		.chip_select	= 0,
+		.mode		= SPI_MODE_3,	/* CPOL=1, CPHA=1 */
+		.max_speed_hz	= 100000,	/* todo: confirm */
+		.platform_data	= &jive_lcm_config,
+	},
+};
 
 static struct s3c2410_spigpio_info jive_lcd_spi = {
 	.bus_num	= 0,
@@ -440,6 +472,7 @@ static struct s3c2410_spigpio_info jive_lcd_spi = {
 	.board_info	= jive_lcd_spi_board,
 	.board_size	= ARRAY_SIZE(jive_lcd_spi_board),
 };
+#endif
 
 static struct platform_device jive_device_lcdspi = {
 	.name		= "s3c24xx-spi-gpio",

@@ -10,3 +10,4 @@ obj-$(CONFIG_BACKLIGHT_CARILLO_RANCH) += cr_bllcd.o
 
 obj-$(CONFIG_LCD_ILI9320)	+= ili9320.o
 obj-$(CONFIG_LCD_VGG2432A4)	+= vgg2432a4.o
+obj-$(CONFIG_LCD_VGG243271)	+= vgg243271.o
