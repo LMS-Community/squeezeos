@@ -184,6 +184,31 @@ static struct lcd_ops ili9320_ops = {
 	.set_power	= ili9320_set_power,
 };
 
+#define class_to_lcd(_w) container_of(_w, struct lcd_device, class_dev)
+
+static ssize_t ili9320_gamma_store(struct class_device *dev,
+				   const char *buf, size_t count)
+{
+	struct lcd_device *lcd = class_to_lcd(dev);
+	struct ili9320 *ili = class_get_devdata(&lcd->class_dev);
+	char *ptr, *end;
+	unsigned long val;
+	unsigned int reg = ILI9320_GAMMA1;
+
+	end = (char *)buf + count;
+	ptr = (char *)buf;
+	while (ptr < end && reg <= ILI9320_GAMMA10) {
+		val = simple_strtoul(ptr, &ptr, 0);
+		ptr++;
+
+		ili9320_write(ili, reg++, val);
+	}
+
+	return count;
+}
+
+static CLASS_DEVICE_ATTR(gamma, 0644, NULL, ili9320_gamma_store);
+
 static void __devinit ili9320_setup_spi(struct ili9320 *ili,
 					struct spi_device *dev)
 {
@@ -216,7 +241,7 @@ int __devinit ili9320_probe_spi(struct spi_device *spi,
 	struct ili9320_platdata *cfg = spi->dev.platform_data;
 	struct ili9320 *ili;
 	struct lcd_device *lcd;
-	int ret = 0;
+	int err, ret = 0;
 
 	/* verify we where given some information */
 
@@ -266,6 +291,10 @@ int __devinit ili9320_probe_spi(struct spi_device *spi,
 		goto err_unregister;
 	}
 
+	if ((err = class_device_create_file(&lcd->class_dev, &class_device_attr_gamma))) {
+		dev_err(&spi->dev, "cannot attach gamma attribute\n");
+	}
+
 	return 0;
 
  err_unregister:
@@ -281,6 +310,8 @@ EXPORT_SYMBOL_GPL(ili9320_probe_spi);
 int __devexit ili9320_remove(struct ili9320 *lcd)
 {
 	ili9320_power(lcd, FB_BLANK_POWERDOWN);
+
+	class_device_remove_file(&lcd->lcd->class_dev, &class_device_attr_gamma);
 
 	lcd_device_unregister(lcd->lcd);
 	kfree(lcd);
