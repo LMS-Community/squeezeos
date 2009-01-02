@@ -15,18 +15,20 @@ do_squeezeos_image() {
 	tmpdir=`mktemp -d /tmp/squeezeos-XXXXXX`
 
 	# Copy image files
-	cp ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE_NAME} ${tmpdir}/zImage-P7
+	cp ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE_NAME} ${tmpdir}/zImage${IMAGE_SQUEEZEOS_EXTRA_VERSION}
 	cp ${DEPLOY_DIR_IMAGE}/${ROOTFS_IMAGE_NAME} ${tmpdir}/root.cramfs
 	cp ${TMPDIR}/rootfs/etc/squeezeos.version ${tmpdir}/jive.version
+	echo -e ${IMAGE_SQUEEZEOS_BOARD_VERSION} > ${tmpdir}/board.version
 
 	# Prepare files
 	cd ${tmpdir}
-	md5sum zImage-P7 root.cramfs  > upgrade.md5
+	md5sum zImage${IMAGE_SQUEEZEOS_EXTRA_VERSION} root.cramfs  > upgrade.md5
 
 	VERSION=${DISTRO_VERSION}_r${SQUEEZEOS_REVISION}
 
 	# Create zip
-	zip ${DEPLOY_DIR_IMAGE}/${MACHINE}_${VERSION}.bin *
+	rm -f ${DEPLOY_DIR_IMAGE}/${MACHINE}_${VERSION}.bin
+	zip ${DEPLOY_DIR_IMAGE}/${MACHINE}_${VERSION}.bin jive.version board.version upgrade.md5 zImage${IMAGE_SQUEEZEOS_EXTRA_VERSION} root.cramfs
 	cd ${DEPLOY_DIR_IMAGE}
 
 	rm -f ${MACHINE}.bin
