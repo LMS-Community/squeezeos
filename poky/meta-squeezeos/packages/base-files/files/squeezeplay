@@ -1,0 +1,48 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+	echo "Starting SqueezePlay"
+
+	export SDL_NOMOUSE=1
+	export ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf
+	export SQUEEZEPLAY_HOME=/etc/squeezeplay
+
+	# Add extensions on media eg SD card to lua path
+	for dir in /media/*/squeezeplay; do
+		if [ -d $dir ]; then
+			LUA_PATH="$LUA_PATH;$dir/?.lua"
+		fi
+	done
+	export LUA_PATH
+
+	cd /usr/bin
+	/usr/bin/jive &
+	;;
+
+    stop)
+	echo "Stopping SqueezePlay"
+
+	killall -q jive
+	;;
+
+    stopwdog)
+	echo "Stopping SqueezePlay (keeping watchdog alive)"
+
+	killall -q jive
+	sleep 2
+	watchdog -t 2 /dev/watchdog
+	;;
+
+    restart)
+	$0 stop
+	sleep 2
+	$0 start
+	;;
+
+    *)
+	echo "Usage: $0 {start|stop|stopwdog|restart}"
+	exit 1
+esac
+
+exit 0

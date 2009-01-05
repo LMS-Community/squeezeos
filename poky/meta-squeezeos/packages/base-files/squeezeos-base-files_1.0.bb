@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r22"
+PR = "r23"
 
 SRC_URI = " \
 	file://85-mtd.rules \
@@ -30,6 +30,7 @@ SRC_URI = " \
 	file://rcS.local.example \
 	file://services \
 	file://shadow \
+	file://squeezeplay \
 	file://suspend \
 	file://udhcpc_action \
 	file://wlan \
@@ -73,6 +74,7 @@ do_install () {
 	install -m 0644 ${WORKDIR}/inetd.conf ${D}${sysconfdir}/inetd.conf
 	install -m 0644 ${WORKDIR}/inittab ${D}${sysconfdir}/inittab
 	install -m 0755 ${WORKDIR}/rcS ${D}${sysconfdir}/init.d/rcS
+	install -m 0755 ${WORKDIR}/squeezeplay ${D}${sysconfdir}/init.d/squeezeplay
 	install -m 0755 ${WORKDIR}/wlan ${D}${sysconfdir}/init.d/wlan
 	install -m 0755 ${WORKDIR}/suspend ${D}${sysconfdir}/init.d/suspend
 	install -m 0644 ${WORKDIR}/issue ${D}${sysconfdir}/issue
