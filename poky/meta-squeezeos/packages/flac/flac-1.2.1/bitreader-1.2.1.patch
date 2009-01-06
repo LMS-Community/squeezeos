@@ -1,0 +1,116 @@
+diff -r -U5 flac-1.2.1/src/libFLAC/bitreader.c flac-1.2.1-fix/src/libFLAC/bitreader.c
+--- flac-1.2.1/src/libFLAC/bitreader.c	2007-09-10 21:48:55.000000000 -0700
++++ flac-1.2.1-fix/src/libFLAC/bitreader.c	2009-01-06 08:10:14.000000000 -0800
+@@ -749,11 +749,11 @@
+ 		 * this is a repeat of the above logic adjusted for the fact we
+ 		 * don't have a whole word.  note though if the client is feeding
+ 		 * us data a byte at a time (unlikely), br->consumed_bits may not
+ 		 * be zero.
+ 		 */
+-		if(br->bytes) {
++		if(br->bytes*8 > br->consumed_bits) {
+ 			const unsigned end = br->bytes * 8;
+ 			brword b = (br->buffer[br->consumed_words] & (FLAC__WORD_ALL_ONES << (FLAC__BITS_PER_WORD-end))) << br->consumed_bits;
+ 			if(b) {
+ 				i = COUNT_ZERO_MSBS(b);
+ 				*val += i;
+@@ -762,11 +762,11 @@
+ 				FLAC__ASSERT(br->consumed_bits < FLAC__BITS_PER_WORD);
+ 				return true;
+ 			}
+ 			else {
+ 				*val += end - br->consumed_bits;
+-				br->consumed_bits += end;
++				br->consumed_bits = end;
+ 				FLAC__ASSERT(br->consumed_bits < FLAC__BITS_PER_WORD);
+ 				/* didn't find stop bit yet, have to keep going... */
+ 			}
+ 		}
+ 		if(!bitreader_read_from_client_(br))
+@@ -872,11 +872,11 @@
+ 			 * this is a repeat of the above logic adjusted for the fact we
+ 			 * don't have a whole word.  note though if the client is feeding
+ 			 * us data a byte at a time (unlikely), br->consumed_bits may not
+ 			 * be zero.
+ 			 */
+-			if(br->bytes) {
++			if(br->bytes*8 > cbits) {
+ 				const unsigned end = br->bytes * 8;
+ 				brword b = (br->buffer[cwords] & (FLAC__WORD_ALL_ONES << (FLAC__BITS_PER_WORD-end))) << cbits;
+ 				if(b) {
+ 					i = COUNT_ZERO_MSBS(b);
+ 					uval += i;
+@@ -886,11 +886,11 @@
+ 					FLAC__ASSERT(cbits < FLAC__BITS_PER_WORD);
+ 					goto break1;
+ 				}
+ 				else {
+ 					uval += end - cbits;
+-					cbits += end;
++					cbits = end;
+ 					FLAC__ASSERT(cbits < FLAC__BITS_PER_WORD);
+ 					/* didn't find stop bit yet, have to keep going... */
+ 				}
+ 			}
+ 			/* flush registers and read; bitreader_read_from_client_() does
+@@ -1055,11 +1055,11 @@
+ 			 * this is a repeat of the above logic adjusted for the fact we
+ 			 * don't have a whole word.  note though if the client is feeding
+ 			 * us data a byte at a time (unlikely), br->consumed_bits may not
+ 			 * be zero.
+ 			 */
+-			if(br->bytes) {
++			if(br->bytes*8 > cbits) {
+ 				const unsigned end = br->bytes * 8;
+ 				brword b = (br->buffer[cwords] & ~(FLAC__WORD_ALL_ONES >> end)) << cbits;
+ 				if(b) {
+ 					i = COUNT_ZERO_MSBS(b);
+ 					uval += i;
+@@ -1068,11 +1068,11 @@
+ 					FLAC__ASSERT(cbits < FLAC__BITS_PER_WORD);
+ 					goto break1;
+ 				}
+ 				else {
+ 					uval += end - cbits;
+-					cbits += end;
++					cbits = end;
+ 					FLAC__ASSERT(cbits < FLAC__BITS_PER_WORD);
+ 					/* didn't find stop bit yet, have to keep going... */
+ 				}
+ 			}
+ 			/* flush registers and read; bitreader_read_from_client_() does
+diff -r -U5 flac-1.2.1/src/libFLAC/ia32/bitreader_asm.nasm flac-1.2.1-fix/src/libFLAC/ia32/bitreader_asm.nasm
+--- flac-1.2.1/src/libFLAC/ia32/bitreader_asm.nasm	2007-03-29 17:54:53.000000000 -0700
++++ flac-1.2.1-fix/src/libFLAC/ia32/bitreader_asm.nasm	2009-01-06 08:20:31.000000000 -0800
+@@ -270,14 +270,15 @@
+ 	;; ecx		cbits
+ 	;; esi		cwords
+ 	;; edi		uval
+ 	;; ebp		br
+ 	mov	edx, [ebp + 12]		;     edx <- br->bytes
+-	test	edx, edx
+-	jz	.read1			;     if(br->bytes) {  [NOTE: this case is rare so it doesn't have to be all that fast ]
++	shl	edx, 3			;     edx <- br->bytes*8
++	cmp	edx, ecx
++	jbe	.read1			;     if(br->bytes*8 > cbits) {  [NOTE: this case is rare so it doesn't have to be all that fast ]
+ 	mov	ebx, [ebp]
+-	shl	edx, 3			;       edx <- const unsigned end = br->bytes * 8;
++					;       edx <- const unsigned end = br->bytes * 8;
+ 	mov	eax, [ebx + 4*esi]	;       b = br->buffer[cwords]
+ 	xchg	edx, ecx		;       [edx <- cbits , ecx <- end]
+ 	mov	ebx, 0xffffffff		;       ebx <- FLAC__WORD_ALL_ONES
+ 	shr	ebx, cl			;       ebx <- FLAC__WORD_ALL_ONES >> end
+ 	not	ebx			;       ebx <- ~(FLAC__WORD_ALL_ONES >> end)
+@@ -294,11 +295,11 @@
+ 	add	ecx, byte 1		;         cbits++; /* skip over stop bit */
+ 	jmp	short .break1 		;         goto break1;
+ .c1_next3:				;       } else {
+ 	sub	edi, ecx
+ 	add	edi, edx		;         uval += end - cbits;
+-	add	ecx, edx		;         cbits += end
++	mov	ecx, edx		;         cbits = end
+ 					;         /* didn't find stop bit yet, have to keep going... */
+ 					;       }
+ 					;     }
+ .read1:
+ 	; flush registers and read; bitreader_read_from_client_() does
