@@ -2,9 +2,10 @@ DESCRIPTION = "FLAC"
 SECTION = "libs"
 LICENSE = "Xiph"
 
-PR = "r2"
+PR = "r3"
 
-SRC_URI="${SOURCEFORGE_MIRROR}/flac/flac-${PV}.tar.gz"
+SRC_URI="${SOURCEFORGE_MIRROR}/flac/flac-${PV}.tar.gz \
+	 file://bitreader.patch;patch=1"
 
 S = "${WORKDIR}/flac-${PV}"
 

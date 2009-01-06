@@ -1,0 +1,55 @@
+--- ../flac-1.1.4/src/libFLAC/bitreader.c	Mon Feb 12 18:10:27 2007
++++ flac-1.1.4/src/libFLAC/bitreader.c	Mon Jan  5 17:35:42 2009
+@@ -732,11 +732,11 @@
+ 		 * this is a repeat of the above logic adjusted for the fact we
+ 		 * don't have a whole word.  note though if the client is feeding
+ 		 * us data a byte at a time (unlikely), br->consumed_bits may not
+ 		 * be zero.
+ 		 */
+-		if(br->bytes) {
++		if(br->bytes*8 > br->consumed_bits) {
+ 			const unsigned end = br->bytes * 8;
+ 			brword b = (br->buffer[br->consumed_words] & (FLAC__WORD_ALL_ONES << (FLAC__BITS_PER_WORD-end))) << br->consumed_bits;
+ 			if(b) {
+ #if 0 /* too slow, but this is the idea: */
+ 				for(i = 0; !(b & FLAC__WORD_TOP_BIT_ONE); i++)
+@@ -750,11 +750,11 @@
+ 				FLAC__ASSERT(br->consumed_bits < FLAC__BITS_PER_WORD);
+ 				return true;
+ 			}
+ 			else {
+ 				*val += end - br->consumed_bits;
+-				br->consumed_bits += end;
++				br->consumed_bits = end;
+ 				FLAC__ASSERT(br->consumed_bits < FLAC__BITS_PER_WORD);
+ 				/* didn't find stop bit yet, have to keep going... */
+ 			}
+ 		}
+ 		if(!bitreader_read_from_client_(br))
+@@ -854,11 +854,11 @@
+ 			 * this is a repeat of the above logic adjusted for the fact we
+ 			 * don't have a whole word.  note though if the client is feeding
+ 			 * us data a byte at a time (unlikely), br->consumed_bits may not
+ 			 * be zero.
+ 			 */
+-			if(br->bytes) {
++			if(br->bytes*8 > cbits) {
+ 				const unsigned end = br->bytes * 8;
+ 				brword b = (br->buffer[cwords] & (FLAC__WORD_ALL_ONES << (FLAC__BITS_PER_WORD-end))) << cbits;
+ 				if(b) {
+ #if 0 /* too slow, but this is the idea: */
+ 					for(i = 0; !(b & FLAC__WORD_TOP_BIT_ONE); i++)
+@@ -873,11 +873,11 @@
+ 					FLAC__ASSERT(cbits < FLAC__BITS_PER_WORD);
+ 					goto break1;
+ 				}
+ 				else {
+ 					uval += end - cbits;
+-					cbits += end;
++					cbits = end;
+ 					FLAC__ASSERT(cbits < FLAC__BITS_PER_WORD);
+ 					/* didn't find stop bit yet, have to keep going... */
+ 				}
+ 			}
+ 			/* flush registers and read; bitreader_read_from_client_() does
+
