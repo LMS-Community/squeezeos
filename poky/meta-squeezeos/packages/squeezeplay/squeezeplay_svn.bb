@@ -31,7 +31,14 @@ EXTRA_OEMAKE = "all lua-lint"
 
 
 do_stage() {
-	install -m 0644 src/ui/jive.h ${STAGING_INCDIR}/
+	install -d ${STAGING_INCDIR}/squeezeplay
+	install -d ${STAGING_INCDIR}/squeezeplay/ui
+	install -d ${STAGING_INCDIR}/squeezeplay/audio
+	install -m 0644 src/debug.h ${STAGING_INCDIR}/squeezeplay/debug.h
+	install -m 0644 src/types.h ${STAGING_INCDIR}/squeezeplay/types.h
+	install -m 0644 src/ui/jive.h ${STAGING_INCDIR}/squeezeplay/ui/jive.h
+	install -m 0644 src/audio/fifo.h ${STAGING_INCDIR}/squeezeplay/audio/fifo.h
+	install -m 0644 src/audio/streambuf.h ${STAGING_INCDIR}/squeezeplay/audio/streambuf.h
 }
 
 FILES_${PN} += "${datadir}"
