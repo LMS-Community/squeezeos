@@ -1,18 +1,12 @@
 DESCRIPTION = "axTLS SSL library"
 SECTION = "libs"
-#PR = "r0"
+PR = "r1"
 
 SRC_URI = "http://downloads.sourceforge.net/axtls/axTLS-${PV}.tar.gz \
            file://axTLS.config \
 	   "
 
 S = "${WORKDIR}/axTLS"
-
-inherit autotools pkgconfig binconfig
-
-LIBTOOL = "${S}/builds/unix/${HOST_SYS}-libtool"
-EXTRA_OEMAKE = "'LIBTOOL=${LIBTOOL}'"
-EXTRA_OECONF = "--without-zlib"
 
 do_configure() {
 	cp ${WORKDIR}/axTLS.config ${S}/config/.config
@@ -31,11 +25,16 @@ do_stage() {
 	install -m 0644 ${S}/ssl/ssl.h ${STAGING_INCDIR}/axTLS/ssl.h
 	install -m 0644 ${S}/ssl/tls1.h ${STAGING_INCDIR}/axTLS/tls1.h
 	install -m 0644 ${S}/ssl/version.h ${STAGING_INCDIR}/axTLS/version.h
-	oe_libinstall -so -a -C _stage libaxtls ${STAGING_LIBDIR}/
+	oe_libinstall -a -C _stage libaxtls ${STAGING_LIBDIR}/
 }
 
 do_install() {
-	PREFIX=${D} oe_runmake install
+	mkdir -p ${D}/usr/lib
+	PREFIX=${D}/usr oe_runmake install
+
+	# We _always_ want to staticaly link axtls, this seems to be
+	# the easiest way to ensure that
+	rm -f ${S}/_stage/libaxtls.so*
 }
 
 FILES_${PN} = "${libdir}/lib*${SOLIBS}"
