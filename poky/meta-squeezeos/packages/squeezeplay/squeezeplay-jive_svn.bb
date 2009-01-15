@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay - Jive specific code"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r7"
+PR = "r8"
 
 DEPENDS += "squeezeplay"
 
@@ -12,7 +12,7 @@ S = "${WORKDIR}/squeezeplay_jive"
 
 inherit autotools
 
-CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_REVISION=\\"${SQUEEZEOS_REVISION}\\"'
+CFLAGS_prepend = '-I${STAGING_INCDIR}/squeezeplay'
 
 EXTRA_OEMAKE = "all lua-lint"
 
