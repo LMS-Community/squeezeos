@@ -2,7 +2,7 @@ DESCRIPTION = "Marvell 8686 wlan tools"
 SECTION = "base"
 LICENSE = "binary only"
 
-#PR = "r0"
+PR = "r1"
 
 PROVIDES = "marvell-wlan-tools"
 
