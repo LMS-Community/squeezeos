@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r6"
+PR = "r8"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
@@ -21,6 +21,10 @@ S = "${WORKDIR}/squeezeplay"
 inherit autotools
 
 EXTRA_OECONF = "--disable-portaudio"
+
+# Optional close source package
+DEPENDS += "${@base_conditional('ENABLE_SPPRIVATE', 'yes', 'squeezeplay-private', '', d)}"
+EXTRA_OECONF += "${@base_conditional('ENABLE_SPPRIVATE', 'yes', '--with-spprivate', '', d)}"
 
 CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_VERSION}\\" -DSQUEEZEPLAY_REVISION=\\"${SQUEEZEOS_REVISION}\\"'
 
