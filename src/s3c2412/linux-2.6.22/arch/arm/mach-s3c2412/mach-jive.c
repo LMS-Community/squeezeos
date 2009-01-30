@@ -104,17 +104,6 @@ static struct s3c2410_uartcfg jive_uartcfgs[] = {
  * 0x02c00000-0x04000000 : jffs2
  */
 static struct mtd_partition jive_imageA_nand_part[] = {
-
-#if 0
-	/* Don't allow access to the bootloader from linux */
-	{
-		.name           = "uboot",
-		.offset         = 0,
-		.size           = (160*SZ_1K),
-		.mask_flags	= MTD_WRITEABLE, /* force read-only */
-	},
-#endif
-
 	/* booted images */
         {
                 .name           = "kernel (ro)",
@@ -156,20 +145,16 @@ static struct mtd_partition jive_imageA_nand_part[] = {
                 .offset         = (24*SZ_1M) - (192*SZ_1K),
                 .size           = (20*SZ_1M),
         },
+	/* allow R/O access to the bootloader from linux */
+	{
+		.name           = "uboot",
+		.offset         = 0,
+		.size           = (160*SZ_1K),
+		.mask_flags	= MTD_WRITEABLE, /* force read-only */
+	},
 };
 
 static struct mtd_partition jive_imageB_nand_part[] = {
-
-#if 0
-	/* Don't allow access to the bootloader from linux */
-	{
-		.name           = "uboot",
-		.offset         = 0,
-		.size           = (160*SZ_1K),
-		.mask_flags	= MTD_WRITEABLE, /* force read-only */
-	},
-#endif
-
 	/* booted images */
         {
                 .name           = "kernel (ro)",
@@ -211,6 +196,13 @@ static struct mtd_partition jive_imageB_nand_part[] = {
                 .offset         = (2*SZ_1M),
                 .size           = (20*SZ_1M),
         },
+	/* allow read-only access to the bootloader from linux */
+	{
+		.name           = "uboot",
+		.offset         = 0,
+		.size           = (160*SZ_1K),
+		.mask_flags	= MTD_WRITEABLE, /* force read-only */
+	},
 };
 
 static struct nand_ecclayout jive_nand_oob = {
