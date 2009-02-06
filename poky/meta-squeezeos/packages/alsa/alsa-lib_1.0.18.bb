@@ -3,7 +3,7 @@ HOMEPAGE = "http://www.alsa-project.org"
 SECTION = "libs/multimedia"
 LICENSE = "GPL"
 
-PR = "1"
+PR = "2"
 
 # configure.in sets -D__arm__ on the command line for any arm system
 # (not just those with the ARM instruction set), this should be removed,
@@ -30,7 +30,7 @@ EXTRA_OECONF = "\
 	     --disable-alisp \
 	     --enable-old-symbols \
 	     --disable-python \
-	     --with-pcm-plugins=hw,plug,multi,route,empty"
+	     --with-pcm-plugins=hw,plug,multi,rate,route,empty"
 
 do_stage () {
 	oe_libinstall -so -C src libasound ${STAGING_LIBDIR}/
