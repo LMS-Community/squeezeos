@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r25"
+PR = "r26"
 
 SRC_URI = " \
 	file://85-mtd.rules \
@@ -35,6 +35,7 @@ SRC_URI = " \
 	file://squeezeplay \
 	file://suspend \
 	file://udhcpc_action \
+	file://zcip_action \
 	file://wlan \
 	file://wpa_action \
 	file://wpa_supplicant.conf \
@@ -110,6 +111,7 @@ do_install () {
 	install -m 0644 ${WORKDIR}/interfaces ${D}${sysconfdir}/network/interfaces
 	install -m 0755 ${WORKDIR}/if_mapping ${D}${sysconfdir}/network/if_mapping
 	install -m 0755 ${WORKDIR}/udhcpc_action ${D}${sysconfdir}/network/udhcpc_action
+	install -m 0755 ${WORKDIR}/zcip_action ${D}${sysconfdir}/network/zcip_action
 	install -m 0755 ${WORKDIR}/wpa_action ${D}${sysconfdir}/network/wpa_action
 
 	# wlan config
