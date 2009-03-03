@@ -4,8 +4,7 @@ LICENSE = "LGPL"
 
 PR="r0"
 
-SRC_URI = "http://crazney.net/programs/itunes/files/alac_decoder-${PV}.tar.gz \
-           file://main.c.patch;patch=1"
+SRC_URI = "svn://svn.slimdevices.com/repos/slim/vendor/src;module=alac_decoder;rev=25280;proto=http"
 
 S="${WORKDIR}/alac_decoder"
 
