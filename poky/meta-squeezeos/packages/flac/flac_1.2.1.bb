@@ -11,7 +11,7 @@ S = "${WORKDIR}/flac-${PV}"
 
 inherit autotools
 
-EXTRA_OECONF = "--disable-ogg --disable-xmms-plugin"
+EXTRA_OECONF = "--disable-ogg --disable-xmms-plugin --enable-static"
 
 do_stage() {
 	autotools_stage_all
