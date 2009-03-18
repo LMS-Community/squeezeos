@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r8"
+PR = "r9"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 RDEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
