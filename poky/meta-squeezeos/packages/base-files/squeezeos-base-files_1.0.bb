@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r28"
+PR = "r29"
 
 SRC_URI = " \
 	file://85-mtd.rules \
