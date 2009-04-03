@@ -1,0 +1,32 @@
+From 6a365f5b240403e09b8bee62c7b3060575e19460 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 16 Jul 2007 23:40:07 -0400
+Subject: [PATCH] Unionfs: debugging: don't oops if sb->s_root is NULL
+
+If we're calling show_branch_counts very early during mount or late during
+unmount, don't oops if the s_root is already NULL.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 424c60d..94f0e84 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -416,7 +416,10 @@ void __show_branch_counts(const struct super_block *sb,
+ 
+ 	printk("BC:");
+ 	for (i=0; i<sbmax(sb); i++) {
+-		mnt = UNIONFS_D(sb->s_root)->lower_paths[i].mnt;
++		if (sb->s_root)
++			mnt = UNIONFS_D(sb->s_root)->lower_paths[i].mnt;
++		else
++			mnt = NULL;
+ 		printk("%d:", (mnt ? atomic_read(&mnt->mnt_count) : -99));
+ 	}
+ 	printk("%s:%s:%d\n",file,fxn,line);
+-- 
+1.5.4.3
+

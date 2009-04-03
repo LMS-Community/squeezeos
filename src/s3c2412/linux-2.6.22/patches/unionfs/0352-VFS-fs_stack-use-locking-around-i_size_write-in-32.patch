@@ -1,0 +1,53 @@
+From 9fc44e8b5d1e4e088e8376ff531233d420192f94 Mon Sep 17 00:00:00 2001
+From: Hugh Dickins <hugh@veritas.com>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] VFS/fs_stack: use locking around i_size_write in 32-bit systems
+
+LTP's iogen01 doio tests hang nicely on 32-bit SMP when /tmp is a unionfs
+mount of a tmpfs.  See the comment on i_size_write in linux/fs.h: it needs
+to be locked, otherwise i_size_read can spin forever waiting for a lost
+seqcount update.
+
+Most filesystems are already holding i_mutex for this, but unionfs calls
+fsstack_copy_inode_size from many places, not necessarily holding i_mutex.
+Use the low-level i_lock within fsstack_copy_inode_size when 32-bit SMP.
+
+Checked the entire unionfs code to ensure this is the right fix for
+i_size_write().
+
+Also compared to what other file systems do when they have to handle inodes,
+esp. not their own inodes (e.g., network file systems have to access the
+exported file system's inodes).  Found out that most such file systems not just
+don't lock around i_size_write, but they don't even use i_size_read or
+i_size_write to access the inode's size.
+
+CC: Mike Halcrow <mhalcrow@us.ibm.com>
+
+Signed-off-by: Hugh Dickins <hugh@veritas.com>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/stack.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/fs/stack.c b/fs/stack.c
+index 7913fe5..4336f2b 100644
+--- a/fs/stack.c
++++ b/fs/stack.c
+@@ -21,8 +21,14 @@
+  */
+ void fsstack_copy_inode_size(struct inode *dst, const struct inode *src)
+ {
++#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
++	spin_lock(&dst->i_lock);
++#endif
+ 	i_size_write(dst, i_size_read(src));
+ 	dst->i_blocks = src->i_blocks;
++#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
++	spin_unlock(&dst->i_lock);
++#endif
+ }
+ EXPORT_SYMBOL_GPL(fsstack_copy_inode_size);
+ 
+-- 
+1.5.4.3
+

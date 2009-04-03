@@ -1,0 +1,44 @@
+From 7b39c8dfba173646e36fa5d1e8563b07105cd08b Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 13:26:15 -0400
+Subject: [PATCH] Unionfs: set append offset correctly for copied-up files
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   12 ++++++++++--
+ 1 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 0fc7963..83034c2 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -258,9 +258,13 @@ static int do_delayed_copyup(struct file *file)
+ 		else
+ 			err = copyup_deleted_file(file, dentry, bstart,
+ 						  bindex);
+-
+-		if (!err)
++		/* if succeeded, set lower open-file flags and break */
++		if (!err) {
++			struct file *lower_file;
++			lower_file = unionfs_lower_file_idx(file, bindex);
++			lower_file->f_flags = file->f_flags;
+ 			break;
++		}
+ 	}
+ 	if (err || (bstart <= fbstart(file)))
+ 		goto out;
+@@ -491,6 +495,10 @@ static int __open_file(struct inode *inode, struct file *file)
+ 			}
+ 			return err;
+ 		} else {
++			/*
++			 * turn off writeable flags, to force delayed copyup
++			 * by caller.
++			 */
+ 			lower_flags &= ~(OPEN_WRITE_FLAGS);
+ 		}
+ 	}
+-- 
+1.5.4.3
+

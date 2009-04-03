@@ -1,0 +1,1298 @@
+From e05dc076346557b17c972f8fac863599280cedc2 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 24 Mar 2007 17:57:56 -0400
+Subject: [PATCH] coding-style: indent every line properly
+
+---
+ fs/stack.c               |    2 +-
+ fs/unionfs/branchman.c   |    1 -
+ fs/unionfs/commonfops.c  |   22 ++++++------
+ fs/unionfs/copyup.c      |   51 ++++++++++++++---------------
+ fs/unionfs/dentry.c      |   19 +++++------
+ fs/unionfs/dirfops.c     |    3 +-
+ fs/unionfs/dirhelper.c   |   13 +++----
+ fs/unionfs/fanout.h      |    8 ++--
+ fs/unionfs/file.c        |    1 -
+ fs/unionfs/inode.c       |   79 ++++++++++++++++++++++-----------------------
+ fs/unionfs/lookup.c      |   15 ++++-----
+ fs/unionfs/main.c        |   19 +++++------
+ fs/unionfs/rdstate.c     |   15 ++++-----
+ fs/unionfs/rename.c      |   41 +++++++++++------------
+ fs/unionfs/sioq.c        |    3 +-
+ fs/unionfs/sioq.h        |    1 -
+ fs/unionfs/subr.c        |   13 +++----
+ fs/unionfs/super.c       |   17 +++++-----
+ fs/unionfs/union.h       |    8 ++--
+ fs/unionfs/unlink.c      |    1 -
+ fs/unionfs/xattr.c       |    5 +--
+ include/linux/fs_stack.h |    2 +-
+ 22 files changed, 161 insertions(+), 178 deletions(-)
+
+diff --git a/fs/stack.c b/fs/stack.c
+index 67716f6..9aee8fc 100644
+--- a/fs/stack.c
++++ b/fs/stack.c
+@@ -18,7 +18,7 @@ EXPORT_SYMBOL_GPL(fsstack_copy_inode_size);
+  * copying
+  */
+ void fsstack_copy_attr_all(struct inode *dest, const struct inode *src,
+-				int (*get_nlinks)(struct inode *))
++			   int (*get_nlinks)(struct inode *))
+ {
+ 	dest->i_mode = src->i_mode;
+ 	dest->i_uid = src->i_uid;
+diff --git a/fs/unionfs/branchman.c b/fs/unionfs/branchman.c
+index 6912be9..dc0a5c5 100644
+--- a/fs/unionfs/branchman.c
++++ b/fs/unionfs/branchman.c
+@@ -57,4 +57,3 @@ out:
+ 	unionfs_unlock_dentry(dentry);
+ 	return err < 0 ? err : bend;
+ }
+-
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index c9df99d..6a207fc 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -39,7 +39,7 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 	hidden_dentry = unionfs_lower_dentry_idx(dentry, bstart);
+ 
+ 	sprintf(name, ".unionfs%*.*lx",
+-			i_inosize, i_inosize, hidden_dentry->d_inode->i_ino);
++		i_inosize, i_inosize, hidden_dentry->d_inode->i_ino);
+ 
+ 	/*
+ 	 * Loop, looking for an unused temp name to copyup to.
+@@ -59,7 +59,7 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 		sprintf(suffix, "%*.*x", countersize, countersize, counter);
+ 
+ 		printk(KERN_DEBUG "unionfs: trying to rename %s to %s\n",
+-				dentry->d_name.name, name);
++		       dentry->d_name.name, name);
+ 
+ 		tmp_dentry = lookup_one_len(name, hidden_dentry->d_parent,
+ 					    UNIONFS_TMPNAM_LEN);
+@@ -175,8 +175,8 @@ static int open_all_files(struct file *file)
+ 		unionfs_read_unlock(sb);
+ 
+ 		hidden_file = dentry_open(hidden_dentry,
+-				unionfs_lower_mnt_idx(dentry, bindex),
+-				file->f_flags);
++					  unionfs_lower_mnt_idx(dentry, bindex),
++					  file->f_flags);
+ 		if (IS_ERR(hidden_file)) {
+ 			err = PTR_ERR(hidden_file);
+ 			goto out;
+@@ -211,7 +211,7 @@ static int open_highest_file(struct file *file, int willwrite)
+ 				break;
+ 		}
+ 		atomic_set(&UNIONFS_F(file)->generation,
+-			atomic_read(&UNIONFS_I(dentry->d_inode)->generation));
++			   atomic_read(&UNIONFS_I(dentry->d_inode)->generation));
+ 		goto out;
+ 	}
+ 
+@@ -221,7 +221,7 @@ static int open_highest_file(struct file *file, int willwrite)
+ 	branchget(sb, bstart);
+ 	unionfs_read_unlock(sb);
+ 	hidden_file = dentry_open(hidden_dentry,
+-			unionfs_lower_mnt_idx(dentry, bstart), file->f_flags);
++				  unionfs_lower_mnt_idx(dentry, bstart), file->f_flags);
+ 	if (IS_ERR(hidden_file)) {
+ 		err = PTR_ERR(hidden_file);
+ 		goto out;
+@@ -249,7 +249,7 @@ static int do_delayed_copyup(struct file *file, struct dentry *dentry)
+ 	for (bindex = bstart - 1; bindex >= 0; bindex--) {
+ 		if (!d_deleted(file->f_dentry))
+ 			err = copyup_file(parent_inode, file, bstart,
+-					bindex, inode_size);
++					  bindex, inode_size);
+ 		else
+ 			err = copyup_deleted_file(file, dentry, bstart, bindex);
+ 
+@@ -351,7 +351,7 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	    !IS_WRITE_FLAG(unionfs_lower_file(file)->f_flags) &&
+ 	    is_robranch(dentry)) {
+ 		printk(KERN_DEBUG "Doing delayed copyup of a read-write "
+-				  "file on a read-only branch.\n");
++		       "file on a read-only branch.\n");
+ 		err = do_delayed_copyup(file, dentry);
+ 	}
+ 
+@@ -383,8 +383,8 @@ static int __open_dir(struct inode *inode, struct file *file)
+ 		dget(hidden_dentry);
+ 		unionfs_mntget(file->f_dentry, bindex);
+ 		hidden_file = dentry_open(hidden_dentry,
+-				unionfs_lower_mnt_idx(file->f_dentry, bindex),
+-				file->f_flags);
++					  unionfs_lower_mnt_idx(file->f_dentry, bindex),
++					  file->f_flags);
+ 		if (IS_ERR(hidden_file))
+ 			return PTR_ERR(hidden_file);
+ 
+@@ -429,7 +429,7 @@ static int __open_file(struct inode *inode, struct file *file)
+ 			/* copyup the file */
+ 			for (bindex = bstart - 1; bindex >= 0; bindex--) {
+ 				err = copyup_file(file->f_dentry->d_parent->d_inode,
+-						file, bstart, bindex, size);
++						  file, bstart, bindex, size);
+ 				if (!err)
+ 					break;
+ 			}
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 331c6ee..ece76cc 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -85,7 +85,7 @@ static int copyup_xattrs(struct dentry *old_hidden_dentry,
+ 			goto out;
+ 		name_list += strlen(name_list) + 1;
+ 	}
+-      out:
++out:
+ 	name_list = name_list_orig;
+ 
+ 	if (name_list)
+@@ -118,8 +118,8 @@ static int copyup_permissions(struct super_block *sb,
+ 	newattrs.ia_mode = i->i_mode;
+ 
+ 	newattrs.ia_valid = ATTR_CTIME | ATTR_ATIME | ATTR_MTIME |
+-	    ATTR_ATIME_SET | ATTR_MTIME_SET | ATTR_FORCE |
+-	    ATTR_GID | ATTR_UID | ATTR_MODE;
++		ATTR_ATIME_SET | ATTR_MTIME_SET | ATTR_FORCE |
++		ATTR_GID | ATTR_UID | ATTR_MODE;
+ 
+ 	err = notify_change(new_hidden_dentry, &newattrs);
+ 
+@@ -184,7 +184,7 @@ static int __copyup_ndentry(struct dentry *old_hidden_dentry,
+ 		err = args.err;
+ 	} else {
+ 		printk(KERN_ERR "Unknown inode type %d\n",
+-				old_mode);
++		       old_mode);
+ 		BUG();
+ 	}
+ 
+@@ -211,8 +211,8 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 	branchget(sb, old_bindex);
+ 	unionfs_read_unlock(sb);
+ 	input_file = dentry_open(old_hidden_dentry,
+-				unionfs_lower_mnt_idx(dentry, old_bindex),
+-				O_RDONLY | O_LARGEFILE);
++				 unionfs_lower_mnt_idx(dentry, old_bindex),
++				 O_RDONLY | O_LARGEFILE);
+ 	if (IS_ERR(input_file)) {
+ 		dput(old_hidden_dentry);
+ 		err = PTR_ERR(input_file);
+@@ -230,8 +230,8 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 	branchget(sb, new_bindex);
+ 	unionfs_read_unlock(sb);
+ 	output_file = dentry_open(new_hidden_dentry,
+-				unionfs_lower_mnt_idx(dentry, new_bindex),
+-				O_WRONLY | O_LARGEFILE);
++				  unionfs_lower_mnt_idx(dentry, new_bindex),
++				  O_WRONLY | O_LARGEFILE);
+ 	if (IS_ERR(output_file)) {
+ 		err = PTR_ERR(output_file);
+ 		goto out_close_in2;
+@@ -265,19 +265,19 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 		len -= PAGE_SIZE;
+ 
+ 		read_bytes =
+-		    input_file->f_op->read(input_file,
+-					   (char __user *)buf, size,
+-					   &input_file->f_pos);
++			input_file->f_op->read(input_file,
++					       (char __user *)buf, size,
++					       &input_file->f_pos);
+ 		if (read_bytes <= 0) {
+ 			err = read_bytes;
+ 			break;
+ 		}
+ 
+ 		write_bytes =
+-		    output_file->f_op->write(output_file,
+-					     (char __user *)buf,
+-					     read_bytes,
+-					     &output_file->f_pos);
++			output_file->f_op->write(output_file,
++						 (char __user *)buf,
++						 read_bytes,
++						 &output_file->f_pos);
+ 		if ((write_bytes < 0) || (write_bytes < read_bytes)) {
+ 			err = write_bytes;
+ 			break;
+@@ -387,9 +387,9 @@ static int copyup_named_dentry(struct inode *dir, struct dentry *dentry,
+ 		oldfs = get_fs();
+ 		set_fs(KERNEL_DS);
+ 		err = old_hidden_dentry->d_inode->i_op->readlink(
+-					old_hidden_dentry,
+-					(char __user *)symbuf,
+-					PATH_MAX);
++			old_hidden_dentry,
++			(char __user *)symbuf,
++			PATH_MAX);
+ 		set_fs(oldfs);
+ 		if (err) {
+ 			__clear(dentry, old_hidden_dentry,
+@@ -417,7 +417,7 @@ static int copyup_named_dentry(struct inode *dir, struct dentry *dentry,
+ 	/* We actually copyup the file here. */
+ 	if (S_ISREG(old_hidden_dentry->d_inode->i_mode))
+ 		err = __copyup_reg_data(dentry, new_hidden_dentry, new_bindex,
+-				old_hidden_dentry, old_bindex, copyup_file, len);
++					old_hidden_dentry, old_bindex, copyup_file, len);
+ 	if (err)
+ 		goto out_unlink;
+ 
+@@ -584,7 +584,7 @@ static void __set_inode(struct dentry * upper, struct dentry * lower,
+ 			int bindex)
+ {
+ 	unionfs_set_lower_inode_idx(upper->d_inode, bindex,
+-			igrab(lower->d_inode));
++				    igrab(lower->d_inode));
+ 	if (likely(ibstart(upper->d_inode) > bindex))
+ 		ibstart(upper->d_inode) = bindex;
+ 	if (likely(ibend(upper->d_inode) < bindex))
+@@ -701,8 +701,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 		if (child_dentry != dentry) {
+ 			/* lookup child in the underlying file system */
+ 			hidden_dentry =
+-			    lookup_one_len(childname, hidden_parent_dentry,
+-					   childnamelen);
++				lookup_one_len(childname, hidden_parent_dentry,
++					       childnamelen);
+ 			if (IS_ERR(hidden_dentry))
+ 				goto out;
+ 		} else {
+@@ -711,8 +711,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 			 * lookup the whiteout child in the underlying file system
+ 			 */
+ 			hidden_dentry =
+-			    lookup_one_len(name, hidden_parent_dentry,
+-					   strlen(name));
++				lookup_one_len(name, hidden_parent_dentry,
++					       strlen(name));
+ 			if (IS_ERR(hidden_dentry))
+ 				goto out;
+ 
+@@ -744,7 +744,7 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 
+ 			if (!err)
+ 				err = copyup_permissions(dir->i_sb,
+-						child_dentry, hidden_dentry);
++							 child_dentry, hidden_dentry);
+ 			unlock_dir(hidden_parent_dentry);
+ 			if (err) {
+ 				dput(hidden_dentry);
+@@ -764,4 +764,3 @@ out:
+ 	kfree(path);
+ 	return hidden_dentry;
+ }
+-
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 9eb143d..2369cf8 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -79,7 +79,7 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry, struct nameidata *n
+ 			struct dentry *hidden_dentry;
+ 			for (bindex = bstart; bindex <= bend; bindex++) {
+ 				hidden_dentry =
+-				    unionfs_lower_dentry_idx(dentry, bindex);
++					unionfs_lower_dentry_idx(dentry, bindex);
+ 				dput(hidden_dentry);
+ 			}
+ 		}
+@@ -106,8 +106,8 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry, struct nameidata *n
+ 				struct inode *hidden_inode;
+ 				for (bindex = bstart; bindex <= bend; bindex++) {
+ 					hidden_inode =
+-					    unionfs_lower_inode_idx(dentry->d_inode,
+-							bindex);
++						unionfs_lower_inode_idx(dentry->d_inode,
++									bindex);
+ 					iput(hidden_inode);
+ 				}
+ 			}
+@@ -159,10 +159,10 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry, struct nameidata *n
+ 
+ 	if (valid) {
+ 		fsstack_copy_attr_all(dentry->d_inode,
+-				unionfs_lower_inode(dentry->d_inode),
+-				unionfs_get_nlinks);
++				      unionfs_lower_inode(dentry->d_inode),
++				      unionfs_get_nlinks);
+ 		fsstack_copy_inode_size(dentry->d_inode,
+-				unionfs_lower_inode(dentry->d_inode));
++					unionfs_lower_inode(dentry->d_inode));
+ 	}
+ 
+ out:
+@@ -247,7 +247,7 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ 	}
+ 
+ 
+- out_this:
++out_this:
+ 	/* finally, lock this dentry and revalidate it */
+ 	verify_locked(dentry);
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+@@ -260,7 +260,7 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ 			unionfs_mntput(dentry, bindex);
+ 	}
+ 
+- out_free:
++out_free:
+ 	/* unlock/dput all dentries in chain and return status */
+ 	if (chain_len > 0) {
+ 		for (i=0; i<chain_len; i++) {
+@@ -268,7 +268,7 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ 		}
+ 		kfree(chain);
+ 	}
+- out:
++out:
+ 	return valid;
+ }
+ 
+@@ -330,4 +330,3 @@ struct dentry_operations unionfs_dops = {
+ 	.d_revalidate	= unionfs_d_revalidate,
+ 	.d_release	= unionfs_d_release,
+ };
+-
+diff --git a/fs/unionfs/dirfops.c b/fs/unionfs/dirfops.c
+index 6ff32a0..1c4f786 100644
+--- a/fs/unionfs/dirfops.c
++++ b/fs/unionfs/dirfops.c
+@@ -231,7 +231,7 @@ static loff_t unionfs_dir_llseek(struct file *file, loff_t offset, int origin)
+ 					err = -EINVAL;
+ 			} else {
+ 				rdstate = find_rdstate(file->f_dentry->d_inode,
+-							offset);
++						       offset);
+ 				if (rdstate) {
+ 					UNIONFS_F(file)->rdstate = rdstate;
+ 					err = rdstate->offset;
+@@ -264,4 +264,3 @@ struct file_operations unionfs_dir_fops = {
+ 	.release	= unionfs_file_release,
+ 	.flush		= unionfs_flush,
+ };
+-
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index bd15eb4..8a4bc93 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -23,7 +23,7 @@
+  * hidden directory inode should be locked
+  */
+ int do_delete_whiteouts(struct dentry *dentry, int bindex,
+-		     struct unionfs_dir_state *namelist)
++			struct unionfs_dir_state *namelist)
+ {
+ 	int err = 0;
+ 	struct dentry *hidden_dir_dentry = NULL;
+@@ -52,7 +52,7 @@ int do_delete_whiteouts(struct dentry *dentry, int bindex,
+ 	for (i = 0; !err && i < namelist->size; i++) {
+ 		list_for_each(pos, &namelist->list[i]) {
+ 			cursor =
+-			    list_entry(pos, struct filldir_node, file_list);
++				list_entry(pos, struct filldir_node, file_list);
+ 			/* Only operate on whiteouts in this branch. */
+ 			if (cursor->bindex != bindex)
+ 				continue;
+@@ -61,8 +61,8 @@ int do_delete_whiteouts(struct dentry *dentry, int bindex,
+ 
+ 			strcpy(p, cursor->name);
+ 			hidden_dentry =
+-			    lookup_one_len(name, hidden_dir_dentry,
+-					   cursor->namelen + UNIONFS_WHLEN);
++				lookup_one_len(name, hidden_dir_dentry,
++					       cursor->namelen + UNIONFS_WHLEN);
+ 			if (IS_ERR(hidden_dentry)) {
+ 				err = PTR_ERR(hidden_dentry);
+ 				break;
+@@ -230,8 +230,8 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 		branchget(sb, bindex);
+ 		unionfs_read_unlock(sb);
+ 		hidden_file =
+-		    dentry_open(hidden_dentry, unionfs_lower_mnt_idx(dentry, bindex),
+-				O_RDONLY);
++			dentry_open(hidden_dentry, unionfs_lower_mnt_idx(dentry, bindex),
++				    O_RDONLY);
+ 		if (IS_ERR(hidden_file)) {
+ 			err = PTR_ERR(hidden_file);
+ 			dput(hidden_dentry);
+@@ -273,4 +273,3 @@ out:
+ 
+ 	return err;
+ }
+-
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 9e4a35f..dbdbbe3 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -91,7 +91,7 @@ static inline struct inode *unionfs_lower_inode_idx(const struct inode *i, int i
+ }
+ 
+ static inline void unionfs_set_lower_inode_idx(struct inode *i, int index,
+-				   struct inode *val)
++					       struct inode *val)
+ {
+ 	UNIONFS_I(i)->lower_inodes[index] = val;
+ }
+@@ -113,7 +113,7 @@ static inline struct super_block *unionfs_lower_super_idx(const struct super_blo
+ }
+ 
+ static inline void unionfs_set_lower_super_idx(struct super_block *sb, int index,
+-				   struct super_block *val)
++					       struct super_block *val)
+ {
+ 	UNIONFS_SB(sb)->data[index].sb = val;
+ }
+@@ -181,7 +181,7 @@ static inline void set_dbopaque(struct dentry *dent, int val)
+ }
+ 
+ static inline void unionfs_set_lower_dentry_idx(struct dentry *dent, int index,
+-				   struct dentry *val)
++						struct dentry *val)
+ {
+ 	UNIONFS_D(dent)->lower_paths[index].dentry = val;
+ }
+@@ -197,7 +197,7 @@ static inline struct dentry *unionfs_lower_dentry(const struct dentry *dent)
+ }
+ 
+ static inline void unionfs_set_lower_mnt_idx(struct dentry *dent, int index,
+-				   struct vfsmount *mnt)
++					     struct vfsmount *mnt)
+ {
+ 	UNIONFS_D(dent)->lower_paths[index].mnt = mnt;
+ }
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 84d6bab..c53af94 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -263,4 +263,3 @@ struct file_operations unionfs_main_fops = {
+ 	.fsync		= unionfs_fsync,
+ 	.fasync		= unionfs_fasync,
+ };
+-
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index f91cf8c..789e2cf 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -69,7 +69,7 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 	}
+ 
+ 	wh_dentry = lookup_one_len(name, hidden_dentry->d_parent,
+-			   dentry->d_name.len + UNIONFS_WHLEN);
++				   dentry->d_name.len + UNIONFS_WHLEN);
+ 	if (IS_ERR(wh_dentry)) {
+ 		err = PTR_ERR(wh_dentry);
+ 		wh_dentry = NULL;
+@@ -86,8 +86,8 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 
+ 		mutex_lock(&wh_dentry->d_inode->i_mutex);
+ 		newattrs.ia_valid = ATTR_CTIME | ATTR_MODE | ATTR_ATIME
+-		    | ATTR_MTIME | ATTR_UID | ATTR_GID | ATTR_FORCE
+-		    | ATTR_KILL_SUID | ATTR_KILL_SGID;
++			| ATTR_MTIME | ATTR_UID | ATTR_GID | ATTR_FORCE
++			| ATTR_KILL_SUID | ATTR_KILL_SGID;
+ 
+ 		newattrs.ia_mode = mode & ~current->fs->umask;
+ 		newattrs.ia_uid = current->fsuid;
+@@ -104,8 +104,8 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 
+ 		if (err)
+ 			printk(KERN_WARNING "unionfs: %s:%d: notify_change "
+-				"failed: %d, ignoring..\n",
+-				__FILE__, __LINE__, err);
++			       "failed: %d, ignoring..\n",
++			       __FILE__, __LINE__, err);
+ 
+ 		new_hidden_dentry = unionfs_lower_dentry(dentry);
+ 		dget(new_hidden_dentry);
+@@ -121,9 +121,9 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 		}
+ 		if (!err) {
+ 			fsstack_copy_attr_times(parent,
+-					new_hidden_dentry->d_parent->d_inode);
++						new_hidden_dentry->d_parent->d_inode);
+ 			fsstack_copy_inode_size(parent,
+-					new_hidden_dentry->d_parent->d_inode);
++						new_hidden_dentry->d_parent->d_inode);
+ 			parent->i_nlink = unionfs_get_nlinks(parent);
+ 		}
+ 
+@@ -194,9 +194,9 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 			err = unionfs_interpose(dentry, parent->i_sb, 0);
+ 			if (!err) {
+ 				fsstack_copy_attr_times(parent,
+-						hidden_parent_dentry->d_inode);
++							hidden_parent_dentry->d_inode);
+ 				fsstack_copy_inode_size(parent,
+-						hidden_parent_dentry->d_inode);
++							hidden_parent_dentry->d_inode);
+ 				/* update number of links on parent directory */
+ 				parent->i_nlink = unionfs_get_nlinks(parent);
+ 			}
+@@ -266,7 +266,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	}
+ 
+ 	whiteout_dentry = lookup_one_len(name, hidden_new_dentry->d_parent,
+-				new_dentry->d_name.len + UNIONFS_WHLEN);
++					 new_dentry->d_name.len + UNIONFS_WHLEN);
+ 	if (IS_ERR(whiteout_dentry)) {
+ 		err = PTR_ERR(whiteout_dentry);
+ 		goto out;
+@@ -281,7 +281,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 		err = is_robranch_super(new_dentry->d_sb, dbstart(new_dentry));
+ 		if (!err)
+ 			err = vfs_unlink(hidden_dir_dentry->d_inode,
+-				       whiteout_dentry);
++					 whiteout_dentry);
+ 
+ 		fsstack_copy_attr_times(dir, hidden_dir_dentry->d_inode);
+ 		dir->i_nlink = unionfs_get_nlinks(dir);
+@@ -294,7 +294,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 
+ 	if (dbstart(old_dentry) != dbstart(new_dentry)) {
+ 		hidden_new_dentry =
+-		    create_parents(dir, new_dentry, dbstart(old_dentry));
++			create_parents(dir, new_dentry, dbstart(old_dentry));
+ 		err = PTR_ERR(hidden_new_dentry);
+ 		if (IS_COPYUP_ERR(err))
+ 			goto docopyup;
+@@ -308,7 +308,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	hidden_dir_dentry = lock_parent(hidden_new_dentry);
+ 	if (!(err = is_robranch(old_dentry)))
+ 		err = vfs_link(hidden_old_dentry, hidden_dir_dentry->d_inode,
+-			     hidden_new_dentry);
++			       hidden_new_dentry);
+ 	unlock_dir(hidden_dir_dentry);
+ 
+ docopyup:
+@@ -318,20 +318,20 @@ docopyup:
+ 
+ 		for (bindex = old_bstart - 1; bindex >= 0; bindex--) {
+ 			err =
+-			    copyup_dentry(old_dentry->d_parent->
+-					  d_inode, old_dentry,
+-					  old_bstart, bindex, NULL,
+-					  old_dentry->d_inode->i_size);
++				copyup_dentry(old_dentry->d_parent->
++					      d_inode, old_dentry,
++					      old_bstart, bindex, NULL,
++					      old_dentry->d_inode->i_size);
+ 			if (!err) {
+ 				hidden_new_dentry =
+-				    create_parents(dir, new_dentry, bindex);
++					create_parents(dir, new_dentry, bindex);
+ 				hidden_old_dentry = unionfs_lower_dentry(old_dentry);
+ 				hidden_dir_dentry =
+-				    lock_parent(hidden_new_dentry);
++					lock_parent(hidden_new_dentry);
+ 				/* do vfs_link */
+ 				err = vfs_link(hidden_old_dentry,
+-					     hidden_dir_dentry->d_inode,
+-					     hidden_new_dentry);
++					       hidden_dir_dentry->d_inode,
++					       hidden_new_dentry);
+ 				unlock_dir(hidden_dir_dentry);
+ 				goto check_link;
+ 			}
+@@ -347,7 +347,7 @@ check_link:
+ 	new_dentry->d_inode = igrab(old_dentry->d_inode);
+ 	d_instantiate(new_dentry, new_dentry->d_inode);
+ 	fsstack_copy_attr_all(dir, hidden_new_dentry->d_parent->d_inode,
+-					unionfs_get_nlinks);
++			      unionfs_get_nlinks);
+ 	fsstack_copy_inode_size(dir, hidden_new_dentry->d_parent->d_inode);
+ 
+ 	/* propagate number of hard-links */
+@@ -395,8 +395,8 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 	}
+ 
+ 	whiteout_dentry =
+-	    lookup_one_len(name, hidden_dentry->d_parent,
+-			   dentry->d_name.len + UNIONFS_WHLEN);
++		lookup_one_len(name, hidden_dentry->d_parent,
++			       dentry->d_name.len + UNIONFS_WHLEN);
+ 	if (IS_ERR(whiteout_dentry)) {
+ 		err = PTR_ERR(whiteout_dentry);
+ 		goto out;
+@@ -411,7 +411,7 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 
+ 		if (!(err = is_robranch_super(dentry->d_sb, bstart)))
+ 			err = vfs_unlink(hidden_dir_dentry->d_inode,
+-				       whiteout_dentry);
++					 whiteout_dentry);
+ 		dput(whiteout_dentry);
+ 
+ 		fsstack_copy_attr_times(dir, hidden_dir_dentry->d_inode);
+@@ -448,7 +448,7 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 					err = PTR_ERR(hidden_dentry);
+ 
+ 				printk(KERN_DEBUG "hidden dentry NULL (or error)"
+-					"for bindex = %d\n", bindex);
++				       "for bindex = %d\n", bindex);
+ 				continue;
+ 			}
+ 		}
+@@ -458,8 +458,8 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 		if (!(err = is_robranch_super(dentry->d_sb, bindex))) {
+ 			mode = S_IALLUGO;
+ 			err =
+-			    vfs_symlink(hidden_dir_dentry->d_inode,
+-					hidden_dentry, symname, mode);
++				vfs_symlink(hidden_dir_dentry->d_inode,
++					    hidden_dentry, symname, mode);
+ 		}
+ 		unlock_dir(hidden_dir_dentry);
+ 
+@@ -471,9 +471,9 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 			err = unionfs_interpose(dentry, dir->i_sb, 0);
+ 			if (!err) {
+ 				fsstack_copy_attr_times(dir,
+-						hidden_dir_dentry->d_inode);
++							hidden_dir_dentry->d_inode);
+ 				fsstack_copy_inode_size(dir,
+-						hidden_dir_dentry->d_inode);
++							hidden_dir_dentry->d_inode);
+ 				/* update number of links on parent directory */
+ 				dir->i_nlink = unionfs_get_nlinks(dir);
+ 			}
+@@ -515,7 +515,7 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 	}
+ 
+ 	whiteout_dentry = lookup_one_len(name, hidden_dentry->d_parent,
+-			   dentry->d_name.len + UNIONFS_WHLEN);
++					 dentry->d_name.len + UNIONFS_WHLEN);
+ 	if (IS_ERR(whiteout_dentry)) {
+ 		err = PTR_ERR(whiteout_dentry);
+ 		goto out;
+@@ -559,7 +559,7 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 			hidden_dentry = create_parents(parent, dentry, bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				printk(KERN_DEBUG "hidden dentry NULL for "
+-					"bindex = %d\n", bindex);
++				       "bindex = %d\n", bindex);
+ 				continue;
+ 			}
+ 		}
+@@ -590,9 +590,9 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 		err = unionfs_interpose(dentry, parent->i_sb, 0);
+ 		if (!err) {
+ 			fsstack_copy_attr_times(parent,
+-					hidden_parent_dentry->d_inode);
++						hidden_parent_dentry->d_inode);
+ 			fsstack_copy_inode_size(parent,
+-					hidden_parent_dentry->d_inode);
++						hidden_parent_dentry->d_inode);
+ 
+ 			/* update number of links on parent directory */
+ 			parent->i_nlink = unionfs_get_nlinks(parent);
+@@ -601,7 +601,7 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 		err = make_dir_opaque(dentry, dbstart(dentry));
+ 		if (err) {
+ 			printk(KERN_ERR "mkdir: error creating "
+-				".wh.__dir_opaque: %d\n", err);
++			       ".wh.__dir_opaque: %d\n", err);
+ 			goto out;
+ 		}
+ 
+@@ -644,7 +644,7 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 	}
+ 
+ 	whiteout_dentry = lookup_one_len(name, hidden_dentry->d_parent,
+-				dentry->d_name.len + UNIONFS_WHLEN);
++					 dentry->d_name.len + UNIONFS_WHLEN);
+ 	if (IS_ERR(whiteout_dentry)) {
+ 		err = PTR_ERR(whiteout_dentry);
+ 		goto out;
+@@ -706,9 +706,9 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 		err = unionfs_interpose(dentry, dir->i_sb, 0);
+ 		if (!err) {
+ 			fsstack_copy_attr_times(dir,
+-					hidden_parent_dentry->d_inode);
++						hidden_parent_dentry->d_inode);
+ 			fsstack_copy_inode_size(dir,
+-					hidden_parent_dentry->d_inode);
++						hidden_parent_dentry->d_inode);
+ 			/* update number of links on parent directory */
+ 			dir->i_nlink = unionfs_get_nlinks(dir);
+ 		}
+@@ -813,7 +813,7 @@ static int inode_permission(struct inode *inode, int mask, struct nameidata *nd,
+ 		if (bindex == 0) {
+ 			umode_t mode = inode->i_mode;
+ 			if (IS_RDONLY(inode) &&
+-			   (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
++			    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+ 				return -EROFS;
+ 		}
+ 		/*
+@@ -1013,4 +1013,3 @@ struct inode_operations unionfs_main_iops = {
+ 	.listxattr	= unionfs_listxattr,
+ #endif
+ };
+-
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 8069698..661bc5b 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -47,7 +47,7 @@ static noinline int is_opaque_dir(struct dentry *dentry, int bindex)
+ 
+ 	if (!permission(hidden_inode, MAY_EXEC, NULL))
+ 		wh_hidden_dentry = lookup_one_len(UNIONFS_DIR_OPAQUE, hidden_dentry,
+-					sizeof(UNIONFS_DIR_OPAQUE) - 1);
++						  sizeof(UNIONFS_DIR_OPAQUE) - 1);
+ 	else {
+ 		args.is_opaque.dentry = hidden_dentry;
+ 		run_sioq(__is_opaque_dir, &args);
+@@ -208,7 +208,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 		nd->mnt = unionfs_lower_mnt_idx(parent_dentry, bindex);
+ 
+ 		hidden_dentry = lookup_one_len_nd(name, hidden_dir_dentry,
+-					       namelen, nd);
++						  namelen, nd);
+ 		if (IS_ERR(hidden_dentry)) {
+ 			dput(first_hidden_dentry);
+ 			unionfs_mntput(first_dentry, first_dentry_offset);
+@@ -250,7 +250,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 
+ 		/* update parent directory's atime with the bindex */
+ 		fsstack_copy_attr_atime(parent_dentry->d_inode,
+-				     hidden_dir_dentry->d_inode);
++					hidden_dir_dentry->d_inode);
+ 
+ 		/* We terminate file lookups here. */
+ 		if (!S_ISDIR(hidden_dentry->d_inode->i_mode)) {
+@@ -299,7 +299,7 @@ out_negative:
+ 		nd->mnt = unionfs_lower_mnt_idx(parent_dentry, bindex);
+ 
+ 		first_hidden_dentry = lookup_one_len_nd(name, hidden_dir_dentry,
+-						     namelen, nd);
++							namelen, nd);
+ 		first_dentry_offset = bindex;
+ 		if (IS_ERR(first_hidden_dentry)) {
+ 			err = PTR_ERR(first_hidden_dentry);
+@@ -410,8 +410,8 @@ static struct kmem_cache *unionfs_dentry_cachep;
+ int unionfs_init_dentry_cache(void)
+ {
+ 	unionfs_dentry_cachep = kmem_cache_create("unionfs_dentry",
+-					sizeof(struct unionfs_dentry_info), 0,
+-					SLAB_RECLAIM_ACCOUNT, NULL, NULL);
++						  sizeof(struct unionfs_dentry_info), 0,
++						  SLAB_RECLAIM_ACCOUNT, NULL, NULL);
+ 
+ 	return (unionfs_dentry_cachep ? 0 : -ENOMEM);
+ }
+@@ -440,7 +440,7 @@ int new_dentry_private_data(struct dentry *dentry)
+ 	spin_lock(&dentry->d_lock);
+ 	if (!info) {
+ 		dentry->d_fsdata = kmem_cache_alloc(unionfs_dentry_cachep,
+-						GFP_ATOMIC);
++						    GFP_ATOMIC);
+ 		info = UNIONFS_D(dentry);
+ 
+ 		if (!info)
+@@ -514,4 +514,3 @@ void update_bstart(struct dentry *dentry)
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 	}
+ }
+-
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 75b7129..e715f29 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -61,7 +61,7 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 			   atomic_read(&UNIONFS_SB(sb)->generation));
+ 
+ 		UNIONFS_I(inode)->lower_inodes =
+-		    kcalloc(sbmax(sb), sizeof(struct inode *), GFP_KERNEL);
++			kcalloc(sbmax(sb), sizeof(struct inode *), GFP_KERNEL);
+ 		if (!UNIONFS_I(inode)->lower_inodes) {
+ 			err = -ENOMEM;
+ 			goto out;
+@@ -90,7 +90,7 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 			continue;
+ 
+ 		unionfs_set_lower_inode_idx(inode, bindex,
+-				igrab(hidden_dentry->d_inode));
++					    igrab(hidden_dentry->d_inode));
+ 	}
+ 
+ 	ibstart(inode) = dbstart(dentry);
+@@ -169,7 +169,7 @@ void unionfs_reinterpose(struct dentry *dentry)
+ 		if (unionfs_lower_inode_idx(inode, bindex))
+ 			continue;
+ 		unionfs_set_lower_inode_idx(inode, bindex,
+-				igrab(hidden_dentry->d_inode));
++					    igrab(hidden_dentry->d_inode));
+ 	}
+ 	ibstart(inode) = dbstart(dentry);
+ 	ibend(inode) = dbend(dentry);
+@@ -267,14 +267,14 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ 
+ 	/* allocate space for underlying pointers to hidden dentry */
+ 	UNIONFS_SB(sb)->data = kcalloc(branches,
+-			sizeof(struct unionfs_data), GFP_KERNEL);
++				       sizeof(struct unionfs_data), GFP_KERNEL);
+ 	if (!UNIONFS_SB(sb)->data) {
+ 		err = -ENOMEM;
+ 		goto out;
+ 	}
+ 
+ 	hidden_root_info->lower_paths = kcalloc(branches,
+-			sizeof(struct path), GFP_KERNEL);
++						sizeof(struct path), GFP_KERNEL);
+ 	if (!hidden_root_info->lower_paths) {
+ 		err = -ENOMEM;
+ 		goto out;
+@@ -346,7 +346,7 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ 
+ 			if (is_branch_overlap(dent1, dent2)) {
+ 				printk(KERN_WARNING "unionfs: branches %d and "
+-					"%d overlap\n", i, j);
++				       "%d overlap\n", i, j);
+ 				err = -EINVAL;
+ 				goto out;
+ 			}
+@@ -392,7 +392,7 @@ static struct unionfs_dentry_info *unionfs_parse_options(struct super_block *sb,
+ 	/* allocate private data area */
+ 	err = -ENOMEM;
+ 	hidden_root_info =
+-	    kzalloc(sizeof(struct unionfs_dentry_info), GFP_KERNEL);
++		kzalloc(sizeof(struct unionfs_dentry_info), GFP_KERNEL);
+ 	if (!hidden_root_info)
+ 		goto out_error;
+ 	hidden_root_info->bstart = -1;
+@@ -693,11 +693,10 @@ static void __exit exit_unionfs_fs(void)
+ }
+ 
+ MODULE_AUTHOR("Erez Zadok, Filesystems and Storage Lab, Stony Brook University"
+-		" (http://www.fsl.cs.sunysb.edu)");
++	      " (http://www.fsl.cs.sunysb.edu)");
+ MODULE_DESCRIPTION("Unionfs " UNIONFS_VERSION
+-		" (http://unionfs.filesystems.org)");
++		   " (http://unionfs.filesystems.org)");
+ MODULE_LICENSE("GPL");
+ 
+ module_init(init_unionfs_fs);
+ module_exit(exit_unionfs_fs);
+-
+diff --git a/fs/unionfs/rdstate.c b/fs/unionfs/rdstate.c
+index 2265031..d0a618d 100644
+--- a/fs/unionfs/rdstate.c
++++ b/fs/unionfs/rdstate.c
+@@ -34,8 +34,8 @@ static struct kmem_cache *unionfs_filldir_cachep;
+ int unionfs_init_filldir_cache(void)
+ {
+ 	unionfs_filldir_cachep =
+-	    kmem_cache_create("unionfs_filldir", sizeof(struct filldir_node), 0,
+-			      SLAB_RECLAIM_ACCOUNT, NULL, NULL);
++		kmem_cache_create("unionfs_filldir", sizeof(struct filldir_node), 0,
++				  SLAB_RECLAIM_ACCOUNT, NULL, NULL);
+ 
+ 	return (unionfs_filldir_cachep ? 0 : -ENOMEM);
+ }
+@@ -99,7 +99,7 @@ struct unionfs_dir_state *find_rdstate(struct inode *inode, loff_t fpos)
+ 	spin_lock(&UNIONFS_I(inode)->rdlock);
+ 	list_for_each(pos, &UNIONFS_I(inode)->readdircache) {
+ 		struct unionfs_dir_state *r =
+-		    list_entry(pos, struct unionfs_dir_state, cache);
++			list_entry(pos, struct unionfs_dir_state, cache);
+ 		if (fpos == rdstate2offset(r)) {
+ 			UNIONFS_I(inode)->rdcount--;
+ 			list_del(&r->cache);
+@@ -127,7 +127,7 @@ struct unionfs_dir_state *alloc_rdstate(struct inode *inode, int bindex)
+ 		mallocsize = PAGE_SIZE;
+ 
+ 	hashsize = (mallocsize -
+-	     sizeof(struct unionfs_dir_state)) / sizeof(struct list_head);
++		    sizeof(struct unionfs_dir_state)) / sizeof(struct list_head);
+ 
+ 	rdstate = kmalloc(mallocsize, GFP_KERNEL);
+ 	if (!rdstate)
+@@ -211,9 +211,9 @@ struct filldir_node *find_filldir_node(struct unionfs_dir_state *rdstate,
+ 			 */
+ 			if (cursor->bindex == rdstate->bindex) {
+ 				printk(KERN_DEBUG "Possible I/O error "
+-					"unionfs_filldir: a file is duplicated "
+-					"in the same branch %d: %s\n",
+-					rdstate->bindex, cursor->name);
++				       "unionfs_filldir: a file is duplicated "
++				       "in the same branch %d: %s\n",
++				       rdstate->bindex, cursor->name);
+ 			}
+ 			break;
+ 		}
+@@ -272,4 +272,3 @@ int add_filldir_node(struct unionfs_dir_state *rdstate, const char *name,
+ out:
+ 	return err;
+ }
+-
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 0044492..c6c3cfe 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -36,11 +36,11 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 
+ 	if (!hidden_new_dentry) {
+ 		hidden_new_dentry =
+-		    create_parents(new_dentry->d_parent->d_inode, new_dentry, bindex);
++			create_parents(new_dentry->d_parent->d_inode, new_dentry, bindex);
+ 		if (IS_ERR(hidden_new_dentry)) {
+ 			printk(KERN_DEBUG "error creating directory tree for"
+-					  " rename, bindex = %d, err = %ld\n",
+-				          bindex, PTR_ERR(hidden_new_dentry));
++			       " rename, bindex = %d, err = %ld\n",
++			       bindex, PTR_ERR(hidden_new_dentry));
+ 			err = PTR_ERR(hidden_new_dentry);
+ 			goto out;
+ 		}
+@@ -53,7 +53,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	}
+ 
+ 	hidden_wh_dentry = lookup_one_len(wh_name, hidden_new_dentry->d_parent,
+-				new_dentry->d_name.len + UNIONFS_WHLEN);
++					  new_dentry->d_name.len + UNIONFS_WHLEN);
+ 	if (IS_ERR(hidden_wh_dentry)) {
+ 		err = PTR_ERR(hidden_wh_dentry);
+ 		goto out;
+@@ -63,7 +63,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		/* get rid of the whiteout that is existing */
+ 		if (hidden_new_dentry->d_inode) {
+ 			printk(KERN_WARNING "Both a whiteout and a dentry"
+-					" exist when doing a rename!\n");
++			       " exist when doing a rename!\n");
+ 			err = -EIO;
+ 
+ 			dput(hidden_wh_dentry);
+@@ -73,7 +73,7 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		hidden_wh_dir_dentry = lock_parent(hidden_wh_dentry);
+ 		if (!(err = is_robranch_super(old_dentry->d_sb, bindex)))
+ 			err = vfs_unlink(hidden_wh_dir_dentry->d_inode,
+-					       hidden_wh_dentry);
++					 hidden_wh_dentry);
+ 
+ 		dput(hidden_wh_dentry);
+ 		unlock_dir(hidden_wh_dir_dentry);
+@@ -137,9 +137,9 @@ out:
+ }
+ 
+ static int do_unionfs_rename(struct inode *old_dir,
+-				   struct dentry *old_dentry,
+-				   struct inode *new_dir,
+-				   struct dentry *new_dentry)
++			     struct dentry *old_dentry,
++			     struct inode *new_dir,
++			     struct dentry *new_dentry)
+ {
+ 	int err = 0;
+ 	int bindex, bwh_old;
+@@ -184,13 +184,13 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 		unlink_dir_dentry = lock_parent(unlink_dentry);
+ 		if (!(err = is_robranch_super(old_dir->i_sb, bindex)))
+ 			err = vfs_unlink(unlink_dir_dentry->d_inode,
+-				       unlink_dentry);
++					 unlink_dentry);
+ 
+ 		fsstack_copy_attr_times(new_dentry->d_parent->d_inode,
+-				     unlink_dir_dentry->d_inode);
++					unlink_dir_dentry->d_inode);
+ 		/* propagate number of hard-links */
+ 		new_dentry->d_parent->d_inode->i_nlink =
+-		    unionfs_get_nlinks(new_dentry->d_parent->d_inode);
++			unionfs_get_nlinks(new_dentry->d_parent->d_inode);
+ 
+ 		unlock_dir(unlink_dir_dentry);
+ 		if (!err) {
+@@ -247,7 +247,7 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 		else {
+ 			/* We can't fix anything now, so we cop-out and use -EIO. */
+ 			printk(KERN_ERR "We can't create a whiteout for the "
+-					"source in rename!\n");
++			       "source in rename!\n");
+ 			err = -EIO;
+ 		}
+ 	}
+@@ -261,14 +261,14 @@ revert:
+ 	local_err = unionfs_refresh_hidden_dentry(new_dentry, old_bstart);
+ 	if (local_err) {
+ 		printk(KERN_WARNING "Revert failed in rename: the new refresh "
+-				"failed.\n");
++		       "failed.\n");
+ 		eio = -EIO;
+ 	}
+ 
+ 	local_err = unionfs_refresh_hidden_dentry(old_dentry, old_bstart);
+ 	if (local_err) {
+ 		printk(KERN_WARNING "Revert failed in rename: the old refresh "
+-				"failed.\n");
++		       "failed.\n");
+ 		eio = -EIO;
+ 		goto revert_out;
+ 	}
+@@ -276,7 +276,7 @@ revert:
+ 	if (!unionfs_lower_dentry_idx(new_dentry, bindex) ||
+ 	    !unionfs_lower_dentry_idx(new_dentry, bindex)->d_inode) {
+ 		printk(KERN_WARNING "Revert failed in rename: the object "
+-				"disappeared from under us!\n");
++		       "disappeared from under us!\n");
+ 		eio = -EIO;
+ 		goto revert_out;
+ 	}
+@@ -284,13 +284,13 @@ revert:
+ 	if (unionfs_lower_dentry_idx(old_dentry, bindex) &&
+ 	    unionfs_lower_dentry_idx(old_dentry, bindex)->d_inode) {
+ 		printk(KERN_WARNING "Revert failed in rename: the object was "
+-				"created underneath us!\n");
++		       "created underneath us!\n");
+ 		eio = -EIO;
+ 		goto revert_out;
+ 	}
+ 
+ 	local_err = do_rename(new_dir, new_dentry, old_dir, old_dentry, old_bstart,
+-					NULL);
++			      NULL);
+ 
+ 	/* If we can't fix it, then we cop-out with -EIO. */
+ 	if (local_err) {
+@@ -331,7 +331,7 @@ static struct dentry *lookup_whiteout(struct dentry *dentry)
+ 		if (!hidden_parent)
+ 			continue;
+ 		wh_dentry = lookup_one_len(whname, hidden_parent,
+-				   dentry->d_name.len + UNIONFS_WHLEN);
++					   dentry->d_name.len + UNIONFS_WHLEN);
+ 		if (IS_ERR(wh_dentry))
+ 			continue;
+ 		if (wh_dentry->d_inode)
+@@ -407,7 +407,7 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		if (S_ISDIR(old_dentry->d_inode->i_mode) !=
+ 		    S_ISDIR(new_dentry->d_inode->i_mode)) {
+ 			err = S_ISDIR(old_dentry->d_inode->i_mode) ?
+-					-ENOTDIR : -EISDIR;
++				-ENOTDIR : -EISDIR;
+ 			goto out;
+ 		}
+ 
+@@ -445,4 +445,3 @@ out:
+ 	unionfs_unlock_dentry(old_dentry);
+ 	return err;
+ }
+-
+diff --git a/fs/unionfs/sioq.c b/fs/unionfs/sioq.c
+index c0d89a3..2a63bbe 100644
+--- a/fs/unionfs/sioq.c
++++ b/fs/unionfs/sioq.c
+@@ -117,7 +117,6 @@ void __is_opaque_dir(struct work_struct *work)
+ 	struct sioq_args *args = container_of(work, struct sioq_args, work);
+ 
+ 	args->ret = lookup_one_len(UNIONFS_DIR_OPAQUE, args->is_opaque.dentry,
+-				sizeof(UNIONFS_DIR_OPAQUE) - 1);
++				   sizeof(UNIONFS_DIR_OPAQUE) - 1);
+ 	complete(&args->comp);
+ }
+-
+diff --git a/fs/unionfs/sioq.h b/fs/unionfs/sioq.h
+index 20e3b0c..4827514 100644
+--- a/fs/unionfs/sioq.h
++++ b/fs/unionfs/sioq.h
+@@ -75,4 +75,3 @@ extern void __delete_whiteouts(struct work_struct *work);
+ extern void __is_opaque_dir(struct work_struct *work);
+ 
+ #endif /* _SIOQ_H */
+-
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index d274752..4a8f22c 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -56,13 +56,13 @@ int create_whiteout(struct dentry *dentry, int start)
+ 						       dentry, bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				printk(KERN_DEBUG "create_parents failed for "
+-						"bindex = %d\n", bindex);
++				       "bindex = %d\n", bindex);
+ 				continue;
+ 			}
+ 		}
+ 
+ 		hidden_wh_dentry = lookup_one_len(name, hidden_dentry->d_parent,
+-					dentry->d_name.len + UNIONFS_WHLEN);
++						  dentry->d_name.len + UNIONFS_WHLEN);
+ 		if (IS_ERR(hidden_wh_dentry))
+ 			continue;
+ 
+@@ -78,8 +78,8 @@ int create_whiteout(struct dentry *dentry, int start)
+ 		hidden_dir_dentry = lock_parent(hidden_wh_dentry);
+ 		if (!(err = is_robranch_super(dentry->d_sb, bindex))) {
+ 			err = vfs_create(hidden_dir_dentry->d_inode,
+-				       hidden_wh_dentry,
+-				       ~current->fs->umask & S_IRWXUGO, NULL);
++					 hidden_wh_dentry,
++					 ~current->fs->umask & S_IRWXUGO, NULL);
+ 
+ 		}
+ 		unlock_dir(hidden_dir_dentry);
+@@ -116,7 +116,7 @@ int unionfs_refresh_hidden_dentry(struct dentry *dentry, int bindex)
+ 	BUG_ON(!S_ISDIR(hidden_parent->d_inode->i_mode));
+ 
+ 	hidden_dentry = lookup_one_len(dentry->d_name.name, hidden_parent,
+-				dentry->d_name.len);
++				       dentry->d_name.len);
+ 	if (IS_ERR(hidden_dentry)) {
+ 		err = PTR_ERR(hidden_dentry);
+ 		goto out;
+@@ -132,7 +132,7 @@ int unionfs_refresh_hidden_dentry(struct dentry *dentry, int bindex)
+ 	} else {
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, hidden_dentry);
+ 		unionfs_set_lower_inode_idx(dentry->d_inode, bindex,
+-				igrab(hidden_dentry->d_inode));
++					    igrab(hidden_dentry->d_inode));
+ 	}
+ 
+ out:
+@@ -230,4 +230,3 @@ char *alloc_whname(const char *name, int len)
+ 
+ 	return buf;
+ }
+-
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 0426773..9e438c9 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -31,7 +31,7 @@ static void unionfs_read_inode(struct inode *inode)
+ 
+ 	if (!info) {
+ 		printk(KERN_ERR "No kernel memory when allocating inode "
+-				"private data!\n");
++		       "private data!\n");
+ 		BUG();
+ 	}
+ 
+@@ -49,7 +49,7 @@ static void unionfs_read_inode(struct inode *inode)
+ 	info->lower_inodes = kzalloc(size, GFP_KERNEL);
+ 	if (!info->lower_inodes) {
+ 		printk(KERN_ERR "No kernel memory when allocating lower-"
+-				"pointer array!\n");
++		       "pointer array!\n");
+ 		BUG();
+ 	}
+ 
+@@ -504,7 +504,7 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ 	}
+ 	/* allocate space for new pointers to lower paths */
+ 	tmp_lower_paths = kcalloc(max_branches,
+-			   sizeof(struct path), GFP_KERNEL);
++				  sizeof(struct path), GFP_KERNEL);
+ 	if (!tmp_lower_paths) {
+ 		err = -ENOMEM;
+ 		goto out_free;
+@@ -829,9 +829,9 @@ int unionfs_init_inode_cache(void)
+ 	int err = 0;
+ 
+ 	unionfs_inode_cachep =
+-	    kmem_cache_create("unionfs_inode_cache",
+-			      sizeof(struct unionfs_inode_info), 0,
+-			      SLAB_RECLAIM_ACCOUNT, init_once, NULL);
++		kmem_cache_create("unionfs_inode_cache",
++				  sizeof(struct unionfs_inode_info), 0,
++				  SLAB_RECLAIM_ACCOUNT, init_once, NULL);
+ 	if (!unionfs_inode_cachep)
+ 		err = -ENOMEM;
+ 	return err;
+@@ -921,8 +921,8 @@ static int unionfs_show_options(struct seq_file *m, struct vfsmount *mnt)
+ 	seq_printf(m, ",dirs=");
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		path = d_path(unionfs_lower_dentry_idx(sb->s_root, bindex),
+-			   unionfs_lower_mnt_idx(sb->s_root, bindex), tmp_page,
+-			   PAGE_SIZE);
++			      unionfs_lower_mnt_idx(sb->s_root, bindex), tmp_page,
++			      PAGE_SIZE);
+ 		if (IS_ERR(path)) {
+ 			ret = PTR_ERR(path);
+ 			goto out;
+@@ -960,4 +960,3 @@ struct super_operations unionfs_sops = {
+ 	.alloc_inode	= unionfs_alloc_inode,
+ 	.destroy_inode	= unionfs_destroy_inode,
+ };
+-
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 0d722bd..681272d 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -266,7 +266,7 @@ extern int remove_whiteouts(struct dentry *dentry, struct dentry *hidden_dentry,
+ 			    int bindex);
+ 
+ extern int do_delete_whiteouts(struct dentry *dentry, int bindex,
+-		     struct unionfs_dir_state *namelist);
++			       struct unionfs_dir_state *namelist);
+ 
+ extern int unionfs_get_nlinks(struct inode *inode);
+ 
+@@ -325,12 +325,12 @@ extern void *unionfs_xattr_alloc(size_t size, size_t limit);
+ extern void unionfs_xattr_free(void *ptr, size_t size);
+ 
+ extern ssize_t unionfs_getxattr(struct dentry *dentry, const char *name,
+-		void *value, size_t size);
++				void *value, size_t size);
+ extern int unionfs_removexattr(struct dentry *dentry, const char *name);
+ extern ssize_t unionfs_listxattr(struct dentry *dentry, char *list,
+-		size_t size);
++				 size_t size);
+ extern int unionfs_setxattr(struct dentry *dentry, const char *name,
+-		const void *value, size_t size, int flags);
++			    const void *value, size_t size, int flags);
+ #endif /* CONFIG_UNION_FS_XATTR */
+ 
+ /* The root directory is unhashed, but isn't deleted. */
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index dd1dd9c..5660a0d 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -163,4 +163,3 @@ out:
+ 	unionfs_unlock_dentry(dentry);
+ 	return err;
+ }
+-
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 6e1f4bd..41b3620 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -51,7 +51,7 @@ void unionfs_xattr_free(void *ptr, size_t size)
+  * dentry->d_inode->i_mutex locked
+  */
+ ssize_t unionfs_getxattr(struct dentry * dentry, const char *name, void *value,
+-		size_t size)
++			 size_t size)
+ {
+ 	struct dentry *hidden_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+@@ -72,7 +72,7 @@ ssize_t unionfs_getxattr(struct dentry * dentry, const char *name, void *value,
+  * dentry->d_inode->i_mutex locked
+  */
+ int unionfs_setxattr(struct dentry *dentry, const char *name, const void *value,
+-		size_t size, int flags)
++		     size_t size, int flags)
+ {
+ 	struct dentry *hidden_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+@@ -128,4 +128,3 @@ ssize_t unionfs_listxattr(struct dentry * dentry, char *list, size_t size)
+ 	unionfs_unlock_dentry(dentry);
+ 	return err;
+ }
+-
+diff --git a/include/linux/fs_stack.h b/include/linux/fs_stack.h
+index bb516ce..891154d 100644
+--- a/include/linux/fs_stack.h
++++ b/include/linux/fs_stack.h
+@@ -9,7 +9,7 @@
+ 
+ /* externs for fs/stack.c */
+ extern void fsstack_copy_attr_all(struct inode *dest, const struct inode *src,
+-				int (*get_nlinks)(struct inode *));
++				  int (*get_nlinks)(struct inode *));
+ 
+ extern void fsstack_copy_inode_size(struct inode *dst, const struct inode *src);
+ 
+-- 
+1.5.4.3
+

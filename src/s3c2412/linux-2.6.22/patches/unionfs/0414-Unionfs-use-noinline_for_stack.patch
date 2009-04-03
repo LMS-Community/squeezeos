@@ -1,0 +1,92 @@
+From 9567a50052c276d2280cca69920bb00c9dc1e652 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 23 Mar 2008 02:25:21 -0400
+Subject: [PATCH] Unionfs: use noinline_for_stack
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |    2 +-
+ fs/unionfs/super.c  |   24 ++++++++++++++----------
+ fs/unionfs/union.h  |    4 ++++
+ 3 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 66cf634..5abeb1e 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -32,7 +32,7 @@ static int is_validname(const char *name)
+ }
+ 
+ /* The rest of these are utility functions for lookup. */
+-static noinline int is_opaque_dir(struct dentry *dentry, int bindex)
++static noinline_for_stack int is_opaque_dir(struct dentry *dentry, int bindex)
+ {
+ 	int err = 0;
+ 	struct dentry *lower_dentry;
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 9b350be..80c72e4 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -179,9 +179,11 @@ out:
+ }
+ 
+ /* handle mode changing during remount */
+-static noinline int do_remount_mode_option(char *optarg, int cur_branches,
+-					   struct unionfs_data *new_data,
+-					   struct path *new_lower_paths)
++static noinline_for_stack int do_remount_mode_option(
++					char *optarg,
++					int cur_branches,
++					struct unionfs_data *new_data,
++					struct path *new_lower_paths)
+ {
+ 	int err = -EINVAL;
+ 	int perms, idx;
+@@ -240,9 +242,10 @@ out:
+ }
+ 
+ /* handle branch deletion during remount */
+-static noinline int do_remount_del_option(char *optarg, int cur_branches,
+-					  struct unionfs_data *new_data,
+-					  struct path *new_lower_paths)
++static noinline_for_stack int do_remount_del_option(
++					char *optarg, int cur_branches,
++					struct unionfs_data *new_data,
++					struct path *new_lower_paths)
+ {
+ 	int err = -EINVAL;
+ 	int idx;
+@@ -303,10 +306,11 @@ out:
+ }
+ 
+ /* handle branch insertion during remount */
+-static noinline int do_remount_add_option(char *optarg, int cur_branches,
+-					  struct unionfs_data *new_data,
+-					  struct path *new_lower_paths,
+-					  int *high_branch_id)
++static noinline_for_stack int do_remount_add_option(
++					char *optarg, int cur_branches,
++					struct unionfs_data *new_data,
++					struct path *new_lower_paths,
++					int *high_branch_id)
+ {
+ 	int err = -EINVAL;
+ 	int perms;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index aecc1f5..4beba11 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -86,6 +86,10 @@ extern struct address_space_operations unionfs_aops;
+ # define unionfs_rw_semaphore	rw_semaphore
+ #endif /* not CONFIG_PREEMPT_RT */
+ 
++#ifndef noinline_for_stack
++# define noinline_for_stack noinline
++#endif /* not noinline_for_stack */
++
+ /* file private data. */
+ struct unionfs_file_info {
+ 	int bstart;
+-- 
+1.5.4.3
+

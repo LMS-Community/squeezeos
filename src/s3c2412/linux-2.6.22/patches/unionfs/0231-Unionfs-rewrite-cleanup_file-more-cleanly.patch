@@ -1,0 +1,102 @@
+From 106ba6c3a549b6d3f1c5c3ee501337af362c1120 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 31 Jul 2007 18:12:25 -0400
+Subject: [PATCH] Unionfs: rewrite cleanup_file more cleanly
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   68 +++++++++++++++++++++++++----------------------
+ 1 files changed, 36 insertions(+), 32 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 1b84487..d77608e 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -104,48 +104,52 @@ out:
+ static void cleanup_file(struct file *file)
+ {
+ 	int bindex, bstart, bend;
+-	struct file **lf;
++	struct file **lower_files;
++	struct file *lower_file;
+ 	struct super_block *sb = file->f_path.dentry->d_sb;
+ 
+-	lf = UNIONFS_F(file)->lower_files;
++	lower_files = UNIONFS_F(file)->lower_files;
+ 	bstart = fbstart(file);
+ 	bend = fbend(file);
+ 
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+-		if (unionfs_lower_file_idx(file, bindex)) {
+-			/*
+-			 * Find new index of matching branch with an open
+-			 * file, since branches could have been added or
+-			 * deleted causing the one with open files to shift.
+-			 */
+-			int i;	/* holds (possibly) updated branch index */
+-			int old_bid;
+-
+-			old_bid = UNIONFS_F(file)->saved_branch_ids[bindex];
+-			i = branch_id_to_idx(sb, old_bid);
+-			if (i < 0)
+-				printk(KERN_ERR "unionfs: no superblock for "
+-				       "file %p\n", file);
+-			else {
+-				/* decrement count of open files */
+-				branchput(sb, i);
+-				/*
+-				 * fput will perform an mntput for us on the
+-				 * correct branch.  Although we're using the
+-				 * file's old branch configuration, bindex,
+-				 * which is the old index, correctly points
+-				 * to the right branch in the file's branch
+-				 * list.  In other words, we're going to
+-				 * mntput the correct branch even if
+-				 * branches have been added/removed.
+-				 */
+-				fput(unionfs_lower_file_idx(file, bindex));
+-			}
++		int i;	/* holds (possibly) updated branch index */
++		int old_bid;
++
++		lower_file = unionfs_lower_file_idx(file, bindex);
++		if (!lower_file)
++			continue;
++
++		/*
++		 * Find new index of matching branch with an open
++		 * file, since branches could have been added or
++		 * deleted causing the one with open files to shift.
++		 */
++		old_bid = UNIONFS_F(file)->saved_branch_ids[bindex];
++		i = branch_id_to_idx(sb, old_bid);
++		if (i < 0) {
++			printk(KERN_ERR "unionfs: no superblock for "
++			       "file %p\n", file);
++			continue;
+ 		}
++
++		/* decrement count of open files */
++		branchput(sb, i);
++		/*
++		 * fput will perform an mntput for us on the correct branch.
++		 * Although we're using the file's old branch configuration,
++		 * bindex, which is the old index, correctly points to the
++		 * right branch in the file's branch list.  In other words,
++		 * we're going to mntput the correct branch even if branches
++		 * have been added/removed.
++		 */
++		fput(lower_file);
++		UNIONFS_F(file)->lower_files[bindex] = NULL;
++		UNIONFS_F(file)->saved_branch_ids[bindex] = -1;
+ 	}
+ 
+ 	UNIONFS_F(file)->lower_files = NULL;
+-	kfree(lf);
++	kfree(lower_files);
+ 	kfree(UNIONFS_F(file)->saved_branch_ids);
+ 	/* set to NULL because caller needs to know if to kfree on error */
+ 	UNIONFS_F(file)->saved_branch_ids = NULL;
+-- 
+1.5.4.3
+

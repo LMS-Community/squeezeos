@@ -1,0 +1,57 @@
+From 375c7686e72f800808ff81ae01c42bdd6bb3f990 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Sun, 15 Apr 2007 17:37:40 -0400
+Subject: [PATCH] cleanup: rename prefix our version of double_lock_dentry with "unionfs_"
+
+To avoid potential confusion with the VFS function of the same name (and
+also confusion with ctags), rename our special version of double_lock_dentry
+to unionfs_double_lock_dentry.
+---
+ fs/unionfs/inode.c  |    2 +-
+ fs/unionfs/rename.c |    2 +-
+ fs/unionfs/union.h  |    3 ++-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index ecf0616..872a6e6 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -265,7 +265,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	BUG_ON(!is_valid_dentry(new_dentry));
+ 	BUG_ON(!is_valid_dentry(old_dentry));
+ 
+-	double_lock_dentry(new_dentry, old_dentry);
++	unionfs_double_lock_dentry(new_dentry, old_dentry);
+ 
+ 	hidden_new_dentry = unionfs_lower_dentry(new_dentry);
+ 
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 231866e..0e1e71a 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -400,7 +400,7 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	BUG_ON(!is_valid_dentry(old_dentry));
+ 	BUG_ON(!is_valid_dentry(new_dentry));
+ 
+-	double_lock_dentry(old_dentry, new_dentry);
++	unionfs_double_lock_dentry(old_dentry, new_dentry);
+ 
+ 	if (!S_ISDIR(old_dentry->d_inode->i_mode))
+ 		err = unionfs_partial_lookup(old_dentry);
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 8d40124..3652277 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -223,7 +223,8 @@ static inline off_t rdstate2offset(struct unionfs_dir_state *buf)
+ #define unionfs_write_lock(sb)	 down_write(&UNIONFS_SB(sb)->rwsem)
+ #define unionfs_write_unlock(sb) up_write(&UNIONFS_SB(sb)->rwsem)
+ 
+-static inline void double_lock_dentry(struct dentry *d1, struct dentry *d2)
++static inline void unionfs_double_lock_dentry(struct dentry *d1,
++					      struct dentry *d2)
+ {
+ 	if (d2 < d1) {
+ 		struct dentry *tmp = d1;
+-- 
+1.5.4.3
+

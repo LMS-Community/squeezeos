@@ -1,0 +1,54 @@
+From e958f90806ccdb54e896695c222838ef90e59d3c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] Unionfs: remove unnecessary conditional inode lock
+
+This was intended to protect the inode during branch management, but that is
+now done through our superblock rwsem.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   13 -------------
+ 1 files changed, 0 insertions(+), 13 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index c1872dd..6512586 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -33,7 +33,6 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	int bindex, bstart, bend;
+ 	int sbgen, dgen;
+ 	int positive = 0;
+-	int locked = 0;
+ 	int interpose_flag;
+ 	struct nameidata lowernd; /* TODO: be gentler to the stack */
+ 
+@@ -87,16 +86,6 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		interpose_flag = INTERPOSE_REVAL_NEG;
+ 		if (positive) {
+ 			interpose_flag = INTERPOSE_REVAL;
+-			/*
+-			 * During BRM, the VFS could already hold a lock on
+-			 * a file being read, so don't lock it again
+-			 * (deadlock), but if you lock it in this function,
+-			 * then release it here too.
+-			 */
+-			if (!mutex_is_locked(&dentry->d_inode->i_mutex)) {
+-				mutex_lock(&dentry->d_inode->i_mutex);
+-				locked = 1;
+-			}
+ 
+ 			bstart = ibstart(dentry->d_inode);
+ 			bend = ibend(dentry->d_inode);
+@@ -115,8 +104,6 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			UNIONFS_I(dentry->d_inode)->lower_inodes = NULL;
+ 			ibstart(dentry->d_inode) = -1;
+ 			ibend(dentry->d_inode) = -1;
+-			if (locked)
+-				mutex_unlock(&dentry->d_inode->i_mutex);
+ 		}
+ 
+ 		result = unionfs_lookup_backend(dentry, &lowernd,
+-- 
+1.5.4.3
+

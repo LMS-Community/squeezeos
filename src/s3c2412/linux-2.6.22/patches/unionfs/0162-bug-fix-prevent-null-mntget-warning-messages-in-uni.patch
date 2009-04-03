@@ -1,0 +1,30 @@
+From 860b7213cf4e83fcb28ef6f7a67b12937dd9ce89 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 28 May 2007 19:38:14 -0400
+Subject: [PATCH] bug fix: prevent null mntget warning messages in unionfs_lookup_backend
+
+Don't try to mntget a lower mnt at a point where the lower mnts don't yet
+exist (the callers will have them later on).  Instead, get the lower mnt of
+the sb->s_root.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 6409387..ead0c6a 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -328,7 +328,7 @@ out_negative:
+ 		 * mount-point crossing
+ 		 */
+ 		first_dentry = dentry;
+-		first_hidden_mnt = unionfs_mntget(dentry, bindex);
++		first_hidden_mnt = unionfs_mntget(dentry->d_sb->s_root, bindex);
+ 	}
+ 	unionfs_set_lower_dentry_idx(dentry, first_dentry_offset,
+ 				     first_hidden_dentry);
+-- 
+1.5.4.3
+

@@ -1,0 +1,31 @@
+From 97cdca809b0193ea30491b1720d5d17f61261a0f Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 31 Jul 2007 19:25:55 -0400
+Subject: [PATCH] Unionfs: mmap fixes to unionfs_writepage
+
+Don't call unlock_page on lower_page unless lower ->writepage failed.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 145ba5b..8b04a46 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -110,8 +110,9 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	err = lower_inode->i_mapping->a_ops->writepage(lower_page, wbc);
+ 	wbc->for_writepages = saved_for_writepages; /* restore value */
+ 
+-	/* b/c find_lock_page locked it */
+-	unlock_page(lower_page);
++	/* b/c find_lock_page locked it and ->writepage unlocks on success */
++	if (err)
++		unlock_page(lower_page);
+ 	/* b/c grab_cache_page increased refcnt */
+ 	page_cache_release(lower_page);
+ 
+-- 
+1.5.4.3
+

@@ -1,0 +1,31 @@
+From 1599df3d1d3845f4fd2a3c36abc47b4b3a0627b4 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 25 May 2007 17:01:00 -0400
+Subject: [PATCH] bug fix: catch bad use of dirs= options (extra ':' separators)
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/main.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index decefef..a690182 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -320,8 +320,12 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ 		int perms;
+ 		char *mode = strchr(name, '=');
+ 
+-		if (!name || !*name)
++		if (!name)
+ 			continue;
++		if (!*name) {	/* bad use of ':' (extra colons) */
++			err = -EINVAL;
++			goto out;
++		}
+ 
+ 		branches++;
+ 
+-- 
+1.5.4.3
+

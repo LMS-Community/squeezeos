@@ -1,0 +1,484 @@
+From 3f52dd67fffb80c877f750d2f32d6c62174d812b Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 22 Aug 2007 16:49:49 -0400
+Subject: [PATCH] Unionfs: imported fixes from korg branch's take-3 series
+
+- removed EACCES/EROFS text from issues.txt
+- updated sioq.[hc] copyright dates to 2006 (not earlier)
+- added small XXX comment to xattr copyup code (selinux CAP_FOWNER stuff) to
+  say that entire copyup code should be moved to SIOQ.
+- copyup_xattr: renamed name_list_orig -> name_list_buf
+- multi-line static inline unionfs_xattr_kfree
+- rewrote unionfs_interpose a bit cleaner (no backward goto's, better
+  variable names, use small util fxn, etc.)
+- introduced CONFIG_UNION_FS_DEBUG instead of hand-editing makefile
+- unionfs_mntget/put cleanups
+- bug fix to is_robranch_idx (thanks to Patrick Aussems).  Fixed bug #571.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ Documentation/filesystems/unionfs/issues.txt |    7 +-
+ fs/Kconfig                                   |    6 ++
+ fs/stack.c                                   |    8 +-
+ fs/unionfs/Makefile                          |   12 +---
+ fs/unionfs/copyup.c                          |    7 +-
+ fs/unionfs/main.c                            |  108 ++++++++++++++------------
+ fs/unionfs/sioq.c                            |   14 ++--
+ fs/unionfs/sioq.h                            |   14 ++--
+ fs/unionfs/union.h                           |   76 ++++++++++---------
+ include/linux/fs_stack.h                     |    8 +-
+ 10 files changed, 134 insertions(+), 126 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/issues.txt b/Documentation/filesystems/unionfs/issues.txt
+index 3644fea..6101ebf 100644
+--- a/Documentation/filesystems/unionfs/issues.txt
++++ b/Documentation/filesystems/unionfs/issues.txt
+@@ -1,10 +1,7 @@
+-KNOWN Unionfs 2.0 ISSUES:
++KNOWN Unionfs 2.1 ISSUES:
+ =========================
+ 
+-1. The NFS server returns -EACCES for read-only exports, instead of -EROFS.
+-   This means we can't reliably detect a read-only NFS export.
+-
+-2. Unionfs should not use lookup_one_len() on the underlying f/s as it
++1. Unionfs should not use lookup_one_len() on the underlying f/s as it
+    confuses NFSv4.  Currently, unionfs_lookup() passes lookup intents to the
+    lower file-system, this eliminates part of the problem.  The remaining
+    calls to lookup_one_len may need to be changed to pass an intent.  We are
+diff --git a/fs/Kconfig b/fs/Kconfig
+index 674cfa9..e9380c7 100644
+--- a/fs/Kconfig
++++ b/fs/Kconfig
+@@ -1063,6 +1063,12 @@ config UNION_FS_XATTR
+ 
+ 	  If unsure, say N.
+ 
++config UNION_FS_DEBUG
++	bool "Debug Unionfs"
++	depends on UNION_FS
++	help
++	  If you say Y here, you can turn on debugging output from Unionfs.
++
+ endmenu
+ 
+ menu "Miscellaneous filesystems"
+diff --git a/fs/stack.c b/fs/stack.c
+index 56fd0df..a548aac 100644
+--- a/fs/stack.c
++++ b/fs/stack.c
+@@ -1,8 +1,8 @@
+ /*
+- * Copyright (c) 2003-2007 Erez Zadok
+- * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
+- * Copyright (c) 2003-2007 Stony Brook University
+- * Copyright (c) 2003-2007 The Research Foundation of SUNY
++ * Copyright (c) 2006-2007 Erez Zadok
++ * Copyright (c) 2006-2007 Josef 'Jeff' Sipek
++ * Copyright (c) 2006-2007 Stony Brook University
++ * Copyright (c) 2006-2007 The Research Foundation of SUNY
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+diff --git a/fs/unionfs/Makefile b/fs/unionfs/Makefile
+index 92ae12a..c8b72e8 100644
+--- a/fs/unionfs/Makefile
++++ b/fs/unionfs/Makefile
+@@ -10,14 +10,4 @@ unionfs-y := subr.o dentry.o file.o inode.o main.o super.o \
+ 
+ unionfs-$(CONFIG_UNION_FS_XATTR) += xattr.o
+ 
+-# If you want debugging output, please uncomment the following line
+-# or put your options in a separate file in linux-x.y.z/fs/unionfs/local.mk
+-#CONFIG_UNIONFS_DEBUG=y
+-
+-# Allow users to override debug options in a separate file
+--include fs/unionfs/local.mk
+-
+-ifeq ($(CONFIG_UNIONFS_DEBUG),y)
+-unionfs-y += debug.o
+-EXTRA_CFLAGS += -DUNIONFS_DEBUG=1
+-endif
++unionfs-$(CONFIG_UNION_FS_DEBUG) += debug.o
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 4f6da6f..04bedb1 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -32,7 +32,7 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 	ssize_t list_size = -1;
+ 	char *name_list = NULL;
+ 	char *attr_value = NULL;
+-	char *name_list_orig = NULL;
++	char *name_list_buf = NULL;
+ 
+ 	/* query the actual size of the xattr list */
+ 	list_size = vfs_listxattr(old_lower_dentry, NULL, 0);
+@@ -48,7 +48,7 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 		goto out;
+ 	}
+ 
+-	name_list_orig = name_list; /* save for kfree at end */
++	name_list_buf = name_list; /* save for kfree at end */
+ 
+ 	/* now get the actual xattr list of the source file */
+ 	list_size = vfs_listxattr(old_lower_dentry, name_list, list_size);
+@@ -89,6 +89,7 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 		 * the security of copied-up files, if Selinux is active,
+ 		 * then we must copy these xattrs as well.  So we need to
+ 		 * temporarily get FOWNER privileges.
++		 * XXX: move entire copyup code to SIOQ.
+ 		 */
+ 		if (err == -EPERM && !capable(CAP_FOWNER)) {
+ 			cap_raise(current->cap_effective, CAP_FOWNER);
+@@ -101,7 +102,7 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 		name_list += strlen(name_list) + 1;
+ 	}
+ out:
+-	unionfs_xattr_kfree(name_list_orig);
++	unionfs_xattr_kfree(name_list_buf);
+ 	unionfs_xattr_kfree(attr_value);
+ 	/* Ignore if xattr isn't supported */
+ 	if (err == -ENOTSUPP || err == -EOPNOTSUPP)
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 58c2897..4faae44 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -20,6 +20,58 @@
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ 
++static void unionfs_fill_inode(struct dentry *dentry,
++			       struct inode *inode)
++{
++	struct inode *lower_inode;
++	struct dentry *lower_dentry;
++	int bindex, bstart, bend;
++
++	bstart = dbstart(dentry);
++	bend = dbend(dentry);
++
++	for (bindex = bstart; bindex <= bend; bindex++) {
++		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
++		if (!lower_dentry) {
++			unionfs_set_lower_inode_idx(inode, bindex, NULL);
++			continue;
++		}
++
++		/* Initialize the lower inode to the new lower inode. */
++		if (!lower_dentry->d_inode)
++			continue;
++
++		unionfs_set_lower_inode_idx(inode, bindex,
++					    igrab(lower_dentry->d_inode));
++	}
++
++	ibstart(inode) = dbstart(dentry);
++	ibend(inode) = dbend(dentry);
++
++	/* Use attributes from the first branch. */
++	lower_inode = unionfs_lower_inode(inode);
++
++	/* Use different set of inode ops for symlinks & directories */
++	if (S_ISLNK(lower_inode->i_mode))
++		inode->i_op = &unionfs_symlink_iops;
++	else if (S_ISDIR(lower_inode->i_mode))
++		inode->i_op = &unionfs_dir_iops;
++
++	/* Use different set of file ops for directories */
++	if (S_ISDIR(lower_inode->i_mode))
++		inode->i_fop = &unionfs_dir_fops;
++
++	/* properly initialize special inodes */
++	if (S_ISBLK(lower_inode->i_mode) || S_ISCHR(lower_inode->i_mode) ||
++	    S_ISFIFO(lower_inode->i_mode) || S_ISSOCK(lower_inode->i_mode))
++		init_special_inode(inode, lower_inode->i_mode,
++				   lower_inode->i_rdev);
++
++	/* all well, copy inode attributes */
++	unionfs_copy_attr_all(inode, lower_inode);
++	fsstack_copy_inode_size(inode, lower_inode);
++}
++
+ /*
+  * Connect a unionfs inode dentry/inode with several lower ones.  This is
+  * the classic stackable file system "vnode interposition" action.
+@@ -29,13 +81,11 @@
+ struct dentry *unionfs_interpose(struct dentry *dentry, struct super_block *sb,
+ 				 int flag)
+ {
+-	struct inode *lower_inode;
+-	struct dentry *lower_dentry;
+ 	int err = 0;
+ 	struct inode *inode;
+ 	int is_negative_dentry = 1;
+ 	int bindex, bstart, bend;
+-	int skipped = 1;
++	int need_fill_inode = 1;
+ 	struct dentry *spliced = NULL;
+ 
+ 	verify_locked(dentry);
+@@ -87,51 +137,9 @@ struct dentry *unionfs_interpose(struct dentry *dentry, struct super_block *sb,
+ 			goto skip;
+ 	}
+ 
+-fill_i_info:
+-	skipped = 0;
+-	for (bindex = bstart; bindex <= bend; bindex++) {
+-		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+-		if (!lower_dentry) {
+-			unionfs_set_lower_inode_idx(inode, bindex, NULL);
+-			continue;
+-		}
+-
+-		/* Initialize the lower inode to the new lower inode. */
+-		if (!lower_dentry->d_inode)
+-			continue;
+-
+-		unionfs_set_lower_inode_idx(inode, bindex,
+-					    igrab(lower_dentry->d_inode));
+-	}
+-
+-	ibstart(inode) = dbstart(dentry);
+-	ibend(inode) = dbend(dentry);
+-
+-	/* Use attributes from the first branch. */
+-	lower_inode = unionfs_lower_inode(inode);
+-
+-	/* Use different set of inode ops for symlinks & directories */
+-	if (S_ISLNK(lower_inode->i_mode))
+-		inode->i_op = &unionfs_symlink_iops;
+-	else if (S_ISDIR(lower_inode->i_mode))
+-		inode->i_op = &unionfs_dir_iops;
+-
+-	/* Use different set of file ops for directories */
+-	if (S_ISDIR(lower_inode->i_mode))
+-		inode->i_fop = &unionfs_dir_fops;
++	need_fill_inode = 0;
++	unionfs_fill_inode(dentry, inode);
+ 
+-	/* properly initialize special inodes */
+-	if (S_ISBLK(lower_inode->i_mode) || S_ISCHR(lower_inode->i_mode) ||
+-	    S_ISFIFO(lower_inode->i_mode) || S_ISSOCK(lower_inode->i_mode))
+-		init_special_inode(inode, lower_inode->i_mode,
+-				   lower_inode->i_rdev);
+-
+-	/* all well, copy inode attributes */
+-	unionfs_copy_attr_all(inode, lower_inode);
+-	fsstack_copy_inode_size(inode, lower_inode);
+-
+-	if (spliced)
+-		goto out_spliced;
+ skip:
+ 	/* only (our) lookup wants to do a d_add */
+ 	switch (flag) {
+@@ -156,8 +164,10 @@ skip:
+ 			spliced->d_fsdata = dentry->d_fsdata;
+ 			dentry->d_fsdata = NULL;
+ 			dentry = spliced;
+-			if (skipped)
+-				goto fill_i_info;
++			if (need_fill_inode) {
++				need_fill_inode = 0;
++				unionfs_fill_inode(dentry, inode);
++			}
+ 			goto out_spliced;
+ 		}
+ 		break;
+diff --git a/fs/unionfs/sioq.c b/fs/unionfs/sioq.c
+index ce17a8d..2a8c88e 100644
+--- a/fs/unionfs/sioq.c
++++ b/fs/unionfs/sioq.c
+@@ -1,11 +1,11 @@
+ /*
+- * Copyright (c) 2003-2007 Erez Zadok
+- * Copyright (c) 2003-2006 Charles P. Wright
+- * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
+- * Copyright (c) 2005-2006 Junjiro Okajima
+- * Copyright (c) 2004-2006 David P. Quigley
+- * Copyright (c) 2003-2007 Stony Brook University
+- * Copyright (c) 2003-2007 The Research Foundation of SUNY
++ * Copyright (c) 2006-2007 Erez Zadok
++ * Copyright (c) 2006      Charles P. Wright
++ * Copyright (c) 2006-2007 Josef 'Jeff' Sipek
++ * Copyright (c) 2006      Junjiro Okajima
++ * Copyright (c) 2006      David P. Quigley
++ * Copyright (c) 2006-2007 Stony Brook University
++ * Copyright (c) 2006-2007 The Research Foundation of SUNY
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+diff --git a/fs/unionfs/sioq.h b/fs/unionfs/sioq.h
+index 3521ed2..afb71ee 100644
+--- a/fs/unionfs/sioq.h
++++ b/fs/unionfs/sioq.h
+@@ -1,11 +1,11 @@
+ /*
+- * Copyright (c) 2003-2007 Erez Zadok
+- * Copyright (c) 2003-2006 Charles P. Wright
+- * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
+- * Copyright (c) 2005-2006 Junjiro Okajima
+- * Copyright (c) 2004-2006 David P. Quigley
+- * Copyright (c) 2003-2007 Stony Brook University
+- * Copyright (c) 2003-2007 The Research Foundation of SUNY
++ * Copyright (c) 2006-2007 Erez Zadok
++ * Copyright (c) 2006      Charles P. Wright
++ * Copyright (c) 2006-2007 Josef 'Jeff' Sipek
++ * Copyright (c) 2006      Junjiro Okajima
++ * Copyright (c) 2006      David P. Quigley
++ * Copyright (c) 2006-2007 Stony Brook University
++ * Copyright (c) 2006-2007 The Research Foundation of SUNY
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 9ebbe4f..46d5f45 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -342,7 +342,10 @@ extern struct dentry *unionfs_interpose(struct dentry *this_dentry,
+ #ifdef CONFIG_UNION_FS_XATTR
+ /* Extended attribute functions. */
+ extern void *unionfs_xattr_alloc(size_t size, size_t limit);
+-static inline void unionfs_xattr_kfree(const void *p) {kfree((p));}
++static inline void unionfs_xattr_kfree(const void *p)
++{
++	kfree(p);
++}
+ extern ssize_t unionfs_getxattr(struct dentry *dentry, const char *name,
+ 				void *value, size_t size);
+ extern int unionfs_removexattr(struct dentry *dentry, const char *name);
+@@ -393,14 +396,23 @@ static inline int is_robranch_super(const struct super_block *sb, int index)
+ /* Is this file on a read-only branch? */
+ static inline int is_robranch_idx(const struct dentry *dentry, int index)
+ {
+-	int err = 0;
++	struct super_block *lower_sb;
+ 
+ 	BUG_ON(index < 0);
+ 
+-	if ((!(branchperms(dentry->d_sb, index) & MAY_WRITE)) ||
+-	    IS_RDONLY(unionfs_lower_dentry_idx(dentry, index)->d_inode))
+-		err = -EROFS;
+-	return err;
++	if (!(branchperms(dentry->d_sb, index) & MAY_WRITE))
++		return -EROFS;
++
++	lower_sb = unionfs_lower_super_idx(dentry->d_sb, index);
++	BUG_ON(lower_sb == NULL);
++	/*
++	 * test sb flags directly, not IS_RDONLY(lower_inode) because the
++	 * lower_dentry could be a negative.
++	 */
++	if (lower_sb->s_flags & MS_RDONLY)
++		return -EROFS;
++
++	return 0;
+ }
+ 
+ static inline int is_robranch(const struct dentry *dentry)
+@@ -458,17 +470,14 @@ static inline struct vfsmount *unionfs_mntget(struct dentry *dentry,
+ {
+ 	struct vfsmount *mnt;
+ 
+-	BUG_ON(!dentry);
+-	BUG_ON(bindex < 0);
++	BUG_ON(!dentry || bindex < 0);
+ 
+-	mnt = unionfs_lower_mnt_idx(dentry, bindex);
+-	if (mnt)
+-		mnt = mntget(mnt);
+-#ifdef UNIONFS_DEBUG
+-	else
++	mnt = mntget(unionfs_lower_mnt_idx(dentry, bindex));
++#ifdef CONFIG_UNION_FS_DEBUG
++	if (!mnt)
+ 		printk(KERN_DEBUG "unionfs_mntget: mnt=%p bindex=%d\n",
+ 		       mnt, bindex);
+-#endif /* UNIONFS_DEBUG */
++#endif /* CONFIG_UNION_FS_DEBUG */
+ 
+ 	return mnt;
+ }
+@@ -479,31 +488,26 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 
+ 	if (!dentry && bindex < 0)
+ 		return;
+-	BUG_ON(!dentry);
+-	BUG_ON(bindex < 0);
++	BUG_ON(!dentry || bindex < 0);
+ 
+ 	mnt = unionfs_lower_mnt_idx(dentry, bindex);
+-	if (!mnt) {
+-#ifdef UNIONFS_DEBUG
+-		/*
+-		 * Directories can have NULL lower objects in between
+-		 * start/end, but NOT if at the start/end range.  We cannot
+-		 * verify that this dentry is a type=DIR, because it may
+-		 * already be a negative dentry.  But if dbstart is greater
+-		 * than dbend, we know that this couldn't have been a
+-		 * regular file: it had to have been a directory.
+-		 */
+-		if (!(bindex > dbstart(dentry) && bindex < dbend(dentry)))
+-			printk(KERN_WARNING
+-			       "unionfs_mntput: mnt=%p bindex=%d\n",
+-			       mnt, bindex);
+-#endif /* UNIONFS_DEBUG */
+-		return;
+-	}
++#ifdef CONFIG_UNION_FS_DEBUG
++	/*
++	 * Directories can have NULL lower objects in between start/end, but
++	 * NOT if at the start/end range.  We cannot verify that this dentry
++	 * is a type=DIR, because it may already be a negative dentry.  But
++	 * if dbstart is greater than dbend, we know that this couldn't have
++	 * been a regular file: it had to have been a directory.
++	 */
++	if (!mnt && !(bindex > dbstart(dentry) && bindex < dbend(dentry)))
++		printk(KERN_WARNING
++		       "unionfs_mntput: mnt=%p bindex=%d\n",
++		       mnt, bindex);
++#endif /* CONFIG_UNION_FS_DEBUG */
+ 	mntput(mnt);
+ }
+ 
+-#ifdef UNIONFS_DEBUG
++#ifdef CONFIG_UNION_FS_DEBUG
+ 
+ /* useful for tracking code reachability */
+ #define UDBG printk("DBG:%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__)
+@@ -539,7 +543,7 @@ extern void __show_dinode_times(const struct dentry *dentry,
+ extern void __show_inode_counts(const struct inode *inode,
+ 			        const char *file, const char *fxn, int line);
+ 
+-#else /* not UNIONFS_DEBUG */
++#else /* not CONFIG_UNION_FS_DEBUG */
+ 
+ /* we leave useful hooks for these check functions throughout the code */
+ #define unionfs_check_inode(i)
+@@ -550,6 +554,6 @@ extern void __show_inode_counts(const struct inode *inode,
+ #define show_dinode_times(d)
+ #define show_inode_counts(i)
+ 
+-#endif /* not UNIONFS_DEBUG */
++#endif /* not CONFIG_UNION_FS_DEBUG */
+ 
+ #endif	/* not _UNION_H_ */
+diff --git a/include/linux/fs_stack.h b/include/linux/fs_stack.h
+index 2599c5b..28543ad 100644
+--- a/include/linux/fs_stack.h
++++ b/include/linux/fs_stack.h
+@@ -1,8 +1,8 @@
+ /*
+- * Copyright (c) 2003-2007 Erez Zadok
+- * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
+- * Copyright (c) 2003-2007 Stony Brook University
+- * Copyright (c) 2003-2007 The Research Foundation of SUNY
++ * Copyright (c) 2006-2007 Erez Zadok
++ * Copyright (c) 2006-2007 Josef 'Jeff' Sipek
++ * Copyright (c) 2006-2007 Stony Brook University
++ * Copyright (c) 2006-2007 The Research Foundation of SUNY
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+-- 
+1.5.4.3
+

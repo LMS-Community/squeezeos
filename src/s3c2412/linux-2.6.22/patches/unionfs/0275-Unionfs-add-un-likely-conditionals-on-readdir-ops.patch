@@ -1,0 +1,81 @@
+From cafc78e54d9584fcfb3c5208aea840c02317ea65 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 24 Sep 2007 01:09:14 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on readdir ops
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/rdstate.c |   15 ++++++++-------
+ 1 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/fs/unionfs/rdstate.c b/fs/unionfs/rdstate.c
+index 5c9d14b..5fca3a5 100644
+--- a/fs/unionfs/rdstate.c
++++ b/fs/unionfs/rdstate.c
+@@ -45,7 +45,7 @@ int unionfs_init_filldir_cache(void)
+ 
+ void unionfs_destroy_filldir_cache(void)
+ {
+-	if (unionfs_filldir_cachep)
++	if (likely(unionfs_filldir_cachep))
+ 		kmem_cache_destroy(unionfs_filldir_cachep);
+ }
+ 
+@@ -72,7 +72,8 @@ static int guesstimate_hash_size(struct inode *inode)
+ 		return UNIONFS_I(inode)->hashsize;
+ 
+ 	for (bindex = ibstart(inode); bindex <= ibend(inode); bindex++) {
+-		if (!(lower_inode = unionfs_lower_inode_idx(inode, bindex)))
++		lower_inode = unionfs_lower_inode_idx(inode, bindex);
++		if (unlikely(!lower_inode))
+ 			continue;
+ 
+ 		if (lower_inode->i_size == DENTPAGE)
+@@ -136,7 +137,7 @@ struct unionfs_dir_state *alloc_rdstate(struct inode *inode, int bindex)
+ 		sizeof(struct list_head);
+ 
+ 	rdstate = kmalloc(mallocsize, GFP_KERNEL);
+-	if (!rdstate)
++	if (unlikely(!rdstate))
+ 		return NULL;
+ 
+ 	spin_lock(&UNIONFS_I(inode)->rdlock);
+@@ -217,7 +218,7 @@ struct filldir_node *find_filldir_node(struct unionfs_dir_state *rdstate,
+ 			 * if the duplicate is in this branch, then the file
+ 			 * system is corrupted.
+ 			 */
+-			if (cursor->bindex == rdstate->bindex) {
++			if (unlikely(cursor->bindex == rdstate->bindex)) {
+ 				printk(KERN_DEBUG "unionfs: filldir: possible "
+ 				       "I/O error: a file is duplicated "
+ 				       "in the same branch %d: %s\n",
+@@ -227,7 +228,7 @@ struct filldir_node *find_filldir_node(struct unionfs_dir_state *rdstate,
+ 		}
+ 	}
+ 
+-	if (!found)
++	if (unlikely(!found))
+ 		cursor = NULL;
+ 
+ 	return cursor;
+@@ -249,7 +250,7 @@ int add_filldir_node(struct unionfs_dir_state *rdstate, const char *name,
+ 	head = &(rdstate->list[index]);
+ 
+ 	new = kmem_cache_alloc(unionfs_filldir_cachep, GFP_KERNEL);
+-	if (!new) {
++	if (unlikely(!new)) {
+ 		err = -ENOMEM;
+ 		goto out;
+ 	}
+@@ -264,7 +265,7 @@ int add_filldir_node(struct unionfs_dir_state *rdstate, const char *name,
+ 		new->name = new->iname;
+ 	else {
+ 		new->name = kmalloc(namelen + 1, GFP_KERNEL);
+-		if (!new->name) {
++		if (unlikely(!new->name)) {
+ 			kmem_cache_free(unionfs_filldir_cachep, new);
+ 			new = NULL;
+ 			goto out;
+-- 
+1.5.4.3
+

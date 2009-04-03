@@ -1,0 +1,52 @@
+From 19c36075ba7d5168cac8f40af1b786a0fb72d584 Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Thu, 1 Feb 2007 12:14:03 -0500
+Subject: [PATCH] fs/unionfs/: Use __roundup_pow_of_two instead of custom rounding code
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/rdstate.c |   11 ++---------
+ fs/unionfs/union.h   |    1 +
+ 2 files changed, 3 insertions(+), 9 deletions(-)
+
+diff --git a/fs/unionfs/rdstate.c b/fs/unionfs/rdstate.c
+index 16ce1bf..e240285 100644
+--- a/fs/unionfs/rdstate.c
++++ b/fs/unionfs/rdstate.c
+@@ -115,19 +115,12 @@ struct unionfs_dir_state *alloc_rdstate(struct inode *inode, int bindex)
+ {
+ 	int i = 0;
+ 	int hashsize;
+-	int mallocsize = sizeof(struct unionfs_dir_state);
++	unsigned long mallocsize = sizeof(struct unionfs_dir_state);
+ 	struct unionfs_dir_state *rdstate;
+ 
+ 	hashsize = guesstimate_hash_size(inode);
+ 	mallocsize += hashsize * sizeof(struct list_head);
+-	/* Round it up to the next highest power of two. */
+-	mallocsize--;
+-	mallocsize |= mallocsize >> 1;
+-	mallocsize |= mallocsize >> 2;
+-	mallocsize |= mallocsize >> 4;
+-	mallocsize |= mallocsize >> 8;
+-	mallocsize |= mallocsize >> 16;
+-	mallocsize++;
++	mallocsize = __roundup_pow_of_two(mallocsize);
+ 
+ 	/* This should give us about 500 entries anyway. */
+ 	if (mallocsize > PAGE_SIZE)
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 8e9a1cc..fc87b03 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -41,6 +41,7 @@
+ #include <linux/xattr.h>
+ #include <linux/fs_stack.h>
+ #include <linux/magic.h>
++#include <linux/log2.h>
+ 
+ #include <asm/mman.h>
+ #include <asm/system.h>
+-- 
+1.5.4.3
+

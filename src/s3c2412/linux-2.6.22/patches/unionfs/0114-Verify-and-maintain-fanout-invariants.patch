@@ -1,0 +1,540 @@
+From ce3c28f7b82742a740b76d5463a39f901a4726cd Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 01:39:26 -0400
+Subject: [PATCH] Verify and maintain fanout invariants.
+
+This somewhat long patch calls various invariant-checking (debugging)
+functions in all places where the fanout invariants should hold.  The three
+invariant-checking functions, __unionfs_check_{inode,dentry,file}, perform
+exhaustive sanity checking on the fan-out of various Unionfs objects.  We
+check that no lower objects exist outside the start/end branch range; that
+all objects within are non-NULL (with some allowed exceptions); that for
+every lower file there's a lower dentry+inode; that the start/end ranges
+match for all corresponding lower objects; that open files/symlinks have
+only one lower objects, but directories can have several; and more.
+
+The rest of this patch actually fixes many places where these invariants did
+not hold, which could lead to bugs or corruptions under heavy loads,
+multi-threaded workloads, dynamic branch-management, and mmap operations.
+Most of the bugs related to actions involving copyups and whiteouts.  With
+these fixes, the entire Unionfs regression suite passes without a single
+invariant violated.
+---
+ fs/unionfs/commonfops.c |   59 ++++++++++++++++++++++++++++++++++++++++------
+ fs/unionfs/copyup.c     |   19 +++++++++++++++
+ fs/unionfs/dentry.c     |    3 ++
+ fs/unionfs/file.c       |    7 +++++
+ fs/unionfs/inode.c      |   33 +++++++++++++++++++++++++-
+ fs/unionfs/rename.c     |   32 ++++++++++++++++++++++++-
+ fs/unionfs/unlink.c     |    8 +++++-
+ fs/unionfs/xattr.c      |    4 +++
+ 8 files changed, 153 insertions(+), 12 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 2cbf561..d824eaa 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -78,11 +78,18 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 
+ 	/* bring it to the same state as an unlinked file */
+ 	hidden_dentry = unionfs_lower_dentry_idx(dentry, dbstart(dentry));
++	if (!unionfs_lower_inode_idx(dentry->d_inode, bindex)) {
++		atomic_inc(&hidden_dentry->d_inode->i_count);
++		unionfs_set_lower_inode_idx(dentry->d_inode, bindex,
++					    hidden_dentry->d_inode);
++	}
+ 	hidden_dir_dentry = lock_parent(hidden_dentry);
+ 	err = vfs_unlink(hidden_dir_dentry->d_inode, hidden_dentry);
+ 	unlock_dir(hidden_dir_dentry);
+ 
+ out:
++	if (!err)
++		unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -257,6 +264,8 @@ static int do_delayed_copyup(struct file *file, struct dentry *dentry)
+ 
+ 	BUG_ON(!S_ISREG(file->f_dentry->d_inode->i_mode));
+ 
++	unionfs_check_file(file);
++	unionfs_check_dentry(dentry);
+ 	for (bindex = bstart - 1; bindex >= 0; bindex--) {
+ 		if (!d_deleted(file->f_dentry))
+ 			err = copyup_file(parent_inode, file, bstart,
+@@ -278,9 +287,25 @@ static int do_delayed_copyup(struct file *file, struct dentry *dentry)
+ 				fput(unionfs_lower_file_idx(file, bindex));
+ 				unionfs_set_lower_file_idx(file, bindex, NULL);
+ 			}
++			if (unionfs_lower_mnt_idx(dentry, bindex)) {
++				unionfs_mntput(dentry, bindex);
++				unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
++			}
++			if (unionfs_lower_dentry_idx(dentry, bindex)) {
++				BUG_ON(!dentry->d_inode);
++				iput(unionfs_lower_inode_idx(dentry->d_inode, bindex));
++				unionfs_set_lower_inode_idx(dentry->d_inode, bindex, NULL);
++				dput(unionfs_lower_dentry_idx(dentry, bindex));
++				unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
++			}
+ 		}
+-		fbend(file) = bend;
++		/* for reg file, we only open it "once" */
++		fbend(file) = fbstart(file);
++		set_dbend(dentry, dbstart(dentry));
++		ibend(dentry->d_inode) = ibstart(dentry->d_inode);
+ 	}
++	unionfs_check_file(file);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -374,6 +399,8 @@ out:
+ 		kfree(UNIONFS_F(file)->saved_branch_ids);
+ 	}
+ out_nofree:
++	if (!err)
++		unionfs_check_file(file);
+ 	unionfs_unlock_dentry(dentry);
+ 	return err;
+ }
+@@ -556,6 +583,8 @@ out:
+ 	}
+ out_nofree:
+ 	unionfs_read_unlock(inode->i_sb);
++	unionfs_check_inode(inode);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -565,10 +594,19 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	struct file *hidden_file = NULL;
+ 	struct unionfs_file_info *fileinfo = UNIONFS_F(file);
+ 	struct unionfs_inode_info *inodeinfo = UNIONFS_I(inode);
++	struct super_block *sb = inode->i_sb;
+ 	int bindex, bstart, bend;
+-	int fgen;
++	int fgen, err = 0;
+ 
+-	unionfs_read_lock(inode->i_sb);
++	unionfs_check_file(file);
++	unionfs_read_lock(sb);
++	/*
++	 * Yes, we have to revalidate this file even if it's being released.
++	 * This is important for open-but-unlinked files, as well as mmap
++	 * support.
++	 */
++	if ((err = unionfs_file_revalidate(file, 1)))
++		goto out;
+ 	/* fput all the hidden files */
+ 	fgen = atomic_read(&fileinfo->generation);
+ 	bstart = fbstart(file);
+@@ -579,9 +617,9 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 
+ 		if (hidden_file) {
+ 			fput(hidden_file);
+-			unionfs_read_lock(inode->i_sb);
+-			branchput(inode->i_sb, bindex);
+-			unionfs_read_unlock(inode->i_sb);
++			unionfs_read_lock(sb);
++			branchput(sb, bindex);
++			unionfs_read_unlock(sb);
+ 		}
+ 	}
+ 	kfree(fileinfo->lower_files);
+@@ -603,8 +641,10 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 		fileinfo->rdstate = NULL;
+ 	}
+ 	kfree(fileinfo);
+-	unionfs_read_unlock(inode->i_sb);
+-	return 0;
++
++out:
++	unionfs_read_unlock(sb);
++	return err;
+ }
+ 
+ /* pass the ioctl to the lower fs */
+@@ -705,6 +745,7 @@ long unionfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 	}
+ 
+ out:
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -719,6 +760,7 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
++	unionfs_check_file(file);
+ 
+ 	if (!atomic_dec_and_test(&UNIONFS_I(dentry->d_inode)->totalopens))
+ 		goto out;
+@@ -750,5 +792,6 @@ out_lock:
+ 	unionfs_unlock_dentry(dentry);
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 2cf1878..c37c90f 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -483,6 +483,25 @@ out_free:
+ 		dput(old_hidden_dentry);
+ 	kfree(symbuf);
+ 
++	if (err)
++		goto out;
++	if (!S_ISDIR(dentry->d_inode->i_mode)) {
++		unionfs_purge_extras(dentry);
++		if (!unionfs_lower_inode(dentry->d_inode)) {
++			/*
++			 * If we got here, then we copied up to an
++			 * unlinked-open file, whose name is .unionfsXXXXX.
++			 */
++			struct inode *inode = new_hidden_dentry->d_inode;
++			atomic_inc(&inode->i_count);
++			unionfs_set_lower_inode_idx(dentry->d_inode,
++						    ibstart(dentry->d_inode),
++						    inode);
++		}
++	}
++	unionfs_inherit_mnt(dentry);
++	unionfs_check_inode(dir);
++	unionfs_check_dentry(dentry);
+ out:
+ 	return err;
+ }
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index d1ee792..1653267 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -289,9 +289,11 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ {
+ 	int err;
+ 
++	unionfs_check_dentry(dentry);
+ 	unionfs_lock_dentry(dentry);
+ 	err = __unionfs_d_revalidate_chain(dentry, nd);
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 
+ 	return err;
+ }
+@@ -304,6 +306,7 @@ static void unionfs_d_release(struct dentry *dentry)
+ {
+ 	int bindex, bstart, bend;
+ 
++	unionfs_check_dentry(dentry);
+ 	/* this could be a negative dentry, so check first */
+ 	if (!UNIONFS_D(dentry)) {
+ 		printk(KERN_DEBUG "unionfs: dentry without private data: %.*s",
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 2e5ec42..7c0553c 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -50,6 +50,7 @@ static loff_t unionfs_llseek(struct file *file, loff_t offset, int origin)
+ 	}
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -74,6 +75,7 @@ static ssize_t unionfs_read(struct file *file, char __user *buf,
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -126,6 +128,7 @@ static ssize_t unionfs_write(struct file *file, const char __user *buf,
+ 		inode->i_size = pos;
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -156,6 +159,7 @@ static unsigned int unionfs_poll(struct file *file, poll_table *wait)
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return mask;
+ }
+ 
+@@ -193,6 +197,7 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -219,6 +224,7 @@ static int unionfs_fsync(struct file *file, struct dentry *dentry,
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+@@ -238,6 +244,7 @@ static int unionfs_fasync(int fd, struct file *file, int flag)
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 872a6e6..02bea8f 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -222,8 +222,14 @@ out:
+ 	dput(wh_dentry);
+ 	kfree(name);
+ 
++	if (!err)
++		unionfs_inherit_mnt(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
++
++	unionfs_check_inode(parent);
++	unionfs_check_dentry(dentry->d_parent);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -248,7 +254,11 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 		nd->dentry = path_save.dentry;
+ 		nd->mnt = path_save.mnt;
+ 	}
++	if (!IS_ERR(ret))
++		unionfs_inherit_mnt(dentry);
+ 
++	unionfs_check_inode(parent);
++	unionfs_check_dentry(dentry);
+ 	return ret;
+ }
+ 
+@@ -374,10 +384,15 @@ out:
+ 		d_drop(new_dentry);
+ 
+ 	kfree(name);
++	if (!err)
++		unionfs_inherit_mnt(new_dentry);
+ 
+ 	unionfs_unlock_dentry(new_dentry);
+ 	unionfs_unlock_dentry(old_dentry);
+ 
++	unionfs_check_inode(dir);
++	unionfs_check_dentry(new_dentry);
++	unionfs_check_dentry(old_dentry);
+ 	return err;
+ }
+ 
+@@ -520,7 +535,12 @@ out:
+ 		d_drop(dentry);
+ 
+ 	kfree(name);
++	if (!err)
++		unionfs_inherit_mnt(dentry);
+ 	unionfs_unlock_dentry(dentry);
++
++	unionfs_check_inode(dir);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -654,6 +674,8 @@ out:
+ 	kfree(name);
+ 
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_inode(parent);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -763,7 +785,12 @@ out:
+ 
+ 	kfree(name);
+ 
++	if (!err)
++		unionfs_inherit_mnt(dentry);
+ 	unionfs_unlock_dentry(dentry);
++
++	unionfs_check_inode(dir);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -792,6 +819,7 @@ static int unionfs_readlink(struct dentry *dentry, char __user *buf,
+ 
+ out:
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -826,12 +854,14 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	err = 0;
+ 
+ out:
++	unionfs_check_dentry(dentry);
+ 	return ERR_PTR(err);
+ }
+ 
+ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 			     void *cookie)
+ {
++	unionfs_check_dentry(dentry);
+ 	kfree(nd_get_link(nd));
+ }
+ 
+@@ -955,6 +985,7 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 
+ out:
+ 	unionfs_read_unlock(inode->i_sb);
++	unionfs_check_inode(inode);
+ 	return err;
+ }
+ 
+@@ -1021,9 +1052,9 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	hidden_inode = unionfs_lower_inode(dentry->d_inode);
+ 	fsstack_copy_attr_all(inode, hidden_inode, unionfs_get_nlinks);
+ 	fsstack_copy_inode_size(inode, hidden_inode);
+-
+ out:
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index edc5a5c..a19957f 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -449,18 +449,46 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		}
+ 	}
+ 	err = do_unionfs_rename(old_dir, old_dentry, new_dir, new_dentry);
+-
+ out:
+ 	if (err)
+ 		/* clear the new_dentry stuff created */
+ 		d_drop(new_dentry);
+-	else
++	else {
+ 		/*
+ 		 * force re-lookup since the dir on ro branch is not renamed,
+ 		 * and hidden dentries still indicate the un-renamed ones.
+ 		 */
+ 		if (S_ISDIR(old_dentry->d_inode->i_mode))
+ 			atomic_dec(&UNIONFS_D(old_dentry)->generation);
++		else
++			unionfs_purge_extras(old_dentry);
++		if (new_dentry->d_inode &&
++		    !S_ISDIR(new_dentry->d_inode->i_mode)) {
++			unionfs_purge_extras(new_dentry);
++			unionfs_inherit_mnt(new_dentry);
++			if (!unionfs_lower_inode(new_dentry->d_inode)) {
++				/*
++				 * If we get here, it means that no copyup
++				 * was needed, and that a file by the old
++				 * name already existing on the destination
++				 * branch; that file got renamed earlier in
++				 * this function, so all we need to do here
++				 * is set the lower inode.
++				 */
++				struct inode *inode;
++				inode = unionfs_lower_inode(old_dentry->d_inode);
++				atomic_inc(&inode->i_count);
++				unionfs_set_lower_inode_idx(
++					new_dentry->d_inode,
++					dbstart(new_dentry), inode);
++			}
++
++		}
++		unionfs_check_inode(old_dir);
++		unionfs_check_inode(new_dir);
++		unionfs_check_dentry(old_dentry);
++		unionfs_check_dentry(new_dentry);
++	}
+ 
+ 	unionfs_unlock_dentry(new_dentry);
+ 	unionfs_unlock_dentry(old_dentry);
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index 2052270..b3d814d 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -75,12 +75,17 @@ int unionfs_unlink(struct inode *dir, struct dentry *dentry)
+ 
+ 	BUG_ON(!is_valid_dentry(dentry));
+ 
++	unionfs_check_dentry(dentry);
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	err = unionfs_unlink_whiteout(dir, dentry);
+ 	/* call d_drop so the system "forgets" about us */
+-	if (!err)
++	if (!err) {
++		if (!S_ISDIR(dentry->d_inode->i_mode))
++			unionfs_purge_extras(dentry);
++		unionfs_check_dentry(dentry);
+ 		d_drop(dentry);
++	}
+ 
+ 	unionfs_unlock_dentry(dentry);
+ 	return err;
+@@ -125,6 +130,7 @@ int unionfs_rmdir(struct inode *dir, struct dentry *dentry)
+ 
+ 	BUG_ON(!is_valid_dentry(dentry));
+ 
++	unionfs_check_dentry(dentry);
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	/* check if this unionfs directory is empty or not */
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 12d618b..4cacead 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -66,6 +66,7 @@ ssize_t unionfs_getxattr(struct dentry *dentry, const char *name, void *value,
+ 	err = vfs_getxattr(hidden_dentry, (char*) name, value, size);
+ 
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -88,6 +89,7 @@ int unionfs_setxattr(struct dentry *dentry, const char *name,
+ 			   size, flags);
+ 
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -108,6 +110,7 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	err = vfs_removexattr(hidden_dentry, (char*) name);
+ 
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+@@ -131,5 +134,6 @@ ssize_t unionfs_listxattr(struct dentry *dentry, char *list, size_t size)
+ 	err = vfs_listxattr(hidden_dentry, encoded_list, size);
+ 
+ 	unionfs_unlock_dentry(dentry);
++	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+-- 
+1.5.4.3
+

@@ -1,0 +1,29 @@
+From 819d37306df073ed5bd37669db6a6691a2024f50 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 26 Nov 2007 19:16:05 -0500
+Subject: [PATCH] Unionfs: call wait_on_page_writeback before clear_page_dirty_for_io
+
+CC: Hugh Dickins <hugh@veritas.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index cc9d085..e0d5ab5 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -103,8 +103,8 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 		wbc->for_writepages = 0;
+ 
+ 	BUG_ON(!lower_mapping->a_ops->writepage);
+-	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
+ 	wait_on_page_writeback(lower_page); /* prevent multiple writers */
++	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
+ 	err = lower_mapping->a_ops->writepage(lower_page, wbc);
+ 	wbc->for_writepages = saved_for_writepages; /* restore value */
+ 	if (err < 0)
+-- 
+1.5.4.3
+

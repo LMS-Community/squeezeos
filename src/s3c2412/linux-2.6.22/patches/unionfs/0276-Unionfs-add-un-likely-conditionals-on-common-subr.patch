@@ -1,0 +1,135 @@
+From 308f6780ed9f02ac173f78fa4fe30030fe0dc2ec Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 00:59:23 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on common subr
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/sioq.c |    4 ++--
+ fs/unionfs/subr.c |   22 +++++++++++-----------
+ 2 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/fs/unionfs/sioq.c b/fs/unionfs/sioq.c
+index 2a8c88e..35d9fc3 100644
+--- a/fs/unionfs/sioq.c
++++ b/fs/unionfs/sioq.c
+@@ -28,7 +28,7 @@ int __init init_sioq(void)
+ 	int err;
+ 
+ 	superio_workqueue = create_workqueue("unionfs_siod");
+-	if (!IS_ERR(superio_workqueue))
++	if (unlikely(!IS_ERR(superio_workqueue)))
+ 		return 0;
+ 
+ 	err = PTR_ERR(superio_workqueue);
+@@ -39,7 +39,7 @@ int __init init_sioq(void)
+ 
+ void stop_sioq(void)
+ {
+-	if (superio_workqueue)
++	if (likely(superio_workqueue))
+ 		destroy_workqueue(superio_workqueue);
+ }
+ 
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index c9a89ab..add2ed9 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -39,7 +39,7 @@ int create_whiteout(struct dentry *dentry, int start)
+ 
+ 	/* create dentry's whiteout equivalent */
+ 	name = alloc_whname(dentry->d_name.name, dentry->d_name.len);
+-	if (IS_ERR(name)) {
++	if (unlikely(IS_ERR(name))) {
+ 		err = PTR_ERR(name);
+ 		goto out;
+ 	}
+@@ -59,7 +59,7 @@ int create_whiteout(struct dentry *dentry, int start)
+ 						      dentry,
+ 						      dentry->d_name.name,
+ 						      bindex);
+-			if (!lower_dentry || IS_ERR(lower_dentry)) {
++			if (unlikely(!lower_dentry || IS_ERR(lower_dentry))) {
+ 				printk(KERN_DEBUG "unionfs: create_parents "
+ 				       "failed for bindex = %d\n", bindex);
+ 				continue;
+@@ -69,7 +69,7 @@ int create_whiteout(struct dentry *dentry, int start)
+ 		lower_wh_dentry =
+ 			lookup_one_len(name, lower_dentry->d_parent,
+ 				       dentry->d_name.len + UNIONFS_WHLEN);
+-		if (IS_ERR(lower_wh_dentry))
++		if (unlikely(IS_ERR(lower_wh_dentry)))
+ 			continue;
+ 
+ 		/*
+@@ -91,12 +91,12 @@ int create_whiteout(struct dentry *dentry, int start)
+ 		unlock_dir(lower_dir_dentry);
+ 		dput(lower_wh_dentry);
+ 
+-		if (!err || !IS_COPYUP_ERR(err))
++		if (unlikely(!err || !IS_COPYUP_ERR(err)))
+ 			break;
+ 	}
+ 
+ 	/* set dbopaque so that lookup will not proceed after this branch */
+-	if (!err)
++	if (likely(!err))
+ 		set_dbopaque(dentry, bindex);
+ 
+ out:
+@@ -124,7 +124,7 @@ int unionfs_refresh_lower_dentry(struct dentry *dentry, int bindex)
+ 
+ 	lower_dentry = lookup_one_len(dentry->d_name.name, lower_parent,
+ 				      dentry->d_name.len);
+-	if (IS_ERR(lower_dentry)) {
++	if (unlikely(IS_ERR(lower_dentry))) {
+ 		err = PTR_ERR(lower_dentry);
+ 		goto out;
+ 	}
+@@ -133,7 +133,7 @@ int unionfs_refresh_lower_dentry(struct dentry *dentry, int bindex)
+ 	iput(unionfs_lower_inode_idx(dentry->d_inode, bindex));
+ 	unionfs_set_lower_inode_idx(dentry->d_inode, bindex, NULL);
+ 
+-	if (!lower_dentry->d_inode) {
++	if (unlikely(!lower_dentry->d_inode)) {
+ 		dput(lower_dentry);
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 	} else {
+@@ -160,14 +160,14 @@ int make_dir_opaque(struct dentry *dentry, int bindex)
+ 	mutex_lock(&lower_dir->i_mutex);
+ 	diropq = lookup_one_len(UNIONFS_DIR_OPAQUE, lower_dentry,
+ 				sizeof(UNIONFS_DIR_OPAQUE) - 1);
+-	if (IS_ERR(diropq)) {
++	if (unlikely(IS_ERR(diropq))) {
+ 		err = PTR_ERR(diropq);
+ 		goto out;
+ 	}
+ 
+ 	if (!diropq->d_inode)
+ 		err = vfs_create(lower_dir, diropq, S_IRUGO, NULL);
+-	if (!err)
++	if (likely(!err))
+ 		set_dbopaque(dentry, bindex);
+ 
+ 	dput(diropq);
+@@ -183,7 +183,7 @@ out:
+ int unionfs_get_nlinks(const struct inode *inode)
+ {
+ 	/* don't bother to do all the work since we're unlinked */
+-	if (inode->i_nlink == 0)
++	if (unlikely(inode->i_nlink == 0))
+ 		return 0;
+ 
+ 	if (!S_ISDIR(inode->i_mode))
+@@ -203,7 +203,7 @@ char *alloc_whname(const char *name, int len)
+ 	char *buf;
+ 
+ 	buf = kmalloc(len + UNIONFS_WHLEN + 1, GFP_KERNEL);
+-	if (!buf)
++	if (unlikely(!buf))
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	strcpy(buf, UNIONFS_WHPFX);
+-- 
+1.5.4.3
+

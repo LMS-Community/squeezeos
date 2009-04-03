@@ -1,0 +1,250 @@
+From 895467dd8bb511f5ccf3b796fd3d132dcd610d72 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 00:54:08 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on dentry ops
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   69 ++++++++++++++++++++++++++-------------------------
+ 1 files changed, 35 insertions(+), 34 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index d9bb199..b5dfbdc 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -45,7 +45,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	verify_locked(dentry);
+ 
+ 	/* if the dentry is unhashed, do NOT revalidate */
+-	if (d_deleted(dentry)) {
++	if (unlikely(d_deleted(dentry))) {
+ 		dprintk(KERN_DEBUG "unionfs: unhashed dentry being "
+ 			"revalidated: %*s\n",
+ 			dentry->d_name.len, dentry->d_name.name);
+@@ -53,7 +53,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	}
+ 
+ 	BUG_ON(dbstart(dentry) == -1);
+-	if (dentry->d_inode)
++	if (likely(dentry->d_inode))
+ 		positive = 1;
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+ 	sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+@@ -62,7 +62,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	 * revalidation to be done, because this file does not exist within
+ 	 * the namespace, and Unionfs operates on the namespace, not data.
+ 	 */
+-	if (sbgen != dgen) {
++	if (unlikely(sbgen != dgen)) {
+ 		struct dentry *result;
+ 		int pdgen;
+ 
+@@ -76,7 +76,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		/* Free the pointers for our inodes and this dentry. */
+ 		bstart = dbstart(dentry);
+ 		bend = dbend(dentry);
+-		if (bstart >= 0) {
++		if (likely(bstart >= 0)) {
+ 			struct dentry *lower_dentry;
+ 			for (bindex = bstart; bindex <= bend; bindex++) {
+ 				lower_dentry =
+@@ -89,7 +89,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		set_dbend(dentry, -1);
+ 
+ 		interpose_flag = INTERPOSE_REVAL_NEG;
+-		if (positive) {
++		if (likely(positive)) {
+ 			interpose_flag = INTERPOSE_REVAL;
+ 			/*
+ 			 * During BRM, the VFS could already hold a lock on
+@@ -97,14 +97,14 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			 * (deadlock), but if you lock it in this function,
+ 			 * then release it here too.
+ 			 */
+-			if (!mutex_is_locked(&dentry->d_inode->i_mutex)) {
++			if (unlikely(!mutex_is_locked(&dentry->d_inode->i_mutex))) {
+ 				mutex_lock(&dentry->d_inode->i_mutex);
+ 				locked = 1;
+ 			}
+ 
+ 			bstart = ibstart(dentry->d_inode);
+ 			bend = ibend(dentry->d_inode);
+-			if (bstart >= 0) {
++			if (likely(bstart >= 0)) {
+ 				struct inode *lower_inode;
+ 				for (bindex = bstart; bindex <= bend;
+ 				     bindex++) {
+@@ -119,14 +119,14 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			UNIONFS_I(dentry->d_inode)->lower_inodes = NULL;
+ 			ibstart(dentry->d_inode) = -1;
+ 			ibend(dentry->d_inode) = -1;
+-			if (locked)
++			if (unlikely(locked))
+ 				mutex_unlock(&dentry->d_inode->i_mutex);
+ 		}
+ 
+ 		result = unionfs_lookup_backend(dentry, &lowernd,
+ 						interpose_flag);
+-		if (result) {
+-			if (IS_ERR(result)) {
++		if (likely(result)) {
++			if (unlikely(IS_ERR(result))) {
+ 				valid = false;
+ 				goto out;
+ 			}
+@@ -138,7 +138,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			dentry = result;
+ 		}
+ 
+-		if (positive && UNIONFS_I(dentry->d_inode)->stale) {
++		if (unlikely(positive && UNIONFS_I(dentry->d_inode)->stale)) {
+ 			make_bad_inode(dentry->d_inode);
+ 			d_drop(dentry);
+ 			valid = false;
+@@ -153,18 +153,18 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	BUG_ON(bstart == -1);
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+-		if (!lower_dentry || !lower_dentry->d_op
+-		    || !lower_dentry->d_op->d_revalidate)
++		if (unlikely(!lower_dentry || !lower_dentry->d_op
++			     || !lower_dentry->d_op->d_revalidate))
+ 			continue;
+-		if (!lower_dentry->d_op->d_revalidate(lower_dentry,
+-						      &lowernd))
++		if (unlikely(!lower_dentry->d_op->d_revalidate(lower_dentry,
++							       &lowernd)))
+ 			valid = false;
+ 	}
+ 
+-	if (!dentry->d_inode)
++	if (unlikely(!dentry->d_inode))
+ 		valid = false;
+ 
+-	if (valid) {
++	if (likely(valid)) {
+ 		/*
+ 		 * If we get here, and we copy the meta-data from the lower
+ 		 * inode to our inode, then it is vital that we have already
+@@ -193,32 +193,32 @@ bool is_newer_lower(const struct dentry *dentry)
+ 	struct inode *lower_inode;
+ 
+ 	/* ignore if we're called on semi-initialized dentries/inodes */
+-	if (!dentry || !UNIONFS_D(dentry))
++	if (likely(!dentry || !UNIONFS_D(dentry)))
+ 		return false;
+ 	inode = dentry->d_inode;
+-	if (!inode || !UNIONFS_I(inode) ||
+-	    ibstart(inode) < 0 || ibend(inode) < 0)
++	if (unlikely(!inode || !UNIONFS_I(inode) ||
++		     ibstart(inode) < 0 || ibend(inode) < 0))
+ 		return false;
+ 
+ 	for (bindex = ibstart(inode); bindex <= ibend(inode); bindex++) {
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+-		if (!lower_inode)
++		if (unlikely(!lower_inode))
+ 			continue;
+ 		/*
+ 		 * We may want to apply other tests to determine if the
+ 		 * lower inode's data has changed, but checking for changed
+ 		 * ctime and mtime on the lower inode should be enough.
+ 		 */
+-		if (timespec_compare(&inode->i_mtime,
+-				     &lower_inode->i_mtime) < 0) {
++		if (unlikely(timespec_compare(&inode->i_mtime,
++					      &lower_inode->i_mtime) < 0)) {
+ 			printk("unionfs: new lower inode mtime "
+ 			       "(bindex=%d, name=%s)\n", bindex,
+ 			       dentry->d_name.name);
+ 			show_dinode_times(dentry);
+ 			return true; /* mtime changed! */
+ 		}
+-		if (timespec_compare(&inode->i_ctime,
+-				     &lower_inode->i_ctime) < 0) {
++		if (unlikely(timespec_compare(&inode->i_ctime,
++					      &lower_inode->i_ctime) < 0)) {
+ 			printk("unionfs: new lower inode ctime "
+ 			       "(bindex=%d, name=%s)\n", bindex,
+ 			       dentry->d_name.name);
+@@ -286,7 +286,7 @@ bool __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd,
+ 	dtmp = dentry->d_parent;
+ 	dgen = atomic_read(&UNIONFS_D(dtmp)->generation);
+ 	/* XXX: should we check if is_newer_lower all the way up? */
+-	if (is_newer_lower(dtmp)) {
++	if (unlikely(is_newer_lower(dtmp))) {
+ 		/*
+ 		 * Special case: the root dentry's generation number must
+ 		 * always be valid, but its lower inode times don't have to
+@@ -320,7 +320,7 @@ bool __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd,
+ 	 * and short lived, so locality will be better.
+ 	 */
+ 	chain = kzalloc(chain_len * sizeof(struct dentry *), GFP_KERNEL);
+-	if (!chain) {
++	if (unlikely(!chain)) {
+ 		printk("unionfs: no more memory in %s\n", __FUNCTION__);
+ 		goto out;
+ 	}
+@@ -357,7 +357,7 @@ bool __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd,
+ 		}
+ 		unionfs_unlock_dentry(chain[i]);
+ 
+-		if (!valid)
++		if (unlikely(!valid))
+ 			goto out_free;
+ 	}
+ 
+@@ -366,7 +366,7 @@ out_this:
+ 	/* finally, lock this dentry and revalidate it */
+ 	verify_locked(dentry);
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+-	if (is_newer_lower(dentry)) {
++	if (unlikely(is_newer_lower(dentry))) {
+ 		/* root dentry special case as aforementioned */
+ 		if (IS_ROOT(dentry))
+ 			unionfs_copy_attr_times(dentry->d_inode);
+@@ -392,7 +392,7 @@ out_this:
+ 	 * which __unionfs_d_revalidate_one has incremented.  Note: the "if"
+ 	 * test below does not depend on whether chain_len was 0 or greater.
+ 	 */
+-	if (valid && sbgen != dgen)
++	if (unlikely(valid && sbgen != dgen))
+ 		for (bindex = dbstart(dentry);
+ 		     bindex <= dbend(dentry);
+ 		     bindex++)
+@@ -418,7 +418,7 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ 	unionfs_lock_dentry(dentry);
+ 	err = __unionfs_d_revalidate_chain(dentry, nd, false);
+ 	unionfs_unlock_dentry(dentry);
+-	if (err > 0) /* true==1: dentry is valid */
++	if (likely(err > 0)) /* true==1: dentry is valid */
+ 		unionfs_check_dentry(dentry);
+ 
+ 	unionfs_read_unlock(dentry->d_sb);
+@@ -438,11 +438,11 @@ static void unionfs_d_release(struct dentry *dentry)
+ 
+ 	unionfs_check_dentry(dentry);
+ 	/* this could be a negative dentry, so check first */
+-	if (!UNIONFS_D(dentry)) {
++	if (unlikely(!UNIONFS_D(dentry))) {
+ 		printk(KERN_DEBUG "unionfs: dentry without private data: %.*s\n",
+ 		       dentry->d_name.len, dentry->d_name.name);
+ 		goto out;
+-	} else if (dbstart(dentry) < 0) {
++	} else if (unlikely(dbstart(dentry) < 0)) {
+ 		/* this is due to a failed lookup */
+ 		printk(KERN_DEBUG "unionfs: dentry without lower "
+ 		       "dentries: %.*s\n",
+@@ -457,7 +457,8 @@ static void unionfs_d_release(struct dentry *dentry)
+ 		dput(unionfs_lower_dentry_idx(dentry, bindex));
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 		/* NULL lower mnt is ok if this is a negative dentry */
+-		if (!dentry->d_inode && !unionfs_lower_mnt_idx(dentry,bindex))
++		if (unlikely(!dentry->d_inode &&
++			     !unionfs_lower_mnt_idx(dentry,bindex)))
+ 			continue;
+ 		unionfs_mntput(dentry, bindex);
+ 		unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
+-- 
+1.5.4.3
+

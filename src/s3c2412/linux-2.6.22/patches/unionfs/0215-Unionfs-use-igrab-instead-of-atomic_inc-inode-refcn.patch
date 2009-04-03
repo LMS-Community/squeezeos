@@ -1,0 +1,29 @@
+From 0bc797ec25340a54309e4e24fd0e1b5d39a28d2c Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 16 Jul 2007 23:45:46 -0400
+Subject: [PATCH] Unionfs: use igrab instead of atomic_inc inode refcnt
+
+In branch management code, use igrab() which is better than directly
+incrementing the lower inode reference count.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/super.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index c168b23..f4118df 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -740,7 +740,7 @@ out_no_change:
+ 	for (i=dbstart(sb->s_root); i<=dbend(sb->s_root); i++) {
+ 		struct dentry *lower_dentry =
+ 			unionfs_lower_dentry_idx(sb->s_root, i);
+-		atomic_inc(&lower_dentry->d_inode->i_count);
++		igrab(lower_dentry->d_inode);
+ 		new_lower_inodes[i] = lower_dentry->d_inode;
+ 	}
+ 	/* 2. release reference on all older lower inodes */
+-- 
+1.5.4.3
+

@@ -1,0 +1,57 @@
+From e0f9ae395c0dd0e6746d06fd2f95425ed6b4b94f Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 10 Sep 2007 20:19:29 -0400
+Subject: [PATCH] Unionfs: cache coherency after lower objects are removed
+
+Prevent an oops if a lower file is deleted and then it is stat'ed from the
+upper layer.  Ensure that we return a negative dentry so the user will get
+an ENOENT.  Properly dput/mntput so we don't leak references at the lower
+file system.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |   14 ++++++++++++--
+ 1 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 1ddc902..da89ced 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -92,7 +92,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	struct dentry *lower_dir_dentry = NULL;
+ 	struct dentry *parent_dentry = NULL;
+ 	struct dentry *d_interposed = NULL;
+-	int bindex, bstart, bend, bopaque;
++	int bindex, bstart = -1, bend, bopaque;
+ 	int dentry_count = 0;	/* Number of positive dentries. */
+ 	int first_dentry_offset = -1; /* -1 is uninitialized */
+ 	struct dentry *first_dentry = NULL;
+@@ -423,7 +423,14 @@ out:
+ 	if (!err && UNIONFS_D(dentry)) {
+ 		BUG_ON(dbend(dentry) > UNIONFS_D(dentry)->bcount);
+ 		BUG_ON(dbend(dentry) > sbmax(dentry->d_sb));
+-		BUG_ON(dbstart(dentry) < 0);
++		if (dbstart(dentry) < 0 &&
++		    dentry->d_inode && bstart >= 0 &&
++		    (!UNIONFS_I(dentry->d_inode) ||
++		     !UNIONFS_I(dentry->d_inode)->lower_inodes)) {
++			unionfs_mntput(dentry->d_sb->s_root, bstart);
++			dput(first_lower_dentry);
++			UNIONFS_I(dentry->d_inode)->stale = 1;
++		}
+ 	}
+ 	kfree(whname);
+ 	if (locked_parent)
+@@ -433,6 +440,9 @@ out:
+ 		unionfs_unlock_dentry(dentry);
+ 	if (!err && d_interposed)
+ 		return d_interposed;
++	if (dentry->d_inode && UNIONFS_I(dentry->d_inode)->stale &&
++	    first_dentry_offset >= 0)
++		unionfs_mntput(dentry->d_sb->s_root, first_dentry_offset);
+ 	return ERR_PTR(err);
+ }
+ 
+-- 
+1.5.4.3
+

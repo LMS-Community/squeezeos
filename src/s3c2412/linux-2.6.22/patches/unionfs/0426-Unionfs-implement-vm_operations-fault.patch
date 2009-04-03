@@ -1,0 +1,610 @@
+From f28b9858d6246c9597a3283cfb3ccde4a173bc82 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 15:17:57 -0400
+Subject: [PATCH] Unionfs: implement vm_operations->fault
+
+As per recommendations made at LSF'08, a stackable file system which does
+not change the data across layers, should try to use vm_operations instead
+of address_space_operations.  This means we now have to implement out own
+->read and ->write methods because we cannot rely on VFS helpers which
+require us to have a ->readpage method.  Either way there are two caveats:
+
+(1) It's not possible currently to set inode->i_mapping->a_ops to NULL,
+because too many code paths expect i_mapping to be non-NULL.
+
+(2) a small/dummy ->readpage is still needed because generic_file_mmap,
+which we used in unionfs_mmap, still check for the existence of the
+->readpage method.  These code paths may have to be changed to remove the
+need for readpage().
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c  |  102 +++++++++++++--
+ fs/unionfs/mmap.c  |  386 ++++++++++------------------------------------------
+ fs/unionfs/union.h |    4 +-
+ 3 files changed, 167 insertions(+), 325 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index df18f55..9085d0e 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -18,6 +18,64 @@
+ 
+ #include "union.h"
+ 
++static ssize_t unionfs_read(struct file *file, char __user *buf,
++			    size_t count, loff_t *ppos)
++{
++	int err;
++	struct file *lower_file;
++	struct dentry *dentry = file->f_path.dentry;
++
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
++	err = unionfs_file_revalidate(file, false);
++	if (unlikely(err))
++		goto out;
++
++	lower_file = unionfs_lower_file(file);
++	err = vfs_read(lower_file, buf, count, ppos);
++	/* update our inode atime upon a successful lower read */
++	if (err >= 0) {
++		fsstack_copy_attr_atime(dentry->d_inode,
++					lower_file->f_path.dentry->d_inode);
++		unionfs_check_file(file);
++	}
++
++out:
++	unionfs_unlock_dentry(dentry);
++	unionfs_read_unlock(dentry->d_sb);
++	return err;
++}
++
++static ssize_t unionfs_write(struct file *file, const char __user *buf,
++			     size_t count, loff_t *ppos)
++{
++	int err = 0;
++	struct file *lower_file;
++	struct dentry *dentry = file->f_path.dentry;
++
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
++	err = unionfs_file_revalidate(file, true);
++	if (unlikely(err))
++		goto out;
++
++	lower_file = unionfs_lower_file(file);
++	err = vfs_write(lower_file, buf, count, ppos);
++	/* update our inode times+sizes upon a successful lower write */
++	if (err >= 0) {
++		fsstack_copy_inode_size(dentry->d_inode,
++					lower_file->f_path.dentry->d_inode);
++		fsstack_copy_attr_times(dentry->d_inode,
++					lower_file->f_path.dentry->d_inode);
++		unionfs_check_file(file);
++	}
++
++out:
++	unionfs_unlock_dentry(dentry);
++	unionfs_read_unlock(dentry->d_sb);
++	return err;
++}
++
+ static int unionfs_file_readdir(struct file *file, void *dirent,
+ 				filldir_t filldir)
+ {
+@@ -30,6 +88,7 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 	bool willwrite;
+ 	struct file *lower_file;
+ 	struct dentry *dentry = file->f_path.dentry;
++	struct vm_operations_struct *saved_vm_ops = NULL;
+ 
+ 	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+@@ -56,12 +115,39 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 		err = -EINVAL;
+ 		printk(KERN_ERR "unionfs: branch %d file system does not "
+ 		       "support writeable mmap\n", fbstart(file));
+-	} else {
+-		err = generic_file_mmap(file, vma);
+-		if (err)
+-			printk(KERN_ERR
+-			       "unionfs: generic_file_mmap failed %d\n", err);
++		goto out;
++	}
++
++	/*
++	 * find and save lower vm_ops.
++	 *
++	 * XXX: the VFS should have a cleaner way of finding the lower vm_ops
++	 */
++	if (!UNIONFS_F(file)->lower_vm_ops) {
++		err = lower_file->f_op->mmap(lower_file, vma);
++		if (err) {
++			printk(KERN_ERR "unionfs: lower mmap failed %d\n", err);
++			goto out;
++		}
++		saved_vm_ops = vma->vm_ops;
++		err = do_munmap(current->mm, vma->vm_start,
++				vma->vm_end - vma->vm_start);
++		if (err) {
++			printk(KERN_ERR "unionfs: do_munmap failed %d\n", err);
++			goto out;
++		}
++	}
++
++	file->f_mapping->a_ops = &unionfs_dummy_aops;
++	err = generic_file_mmap(file, vma);
++	file->f_mapping->a_ops = &unionfs_aops;
++	if (err) {
++		printk(KERN_ERR "unionfs: generic_file_mmap failed %d\n", err);
++		goto out;
+ 	}
++	vma->vm_ops = &unionfs_vm_ops;
++	if (!UNIONFS_F(file)->lower_vm_ops)
++		UNIONFS_F(file)->lower_vm_ops = saved_vm_ops;
+ 
+ out:
+ 	if (!err) {
+@@ -270,10 +356,8 @@ out:
+ 
+ struct file_operations unionfs_main_fops = {
+ 	.llseek		= generic_file_llseek,
+-	.read		= do_sync_read,
+-	.aio_read	= generic_file_aio_read,
+-	.write		= do_sync_write,
+-	.aio_write	= generic_file_aio_write,
++	.read		= unionfs_read,
++	.write		= unionfs_write,
+ 	.readdir	= unionfs_file_readdir,
+ 	.unlocked_ioctl	= unionfs_ioctl,
+ 	.mmap		= unionfs_mmap,
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 36e911d..5c64928 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -19,348 +19,104 @@
+ 
+ #include "union.h"
+ 
++
+ /*
+- * Some lower file systems (e.g., NFS) expect the VFS to call its writepages
+- * only, which in turn will call generic_writepages and invoke each of the
+- * lower file system's ->writepage.  NFS in particular uses the
+- * wbc->fs_private field in its nfs_writepage, which is set in its
+- * nfs_writepages.  So if we don't call the lower nfs_writepages first, then
+- * NFS's nfs_writepage will dereference a NULL wbc->fs_private and cause an
+- * OOPS.  If, however, we implement a unionfs_writepages and then we do call
+- * the lower nfs_writepages, then we "lose control" over the pages we're
+- * trying to write to the lower file system: we won't be writing our own
+- * new/modified data from the upper pages to the lower pages, and any
+- * mmap-based changes are lost.
+- *
+- * This is a fundamental cache-coherency problem in Linux.  The kernel isn't
+- * able to support such stacking abstractions cleanly.  One possible clean
+- * way would be that a lower file system's ->writepage method have some sort
+- * of a callback to validate if any upper pages for the same file+offset
+- * exist and have newer content in them.
++ * XXX: we need a dummy readpage handler because generic_file_mmap (which we
++ * use in unionfs_mmap) checks for the existence of
++ * mapping->a_ops->readpage, else it returns -ENOEXEC.  The VFS will need to
++ * be fixed to allow a file system to define vm_ops->fault without any
++ * address_space_ops whatsoever.
+  *
+- * This whole NULL ptr dereference is triggered at the lower file system
+- * (NFS) because the wbc->for_writepages is set to 1.  Therefore, to avoid
+- * this NULL pointer dereference, we set this flag to 0 and restore it upon
+- * exit.  This probably means that we're slightly less efficient in writing
+- * pages out, doing them one at a time, but at least we avoid the oops until
+- * such day as Linux can better support address_space_ops in a stackable
+- * fashion.
++ * Otherwise, we don't want to use our readpage method at all.
+  */
+-static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+-{
+-	int err = -EIO;
+-	struct inode *inode;
+-	struct inode *lower_inode;
+-	struct page *lower_page;
+-	int saved_for_writepages = wbc->for_writepages;
+-	struct address_space *lower_mapping; /* lower inode mapping */
+-	gfp_t mask;
+-
+-	BUG_ON(!PageUptodate(page));
+-	inode = page->mapping->host;
+-	/* if no lower inode, nothing to do */
+-	if (!inode || !UNIONFS_I(inode) || UNIONFS_I(inode)->lower_inodes) {
+-		err = 0;
+-		goto out;
+-	}
+-	lower_inode = unionfs_lower_inode(inode);
+-	lower_mapping = lower_inode->i_mapping;
+-
+-	/*
+-	 * find lower page (returns a locked page)
+-	 *
+-	 * We turn off __GFP_FS while we look for or create a new lower
+-	 * page.  This prevents a recursion into the file system code, which
+-	 * under memory pressure conditions could lead to a deadlock.  This
+-	 * is similar to how the loop driver behaves (see loop_set_fd in
+-	 * drivers/block/loop.c).  If we can't find the lower page, we
+-	 * redirty our page and return "success" so that the VM will call us
+-	 * again in the (hopefully near) future.
+-	 */
+-	mask = mapping_gfp_mask(lower_mapping) & ~(__GFP_FS);
+-	lower_page = find_or_create_page(lower_mapping, page->index, mask);
+-	if (!lower_page) {
+-		err = 0;
+-		set_page_dirty(page);
+-		goto out;
+-	}
+-
+-	/* copy page data from our upper page to the lower page */
+-	copy_highpage(lower_page, page);
+-	flush_dcache_page(lower_page);
+-	SetPageUptodate(lower_page);
+-	set_page_dirty(lower_page);
+-
+-	/*
+-	 * Call lower writepage (expects locked page).  However, if we are
+-	 * called with wbc->for_reclaim, then the VFS/VM just wants to
+-	 * reclaim our page.  Therefore, we don't need to call the lower
+-	 * ->writepage: just copy our data to the lower page (already done
+-	 * above), then mark the lower page dirty and unlock it, and return
+-	 * success.
+-	 */
+-	if (wbc->for_reclaim) {
+-		unlock_page(lower_page);
+-		goto out_release;
+-	}
+-	/* workaround for some lower file systems: see big comment on top */
+-	if (wbc->for_writepages && !wbc->fs_private)
+-		wbc->for_writepages = 0;
+-
+-	BUG_ON(!lower_mapping->a_ops->writepage);
+-	wait_on_page_writeback(lower_page); /* prevent multiple writers */
+-	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
+-	err = lower_mapping->a_ops->writepage(lower_page, wbc);
+-	wbc->for_writepages = saved_for_writepages; /* restore value */
+-	if (err < 0)
+-		goto out_release;
+-
+-	/*
+-	 * Lower file systems such as ramfs and tmpfs, may return
+-	 * AOP_WRITEPAGE_ACTIVATE so that the VM won't try to (pointlessly)
+-	 * write the page again for a while.  But those lower file systems
+-	 * also set the page dirty bit back again.  Since we successfully
+-	 * copied our page data to the lower page, then the VM will come
+-	 * back to the lower page (directly) and try to flush it.  So we can
+-	 * save the VM the hassle of coming back to our page and trying to
+-	 * flush too.  Therefore, we don't re-dirty our own page, and we
+-	 * never return AOP_WRITEPAGE_ACTIVATE back to the VM (we consider
+-	 * this a success).
+-	 *
+-	 * We also unlock the lower page if the lower ->writepage returned
+-	 * AOP_WRITEPAGE_ACTIVATE.  (This "anomalous" behaviour may be
+-	 * addressed in future shmem/VM code.)
+-	 */
+-	if (err == AOP_WRITEPAGE_ACTIVATE) {
+-		err = 0;
+-		unlock_page(lower_page);
+-	}
+-
+-	/* all is well */
+-
+-	/* lower mtimes have changed: update ours */
+-	unionfs_copy_attr_times(inode);
+-
+-out_release:
+-	/* b/c find_or_create_page increased refcnt */
+-	page_cache_release(lower_page);
+-out:
+-	/*
+-	 * We unlock our page unconditionally, because we never return
+-	 * AOP_WRITEPAGE_ACTIVATE.
+-	 */
+-	unlock_page(page);
+-	return err;
+-}
+-
+-static int unionfs_writepages(struct address_space *mapping,
+-			      struct writeback_control *wbc)
++static int unionfs_readpage(struct file *file, struct page *page)
+ {
+-	int err = 0;
+-	struct inode *lower_inode;
+-	struct inode *inode;
+-
+-	inode = mapping->host;
+-	if (ibstart(inode) < 0 && ibend(inode) < 0)
+-		goto out;
+-	lower_inode = unionfs_lower_inode(inode);
+-	if (!lower_inode)
+-		goto out;
+-
+-	err = generic_writepages(mapping, wbc);
+-	if (!err)
+-		unionfs_copy_attr_times(inode);
+-out:
+-	return err;
++	BUG();
++	return -EINVAL;
+ }
+ 
+-/* Readpage expects a locked page, and must unlock it */
+-static int unionfs_readpage(struct file *file, struct page *page)
++static struct page *unionfs_nopage(struct vm_area_struct *vma,
++				   unsigned long address, int *type)
+ {
+-	int err;
+-	struct file *lower_file;
+-	struct inode *inode;
+-	mm_segment_t old_fs;
+-	char *page_data = NULL;
+-	mode_t orig_mode;
++	struct file *file, *lower_file;
++	struct vm_operations_struct *lower_vm_ops;
++	struct vm_area_struct lower_vma;
++	struct page *page;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+-	err = unionfs_file_revalidate(file, false);
+-	if (unlikely(err))
+-		goto out;
+-	unionfs_check_file(file);
+-
+-	if (!UNIONFS_F(file)) {
+-		err = -ENOENT;
+-		goto out;
+-	}
++	BUG_ON(!vma);
++	memcpy(&lower_vma, vma, sizeof(struct vm_area_struct));
++	file = lower_vma.vm_file;
++	lower_vm_ops = UNIONFS_F(file)->lower_vm_ops;
++	BUG_ON(!lower_vm_ops);
+ 
+ 	lower_file = unionfs_lower_file(file);
+-	/* FIXME: is this assertion right here? */
+-	BUG_ON(lower_file == NULL);
+-
+-	inode = file->f_path.dentry->d_inode;
+-
+-	page_data = (char *) kmap(page);
+-	/*
+-	 * Use vfs_read because some lower file systems don't have a
+-	 * readpage method, and some file systems (esp. distributed ones)
+-	 * don't like their pages to be accessed directly.  Using vfs_read
+-	 * may be a little slower, but a lot safer, as the VFS does a lot of
+-	 * the necessary magic for us.
+-	 */
+-	lower_file->f_pos = page_offset(page);
+-	old_fs = get_fs();
+-	set_fs(KERNEL_DS);
+-	/*
+-	 * generic_file_splice_write may call us on a file not opened for
+-	 * reading, so temporarily allow reading.
+-	 */
+-	orig_mode = lower_file->f_mode;
+-	lower_file->f_mode |= FMODE_READ;
+-	err = vfs_read(lower_file, page_data, PAGE_CACHE_SIZE,
+-		       &lower_file->f_pos);
+-	lower_file->f_mode = orig_mode;
+-	set_fs(old_fs);
+-	if (err >= 0 && err < PAGE_CACHE_SIZE)
+-		memset(page_data + err, 0, PAGE_CACHE_SIZE - err);
+-	kunmap(page);
+-
+-	if (err < 0)
+-		goto out;
+-	err = 0;
+-
+-	/* if vfs_read succeeded above, sync up our times */
+-	unionfs_copy_attr_times(inode);
+-
+-	flush_dcache_page(page);
+-
++	BUG_ON(!lower_file);
+ 	/*
+-	 * we have to unlock our page, b/c we _might_ have gotten a locked
+-	 * page.  but we no longer have to wakeup on our page here, b/c
+-	 * UnlockPage does it
++	 * XXX: vm_ops->nopage may be called in parallel.  Because we have to
++	 * resort to temporarily changing the vma->vm_file to point to the
++	 * lower file, a concurrent invocation of unionfs_fault could see a
++	 * different value.  In this workaround, we keep a different copy of
++	 * the vma structure in our stack, so we never expose a different
++	 * value of the vma->vm_file called to us, even temporarily.  A
++	 * better fix would be to change the calling semantics of ->fault to
++	 * take an explicit file pointer.
+ 	 */
+-out:
+-	if (err == 0)
+-		SetPageUptodate(page);
+-	else
+-		ClearPageUptodate(page);
+-
+-	unlock_page(page);
+-	unionfs_check_file(file);
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+-
+-	return err;
++	lower_vma.vm_file = lower_file;
++	page = lower_vm_ops->nopage(&lower_vma, address, type);
++	return page;
+ }
+ 
+-static int unionfs_prepare_write(struct file *file, struct page *page,
+-				 unsigned from, unsigned to)
+-{
+-	int err;
++static int unionfs_populate(struct vm_area_struct *vma,
++			    unsigned long address, unsigned long len,
++			    pgprot_t prot, unsigned long pgoff, int nonblock)
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+-	err = unionfs_file_revalidate(file, true);
+-	if (!err) {
+-		unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+-		unionfs_check_file(file);
+-	}
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+-
+-	return err;
+-}
+-
+-static int unionfs_commit_write(struct file *file, struct page *page,
+-				unsigned from, unsigned to)
+ {
+-	int err = -ENOMEM;
+-	struct inode *inode, *lower_inode;
+-	struct file *lower_file = NULL;
+-	unsigned bytes = to - from;
+-	char *page_data = NULL;
+-	mm_segment_t old_fs;
++	int err = -EOPNOTSUPP;
++	struct file *file, *lower_file;
++	struct vm_operations_struct *lower_vm_ops;
++	struct vm_area_struct lower_vma;
+ 
+-	BUG_ON(file == NULL);
++	pr_debug("Unionfs: vm operation populate unsupported\n");
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+-	err = unionfs_file_revalidate(file, true);
+-	if (unlikely(err))
++	if (!vma)
+ 		goto out;
+-	unionfs_check_file(file);
+-
+-	inode = page->mapping->host;
+-
+-	if (UNIONFS_F(file) != NULL)
+-		lower_file = unionfs_lower_file(file);
+-
+-	/* FIXME: is this assertion right here? */
+-	BUG_ON(lower_file == NULL);
+-
+-	page_data = (char *)kmap(page);
+-	lower_file->f_pos = page_offset(page) + from;
+-
+-	/*
+-	 * We use vfs_write instead of copying page data and the
+-	 * prepare_write/commit_write combo because file system's like
+-	 * GFS/OCFS2 don't like things touching those directly,
+-	 * calling the underlying write op, while a little bit slower, will
+-	 * call all the FS specific code as well
+-	 */
+-	old_fs = get_fs();
+-	set_fs(KERNEL_DS);
+-	err = vfs_write(lower_file, page_data + from, bytes,
+-			&lower_file->f_pos);
+-	set_fs(old_fs);
+-
+-	kunmap(page);
+-
+-	if (err < 0)
++	memcpy(&lower_vma, vma, sizeof(struct vm_area_struct));
++	file = lower_vma.vm_file;
++	lower_vm_ops = UNIONFS_F(file)->lower_vm_ops;
++	if (!lower_vm_ops)
+ 		goto out;
+ 
+-	/* if vfs_write succeeded above, sync up our times/sizes */
+-	lower_inode = lower_file->f_path.dentry->d_inode;
+-	if (!lower_inode)
+-		lower_inode = unionfs_lower_inode(inode);
+-	BUG_ON(!lower_inode);
+-	fsstack_copy_inode_size(inode, lower_inode);
+-	unionfs_copy_attr_times(inode);
+-	mark_inode_dirty_sync(inode);
++	lower_file = unionfs_lower_file(file);
++	if (!lower_file)
++		goto out;
+ 
++	lower_vma.vm_file = lower_file;
++	err = lower_vm_ops->populate(&lower_vma, address, len, prot,
++				     pgoff, nonblock);
+ out:
+-	if (err < 0)
+-		ClearPageUptodate(page);
+-
+-	unionfs_check_file(file);
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+-	return err;		/* assume all is ok */
++	return err;
+ }
+ 
+ /*
+- * Although unionfs isn't a block-based file system, it may stack on one.
+- * ->bmap is needed, for example, to swapon(2) files.
++ * XXX: the default address_space_ops for unionfs is empty.  We cannot set
++ * our inode->i_mapping->a_ops to NULL because too many code paths expect
++ * the a_ops vector to be non-NULL.
+  */
+-sector_t unionfs_bmap(struct address_space *mapping, sector_t block)
+-{
+-	int err = -EINVAL;
+-	struct inode *inode, *lower_inode;
+-	sector_t (*bmap)(struct address_space *, sector_t);
+-
+-	inode = (struct inode *)mapping->host;
+-	lower_inode = unionfs_lower_inode(inode);
+-	if (!lower_inode)
+-		goto out;
+-	bmap = lower_inode->i_mapping->a_ops->bmap;
+-	if (bmap)
+-		err = bmap(lower_inode->i_mapping, block);
+-out:
+-	return err;
+-}
+-
+-
+ struct address_space_operations unionfs_aops = {
+-	.writepage	= unionfs_writepage,
+-	.writepages	= unionfs_writepages,
++	/* empty on purpose */
++};
++
++/*
++ * XXX: we need a second, dummy address_space_ops vector, to be used
++ * temporarily during unionfs_mmap, because the latter calls
++ * generic_file_mmap, which checks if ->readpage exists, else returns
++ * -ENOEXEC.
++ */
++struct address_space_operations unionfs_dummy_aops = {
+ 	.readpage	= unionfs_readpage,
+-	.prepare_write	= unionfs_prepare_write,
+-	.commit_write	= unionfs_commit_write,
+-	.bmap		= unionfs_bmap,
++};
++
++struct vm_operations_struct unionfs_vm_ops = {
++	.nopage		= unionfs_nopage,
++	.populate	= unionfs_populate,
+ };
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 9c1cca1..980becb 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -74,7 +74,8 @@ extern struct inode_operations unionfs_dir_iops;
+ extern struct inode_operations unionfs_symlink_iops;
+ extern struct super_operations unionfs_sops;
+ extern struct dentry_operations unionfs_dops;
+-extern struct address_space_operations unionfs_aops;
++extern struct address_space_operations unionfs_aops, unionfs_dummy_aops;
++extern struct vm_operations_struct unionfs_vm_ops;
+ 
+ /* How long should an entry be allowed to persist */
+ #define RDCACHE_JIFFIES	(5*HZ)
+@@ -99,6 +100,7 @@ struct unionfs_file_info {
+ 	struct unionfs_dir_state *rdstate;
+ 	struct file **lower_files;
+ 	int *saved_branch_ids; /* IDs of branches when file was opened */
++	struct vm_operations_struct *lower_vm_ops;
+ };
+ 
+ /* unionfs inode data in memory */
+-- 
+1.5.4.3
+

@@ -1,0 +1,40 @@
+From 54c099a09a4f33d0f86dc1970468a2b820357a03 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 25 Jan 2008 20:21:07 -0500
+Subject: [PATCH] Unionfs: remove unnecessary call to d_iput
+
+This old code was to fix a bug which has long since been fixed in our
+copyup_permission and unionfs_d_iput.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |   13 -------------
+ 1 files changed, 0 insertions(+), 13 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index b22d23c..b028908 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -801,19 +801,6 @@ begin:
+ 						 lower_dentry);
+ 		unlock_dir(lower_parent_dentry);
+ 		if (err) {
+-			struct inode *inode = lower_dentry->d_inode;
+-			/*
+-			 * If we get here, it means that we created a new
+-			 * dentry+inode, but copying permissions failed.
+-			 * Therefore, we should delete this inode and dput
+-			 * the dentry so as not to leave cruft behind.
+-			 */
+-			if (lower_dentry->d_op && lower_dentry->d_op->d_iput)
+-				lower_dentry->d_op->d_iput(lower_dentry,
+-							   inode);
+-			else
+-				iput(inode);
+-			lower_dentry->d_inode = NULL;
+ 			dput(lower_dentry);
+ 			lower_dentry = ERR_PTR(err);
+ 			goto out;
+-- 
+1.5.4.3
+

@@ -1,0 +1,85 @@
+From 4500fef2c2c146f8d8a3dd3bcd36819acc754293 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 01:31:14 -0400
+Subject: [PATCH] Post-copyup helper functions
+
+Two functions which are very useful to execute common actions needed after a
+copy-up had taken place.
+---
+ fs/unionfs/copyup.c |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/unionfs/union.h  |    3 +++
+ 2 files changed, 51 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index bed2419..2cf1878 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -798,3 +798,51 @@ out:
+ 	kfree(path);
+ 	return hidden_dentry;
+ }
++
++/* set lower mnt of dentry+parents to the first parent node that has an mnt */
++void unionfs_inherit_mnt(struct dentry *dentry)
++{
++	struct dentry *parent, *hasone;
++	int bindex = dbstart(dentry);
++
++	if (unionfs_lower_mnt_idx(dentry, bindex))
++		return;
++	hasone = dentry->d_parent;
++	/* this loop should stop at root dentry */
++	while (!unionfs_lower_mnt_idx(hasone, bindex)) {
++		hasone = hasone->d_parent;
++	}
++	parent = dentry;
++	while (!unionfs_lower_mnt_idx(parent, bindex)) {
++		unionfs_set_lower_mnt_idx(parent, bindex,
++					  unionfs_mntget(hasone, bindex));
++		parent = parent->d_parent;
++	}
++}
++
++/*
++ * Regular files should have only one lower object(s).  On copyup, we may
++ * have leftover objects from previous branches.  So purge all such extra
++ * objects and keep only the most recent, leftmost, copied-up one.
++ */
++void unionfs_purge_extras(struct dentry *dentry)
++{
++	int bindex;
++
++	BUG_ON(S_ISDIR(dentry->d_inode->i_mode));
++	for (bindex=dbstart(dentry)+1; bindex<=dbend(dentry); bindex++) {
++		if (unionfs_lower_mnt_idx(dentry, bindex)) {
++			unionfs_mntput(dentry, bindex);
++			unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
++		}
++		if (unionfs_lower_dentry_idx(dentry, bindex)) {
++			dput(unionfs_lower_dentry_idx(dentry, bindex));
++			unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
++			iput(unionfs_lower_inode_idx(dentry->d_inode, bindex));
++			unionfs_set_lower_inode_idx(dentry->d_inode, bindex, NULL);
++		}
++	}
++	bindex = dbstart(dentry);
++	set_dbend(dentry, bindex);
++	ibend(dentry->d_inode) = ibstart(dentry->d_inode) = bindex;
++}
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index f645d53..7a4f627 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -268,6 +268,9 @@ extern int copyup_named_file(struct inode *dir, struct file *file,
+ extern int copyup_dentry(struct inode *dir, struct dentry *dentry, int bstart,
+ 			 int new_bindex, struct file **copyup_file,
+ 			 loff_t len);
++/* helper functions for post-copyup cleanup */
++extern void unionfs_inherit_mnt(struct dentry *dentry);
++extern void unionfs_purge_extras(struct dentry *dentry);
+ 
+ extern int remove_whiteouts(struct dentry *dentry,
+ 			    struct dentry *hidden_dentry, int bindex);
+-- 
+1.5.4.3
+

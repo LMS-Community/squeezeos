@@ -1,0 +1,44 @@
+From 98a144cadd6d333718b052c6bf8261dbf8ffe4dd Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:57:34 -0500
+Subject: [PATCH] Unionfs: remove unnecessary locking in follow-link
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 8083d13..44fc2fc 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -842,7 +842,8 @@ out:
+  * nor do we need to revalidate it either.  It is safe to not lock our
+  * dentry here, nor revalidate it, because unionfs_follow_link does not do
+  * anything (prior to calling ->readlink) which could become inconsistent
+- * due to branch management.
++ * due to branch management.  We also don't need to lock our super because
++ * this function isn't affected by branch-management.
+  */
+ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ {
+@@ -850,8 +851,6 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	int len = PAGE_SIZE, err;
+ 	mm_segment_t old_fs;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-
+ 	/* This is freed by the put_link method assuming a successful call. */
+ 	buf = kmalloc(len, GFP_KERNEL);
+ 	if (unlikely(!buf)) {
+@@ -875,7 +874,6 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 
+ out:
+ 	unionfs_check_dentry(dentry);
+-	unionfs_read_unlock(dentry->d_sb);
+ 	return ERR_PTR(err);
+ }
+ 
+-- 
+1.5.4.3
+

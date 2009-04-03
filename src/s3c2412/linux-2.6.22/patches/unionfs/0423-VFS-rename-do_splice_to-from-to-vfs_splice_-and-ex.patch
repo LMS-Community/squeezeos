@@ -1,0 +1,111 @@
+From 3dc68d6ba74a315c7e8ff707bd1568c7a22d95b9 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 14:30:10 -0400
+Subject: [PATCH] VFS: rename do_splice_to/from to vfs_splice_* and export symbols
+
+A stackable file system which uses vm_ops->fault, and does not implement
+address_space_operations, cannot use generic_file_splice_read/write, but has
+to implement ->splice_read/write itself.  These two helper functions are
+very useful to such a module.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/splice.c        |   22 ++++++++++++----------
+ include/linux/fs.h |    5 +++++
+ 2 files changed, 17 insertions(+), 10 deletions(-)
+
+Index: linux-2.6.22/fs/splice.c
+===================================================================
+--- linux-2.6.22.orig/fs/splice.c	2008-12-29 11:11:52.000000000 +0000
++++ linux-2.6.22/fs/splice.c	2009-04-03 10:20:48.000000000 +0100
+@@ -916,8 +916,8 @@
+ /*
+  * Attempt to initiate a splice from pipe to file.
+  */
+-static long do_splice_from(struct pipe_inode_info *pipe, struct file *out,
+-			   loff_t *ppos, size_t len, unsigned int flags)
++long vfs_splice_from(struct pipe_inode_info *pipe, struct file *out,
++		     loff_t *ppos, size_t len, unsigned int flags)
+ {
+ 	int ret;
+ 
+@@ -933,13 +933,14 @@
+ 
+ 	return out->f_op->splice_write(pipe, out, ppos, len, flags);
+ }
++EXPORT_SYMBOL_GPL(vfs_splice_from);
+ 
+ /*
+  * Attempt to initiate a splice from a file to a pipe.
+  */
+-static long do_splice_to(struct file *in, loff_t *ppos,
+-			 struct pipe_inode_info *pipe, size_t len,
+-			 unsigned int flags)
++long vfs_splice_to(struct file *in, loff_t *ppos,
++		   struct pipe_inode_info *pipe, size_t len,
++		   unsigned int flags)
+ {
+ 	int ret;
+ 
+@@ -955,6 +956,7 @@
+ 
+ 	return in->f_op->splice_read(in, ppos, pipe, len, flags);
+ }
++EXPORT_SYMBOL_GPL(vfs_splice_to);
+ 
+ long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
+ 		      size_t len, unsigned int flags)
+@@ -1009,7 +1011,7 @@
+ 		 */
+ 		max_read_len = min(len, (size_t)(PIPE_BUFFERS*PAGE_SIZE));
+ 
+-		ret = do_splice_to(in, ppos, pipe, max_read_len, flags);
++ 		ret = vfs_splice_to(in, ppos, pipe, max_read_len, flags);
+ 		if (unlikely(ret < 0))
+ 			goto out_release;
+ 
+@@ -1020,8 +1022,8 @@
+ 		 * must not do the output in nonblocking mode as then we
+ 		 * could get stuck data in the internal pipe:
+ 		 */
+-		ret = do_splice_from(pipe, out, &out_off, read_len,
+-				     flags & ~SPLICE_F_NONBLOCK);
++		ret = vfs_splice_from(pipe, out, &out_off, read_len,
++				      flags & ~SPLICE_F_NONBLOCK);
+ 		if (unlikely(ret < 0))
+ 			goto out_release;
+ 
+@@ -1105,7 +1107,7 @@
+ 		} else
+ 			off = &out->f_pos;
+ 
+-		ret = do_splice_from(pipe, out, off, len, flags);
++		ret = vfs_splice_from(pipe, out, off, len, flags);
+ 
+ 		if (off_out && copy_to_user(off_out, off, sizeof(loff_t)))
+ 			ret = -EFAULT;
+@@ -1126,7 +1128,7 @@
+ 		} else
+ 			off = &in->f_pos;
+ 
+-		ret = do_splice_to(in, off, pipe, len, flags);
++		ret = vfs_splice_to(in, off, pipe, len, flags);
+ 
+ 		if (off_in && copy_to_user(off_in, off, sizeof(loff_t)))
+ 			ret = -EFAULT;
+Index: linux-2.6.22/include/linux/fs.h
+===================================================================
+--- linux-2.6.22.orig/include/linux/fs.h	2008-12-29 11:10:44.000000000 +0000
++++ linux-2.6.22/include/linux/fs.h	2009-04-03 10:19:04.000000000 +0100
+@@ -1780,6 +1780,11 @@
+ 		struct file *out, loff_t *, size_t len, unsigned int flags);
+ extern long do_splice_direct(struct file *in, loff_t *ppos, struct file *out,
+ 		size_t len, unsigned int flags);
++extern long vfs_splice_from(struct pipe_inode_info *pipe, struct file *out,
++			    loff_t *ppos, size_t len, unsigned int flags);
++extern long vfs_splice_to(struct file *in, loff_t *ppos,
++			  struct pipe_inode_info *pipe, size_t len,
++			  unsigned int flags);
+ 
+ extern void
+ file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping);

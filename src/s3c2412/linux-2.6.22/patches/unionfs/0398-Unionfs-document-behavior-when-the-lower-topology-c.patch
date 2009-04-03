@@ -1,0 +1,35 @@
+From 0515bd7feb1e378a2bac29328204962def2d3c21 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 21:22:26 -0500
+Subject: [PATCH] Unionfs: document behavior when the lower topology changes
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ Documentation/filesystems/unionfs/concepts.txt |   13 +++++++++++++
+ 1 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/concepts.txt b/Documentation/filesystems/unionfs/concepts.txt
+index bed69bd..8d9a1c5 100644
+--- a/Documentation/filesystems/unionfs/concepts.txt
++++ b/Documentation/filesystems/unionfs/concepts.txt
+@@ -210,4 +210,17 @@ there's a lot of concurrent activity on both the upper and lower objects,
+ for the same file(s).  Lastly, this delayed time attribute detection is
+ similar to how NFS clients operate (e.g., acregmin).
+ 
++Finally, there is no way currently in Linux to prevent lower directories
++from being moved around (i.e., topology changes); there's no way to prevent
++modifications to directory sub-trees of whole file systems which are mounted
++read-write.  It is therefore possible for in-flight operations in unionfs to
++take place, while a lower directory is being moved around.  Therefore, if
++you try to, say, create a new file in a directory through unionfs, while the
++directory is being moved around directly, then the new file may get created
++in the new location where that directory was moved to.  This is a somewhat
++similar behaviour in NFS: an NFS client could be creating a new file while
++th NFS server is moving th directory around; the file will get successfully
++created in the new location.  (The one exception in unionfs is that if the
++branch is marked read-only by unionfs, then a copyup will take place.)
++
+ For more information, see <http://unionfs.filesystems.org/>.
+-- 
+1.5.4.3
+

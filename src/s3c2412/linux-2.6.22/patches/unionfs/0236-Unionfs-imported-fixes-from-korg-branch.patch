@@ -1,0 +1,408 @@
+From 033f5d8d80a2f2e53faea6d146b21115f191e3c3 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 18 Aug 2007 23:35:40 -0400
+Subject: [PATCH] Unionfs: imported fixes from korg branch
+
+SElinux: xattr fixes (CAP_FOWNER).
+unionfs_xattr_kfree inline function.
+unionfs_purge_extras -> unionfs_postcopyup_release.
+unionfs_inherit_mnt -> unionfs_postcopyup_setmnt.
+minor code/copyright cleanups.
+MS_SILENT remount fix.
+simplify unionfs_mntget/put.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |   47 +++++++++++++++-----------
+ fs/unionfs/inode.c  |    8 ++--
+ fs/unionfs/main.c   |   15 +++++----
+ fs/unionfs/rename.c |    6 ++--
+ fs/unionfs/sioq.c   |    4 --
+ fs/unionfs/sioq.h   |    4 --
+ fs/unionfs/super.c  |    9 +++--
+ fs/unionfs/union.h  |   88 ++++++++++++++++++---------------------------------
+ fs/unionfs/unlink.c |    2 +-
+ 9 files changed, 79 insertions(+), 104 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index fb7a2de..4f6da6f 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -84,21 +84,27 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 		/* Don't lock here since vfs_setxattr does it for us. */
+ 		err = vfs_setxattr(new_lower_dentry, name_list, attr_value,
+ 				   size, 0);
++		/*
++		 * Selinux depends on "security.*" xattrs, so to maintain
++		 * the security of copied-up files, if Selinux is active,
++		 * then we must copy these xattrs as well.  So we need to
++		 * temporarily get FOWNER privileges.
++		 */
++		if (err == -EPERM && !capable(CAP_FOWNER)) {
++			cap_raise(current->cap_effective, CAP_FOWNER);
++			err = vfs_setxattr(new_lower_dentry, name_list,
++					   attr_value, size, 0);
++			cap_lower(current->cap_effective, CAP_FOWNER);
++		}
+ 		if (err < 0)
+ 			goto out;
+ 		name_list += strlen(name_list) + 1;
+ 	}
+ out:
+-	if (name_list_orig)
+-		kfree(name_list_orig);
+-	if (attr_value)
+-		kfree(attr_value);
+-	/*
+-	 * Ignore if xattr isn't supported.  Also ignore EPERM because that
+-	 * requires CAP_SYS_ADMIN for security.* xattrs, but copyup happens
+-	 * as normal users.
+-	 */
+-	if (err == -ENOTSUPP || err == -EOPNOTSUPP || err == -EPERM)
++	unionfs_xattr_kfree(name_list_orig);
++	unionfs_xattr_kfree(attr_value);
++	/* Ignore if xattr isn't supported */
++	if (err == -ENOTSUPP || err == -EOPNOTSUPP)
+ 		err = 0;
+ 	return err;
+ }
+@@ -503,7 +509,7 @@ out_free:
+ 	if (err)
+ 		goto out;
+ 	if (!S_ISDIR(dentry->d_inode->i_mode)) {
+-		unionfs_purge_extras(dentry);
++		unionfs_postcopyup_release(dentry);
+ 		if (!unionfs_lower_inode(dentry->d_inode)) {
+ 			/*
+ 			 * If we got here, then we copied up to an
+@@ -516,7 +522,7 @@ out_free:
+ 						    inode);
+ 		}
+ 	}
+-	unionfs_inherit_mnt(dentry);
++	unionfs_postcopyup_setmnt(dentry);
+ 	/* sync inode times from copied-up inode to our inode */
+ 	unionfs_copy_attr_times(dentry->d_inode);
+ 	unionfs_check_inode(dir);
+@@ -830,8 +836,11 @@ out:
+ 	return lower_dentry;
+ }
+ 
+-/* set lower mnt of dentry+parents to the first parent node that has an mnt */
+-void unionfs_inherit_mnt(struct dentry *dentry)
++/*
++ * Post-copyup helper to ensure we have valid mnts: set lower mnt of
++ * dentry+parents to the first parent node that has an mnt.
++ */
++void unionfs_postcopyup_setmnt(struct dentry *dentry)
+ {
+ 	struct dentry *parent, *hasone;
+ 	int bindex = dbstart(dentry);
+@@ -840,9 +849,8 @@ void unionfs_inherit_mnt(struct dentry *dentry)
+ 		return;
+ 	hasone = dentry->d_parent;
+ 	/* this loop should stop at root dentry */
+-	while (!unionfs_lower_mnt_idx(hasone, bindex)) {
++	while (!unionfs_lower_mnt_idx(hasone, bindex))
+ 		hasone = hasone->d_parent;
+-	}
+ 	parent = dentry;
+ 	while (!unionfs_lower_mnt_idx(parent, bindex)) {
+ 		unionfs_set_lower_mnt_idx(parent, bindex,
+@@ -852,11 +860,10 @@ void unionfs_inherit_mnt(struct dentry *dentry)
+ }
+ 
+ /*
+- * Regular files should have only one lower object(s).  On copyup, we may
+- * have leftover objects from previous branches.  So purge all such extra
+- * objects and keep only the most recent, leftmost, copied-up one.
++ * Post-copyup helper to release all non-directory source objects of a
++ * copied-up file.  Regular files should have only one lower object.
+  */
+-void unionfs_purge_extras(struct dentry *dentry)
++void unionfs_postcopyup_release(struct dentry *dentry)
+ {
+ 	int bindex;
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 9e0801a..9adf272 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -223,7 +223,7 @@ out:
+ 	kfree(name);
+ 
+ 	if (!err)
+-		unionfs_inherit_mnt(dentry);
++		unionfs_postcopyup_setmnt(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+@@ -412,7 +412,7 @@ out:
+ 
+ 	kfree(name);
+ 	if (!err)
+-		unionfs_inherit_mnt(new_dentry);
++		unionfs_postcopyup_setmnt(new_dentry);
+ 
+ 	unionfs_unlock_dentry(new_dentry);
+ 	unionfs_unlock_dentry(old_dentry);
+@@ -577,7 +577,7 @@ out:
+ 
+ 	kfree(name);
+ 	if (!err)
+-		unionfs_inherit_mnt(dentry);
++		unionfs_postcopyup_setmnt(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_check_inode(dir);
+@@ -856,7 +856,7 @@ out:
+ 	kfree(name);
+ 
+ 	if (!err)
+-		unionfs_inherit_mnt(dentry);
++		unionfs_postcopyup_setmnt(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_check_inode(dir);
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index c96133b..58c2897 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -143,14 +143,15 @@ skip:
+ 		spliced = d_splice_alias(inode, dentry);
+ 		if (IS_ERR(spliced))
+ 			err = PTR_ERR(spliced);
+-
+-		/*
+-		 * d_splice can return a dentry if it was disconnected and
+-		 * had to be moved.  We must ensure that the private data of
+-		 * the new dentry is correct and that the inode info was
+-		 * filled properly.  Finally we must return this new dentry.
+-		 */
+ 		else if (spliced && spliced != dentry) {
++			/*
++			 * d_splice can return a dentry if it was
++			 * disconnected and had to be moved.  We must ensure
++			 * that the private data of the new dentry is
++			 * correct and that the inode info was filled
++			 * properly.  Finally we must return this new
++			 * dentry.
++			 */
+ 			spliced->d_op = &unionfs_dops;
+ 			spliced->d_fsdata = dentry->d_fsdata;
+ 			dentry->d_fsdata = NULL;
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 1761f8b..362f9ce 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -479,11 +479,11 @@ out:
+ 		if (S_ISDIR(old_dentry->d_inode->i_mode))
+ 			atomic_dec(&UNIONFS_D(old_dentry)->generation);
+ 		else
+-			unionfs_purge_extras(old_dentry);
++			unionfs_postcopyup_release(old_dentry);
+ 		if (new_dentry->d_inode &&
+ 		    !S_ISDIR(new_dentry->d_inode->i_mode)) {
+-			unionfs_purge_extras(new_dentry);
+-			unionfs_inherit_mnt(new_dentry);
++			unionfs_postcopyup_release(new_dentry);
++			unionfs_postcopyup_setmnt(new_dentry);
+ 			if (!unionfs_lower_inode(new_dentry->d_inode)) {
+ 				/*
+ 				 * If we get here, it means that no copyup
+diff --git a/fs/unionfs/sioq.c b/fs/unionfs/sioq.c
+index 478041d..ce17a8d 100644
+--- a/fs/unionfs/sioq.c
++++ b/fs/unionfs/sioq.c
+@@ -3,11 +3,7 @@
+  * Copyright (c) 2003-2006 Charles P. Wright
+  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
+  * Copyright (c) 2005-2006 Junjiro Okajima
+- * Copyright (c) 2005      Arun M. Krishnakumar
+  * Copyright (c) 2004-2006 David P. Quigley
+- * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
+- * Copyright (c) 2003      Puja Gupta
+- * Copyright (c) 2003      Harikesavan Krishnan
+  * Copyright (c) 2003-2007 Stony Brook University
+  * Copyright (c) 2003-2007 The Research Foundation of SUNY
+  *
+diff --git a/fs/unionfs/sioq.h b/fs/unionfs/sioq.h
+index e180756..3521ed2 100644
+--- a/fs/unionfs/sioq.h
++++ b/fs/unionfs/sioq.h
+@@ -3,11 +3,7 @@
+  * Copyright (c) 2003-2006 Charles P. Wright
+  * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
+  * Copyright (c) 2005-2006 Junjiro Okajima
+- * Copyright (c) 2005      Arun M. Krishnakumar
+  * Copyright (c) 2004-2006 David P. Quigley
+- * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
+- * Copyright (c) 2003      Puja Gupta
+- * Copyright (c) 2003      Harikesavan Krishnan
+  * Copyright (c) 2003-2007 Stony Brook University
+  * Copyright (c) 2003-2007 The Research Foundation of SUNY
+  *
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 8c0566a..f6b4921 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -448,11 +448,12 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ 	unionfs_write_lock(sb);
+ 
+ 	/*
+-	 * The VFS will take care of "ro" and "rw" flags, so anything else
+-	 * is an error.  So we need to check if any other flags may have
+-	 * been passed (none are allowed/supported as of now).
++	 * The VFS will take care of "ro" and "rw" flags, and we can safely
++	 * ignore MS_SILENT, but anything else left over is an error.  So we
++	 * need to check if any other flags may have been passed (none are
++	 * allowed/supported as of now).
+ 	 */
+-	if ((*flags & ~MS_RDONLY) != 0) {
++	if ((*flags & ~(MS_RDONLY | MS_SILENT)) != 0) {
+ 		printk(KERN_WARNING
+ 		       "unionfs: remount flags 0x%x unsupported\n", *flags);
+ 		err = -EINVAL;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index ba0ff50..9ebbe4f 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -281,9 +281,9 @@ extern int copyup_named_file(struct inode *dir, struct file *file,
+ extern int copyup_dentry(struct inode *dir, struct dentry *dentry,
+ 			 int bstart, int new_bindex, const char *name,
+ 			 int namelen, struct file **copyup_file, loff_t len);
+-/* helper functions for post-copyup cleanup */
+-extern void unionfs_inherit_mnt(struct dentry *dentry);
+-extern void unionfs_purge_extras(struct dentry *dentry);
++/* helper functions for post-copyup actions */
++extern void unionfs_postcopyup_setmnt(struct dentry *dentry);
++extern void unionfs_postcopyup_release(struct dentry *dentry);
+ 
+ extern int remove_whiteouts(struct dentry *dentry,
+ 			    struct dentry *lower_dentry, int bindex);
+@@ -342,7 +342,7 @@ extern struct dentry *unionfs_interpose(struct dentry *this_dentry,
+ #ifdef CONFIG_UNION_FS_XATTR
+ /* Extended attribute functions. */
+ extern void *unionfs_xattr_alloc(size_t size, size_t limit);
+-
++static inline void unionfs_xattr_kfree(const void *p) {kfree((p));}
+ extern ssize_t unionfs_getxattr(struct dentry *dentry, const char *name,
+ 				void *value, size_t size);
+ extern int unionfs_removexattr(struct dentry *dentry, const char *name);
+@@ -458,32 +458,18 @@ static inline struct vfsmount *unionfs_mntget(struct dentry *dentry,
+ {
+ 	struct vfsmount *mnt;
+ 
+-	if (!dentry) {
+-		if (bindex < 0)
+-			return NULL;
+-		if (!dentry && bindex >= 0) {
+-#ifdef UNIONFS_DEBUG
+-			printk(KERN_DEBUG
+-			       "unionfs_mntget: dentry=%p bindex=%d\n",
+-			       dentry, bindex);
+-#endif /* UNIONFS_DEBUG */
+-			return NULL;
+-		}
+-	}
++	BUG_ON(!dentry);
++	BUG_ON(bindex < 0);
++
+ 	mnt = unionfs_lower_mnt_idx(dentry, bindex);
+-	if (!mnt) {
+-		if (bindex < 0)
+-			return NULL;
+-		if (!mnt && bindex >= 0) {
++	if (mnt)
++		mnt = mntget(mnt);
+ #ifdef UNIONFS_DEBUG
+-			printk(KERN_DEBUG
+-			       "unionfs_mntget: mnt=%p bindex=%d\n",
+-			       mnt, bindex);
++	else
++		printk(KERN_DEBUG "unionfs_mntget: mnt=%p bindex=%d\n",
++		       mnt, bindex);
+ #endif /* UNIONFS_DEBUG */
+-			return NULL;
+-		}
+-	}
+-	mnt = mntget(mnt);
++
+ 	return mnt;
+ }
+ 
+@@ -491,40 +477,28 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ {
+ 	struct vfsmount *mnt;
+ 
+-	if (!dentry) {
+-		if (bindex < 0)
+-			return;
+-		if (!dentry && bindex >= 0) {
+-#ifdef UNIONFS_DEBUG
+-			printk(KERN_DEBUG
+-			       "unionfs_mntput: dentry=%p bindex=%d\n",
+-			       dentry, bindex);
+-#endif /* UNIONFS_DEBUG */
+-			return;
+-		}
+-	}
++	if (!dentry && bindex < 0)
++		return;
++	BUG_ON(!dentry);
++	BUG_ON(bindex < 0);
++
+ 	mnt = unionfs_lower_mnt_idx(dentry, bindex);
+ 	if (!mnt) {
+-		if (bindex < 0)
+-			return;
+-		if (!mnt && bindex >= 0) {
+ #ifdef UNIONFS_DEBUG
+-			/*
+-			 * Directories can have NULL lower objects in
+-			 * between start/end, but NOT if at the start/end
+-			 * range.  We cannot verify that this dentry is a
+-			 * type=DIR, because it may already be a negative
+-			 * dentry.  But if dbstart is greater than dbend, we
+-			 * know that this couldn't have been a regular file:
+-			 * it had to have been a directory.
+-			 */
+-			if (!(bindex > dbstart(dentry) && bindex < dbend(dentry)))
+-				printk(KERN_WARNING
+-				       "unionfs_mntput: mnt=%p bindex=%d\n",
+-				       mnt, bindex);
++		/*
++		 * Directories can have NULL lower objects in between
++		 * start/end, but NOT if at the start/end range.  We cannot
++		 * verify that this dentry is a type=DIR, because it may
++		 * already be a negative dentry.  But if dbstart is greater
++		 * than dbend, we know that this couldn't have been a
++		 * regular file: it had to have been a directory.
++		 */
++		if (!(bindex > dbstart(dentry) && bindex < dbend(dentry)))
++			printk(KERN_WARNING
++			       "unionfs_mntput: mnt=%p bindex=%d\n",
++			       mnt, bindex);
+ #endif /* UNIONFS_DEBUG */
+-			return;
+-		}
++		return;
+ 	}
+ 	mntput(mnt);
+ }
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index 47bebab..4ea350a 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -89,7 +89,7 @@ int unionfs_unlink(struct inode *dir, struct dentry *dentry)
+ 	/* call d_drop so the system "forgets" about us */
+ 	if (!err) {
+ 		if (!S_ISDIR(dentry->d_inode->i_mode))
+-			unionfs_purge_extras(dentry);
++			unionfs_postcopyup_release(dentry);
+ 		d_drop(dentry);
+ 		/*
+ 		 * if unlink/whiteout succeeded, parent dir mtime has
+-- 
+1.5.4.3
+

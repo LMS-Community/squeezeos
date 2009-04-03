@@ -1,0 +1,33 @@
+From a7548f11aaca31f1203eb3ddd9a3d73c863d882e Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 17 Oct 2007 16:37:51 -0400
+Subject: [PATCH] Unionfs: don't printk trivial message upon normal rename-copyup
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/rename.c |    8 +++++---
+ 1 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 118bd57..b1b756c 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -40,10 +40,12 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 				       new_dentry, new_dentry->d_name.name,
+ 				       bindex);
+ 		if (IS_ERR(lower_new_dentry)) {
+-			printk(KERN_ERR "unionfs: error creating directory "
+-			       "tree for rename, bindex = %d, err = %ld\n",
+-			       bindex, PTR_ERR(lower_new_dentry));
+ 			err = PTR_ERR(lower_new_dentry);
++			if (err == -EROFS)
++				goto out;
++			printk(KERN_ERR "unionfs: error creating directory "
++			       "tree for rename, bindex=%d err=%d\n",
++			       bindex, err);
+ 			goto out;
+ 		}
+ 	}
+-- 
+1.5.4.3
+

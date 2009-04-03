@@ -1,0 +1,45 @@
+From 3523281bee0d6bae2070d53ce37fc814e3a67126 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 30 Apr 2007 16:42:30 -0400
+Subject: [PATCH] branch management: disallow setting leftmost branch to readonly
+
+Unionfs requires the leftmost branch to be writeable for copyup to work
+properly and simply.  If, through branch-management commands (add, delete,
+or mode change), the leftmost branch will becomes readonly, then return an
+error (and tell the user to use "remount,ro" if they want a readonly union).
+---
+ fs/unionfs/super.c |   16 ++++++++++++----
+ 1 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 10520c0..3a8d74c 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -626,12 +626,20 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ out_no_change:
+ 
+ 	/******************************************************************
+-	 * WE'RE ALMOST DONE: see if we need to allocate a small-sized new
+-	 * vector, copy the vectors to their correct place, release the
+-	 * refcnt of the older ones, and return.
+-	 * Also handle invalidating any pages that will have to be re-read.
++	 * WE'RE ALMOST DONE: check if leftmost branch might be read-only,
++	 * see if we need to allocate a small-sized new vector, copy the
++	 * vectors to their correct place, release the refcnt of the older
++	 * ones, and return.  Also handle invalidating any pages that will
++	 * have to be re-read.
+ 	 *******************************************************************/
+ 
++	if (!(tmp_data[0].branchperms & MAY_WRITE)) {
++		printk("unionfs: leftmost branch cannot be read-only "
++		       "(use \"remount,ro\" to create a read-only union)\n");
++		err = -EINVAL;
++		goto out_release;
++	}
++
+ 	/*
+ 	 * Allocate space for actual pointers, if needed.  By the time we
+ 	 * finish this block of code, new_branches and new_lower_paths will
+-- 
+1.5.4.3
+

@@ -1,0 +1,37 @@
+From 5b9107d3afa55cac2b583d83bca42ea025c9f973 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 21 Jul 2007 02:38:14 -0400
+Subject: [PATCH] Unionfs: branch-management bugfix to unionfs_file_revalidate
+
+If we re-opened the file on a different branch than the original one, and
+only if this was due to a new branch inserted, then update the mnt counts of
+the old and new branches accordingly.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index f6f7dea..baa6a37 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -370,11 +370,12 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 				goto out;
+ 			new_brid = UNIONFS_F(file)->
+ 			  saved_branch_ids[fbstart(file)];
+-			if (new_brid != orig_brid) {
++			if (new_brid != orig_brid && sbgen > fgen) {
+ 				/*
+ 				 * If we re-opened the file on a different
+-				 * branch than the original one, then update
+-				 * the mnt counts of the old and new
++				 * branch than the original one, and this
++				 * was due to a new branch inserted, then
++				 * update the mnt counts of the old and new
+ 				 * branches accordingly.
+ 				 */
+ 				unionfs_mntget(dentry, bstart);	/* new branch */
+-- 
+1.5.4.3
+

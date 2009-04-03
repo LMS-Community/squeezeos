@@ -1,0 +1,44 @@
+From 3fa0712c084ce9c6252553e958a77d565f780588 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 1 Aug 2007 10:29:42 -0400
+Subject: [PATCH] Unionfs: check for immutable files before read-only branches
+
+Immutable files should never be allowed to be copied-up on write, even if
+they're on read-only file systems or branches.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   10 +++++-----
+ 1 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 53d373a..c772fbd 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -985,6 +985,11 @@ static int inode_permission(struct super_block *sb, struct inode *inode, int mas
+ 		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+ 			return -EROFS;
+ 		/*
++		 * Nobody gets write access to an immutable file.
++		 */
++		if (IS_IMMUTABLE(inode))
++			return -EACCES;
++		/*
+ 		 * For all other branches than the first one, we ignore
+ 		 * EROFS or if the branch is mounted as readonly, to let
+ 		 * copyup take place.
+@@ -993,11 +998,6 @@ static int inode_permission(struct super_block *sb, struct inode *inode, int mas
+ 		    is_robranch_super(sb, bindex) &&
+ 		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+ 			return 0;
+-		/*
+-		 * Nobody gets write access to an immutable file.
+-		 */
+-		if (IS_IMMUTABLE(inode))
+-			return -EACCES;
+ 	}
+ 
+ 	/* Ordinary permission routines do not understand MAY_APPEND. */
+-- 
+1.5.4.3
+

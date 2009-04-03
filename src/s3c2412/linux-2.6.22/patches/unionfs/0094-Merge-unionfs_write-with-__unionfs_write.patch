@@ -1,0 +1,78 @@
+From 323b5e9f9e974bdf9d80e462192abfd864983e1d Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Sun, 25 Mar 2007 01:24:54 -0400
+Subject: [PATCH] Merge unionfs_write with __unionfs_write.
+
+Merge the two functions because unionfs_write was a small function and the
+only one which called the __unionfs_write.  This saves on stack space and
+clarifies code a bit.
+---
+ fs/unionfs/file.c |   30 ++++++++++--------------------
+ 1 files changed, 10 insertions(+), 20 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 57f2bdd..972e696 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -77,17 +77,20 @@ out:
+ 	return err;
+ }
+ 
+-/* helper function to unionfs_write */
+-static ssize_t __unionfs_write(struct file * file, const char __user * buf,
+-			       size_t count, loff_t * ppos)
++static ssize_t unionfs_write(struct file * file, const char __user * buf,
++			     size_t count, loff_t *ppos)
+ {
+-	int err = -EINVAL;
++	int err;
+ 	struct file *hidden_file = NULL;
+ 	struct inode *inode;
+ 	struct inode *hidden_inode;
+ 	loff_t pos = *ppos;
+ 	int bstart, bend;
+ 
++	unionfs_read_lock(file->f_dentry->d_sb);
++	if ((err = unionfs_file_revalidate(file, 1)))
++		goto out;
++
+ 	inode = file->f_dentry->d_inode;
+ 
+ 	bstart = fbstart(file);
+@@ -98,8 +101,10 @@ static ssize_t __unionfs_write(struct file * file, const char __user * buf,
+ 	hidden_file = unionfs_lower_file(file);
+ 	hidden_inode = hidden_file->f_dentry->d_inode;
+ 
+-	if (!hidden_file->f_op || !hidden_file->f_op->write)
++	if (!hidden_file->f_op || !hidden_file->f_op->write) {
++		err = -EINVAL;
+ 		goto out;
++	}
+ 
+ 	/* adjust for append -- seek to the end of the file */
+ 	if (file->f_flags & O_APPEND)
+@@ -120,21 +125,6 @@ static ssize_t __unionfs_write(struct file * file, const char __user * buf,
+ 	if (pos > inode->i_size)
+ 		inode->i_size = pos;
+ out:
+-	return err;
+-}
+-
+-static ssize_t unionfs_write(struct file * file, const char __user * buf,
+-			     size_t count, loff_t * ppos)
+-{
+-	int err = 0;
+-
+-	unionfs_read_lock(file->f_dentry->d_sb);
+-	if ((err = unionfs_file_revalidate(file, 1)))
+-		goto out;
+-
+-	err = __unionfs_write(file, buf, count, ppos);
+-
+-out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 	return err;
+ }
+-- 
+1.5.4.3
+

@@ -1,0 +1,48 @@
+From c12d69de4d3dd04a0ff41da14af3e7c8b3a5a9c7 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 25 Jan 2008 20:21:07 -0500
+Subject: [PATCH] Unionfs: d_parent related locking fixes
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    3 +--
+ fs/unionfs/union.h  |    4 ++--
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index b028908..81f5431 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -710,8 +710,7 @@ struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
+ 		child_dentry = parent_dentry;
+ 
+ 		/* find the parent directory dentry in unionfs */
+-		parent_dentry = child_dentry->d_parent;
+-		dget(parent_dentry);
++		parent_dentry = dget_parent(child_dentry);
+ 
+ 		/* find out the lower_parent_dentry in the given branch */
+ 		lower_parent_dentry =
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index bbcb310..2adbea7 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -492,13 +492,13 @@ extern int parse_branch_mode(const char *name, int *perms);
+ /* locking helpers */
+ static inline struct dentry *lock_parent(struct dentry *dentry)
+ {
+-	struct dentry *dir = dget(dentry->d_parent);
++	struct dentry *dir = dget_parent(dentry);
+ 	mutex_lock_nested(&dir->d_inode->i_mutex, I_MUTEX_PARENT);
+ 	return dir;
+ }
+ static inline struct dentry *lock_parent_wh(struct dentry *dentry)
+ {
+-	struct dentry *dir = dget(dentry->d_parent);
++	struct dentry *dir = dget_parent(dentry);
+ 
+ 	mutex_lock_nested(&dir->d_inode->i_mutex, UNIONFS_DMUTEX_WHITEOUT);
+ 	return dir;
+-- 
+1.5.4.3
+

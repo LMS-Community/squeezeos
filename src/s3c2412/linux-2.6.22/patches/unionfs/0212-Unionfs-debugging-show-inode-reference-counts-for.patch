@@ -1,0 +1,76 @@
+From 630fdd3c023e9f016efe32aacd0466d41266b7a5 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 16 Jul 2007 23:38:30 -0400
+Subject: [PATCH] Unionfs: debugging: show inode reference counts for all branches
+
+Another useful utility function for debugging, to show the inode refcnt's
+of all lower inodes.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |   21 +++++++++++++++++++++
+ fs/unionfs/union.h |    5 +++++
+ 2 files changed, 26 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index cc9d42a..424c60d 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -468,3 +468,24 @@ void __show_dinode_times(const struct dentry *dentry,
+ 		       lower_inode->i_ctime.tv_nsec);
+ 	}
+ }
++
++void __show_inode_counts(const struct inode *inode,
++			const char *file, const char *fxn, int line)
++{
++	struct inode *lower_inode;
++	int bindex;
++
++	if (!inode) {
++		printk("SiC: Null inode\n");
++		return;
++	}
++	for (bindex=sbstart(inode->i_sb); bindex <= sbend(inode->i_sb); bindex++) {
++		lower_inode = unionfs_lower_inode_idx(inode, bindex);
++		if (!lower_inode)
++			continue;
++		printk("SIC(%lu:%d:%d): ", inode->i_ino, bindex,
++		       atomic_read(&(inode)->i_count));
++		printk("lc=%d ", atomic_read(&(lower_inode)->i_count));
++		printk("%s:%s:%d\n",file,fxn,line);
++	}
++}
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 2bedaec..a13052b 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -545,6 +545,8 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 	__FILE__,__FUNCTION__,__LINE__)
+ #define show_dinode_times(d)	__show_dinode_times((d),	\
+ 	__FILE__,__FUNCTION__,__LINE__)
++#define show_inode_counts(i)	__show_inode_counts((i),	\
++	__FILE__,__FUNCTION__,__LINE__)
+ 
+ extern void __unionfs_check_inode(const struct inode *inode, const char *fname,
+ 				  const char *fxn, int line);
+@@ -559,6 +561,8 @@ extern void __show_inode_times(const struct inode *inode,
+ 			       const char *file, const char *fxn, int line);
+ extern void __show_dinode_times(const struct dentry *dentry,
+ 				const char *file, const char *fxn, int line);
++extern void __show_inode_counts(const struct inode *inode,
++			        const char *file, const char *fxn, int line);
+ 
+ #else /* not UNIONFS_DEBUG */
+ 
+@@ -569,6 +573,7 @@ extern void __show_dinode_times(const struct dentry *dentry,
+ #define show_branch_counts(sb)
+ #define show_inode_times(i)
+ #define show_dinode_times(d)
++#define show_inode_counts(i)
+ 
+ #endif /* not UNIONFS_DEBUG */
+ 
+-- 
+1.5.4.3
+

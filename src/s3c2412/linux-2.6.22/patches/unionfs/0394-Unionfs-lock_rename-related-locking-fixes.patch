@@ -1,0 +1,65 @@
+From ecdb93de7727f7ab8ef1a240eec94ef47a55ec29 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 25 Jan 2008 20:21:07 -0500
+Subject: [PATCH] Unionfs: lock_rename related locking fixes
+
+CC: Mike Halcrow <mhalcrow@us.ibm.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/rename.c |   16 +++++++++++++++-
+ 1 files changed, 15 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index bc71e8e..6ba8824 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -29,6 +29,7 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	struct dentry *lower_new_dir_dentry;
+ 	struct dentry *lower_wh_dentry;
+ 	struct dentry *lower_wh_dir_dentry;
++	struct dentry *trap;
+ 	char *wh_name = NULL;
+ 
+ 	lower_new_dentry = unionfs_lower_dentry_idx(new_dentry, bindex);
+@@ -95,6 +96,7 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		goto out;
+ 
+ 	dget(lower_old_dentry);
++	dget(lower_new_dentry);
+ 	lower_old_dir_dentry = dget_parent(lower_old_dentry);
+ 	lower_new_dir_dentry = dget_parent(lower_new_dentry);
+ 
+@@ -122,9 +124,20 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 
+ 	/* see Documentation/filesystems/unionfs/issues.txt */
+ 	lockdep_off();
+-	lock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
++	trap = lock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
++	/* source should not be ancenstor of target */
++	if (trap == lower_old_dentry) {
++		err = -EINVAL;
++		goto out_err_unlock;
++	}
++	/* target should not be ancenstor of source */
++	if (trap == lower_new_dentry) {
++		err = -ENOTEMPTY;
++		goto out_err_unlock;
++	}
+ 	err = vfs_rename(lower_old_dir_dentry->d_inode, lower_old_dentry,
+ 			 lower_new_dir_dentry->d_inode, lower_new_dentry);
++out_err_unlock:
+ 	unlock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
+ 	lockdep_on();
+ 
+@@ -132,6 +145,7 @@ out_dput:
+ 	dput(lower_old_dir_dentry);
+ 	dput(lower_new_dir_dentry);
+ 	dput(lower_old_dentry);
++	dput(lower_new_dentry);
+ 
+ out:
+ 	if (!err) {
+-- 
+1.5.4.3
+

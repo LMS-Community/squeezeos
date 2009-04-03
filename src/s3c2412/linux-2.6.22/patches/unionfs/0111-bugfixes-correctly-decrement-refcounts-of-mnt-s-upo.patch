@@ -1,0 +1,78 @@
+From 9d512f5bb07376e8434022bd07e43553eb471953 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 11 May 2007 01:55:19 -0400
+Subject: [PATCH] bugfixes: correctly decrement refcounts of mnt's upon branch management
+
+The old logic was broken in one place, which another place tried to "fix"
+incorrectly.  Also added detailed comments to explain the new/correct logic.
+---
+ fs/unionfs/commonfops.c |   17 ++++++++++++-----
+ fs/unionfs/dentry.c     |   18 +++++++++++++-----
+ 2 files changed, 25 insertions(+), 10 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index d4a14e4..2cbf561 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -134,14 +134,21 @@ static void cleanup_file(struct file *file)
+ 				       "file %p\n", file);
+ 			else {
+ 				unionfs_read_lock(sb);
++				/* decrement count of open files */
+ 				branchput(sb, i);
+ 				unionfs_read_unlock(sb);
+-				/* XXX: is it OK to use sb->s_root here? */
+-				unionfs_mntput(sb->s_root, i);
+-				/* mntget b/c fput below will call mntput */
+-				unionfs_mntget(sb->s_root, bindex);
++				/*
++				 * fput will perform an mntput for us on the
++				 * correct branch.  Although we're using the
++				 * file's old branch configuration, bindex,
++				 * which is the old index, correctly points
++				 * to the right branch in the file's branch
++				 * list.  In other words, we're going to
++				 * mntput the correct branch even if
++				 * branches have been added/removed.
++				 */
++				fput(unionfs_lower_file_idx(file, bindex));
+ 			}
+-			fput(unionfs_lower_file_idx(file, bindex));
+ 		}
+ 	}
+ 
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 7eac160..d1ee792 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -257,14 +257,22 @@ out_this:
+ 	/* finally, lock this dentry and revalidate it */
+ 	verify_locked(dentry);
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+-	saved_bstart = dbstart(dentry);
+-	saved_bend = dbend(dentry);
+ 	valid = __unionfs_d_revalidate_one(dentry, nd);
+ 
+-	if (valid && chain_len > 0 && sbgen != dgen) {
+-		for (bindex = saved_bstart; bindex <= saved_bend; bindex++)
++	/*
++	 * If __unionfs_d_revalidate_one() succeeded above, then it will
++	 * have incremented the refcnt of the mnt's, but also the branch
++	 * indices of the dentry will have been updated (to take into
++	 * account any branch insertions/deletion.  So the current
++	 * dbstart/dbend match the current, and new, indices of the mnts
++	 * which __unionfs_d_revalidate_one has incremented.  Note: the "if"
++	 * test below does not depend on whether chain_len was 0 or greater.
++	 */
++	if (valid && sbgen != dgen)
++		for (bindex = dbstart(dentry);
++		     bindex <= dbend(dentry);
++		     bindex++)
+ 			unionfs_mntput(dentry, bindex);
+-	}
+ 
+ out_free:
+ 	/* unlock/dput all dentries in chain and return status */
+-- 
+1.5.4.3
+

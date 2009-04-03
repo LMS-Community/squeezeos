@@ -1,0 +1,53 @@
+From 9de860f4996c604e9747dc7a4aa296303489d37c Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Sun, 28 Jan 2007 14:20:19 -0500
+Subject: [PATCH] fs/unionfs/: Don't duplicate the struct nameidata
+
+The only fields that we have to watch out for are the dentry and vfsmount.
+Additionally, this makes Unionfs gentler on the stack as nameidata is rather
+large.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   22 ++++++++++++++++------
+ 1 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 3b4a388..1b2e8a8 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -191,15 +191,25 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 				     struct dentry *dentry,
+ 				     struct nameidata *nd)
+ {
+-	struct nameidata lowernd; /* TODO: be gentler to the stack */
++	struct path path_save;
++	struct dentry *ret;
+ 
+-	if (nd)
+-		memcpy(&lowernd, nd, sizeof(struct nameidata));
+-	else
+-		memset(&lowernd, 0, sizeof(struct nameidata));
++	/* save the dentry & vfsmnt from namei */
++	if (nd) {
++		path_save.dentry = nd->dentry;
++		path_save.mnt = nd->mnt;
++	}
+ 
+ 	/* The locking is done by unionfs_lookup_backend. */
+-	return unionfs_lookup_backend(dentry, &lowernd, INTERPOSE_LOOKUP);
++	ret = unionfs_lookup_backend(dentry, nd, INTERPOSE_LOOKUP);
++
++	/* restore the dentry & vfsmnt in namei */
++	if (nd) {
++		nd->dentry = path_save.dentry;
++		nd->mnt = path_save.mnt;
++	}
++
++	return ret;
+ }
+ 
+ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+-- 
+1.5.4.3
+

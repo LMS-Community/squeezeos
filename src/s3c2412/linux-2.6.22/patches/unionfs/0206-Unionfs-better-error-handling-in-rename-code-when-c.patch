@@ -1,0 +1,65 @@
+From cc6bed8a5b846880f50ccfe996b7f551b511c75d Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 9 Jul 2007 20:14:41 -0400
+Subject: [PATCH] Unionfs: better error handling in rename code when copyups are involved
+
+First, rewrite code slightly and document it better to explain why we appear
+to ignore copyup errors (because we try the next branch to the left).
+
+Second, change a BUG_ON to a printk(KERN_ERR), because a mild failure to
+copyup a file should not cause an oops.  For example, some file systems
+don't support UIDs/GIDs (e.g., VFAT) and others don't allow you to chmod a
+symlink (e.g., jffs2), possibly resulting in mild copyup failures; that
+shouldn't be considered so severe as to cause an oops.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/rename.c |   25 ++++++++++++++++---------
+ 1 files changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 0316258..1761f8b 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -230,14 +230,15 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 					    old_dentry->d_name.name,
+ 					    old_dentry->d_name.len,
+ 					    NULL, old_dentry->d_inode->i_size);
+-			if (!err) {
+-				dput(wh_old);
+-				bwh_old = bindex;
+-				err = __unionfs_rename(old_dir, old_dentry,
+-						       new_dir, new_dentry,
+-						       bindex, &wh_old);
+-				break;
+-			}
++			/* if copyup failed, try next branch to the left */
++			if (err)
++				continue;
++			dput(wh_old);
++			bwh_old = bindex;
++			err = __unionfs_rename(old_dir, old_dentry,
++					       new_dir, new_dentry,
++					       bindex, &wh_old);
++			break;
+ 		}
+ 	}
+ 
+@@ -255,7 +256,13 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 	 */
+ 	if ((old_bstart != old_bend) || (do_copyup != -1)) {
+ 		struct dentry *lower_parent;
+-		BUG_ON(!wh_old || wh_old->d_inode || bwh_old < 0);
++		if (!wh_old || wh_old->d_inode || bwh_old < 0) {
++			printk(KERN_ERR "unionfs: rename error "
++			       "(wh_old=%p/%p bwh_old=%d)\n", wh_old,
++			       (wh_old ? wh_old->d_inode : NULL), bwh_old);
++			err = -EIO;
++			goto out;
++		}
+ 		lower_parent = lock_parent(wh_old);
+ 		local_err = vfs_create(lower_parent->d_inode, wh_old, S_IRUGO,
+ 				       NULL);
+-- 
+1.5.4.3
+

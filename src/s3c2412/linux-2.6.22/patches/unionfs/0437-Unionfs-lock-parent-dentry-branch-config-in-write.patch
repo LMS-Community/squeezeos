@@ -1,0 +1,40 @@
+From afa6c3389b3a8253a7ed425b4c111843e0fd493d Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 23 Apr 2008 19:13:41 -0400
+Subject: [PATCH] Unionfs: lock parent dentry branch config in write
+
+Ensure that branch configuration is available to file_revalidate should a
+copyup be required.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 98c958d..5175963 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -55,7 +55,9 @@ static ssize_t unionfs_write(struct file *file, const char __user *buf,
+ 
+ 	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+-	err = unionfs_file_revalidate(file, true);
++	if (dentry != dentry->d_parent)
++		unionfs_lock_dentry(dentry->d_parent, UNIONFS_DMUTEX_PARENT);
++	err = unionfs_file_revalidate_locked(file, true);
+ 	if (unlikely(err))
+ 		goto out;
+ 
+@@ -72,6 +74,8 @@ static ssize_t unionfs_write(struct file *file, const char __user *buf,
+ 	}
+ 
+ out:
++	if (dentry != dentry->d_parent)
++		unionfs_unlock_dentry(dentry->d_parent);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+-- 
+1.5.4.3
+

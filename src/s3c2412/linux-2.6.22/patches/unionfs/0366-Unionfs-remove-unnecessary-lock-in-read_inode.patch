@@ -1,0 +1,39 @@
+From 33baea84c12eabebfb0fc748a2d24126f475b7f3 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] Unionfs: remove unnecessary lock in read_inode
+
+Our read_inode doesn't need to grab the superblock rwsem because there no
+chance it could be affected by branch management.  But our read_inode was
+called from other places which did grab need to grab that rwsem, and lockdep
+complained.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/super.c |    3 ---
+ 1 files changed, 0 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 70eb9d5..631f732 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -29,8 +29,6 @@ static void unionfs_read_inode(struct inode *inode)
+ 	int size;
+ 	struct unionfs_inode_info *info = UNIONFS_I(inode);
+ 
+-	unionfs_read_lock(inode->i_sb);
+-
+ 	memset(info, 0, offsetof(struct unionfs_inode_info, vfs_inode));
+ 	info->bstart = -1;
+ 	info->bend = -1;
+@@ -63,7 +61,6 @@ static void unionfs_read_inode(struct inode *inode)
+ 	inode->i_mtime.tv_sec = inode->i_mtime.tv_nsec = 0;
+ 	inode->i_ctime.tv_sec = inode->i_ctime.tv_nsec = 0;
+ 
+-	unionfs_read_unlock(inode->i_sb);
+ }
+ 
+ /*
+-- 
+1.5.4.3
+

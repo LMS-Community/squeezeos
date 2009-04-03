@@ -1,0 +1,84 @@
+From 687b48be4cf8950a8241b74341e0f22cf002b41c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 13:27:15 -0400
+Subject: [PATCH] Unionfs: minor code cleanups
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    2 --
+ fs/unionfs/inode.c      |   39 +++++++++++++++++----------------------
+ 2 files changed, 17 insertions(+), 24 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 50f4eda..0fc7963 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -250,7 +250,6 @@ static int do_delayed_copyup(struct file *file)
+ 	BUG_ON(!S_ISREG(dentry->d_inode->i_mode));
+ 
+ 	unionfs_check_file(file);
+-	unionfs_check_dentry(dentry);
+ 	for (bindex = bstart - 1; bindex >= 0; bindex--) {
+ 		if (!d_deleted(dentry))
+ 			err = copyup_file(parent_inode, file, bstart,
+@@ -292,7 +291,6 @@ static int do_delayed_copyup(struct file *file)
+ 
+ out:
+ 	unionfs_check_file(file);
+-	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 64ff508..c490303 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -388,28 +388,23 @@ docopyup:
+ 					    bindex, old_dentry->d_name.name,
+ 					    old_dentry->d_name.len, NULL,
+ 					    i_size_read(old_dentry->d_inode));
+-			if (!err) {
+-				lower_new_dentry =
+-					create_parents(dir, new_dentry,
+-						       new_dentry->d_name.name,
+-						       bindex);
+-				lower_old_dentry =
+-					unionfs_lower_dentry(old_dentry);
+-				lower_dir_dentry =
+-					lock_parent(lower_new_dentry);
+-				/*
+-				 * see
+-				 * Documentation/filesystems/unionfs/issues.txt
+-				 */
+-				lockdep_off();
+-				/* do vfs_link */
+-				err = vfs_link(lower_old_dentry,
+-					       lower_dir_dentry->d_inode,
+-					       lower_new_dentry);
+-				lockdep_on();
+-				unlock_dir(lower_dir_dentry);
+-				goto check_link;
+-			}
++			if (err)
++				continue;
++			lower_new_dentry =
++				create_parents(dir, new_dentry,
++					       new_dentry->d_name.name,
++					       bindex);
++			lower_old_dentry = unionfs_lower_dentry(old_dentry);
++			lower_dir_dentry = lock_parent(lower_new_dentry);
++			/* see Documentation/filesystems/unionfs/issues.txt */
++			lockdep_off();
++			/* do vfs_link */
++			err = vfs_link(lower_old_dentry,
++				       lower_dir_dentry->d_inode,
++				       lower_new_dentry);
++			lockdep_on();
++			unlock_dir(lower_dir_dentry);
++			goto check_link;
+ 		}
+ 		goto out;
+ 	}
+-- 
+1.5.4.3
+

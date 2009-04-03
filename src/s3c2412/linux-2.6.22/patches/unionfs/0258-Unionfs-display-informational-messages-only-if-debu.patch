@@ -1,0 +1,72 @@
+From 3bb6c4ebf726be88087d6a8c56903d3577302932 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 20 Sep 2007 00:59:05 -0400
+Subject: [PATCH] Unionfs: display informational messages only if debug is on
+
+This is to avoid filling the console/logs with messages that are primarily
+of debugging use.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    4 ++--
+ fs/unionfs/dentry.c     |    6 +++---
+ fs/unionfs/union.h      |    4 ++++
+ 3 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 87cbb09..e69ccf6 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -394,8 +394,8 @@ int unionfs_file_revalidate(struct file *file, bool willwrite)
+ 	if (willwrite && IS_WRITE_FLAG(file->f_flags) &&
+ 	    !IS_WRITE_FLAG(unionfs_lower_file(file)->f_flags) &&
+ 	    is_robranch(dentry)) {
+-		printk(KERN_DEBUG "unionfs: do delay copyup of \"%s\"\n",
+-		       dentry->d_name.name);
++		dprintk(KERN_DEBUG "unionfs: do delay copyup of \"%s\"\n",
++			dentry->d_name.name);
+ 		err = do_delayed_copyup(file);
+ 	}
+ 
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 9e0742d..08b5722 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -46,9 +46,9 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 
+ 	/* if the dentry is unhashed, do NOT revalidate */
+ 	if (d_deleted(dentry)) {
+-		printk(KERN_DEBUG "unionfs: unhashed dentry being "
+-		       "revalidated: %*s\n",
+-		       dentry->d_name.len, dentry->d_name.name);
++		dprintk(KERN_DEBUG "unionfs: unhashed dentry being "
++			"revalidated: %*s\n",
++			dentry->d_name.len, dentry->d_name.name);
+ 		goto out;
+ 	}
+ 
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 2f6e117..54320b5 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -509,6 +509,8 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 
+ #ifdef CONFIG_UNION_FS_DEBUG
+ 
++#define dprintk		printk
++
+ /* useful for tracking code reachability */
+ #define UDBG printk("DBG:%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__)
+ 
+@@ -545,6 +547,8 @@ extern void __show_inode_counts(const struct inode *inode,
+ 
+ #else /* not CONFIG_UNION_FS_DEBUG */
+ 
++#define dprintk(x...)		do { ; } while (0)
++
+ /* we leave useful hooks for these check functions throughout the code */
+ #define unionfs_check_inode(i)		do { } while(0)
+ #define unionfs_check_dentry(d)	do { } while(0)
+-- 
+1.5.4.3
+

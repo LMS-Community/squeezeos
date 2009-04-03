@@ -1,0 +1,155 @@
+From 9fe19b84c3f211938ee48257067184080b5bb38e Mon Sep 17 00:00:00 2001
+From: Hugh Dickins <hugh@veritas.com>
+Date: Fri, 28 Dec 2007 13:41:43 -0500
+Subject: [PATCH] Unionfs: restructure unionfs_setattr and fix truncation order
+
+Restructure the code to move the lower notify_change out of the loop in
+unionfs_setattr.  Cleanup and simplify the code.  Then fix the truncation
+order which fsx-linux in a unionfs on tmpfs found.  Then handle copyup
+properly.
+
+When shrinking a file, unionfs_setattr needs to vmtruncate the upper level
+before notifying change to the lower level, to eliminate those dirty pages
+beyond new eof which otherwise drift down to the lower level's writepage,
+writing beyond its eof (and later uncovered when the file is expanded).
+
+Also truncate the upper level first when expanding, in the case when
+the upper level's s_maxbytes is more limiting than the lower level's.
+
+Signed-off-by: Hugh Dickins <hugh@veritas.com>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   97 ++++++++++++++++++++++++++-------------------------
+ 1 files changed, 49 insertions(+), 48 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 416f68c..8083d13 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -986,11 +986,10 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ {
+ 	int err = 0;
+ 	struct dentry *lower_dentry;
+-	struct inode *inode = NULL;
+-	struct inode *lower_inode = NULL;
++	struct inode *inode;
++	struct inode *lower_inode;
+ 	int bstart, bend, bindex;
+-	int i;
+-	int copyup = 0;
++	loff_t size;
+ 
+ 	unionfs_read_lock(dentry->d_sb);
+ 	unionfs_lock_dentry(dentry);
+@@ -1004,62 +1003,64 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	bend = dbend(dentry);
+ 	inode = dentry->d_inode;
+ 
+-	for (bindex = bstart; (bindex <= bend) || (bindex == bstart);
+-	     bindex++) {
+-		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+-		if (!lower_dentry)
+-			continue;
+-		BUG_ON(lower_dentry->d_inode == NULL);
+-
+-		/* If the file is on a read only branch */
+-		if (is_robranch_super(dentry->d_sb, bindex)
+-		    || IS_RDONLY(lower_dentry->d_inode)) {
+-			if (copyup || (bindex != bstart))
+-				continue;
+-			/* Only if its the leftmost file, copyup the file */
+-			for (i = bstart - 1; i >= 0; i--) {
+-				loff_t size = i_size_read(dentry->d_inode);
+-				if (ia->ia_valid & ATTR_SIZE)
+-					size = ia->ia_size;
+-				err = copyup_dentry(dentry->d_parent->d_inode,
+-						    dentry, bstart, i,
+-						    dentry->d_name.name,
+-						    dentry->d_name.len,
+-						    NULL, size);
+-
+-				if (!err) {
+-					copyup = 1;
+-					lower_dentry =
+-						unionfs_lower_dentry(dentry);
+-					break;
+-				}
+-				/*
+-				 * if error is in the leftmost branch, pass
+-				 * it up.
+-				 */
+-				if (i == 0)
+-					goto out;
+-			}
++	lower_dentry = unionfs_lower_dentry(dentry);
++	BUG_ON(!lower_dentry);	/* should never happen after above revalidate */
++
++	/* copyup if the file is on a read only branch */
++	if (is_robranch_super(dentry->d_sb, bstart)
++	    || IS_RDONLY(lower_dentry->d_inode)) {
++		/* check if we have a branch to copy up to */
++		if (bstart <= 0) {
++			err = -EACCES;
++			goto out;
++		}
+ 
++		if (ia->ia_valid & ATTR_SIZE)
++			size = ia->ia_size;
++		else
++			size = i_size_read(inode);
++		/* copyup to next available branch */
++		for (bindex = bstart - 1; bindex >= 0; bindex--) {
++			err = copyup_dentry(dentry->d_parent->d_inode,
++					    dentry, bstart, bindex,
++					    dentry->d_name.name,
++					    dentry->d_name.len,
++					    NULL, size);
++			if (!err)
++				break;
+ 		}
+-		err = notify_change(lower_dentry, ia);
+ 		if (err)
+ 			goto out;
+-		break;
++		/* get updated lower_dentry after copyup */
++		lower_dentry = unionfs_lower_dentry(dentry);
+ 	}
+ 
+-	/* for mmap */
++	lower_inode = unionfs_lower_inode(inode);
++
++	/*
++	 * If shrinking, first truncate upper level to cancel writing dirty
++	 * pages beyond the new eof; and also if its' maxbytes is more
++	 * limiting (fail with -EFBIG before making any change to the lower
++	 * level).  There is no need to vmtruncate the upper level
++	 * afterwards in the other cases: we fsstack_copy_inode_size from
++	 * the lower level.
++	 */
+ 	if (ia->ia_valid & ATTR_SIZE) {
+-		if (ia->ia_size != i_size_read(inode)) {
++		size = i_size_read(inode);
++		if (ia->ia_size < size || (ia->ia_size > size &&
++		    inode->i_sb->s_maxbytes < lower_inode->i_sb->s_maxbytes)) {
+ 			err = vmtruncate(inode, ia->ia_size);
+ 			if (err)
+-				printk(KERN_ERR
+-				       "unionfs: setattr: vmtruncate failed\n");
++				goto out;
+ 		}
+ 	}
+ 
+-	/* get the size from the first lower inode */
+-	lower_inode = unionfs_lower_inode(inode);
++	/* notify the (possibly copied-up) lower inode */
++	err = notify_change(lower_dentry, ia);
++	if (err)
++		goto out;
++
++	/* get attributes from the first lower inode */
+ 	unionfs_copy_attr_all(inode, lower_inode);
+ 	/*
+ 	 * unionfs_copy_attr_all will copy the lower times to our inode if
+-- 
+1.5.4.3
+

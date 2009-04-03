@@ -1,0 +1,32 @@
+From a598d475fa3965c7d2c194f13d0929fbeb7b3bc1 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] Unionfs: initialize inode times for reused inodes
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/super.c |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 99ec8d2..70eb9d5 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -55,6 +55,14 @@ static void unionfs_read_inode(struct inode *inode)
+ 
+ 	inode->i_mapping->a_ops = &unionfs_aops;
+ 
++	/*
++	 * reset times so unionfs_copy_attr_all can keep out time invariants
++	 * right (upper inode time being the max of all lower ones).
++	 */
++	inode->i_atime.tv_sec = inode->i_atime.tv_nsec = 0;
++	inode->i_mtime.tv_sec = inode->i_mtime.tv_nsec = 0;
++	inode->i_ctime.tv_sec = inode->i_ctime.tv_nsec = 0;
++
+ 	unionfs_read_unlock(inode->i_sb);
+ }
+ 
+-- 
+1.5.4.3
+
