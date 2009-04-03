@@ -1,0 +1,70 @@
+From 03c93dabe598e4a9e619747d443c580966e76675 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 00:47:01 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on xattr ops
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/xattr.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 7f77d7d..bd2de06 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -23,14 +23,14 @@ void *unionfs_xattr_alloc(size_t size, size_t limit)
+ {
+ 	void *ptr;
+ 
+-	if (size > limit)
++	if (unlikely(size > limit))
+ 		return ERR_PTR(-E2BIG);
+ 
+ 	if (!size)		/* size request, no buffer is needed */
+ 		return NULL;
+ 
+ 	ptr = kmalloc(size, GFP_KERNEL);
+-	if (!ptr)
++	if (unlikely(!ptr))
+ 		return ERR_PTR(-ENOMEM);
+ 	return ptr;
+ }
+@@ -48,7 +48,7 @@ ssize_t unionfs_getxattr(struct dentry *dentry, const char *name, void *value,
+ 	unionfs_read_lock(dentry->d_sb);
+ 	unionfs_lock_dentry(dentry);
+ 
+-	if (!__unionfs_d_revalidate_chain(dentry, NULL, false)) {
++	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+@@ -77,7 +77,7 @@ int unionfs_setxattr(struct dentry *dentry, const char *name,
+ 	unionfs_read_lock(dentry->d_sb);
+ 	unionfs_lock_dentry(dentry);
+ 
+-	if (!__unionfs_d_revalidate_chain(dentry, NULL, false)) {
++	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+@@ -106,7 +106,7 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	unionfs_read_lock(dentry->d_sb);
+ 	unionfs_lock_dentry(dentry);
+ 
+-	if (!__unionfs_d_revalidate_chain(dentry, NULL, false)) {
++	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+@@ -135,7 +135,7 @@ ssize_t unionfs_listxattr(struct dentry *dentry, char *list, size_t size)
+ 	unionfs_read_lock(dentry->d_sb);
+ 	unionfs_lock_dentry(dentry);
+ 
+-	if (!__unionfs_d_revalidate_chain(dentry, NULL, false)) {
++	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+-- 
+1.5.4.3
+

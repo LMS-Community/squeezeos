@@ -1,0 +1,114 @@
+From 011b521626f7eb207fc94612baedafde691c33b4 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 03:07:37 -0400
+Subject: [PATCH] cleanup: rewrite do_delayed_copyup more cleanly and clearly
+
+---
+ fs/unionfs/commonfops.c |   64 +++++++++++++++++++++++++----------------------
+ 1 files changed, 34 insertions(+), 30 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 62e9923..2b2aff8 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -257,21 +257,22 @@ out:
+ }
+ 
+ /* perform a delayed copyup of a read-write file on a read-only branch */
+-static int do_delayed_copyup(struct file *file, struct dentry *dentry)
++static int do_delayed_copyup(struct file *file)
+ {
+ 	int bindex, bstart, bend, err = 0;
++	struct dentry *dentry = file->f_dentry;
+ 	struct inode *parent_inode = dentry->d_parent->d_inode;
+-	loff_t inode_size = file->f_dentry->d_inode->i_size;
++	loff_t inode_size = dentry->d_inode->i_size;
+ 
+ 	bstart = fbstart(file);
+ 	bend = fbend(file);
+ 
+-	BUG_ON(!S_ISREG(file->f_dentry->d_inode->i_mode));
++	BUG_ON(!S_ISREG(dentry->d_inode->i_mode));
+ 
+ 	unionfs_check_file(file);
+ 	unionfs_check_dentry(dentry);
+ 	for (bindex = bstart - 1; bindex >= 0; bindex--) {
+-		if (!d_deleted(file->f_dentry))
++		if (!d_deleted(dentry))
+ 			err = copyup_file(parent_inode, file, bstart,
+ 					  bindex, inode_size);
+ 		else
+@@ -281,33 +282,36 @@ static int do_delayed_copyup(struct file *file, struct dentry *dentry)
+ 		if (!err)
+ 			break;
+ 	}
+-	if (!err && (bstart > fbstart(file))) {
+-		bend = fbend(file);
+-		for (bindex = bstart; bindex <= bend; bindex++) {
+-			if (unionfs_lower_file_idx(file, bindex)) {
+-				unionfs_read_lock(dentry->d_sb);
+-				branchput(dentry->d_sb, bindex);
+-				unionfs_read_unlock(dentry->d_sb);
+-				fput(unionfs_lower_file_idx(file, bindex));
+-				unionfs_set_lower_file_idx(file, bindex, NULL);
+-			}
+-			if (unionfs_lower_mnt_idx(dentry, bindex)) {
+-				unionfs_mntput(dentry, bindex);
+-				unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
+-			}
+-			if (unionfs_lower_dentry_idx(dentry, bindex)) {
+-				BUG_ON(!dentry->d_inode);
+-				iput(unionfs_lower_inode_idx(dentry->d_inode, bindex));
+-				unionfs_set_lower_inode_idx(dentry->d_inode, bindex, NULL);
+-				dput(unionfs_lower_dentry_idx(dentry, bindex));
+-				unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+-			}
++	if (err || (bstart <= fbstart(file)))
++		goto out;
++	bend = fbend(file);
++	for (bindex = bstart; bindex <= bend; bindex++) {
++		if (unionfs_lower_file_idx(file, bindex)) {
++			unionfs_read_lock(dentry->d_sb);
++			branchput(dentry->d_sb, bindex);
++			unionfs_read_unlock(dentry->d_sb);
++			fput(unionfs_lower_file_idx(file, bindex));
++			unionfs_set_lower_file_idx(file, bindex, NULL);
++		}
++		if (unionfs_lower_mnt_idx(dentry, bindex)) {
++			unionfs_mntput(dentry, bindex);
++			unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
++		}
++		if (unionfs_lower_dentry_idx(dentry, bindex)) {
++			BUG_ON(!dentry->d_inode);
++			iput(unionfs_lower_inode_idx(dentry->d_inode, bindex));
++			unionfs_set_lower_inode_idx(dentry->d_inode, bindex,
++						    NULL);
++			dput(unionfs_lower_dentry_idx(dentry, bindex));
++			unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 		}
+-		/* for reg file, we only open it "once" */
+-		fbend(file) = fbstart(file);
+-		set_dbend(dentry, dbstart(dentry));
+-		ibend(dentry->d_inode) = ibstart(dentry->d_inode);
+ 	}
++	/* for reg file, we only open it "once" */
++	fbend(file) = fbstart(file);
++	set_dbend(dentry, dbstart(dentry));
++	ibend(dentry->d_inode) = ibstart(dentry->d_inode);
++
++out:
+ 	unionfs_check_file(file);
+ 	unionfs_check_dentry(dentry);
+ 	return err;
+@@ -397,7 +401,7 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	    is_robranch(dentry)) {
+ 		printk(KERN_DEBUG "unionfs: Doing delayed copyup of a "
+ 		       "read-write file on a read-only branch.\n");
+-		err = do_delayed_copyup(file, dentry);
++		err = do_delayed_copyup(file);
+ 	}
+ 
+ out:
+-- 
+1.5.4.3
+

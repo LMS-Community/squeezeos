@@ -1,0 +1,159 @@
+From 191575fbf6b59b1455d8ae2a0ea6342d09cda2b1 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 11 Jun 2007 12:48:29 -0400
+Subject: [PATCH] Cache coherency: resync unionfs data/meta-data when lower files change
+
+Whenever we revalidate a file or dentry, we check to see if any of the lower
+inodes have changed (new mtime/ctime).  If so, we revalidate the upper
+unionfs objects.  This method "works" in that as long as a user process will
+have caused unionfs to be called, directly or indirectly, even to just do
+->d_revalidate, then we will have purged the current unionfs data and the
+process will see the new data.  For example, a process that continually
+re-reads the same file's data will see the NEW data as soon as the lower
+file had changed, upon the next read(2) syscall.  This also works for
+meta-data changes which change the ctime (chmod, chown, chgrp, etc).
+
+However, this doesn't work when the process re-reads the file's data via
+mmap and the data was already read before via mmap: once we respond to
+->readpage(s), then the kernel maps the page into the process's address
+space and there doesn't appear to be a way to force the kernel to invalidate
+those pages/mappings, and force the process to re-issue ->readpage.  Note:
+only pages that have already been readpage'ed are not updated; any other
+pages which unionfs's ->readpage would be called on, WILL get the updated
+data.  If there's a way to invalidate active mappings and force a
+->readpage, let us know please (invalidate_inode_pages2 doesn't do the
+trick).
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   93 +++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 files changed, 91 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 85f68f1..81db0ae 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -165,6 +165,13 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		valid = 0;
+ 
+ 	if (valid) {
++		/*
++		 * If we get here, and we copy the meta-data from the lower
++		 * inode to our inode, then it is vital that we have already
++		 * purged all unionfs-level file data.  We do that in the
++		 * caller (__unionfs_d_revalidate_chain) by calling
++		 * purge_inode_data.
++		 */
+ 		fsstack_copy_attr_all(dentry->d_inode,
+ 				      unionfs_lower_inode(dentry->d_inode),
+ 				      unionfs_get_nlinks);
+@@ -177,6 +184,80 @@ out:
+ }
+ 
+ /*
++ * Determine if the lower inode objects have changed from below the unionfs
++ * inode.  Return 1 if changed, 0 otherwise.
++ */
++static int is_newer_lower(struct dentry *dentry)
++{
++	int bindex;
++	struct inode *inode = dentry->d_inode;
++	struct inode *lower_inode;
++
++	if (IS_ROOT(dentry))	/* XXX: root dentry can never be invalid?! */
++		return 0;
++
++	if (!inode)
++		return 0;
++
++	for (bindex = ibstart(inode); bindex <= ibend(inode); bindex++) {
++		lower_inode = unionfs_lower_inode_idx(inode, bindex);
++		if (!lower_inode)
++			continue;
++		/*
++		 * We may want to apply other tests to determine if the
++		 * lower inode's data has changed, but checking for changed
++		 * ctime and mtime on the lower inode should be enough.
++		 */
++		if (timespec_compare(&inode->i_mtime,
++				     &lower_inode->i_mtime) < 0) {
++			printk("unionfs: resyncing with lower inode "
++			       "(new mtime, name=%s)\n",
++			       dentry->d_name.name);
++			return 1; /* mtime changed! */
++		}
++		if (timespec_compare(&inode->i_ctime,
++				     &lower_inode->i_ctime) < 0) {
++			printk("unionfs: resyncing with lower inode "
++			       "(new ctime, name=%s)\n",
++			       dentry->d_name.name);
++			return 1; /* ctime changed! */
++		}
++	}
++	return 0;		/* default: lower is not newer */
++}
++
++/*
++ * Purge/remove/unmap all date pages of a unionfs inode.  This is called
++ * when the lower inode has changed, and we have to force processes to get
++ * the new data.
++ *
++ * XXX: this function "works" in that as long as a user process will have
++ * caused unionfs to be called, directly or indirectly, even to just do
++ * ->d_revalidate, then we will have purged the current unionfs data and the
++ * process will see the new data.  For example, a process that continually
++ * re-reads the same file's data will see the NEW data as soon as the lower
++ * file had changed, upon the next read(2) syscall.  However, this doesn't
++ * work when the process re-reads the file's data via mmap: once we respond
++ * to ->readpage(s), then the kernel maps the page into the process's
++ * address space and there doesn't appear to be a way to force the kernel to
++ * invalidate those pages/mappings, and force the process to re-issue
++ * ->readpage.  If there's a way to invalidate active mappings and force a
++ * ->readpage, let us know please (invalidate_inode_pages2 doesn't do the
++ * trick).
++ */
++static inline void purge_inode_data(struct dentry *dentry)
++{
++	/* reset generation number to zero, guaranteed to be "old" */
++	atomic_set(&UNIONFS_D(dentry)->generation, 0);
++
++	/* remove all non-private mappings */
++	unmap_mapping_range(dentry->d_inode->i_mapping, 0, 0, 0);
++
++	if (dentry->d_inode->i_data.nrpages)
++		truncate_inode_pages(&dentry->d_inode->i_data, 0);
++}
++
++/*
+  * Revalidate a parent chain of dentries, then the actual node.
+  * Assumes that dentry is locked, but will lock all parents if/when needed.
+  */
+@@ -194,7 +275,11 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ 	chain_len = 0;
+ 	sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+ 	dtmp = dentry->d_parent;
+-	dgen = atomic_read(&UNIONFS_D(dtmp)->generation);
++	if (dtmp->d_inode && is_newer_lower(dtmp)) {
++		dgen = 0;
++		purge_inode_data(dtmp);
++	} else
++		dgen = atomic_read(&UNIONFS_D(dtmp)->generation);
+ 	while (sbgen != dgen) {
+ 		/* The root entry should always be valid */
+ 		BUG_ON(IS_ROOT(dtmp));
+@@ -256,7 +341,11 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ out_this:
+ 	/* finally, lock this dentry and revalidate it */
+ 	verify_locked(dentry);
+-	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
++	if (dentry->d_inode && is_newer_lower(dentry)) {
++		dgen = 0;
++		purge_inode_data(dentry);
++	} else
++		dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+ 	valid = __unionfs_d_revalidate_one(dentry, nd);
+ 
+ 	/*
+-- 
+1.5.4.3
+

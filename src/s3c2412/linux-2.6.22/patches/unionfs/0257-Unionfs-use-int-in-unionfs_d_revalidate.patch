@@ -1,0 +1,45 @@
+From 2f8bca0122bec285740d73fee81dda7f92921b1f Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 19 Sep 2007 23:55:27 -0400
+Subject: [PATCH] Unionfs: use int in unionfs_d_revalidate
+
+We have to use an int, even though unionfs_d_revalidate calls other routines
+that return only true/false, b/c ->d_revalidate is allowed to return a
+negative errno number.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 2db8ba5..9e0742d 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -411,19 +411,19 @@ out:
+ 
+ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ {
+-	bool valid;
++	int err;
+ 
+ 	unionfs_read_lock(dentry->d_sb);
+ 
+ 	unionfs_lock_dentry(dentry);
+-	valid = __unionfs_d_revalidate_chain(dentry, nd, false);
++	err = __unionfs_d_revalidate_chain(dentry, nd, false);
+ 	unionfs_unlock_dentry(dentry);
+-	if (valid)
++	if (err > 0) /* true==1: dentry is valid */
+ 		unionfs_check_dentry(dentry);
+ 
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+-	return valid;
++	return err;
+ }
+ 
+ /*
+-- 
+1.5.4.3
+

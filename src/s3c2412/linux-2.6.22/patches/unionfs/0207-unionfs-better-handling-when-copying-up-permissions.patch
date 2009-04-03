@@ -1,0 +1,75 @@
+From 3327229d7d1fb0c2944e5e0156dfe92d503d1e09 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 9 Jul 2007 20:19:08 -0400
+Subject: [PATCH] unionfs: better handling when copying up permissions
+
+When we copyup a file, directory, or symlink, we may be copying up from one
+file system type to another.  The destination file system may not support
+all of the features of the source file system, and the differences in
+support may be minor.  For example jffs2 doesn't allow one to chmod a
+symlink (and it returns a -EOPNOTSUPP).  So we ignore such harmless errors,
+rather than propagating them up, which results in copyup errors and errors
+returned back to users.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |   29 +++++++++++++++++++++++------
+ 1 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 6ae2e56..09d3bd4 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -92,7 +92,14 @@ out:
+ }
+ #endif /* CONFIG_UNION_FS_XATTR */
+ 
+-/* Determine the mode based on the copyup flags, and the existing dentry. */
++/*
++ * Determine the mode based on the copyup flags, and the existing dentry.
++ *
++ * Handle file systems which may not support certain options.  For example
++ * jffs2 doesn't allow one to chmod a symlink.  So we ignore such harmless
++ * errors, rather than propagating them up, which results in copyup errors
++ * and errors returned back to users.
++ */
+ static int copyup_permissions(struct super_block *sb,
+ 			      struct dentry *old_lower_dentry,
+ 			      struct dentry *new_lower_dentry)
+@@ -104,18 +111,28 @@ static int copyup_permissions(struct super_block *sb,
+ 	newattrs.ia_atime = i->i_atime;
+ 	newattrs.ia_mtime = i->i_mtime;
+ 	newattrs.ia_ctime = i->i_ctime;
+-
+ 	newattrs.ia_gid = i->i_gid;
+ 	newattrs.ia_uid = i->i_uid;
+-
+-	newattrs.ia_mode = i->i_mode;
+-
+ 	newattrs.ia_valid = ATTR_CTIME | ATTR_ATIME | ATTR_MTIME |
+ 		ATTR_ATIME_SET | ATTR_MTIME_SET | ATTR_FORCE |
+-		ATTR_GID | ATTR_UID | ATTR_MODE;
++		ATTR_GID | ATTR_UID;
++	err = notify_change(new_lower_dentry, &newattrs);
++	if (err)
++		goto out;
+ 
++	/* now try to change the mode and ignore EOPNOTSUPP on symlinks */
++	newattrs.ia_mode = i->i_mode;
++	newattrs.ia_valid = ATTR_MODE | ATTR_FORCE;
+ 	err = notify_change(new_lower_dentry, &newattrs);
++	if (err == -EOPNOTSUPP &&
++	    S_ISLNK(new_lower_dentry->d_inode->i_mode)) {
++		printk(KERN_WARNING
++		       "unionfs: changing \"%s\" symlink mode unsupported\n",
++		       new_lower_dentry->d_name.name);
++		err = 0;
++	}
+ 
++out:
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

@@ -1,0 +1,423 @@
+From 3674dc33758a1c47d008867106579968356d6ff3 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 19 Sep 2008 00:39:40 -0400
+Subject: [PATCH] Unionfs: remove unused nameidata parameters
+
+In preparation for the VFS removing most/all nameidata from file systems's
+view.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    4 ++--
+ fs/unionfs/dentry.c     |   24 ++++++++----------------
+ fs/unionfs/inode.c      |   41 +++++++++++++++--------------------------
+ fs/unionfs/lookup.c     |    6 ++----
+ fs/unionfs/rename.c     |    5 ++---
+ fs/unionfs/super.c      |    2 +-
+ fs/unionfs/union.h      |    5 +----
+ fs/unionfs/unlink.c     |    4 ++--
+ fs/unionfs/xattr.c      |    8 ++++----
+ 9 files changed, 37 insertions(+), 62 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 5938adf..ceca1be 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -417,7 +417,7 @@ int unionfs_file_revalidate(struct file *file, struct dentry *parent,
+ 	 */
+ reval_dentry:
+ 	if (!d_deleted(dentry) &&
+-	    !__unionfs_d_revalidate(dentry, parent, NULL, willwrite)) {
++	    !__unionfs_d_revalidate(dentry, parent, willwrite)) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+@@ -561,7 +561,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 	}
+ 
+ 	/* XXX: should I change 'false' below to the 'willwrite' flag? */
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out_nofree;
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index e6eabcd..ee071a1 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -62,8 +62,7 @@ static inline void __dput_lowers(struct dentry *dentry, int start, int end)
+  * Returns true if valid, false otherwise.
+  */
+ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+-				       struct dentry *parent,
+-				       struct nameidata *nd)
++				       struct dentry *parent)
+ {
+ 	bool valid = true;	/* default is valid */
+ 	struct dentry *lower_dentry;
+@@ -71,12 +70,6 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	int sbgen, dgen;
+ 	int positive = 0;
+ 	int interpose_flag;
+-	struct nameidata lowernd; /* TODO: be gentler to the stack */
+-
+-	if (nd)
+-		memcpy(&lowernd, nd, sizeof(struct nameidata));
+-	else
+-		memset(&lowernd, 0, sizeof(struct nameidata));
+ 
+ 	sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+ 	/* if the dentry is unhashed, do NOT revalidate */
+@@ -120,8 +113,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			goto out;
+ 		}
+ 
+-		result = unionfs_lookup_full(dentry, parent,
+-					     &lowernd, interpose_flag);
++		result = unionfs_lookup_full(dentry, parent, interpose_flag);
+ 		if (result) {
+ 			if (IS_ERR(result)) {
+ 				valid = false;
+@@ -152,8 +144,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		if (!lower_dentry || !lower_dentry->d_op
+ 		    || !lower_dentry->d_op->d_revalidate)
+ 			continue;
+-		if (!lower_dentry->d_op->d_revalidate(lower_dentry,
+-						      &lowernd))
++		if (!lower_dentry->d_op->d_revalidate(lower_dentry, NULL))
+ 			valid = false;
+ 	}
+ 
+@@ -283,7 +274,7 @@ static inline void purge_inode_data(struct inode *inode)
+  * dentry).  Returns true if valid, false otherwise.
+  */
+ bool __unionfs_d_revalidate(struct dentry *dentry, struct dentry *parent,
+-			    struct nameidata *nd, bool willwrite)
++			    bool willwrite)
+ {
+ 	bool valid = false;	/* default is invalid */
+ 	int sbgen, dgen;
+@@ -311,13 +302,14 @@ bool __unionfs_d_revalidate(struct dentry *dentry, struct dentry *parent,
+ 		if (!willwrite)
+ 			purge_inode_data(dentry->d_inode);
+ 	}
+-	valid = __unionfs_d_revalidate_one(dentry, parent, nd);
++	valid = __unionfs_d_revalidate_one(dentry, parent);
+ 
+ out:
+ 	return valid;
+ }
+ 
+-static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
++static int unionfs_d_revalidate(struct dentry *dentry,
++				struct nameidata *nd_unused)
+ {
+ 	bool valid = true;
+ 	int err = 1;		/* 1 means valid for the VFS */
+@@ -334,7 +326,7 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ 			goto out;
+ 		}
+ 	}
+-	valid = __unionfs_d_revalidate(dentry, parent, nd, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (likely(valid)) {
+ 		unionfs_postcopyup_setmnt(dentry);
+ 		unionfs_check_dentry(dentry);
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 8460552..c9b3637 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -97,7 +97,7 @@ out:
+ }
+ 
+ static int unionfs_create(struct inode *dir, struct dentry *dentry,
+-			  int mode, struct nameidata *nd)
++			  int mode, struct nameidata *nd_unused)
+ {
+ 	int err = 0;
+ 	struct dentry *lower_dentry = NULL;
+@@ -109,7 +109,7 @@ static int unionfs_create(struct inode *dir, struct dentry *dentry,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, nd, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;	/* same as what real_lookup does */
+ 		goto out;
+@@ -127,7 +127,8 @@ static int unionfs_create(struct inode *dir, struct dentry *dentry,
+ 		goto out;
+ 	}
+ 
+-	err = vfs_create(lower_parent_dentry->d_inode, lower_dentry, mode, nd);
++	err = vfs_create(lower_parent_dentry->d_inode, lower_dentry, mode,
++			 NULL);
+ 
+ 	if (!err) {
+ 		err = PTR_ERR(unionfs_interpose(dentry, dir->i_sb, 0));
+@@ -161,9 +162,8 @@ out:
+  */
+ static struct dentry *unionfs_lookup(struct inode *dir,
+ 				     struct dentry *dentry,
+-				     struct nameidata *nd)
++				     struct nameidata *nd_unused)
+ {
+-	struct path path_save = {NULL, NULL};
+ 	struct dentry *ret, *parent;
+ 	int err = 0;
+ 	bool valid;
+@@ -176,12 +176,6 @@ static struct dentry *unionfs_lookup(struct inode *dir,
+ 		goto out;
+ 	}
+ 
+-	/* save the dentry & vfsmnt from namei */
+-	if (nd) {
+-		path_save.dentry = nd->dentry;
+-		path_save.mnt = nd->mnt;
+-	}
+-
+ 	/*
+ 	 * unionfs_lookup_full returns a locked dentry upon success,
+ 	 * so we'll have to unlock it below.
+@@ -194,13 +188,8 @@ static struct dentry *unionfs_lookup(struct inode *dir,
+ 		goto out;
+ 	}
+ 
+-	ret = unionfs_lookup_full(dentry, parent, nd, INTERPOSE_LOOKUP);
++	ret = unionfs_lookup_full(dentry, parent, INTERPOSE_LOOKUP);
+ 
+-	/* restore the dentry & vfsmnt in namei */
+-	if (nd) {
+-		nd->dentry = path_save.dentry;
+-		nd->mnt = path_save.mnt;
+-	}
+ 	if (!IS_ERR(ret)) {
+ 		if (ret)
+ 			dentry = ret;
+@@ -242,14 +231,13 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	unionfs_double_lock_parents(old_parent, new_parent);
+ 	unionfs_double_lock_dentry(old_dentry, new_dentry);
+ 
+-	valid = __unionfs_d_revalidate(old_dentry, old_parent, NULL, false);
++	valid = __unionfs_d_revalidate(old_dentry, old_parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+ 	if (new_dentry->d_inode) {
+-		valid = __unionfs_d_revalidate(new_dentry, new_parent,
+-					       NULL, false);
++		valid = __unionfs_d_revalidate(new_dentry, new_parent, false);
+ 		if (unlikely(!valid)) {
+ 			err = -ESTALE;
+ 			goto out;
+@@ -381,7 +369,7 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+@@ -450,7 +438,7 @@ static int unionfs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;	/* same as what real_lookup does */
+ 		goto out;
+@@ -575,7 +563,7 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+@@ -663,7 +651,7 @@ static int unionfs_readlink(struct dentry *dentry, char __user *buf,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	if (unlikely(!__unionfs_d_revalidate(dentry, parent, NULL, false))) {
++	if (unlikely(!__unionfs_d_revalidate(dentry, parent, false))) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+@@ -722,6 +710,7 @@ out:
+ 	return ERR_PTR(err);
+ }
+ 
++/* this @nd *IS* still used */
+ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 			     void *cookie)
+ {
+@@ -731,7 +720,7 @@ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	if (unlikely(!__unionfs_d_revalidate(dentry, parent, nd, false)))
++	if (unlikely(!__unionfs_d_revalidate(dentry, parent, false)))
+ 		printk(KERN_ERR
+ 		       "unionfs: put_link failed to revalidate dentry\n");
+ 
+@@ -893,7 +882,7 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	if (unlikely(!__unionfs_d_revalidate(dentry, parent, NULL, false))) {
++	if (unlikely(!__unionfs_d_revalidate(dentry, parent, false))) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index abfe4be..9d028cf 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -72,10 +72,9 @@ struct dentry *__lookup_one(struct dentry *base, struct vfsmount *mnt,
+ int unionfs_partial_lookup(struct dentry *dentry, struct dentry *parent)
+ {
+ 	struct dentry *tmp;
+-	struct nameidata nd = { .flags = 0 };
+ 	int err = -ENOSYS;
+ 
+-	tmp = unionfs_lookup_full(dentry, parent, &nd, INTERPOSE_PARTIAL);
++	tmp = unionfs_lookup_full(dentry, parent, INTERPOSE_PARTIAL);
+ 
+ 	if (!tmp) {
+ 		err = 0;
+@@ -219,8 +218,7 @@ void update_bstart(struct dentry *dentry)
+  * dentry's info, which the caller must unlock.
+  */
+ struct dentry *unionfs_lookup_full(struct dentry *dentry,
+-				   struct dentry *parent,
+-				   struct nameidata *nd_unused, int lookupmode)
++				   struct dentry *parent, int lookupmode)
+ {
+ 	int err = 0;
+ 	struct dentry *lower_dentry = NULL;
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index fa3c98e..800d9ee 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -396,14 +396,13 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		unionfs_lock_dentry(new_parent, UNIONFS_DMUTEX_REVAL_CHILD);
+ 	unionfs_double_lock_dentry(old_dentry, new_dentry);
+ 
+-	valid = __unionfs_d_revalidate(old_dentry, old_parent, NULL, false);
++	valid = __unionfs_d_revalidate(old_dentry, old_parent, false);
+ 	if (!valid) {
+ 		err = -ESTALE;
+ 		goto out;
+ 	}
+ 	if (!d_deleted(new_dentry) && new_dentry->d_inode) {
+-		valid = __unionfs_d_revalidate(new_dentry, new_parent,
+-					       NULL, false);
++		valid = __unionfs_d_revalidate(new_dentry, new_parent, false);
+ 		if (!valid) {
+ 			err = -ESTALE;
+ 			goto out;
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 8e02c38..d3e1b9e 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -149,7 +149,7 @@ static int unionfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 1915069..6a38a7f 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -366,7 +366,6 @@ extern int unionfs_partial_lookup(struct dentry *dentry,
+ 				  struct dentry *parent);
+ extern struct dentry *unionfs_lookup_full(struct dentry *dentry,
+ 					  struct dentry *parent,
+-					  struct nameidata *nd_unused,
+ 					  int lookupmode);
+ 
+ /* copies a file from dbstart to newbindex branch */
+@@ -429,9 +428,7 @@ extern int unionfs_unlink(struct inode *dir, struct dentry *dentry);
+ extern int unionfs_rmdir(struct inode *dir, struct dentry *dentry);
+ 
+ extern bool __unionfs_d_revalidate(struct dentry *dentry,
+-				   struct dentry *parent,
+-				   struct nameidata *nd,
+-				   bool willwrite);
++				   struct dentry *parent, bool willwrite);
+ extern bool is_negative_lower(const struct dentry *dentry);
+ extern bool is_newer_lower(const struct dentry *dentry);
+ extern void purge_sb_data(struct super_block *sb);
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index 679f4ca..6634c4b 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -132,7 +132,7 @@ int unionfs_unlink(struct inode *dir, struct dentry *dentry)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+@@ -214,7 +214,7 @@ int unionfs_rmdir(struct inode *dir, struct dentry *dentry)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 6eb9503..e2215c1 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -51,7 +51,7 @@ ssize_t unionfs_getxattr(struct dentry *dentry, const char *name, void *value,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+@@ -85,7 +85,7 @@ int unionfs_setxattr(struct dentry *dentry, const char *name,
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+@@ -119,7 +119,7 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+@@ -153,7 +153,7 @@ ssize_t unionfs_listxattr(struct dentry *dentry, char *list, size_t size)
+ 	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+-	valid = __unionfs_d_revalidate(dentry, parent, NULL, false);
++	valid = __unionfs_d_revalidate(dentry, parent, false);
+ 	if (unlikely(!valid)) {
+ 		err = -ESTALE;
+ 		goto out;
+-- 
+1.5.4.3
+

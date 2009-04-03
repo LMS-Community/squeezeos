@@ -1,0 +1,44 @@
+From 320e0c0a90abdd09248584bab6907607e69d7405 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 4 Mar 2007 00:41:51 -0500
+Subject: [PATCH] fs/unionfs/: Fix copyup_deleted_file dentry leak
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 2664be9..aa7c75d 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -41,6 +41,15 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 	sprintf(name, ".unionfs%*.*lx",
+ 			i_inosize, i_inosize, hidden_dentry->d_inode->i_ino);
+ 
++	/*
++	 * Loop, looking for an unused temp name to copyup to.
++	 *
++	 * It's somewhat silly that we look for a free temp tmp name in the
++	 * source branch (bstart) instead of the dest branch (bindex), where
++	 * the final name will be created.  We _will_ catch it if somehow
++	 * the name exists in the dest branch, but it'd be nice to catch it
++	 * sooner than later.
++	 */
+ 	tmp_dentry = NULL;
+ 	do {
+ 		char *suffix = name + nlen - countersize;
+@@ -58,7 +67,9 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 			err = PTR_ERR(tmp_dentry);
+ 			goto out;
+ 		}
++		/* don't dput here because of do-while condition eval order */
+ 	} while (tmp_dentry->d_inode != NULL);	/* need negative dentry */
++	dput(tmp_dentry);
+ 
+ 	err = copyup_named_file(dentry->d_parent->d_inode, file, name, bstart,
+ 				bindex, file->f_dentry->d_inode->i_size);
+-- 
+1.5.4.3
+

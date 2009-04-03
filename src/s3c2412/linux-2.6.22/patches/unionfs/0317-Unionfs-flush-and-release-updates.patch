@@ -1,0 +1,124 @@
+From de8166fdd1fd4b01540f3eef4dcd5adc7aa8b959 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Nov 2007 20:45:43 -0500
+Subject: [PATCH] Unionfs: flush and release updates
+
+Remove the totalopens counter which was intended to reduce unnecessary
+processing of d_deleted dentries.  Move that processing from file_release to
+flush.
+
+Cc: Hugh Dickins <hugh@veritas.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   30 +++++++++++-------------------
+ fs/unionfs/union.h      |    2 --
+ 2 files changed, 11 insertions(+), 21 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 50e5775..ba84529 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -551,9 +551,6 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 	bstart = fbstart(file) = dbstart(dentry);
+ 	bend = fbend(file) = dbend(dentry);
+ 
+-	/* increment, so that we can flush appropriately */
+-	atomic_inc(&UNIONFS_I(dentry->d_inode)->totalopens);
+-
+ 	/*
+ 	 * open all directories and make the unionfs file struct point to
+ 	 * these lower file structs
+@@ -565,7 +562,6 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 
+ 	/* freeing the allocated resources, and fput the opened files */
+ 	if (err) {
+-		atomic_dec(&UNIONFS_I(dentry->d_inode)->totalopens);
+ 		for (bindex = bstart; bindex <= bend; bindex++) {
+ 			lower_file = unionfs_lower_file_idx(file, bindex);
+ 			if (!lower_file)
+@@ -606,6 +602,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	struct unionfs_file_info *fileinfo;
+ 	struct unionfs_inode_info *inodeinfo;
+ 	struct super_block *sb = inode->i_sb;
++	struct dentry *dentry = file->f_path.dentry;
+ 	int bindex, bstart, bend;
+ 	int fgen, err = 0;
+ 
+@@ -628,6 +625,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	bstart = fbstart(file);
+ 	bend = fbend(file);
+ 
++	unionfs_lock_dentry(dentry);
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		lower_file = unionfs_lower_file_idx(file, bindex);
+ 
+@@ -635,7 +633,15 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 			fput(lower_file);
+ 			branchput(sb, bindex);
+ 		}
++
++		/* if there are no more refs to the dentry, dput it */
++		if (d_deleted(dentry)) {
++			dput(unionfs_lower_dentry_idx(dentry, bindex));
++			unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
++		}
+ 	}
++	unionfs_unlock_dentry(dentry);
++
+ 	kfree(fileinfo->lower_files);
+ 	kfree(fileinfo->saved_branch_ids);
+ 
+@@ -799,11 +805,6 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 		goto out;
+ 	unionfs_check_file(file);
+ 
+-	if (!atomic_dec_and_test(&UNIONFS_I(dentry->d_inode)->totalopens))
+-		goto out;
+-
+-	unionfs_lock_dentry(dentry);
+-
+ 	bstart = fbstart(file);
+ 	bend = fbend(file);
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+@@ -813,14 +814,7 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 		    lower_file->f_op->flush) {
+ 			err = lower_file->f_op->flush(lower_file, id);
+ 			if (err)
+-				goto out_lock;
+-
+-			/* if there are no more refs to the dentry, dput it */
+-			if (d_deleted(dentry)) {
+-				dput(unionfs_lower_dentry_idx(dentry, bindex));
+-				unionfs_set_lower_dentry_idx(dentry, bindex,
+-							     NULL);
+-			}
++				goto out;
+ 		}
+ 
+ 	}
+@@ -830,8 +824,6 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 	/* parent time could have changed too (async) */
+ 	unionfs_copy_attr_times(dentry->d_parent->d_inode);
+ 
+-out_lock:
+-	unionfs_unlock_dentry(dentry);
+ out:
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	unionfs_check_file(file);
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index b1fef7d..aad38c5 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -102,8 +102,6 @@ struct unionfs_inode_info {
+ 
+ 	/* The lower inodes */
+ 	struct inode **lower_inodes;
+-	/* to keep track of reads/writes for unlinks before closes */
+-	atomic_t totalopens;
+ 
+ 	struct inode vfs_inode;
+ };
+-- 
+1.5.4.3
+

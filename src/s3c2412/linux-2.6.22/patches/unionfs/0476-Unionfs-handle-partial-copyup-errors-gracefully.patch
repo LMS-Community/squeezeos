@@ -1,0 +1,40 @@
+From 076490fb52aa38b581895c03a8c53388f9ddd215 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Jan 2009 23:03:20 -0500
+Subject: [PATCH] Unionfs: handle partial copyup errors gracefully
+
+Don't leave any dentries behind if copying up the inode (or setting its
+permission, i.e., using TOMOYO) failed.
+
+CC: Tetsuo Handa <penguin-kernel@i-love.sakura.ne.jp>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |   11 ++++++++++-
+ 1 files changed, 10 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 6f0e2c8..7a56228 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -513,8 +513,17 @@ out_free:
+ 		dput(old_lower_dentry);
+ 	kfree(symbuf);
+ 
+-	if (err)
++	if (err) {
++		/*
++		 * if directory creation succeeded, but inode copyup failed,
++		 * then purge new dentries.
++		 */
++		if (dbstart(dentry) < old_bstart &&
++		    ibstart(dentry->d_inode) > dbstart(dentry))
++			__clear(dentry, NULL, old_bstart, old_bend,
++				unionfs_lower_dentry(dentry), dbstart(dentry));
+ 		goto out;
++	}
+ 	if (!S_ISDIR(dentry->d_inode->i_mode)) {
+ 		unionfs_postcopyup_release(dentry);
+ 		if (!unionfs_lower_inode(dentry->d_inode)) {
+-- 
+1.5.4.3
+

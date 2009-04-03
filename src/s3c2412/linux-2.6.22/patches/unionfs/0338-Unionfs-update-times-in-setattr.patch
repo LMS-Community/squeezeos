@@ -1,0 +1,38 @@
+From 9b29f0577e1d12173d50043c4284dc674a2e1ebc Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 25 Nov 2007 18:27:27 -0500
+Subject: [PATCH] Unionfs: update times in setattr
+
+Needed to maintain Unix semantics via utimes(2).
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 77c7f33..bdefff1 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -1071,6 +1071,18 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	/* get the size from the first lower inode */
+ 	lower_inode = unionfs_lower_inode(inode);
+ 	unionfs_copy_attr_all(inode, lower_inode);
++	/*
++	 * unionfs_copy_attr_all will copy the lower times to our inode if
++	 * the lower ones are newer (useful for cache coherency).  However,
++	 * ->setattr is the only place in which we may have to copy the
++	 * lower inode times absolutely, to support utimes(2).
++	 */
++	if (ia->ia_valid & ATTR_MTIME_SET)
++		inode->i_mtime = lower_inode->i_mtime;
++	if (ia->ia_valid & ATTR_CTIME)
++		inode->i_ctime = lower_inode->i_ctime;
++	if (ia->ia_valid & ATTR_ATIME_SET)
++		inode->i_atime = lower_inode->i_atime;
+ 	fsstack_copy_inode_size(inode, lower_inode);
+ 	/* if setattr succeeded, then parent dir may have changed */
+ 	unionfs_copy_attr_times(dentry->d_parent->d_inode);
+-- 
+1.5.4.3
+

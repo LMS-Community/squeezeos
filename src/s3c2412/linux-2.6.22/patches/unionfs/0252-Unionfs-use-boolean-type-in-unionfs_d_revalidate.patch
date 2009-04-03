@@ -1,0 +1,41 @@
+From 1c6860d7e9f829af05508035d7c5d80f5d010a15 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 10 Sep 2007 20:10:31 -0400
+Subject: [PATCH] Unionfs: use boolean type in unionfs_d_revalidate
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    9 +++++----
+ 1 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 91f9780..2db8ba5 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -411,18 +411,19 @@ out:
+ 
+ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ {
+-	int err;
++	bool valid;
+ 
+ 	unionfs_read_lock(dentry->d_sb);
+ 
+ 	unionfs_lock_dentry(dentry);
+-	err = __unionfs_d_revalidate_chain(dentry, nd, false);
++	valid = __unionfs_d_revalidate_chain(dentry, nd, false);
+ 	unionfs_unlock_dentry(dentry);
+-	unionfs_check_dentry(dentry);
++	if (valid)
++		unionfs_check_dentry(dentry);
+ 
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+-	return err;
++	return valid;
+ }
+ 
+ /*
+-- 
+1.5.4.3
+

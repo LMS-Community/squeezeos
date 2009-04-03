@@ -1,0 +1,72 @@
+From 74842c485fb526e03dea4095c1e657d939c14f93 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 3 Jul 2007 09:14:39 -0400
+Subject: [PATCH] Unionfs: prevent deadlock with branch-management code.
+
+Don't grab the superblock read-lock in unionfs_permission, which prevents a
+deadlock with the branch-management "add branch" code (which grabbed the
+write lock).  It is safe to not grab the read lock here, because even with
+branch management taking place, there is no chance that unionfs_permission,
+or anything it calls, will use stale branch information.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   28 ++++++++--------------------
+ 1 files changed, 8 insertions(+), 20 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index b2c0214..401c62b 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -1017,6 +1017,14 @@ static int inode_permission(struct inode *inode, int mask,
+ 	return ((retval == -EROFS) ? 0 : retval);	/* ignore EROFS */
+ }
+ 
++/*
++ * Don't grab the superblock read-lock in unionfs_permission, which prevents
++ * a deadlock with the branch-management "add branch" code (which grabbed
++ * the write lock).  It is safe to not grab the read lock here, because even
++ * with branch management taking place, there is no chance that
++ * unionfs_permission, or anything it calls, will use stale branch
++ * information.
++ */
+ static int unionfs_permission(struct inode *inode, int mask,
+ 			      struct nameidata *nd)
+ {
+@@ -1026,24 +1034,6 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 	const int is_file = !S_ISDIR(inode->i_mode);
+ 	const int write_mask = (mask & MAY_WRITE) && !(mask & MAY_READ);
+ 
+-	/*
+-	 * If the same process which is pivot_root'ed on a unionfs, tries to
+-	 * insert a new branch, then the caller (remount code) already has
+-	 * the write lock on this rwsem.  It then calls here to check the
+-	 * permission of a new branch to add.  It could get into a self
+-	 * deadlock with this attempt to get the read lock (which is crucial
+-	 * for dynamic branch-management) unless no one else is waiting on
+-	 * this lock.  Essentially this test tries to figure out if the same
+-	 * process which also holds a write lock on the rwsem, also tries to
+-	 * grab a read lock, and then skip trying to grab this "harmless"
+-	 * read lock; otherwise we DO want to grab the read lock, and block
+-	 * as needed (dynamic branch management).  (BTW, if there's a better
+-	 * way to find out who is the lock owner compared to "current", that
+-	 * should be used instead.)
+-	 */
+-	if (!list_empty(&UNIONFS_SB(inode->i_sb)->rwsem.wait_list))
+-		unionfs_read_lock(inode->i_sb);
+-
+ 	bstart = ibstart(inode);
+ 	bend = ibend(inode);
+ 	if (bstart < 0 || bend < 0) {
+@@ -1098,8 +1088,6 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 	unionfs_copy_attr_times(inode);
+ 
+ out:
+-	if (!list_empty(&UNIONFS_SB(inode->i_sb)->rwsem.wait_list))
+-		unionfs_read_unlock(inode->i_sb);
+ 	unionfs_check_inode(inode);
+ 	return err;
+ }
+-- 
+1.5.4.3
+

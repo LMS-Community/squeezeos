@@ -1,0 +1,41 @@
+From 46dc96dbd589de2c9d43b014a2d049330bc451b9 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 19 Mar 2007 03:01:49 -0400
+Subject: [PATCH] Unionfs: Provide more helpful info on branch leaks during unmount
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+[jsipek: no need to take a read lock on the superblock private data]
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/super.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 571b589..037c47d 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -97,6 +97,7 @@ static void unionfs_put_super(struct super_block *sb)
+ {
+ 	int bindex, bstart, bend;
+ 	struct unionfs_sb_info *spd;
++	int leaks = 0;
+ 
+ 	spd = UNIONFS_SB(sb);
+ 	if (!spd)
+@@ -107,7 +108,12 @@ static void unionfs_put_super(struct super_block *sb)
+ 
+ 	/* Make sure we have no leaks of branchget/branchput. */
+ 	for (bindex = bstart; bindex <= bend; bindex++)
+-		BUG_ON(branch_count(sb, bindex) != 0);
++		if (branch_count(sb, bindex) != 0) {
++			printk("unionfs: branch %d has %d references left!\n",
++			       bindex, branch_count(sb,bindex));
++			leaks = 1;
++		}
++	BUG_ON(leaks != 0);
+ 
+ 	kfree(spd->data);
+ 	kfree(spd);
+-- 
+1.5.4.3
+

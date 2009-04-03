@@ -1,0 +1,170 @@
+From 84dd1b542030a3a71145d24017a350f693b18467 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 29 Jun 2007 00:36:08 -0400
+Subject: [PATCH] Unionfs: Cleanup new_dentry_private_data
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+
+Conflicts:
+
+	fs/unionfs/lookup.c
+---
+ fs/unionfs/lookup.c |  102 ++++++++++++++++++++++++++++++--------------------
+ fs/unionfs/union.h  |    1 +
+ 2 files changed, 62 insertions(+), 41 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index ea5bba1..93b9298 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -111,11 +111,22 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 		BUG_ON(UNIONFS_D(dentry) != NULL);
+ 		locked_child = 1;
+ 	}
+-	if (lookupmode != INTERPOSE_PARTIAL) {
+-		if ((err = new_dentry_private_data(dentry)))
+-			goto out;
+-		allocated_new_info = 1;
++
++	switch(lookupmode) {
++		case INTERPOSE_PARTIAL:
++			break;
++		case INTERPOSE_LOOKUP:
++			if ((err = new_dentry_private_data(dentry)))
++				goto out;
++			allocated_new_info = 1;
++			break;
++		default:
++			if ((err = realloc_dentry_private_data(dentry)))
++				goto out;
++			allocated_new_info = 1;
++			break;
+ 	}
++
+ 	/* must initialize dentry operations */
+ 	dentry->d_op = &unionfs_dops;
+ 
+@@ -474,62 +485,71 @@ void free_dentry_private_data(struct unionfs_dentry_info *udi)
+ 	kmem_cache_free(unionfs_dentry_cachep, udi);
+ }
+ 
+-/*
+- * Allocate new dentry private data, free old one if necessary.
+- * On success, returns a dentry whose ->info node is locked already.
+- *
+- * Note: this function may get a dentry with an already existing *and*
+- * locked info node!
+- */
+-int new_dentry_private_data(struct dentry *dentry)
++static inline int __realloc_dentry_private_data(struct dentry *dentry)
+ {
+-	int size;
+ 	struct unionfs_dentry_info *info = UNIONFS_D(dentry);
+ 	void *p;
+-	int unlock_on_err = 0;
+-
+-	if (!info) {
+-		dentry->d_fsdata = kmem_cache_alloc(unionfs_dentry_cachep,
+-						    GFP_ATOMIC);
+-		info = UNIONFS_D(dentry);
+-		if (!info)
+-			goto out;
+-
+-		mutex_init(&info->lock);
+-		unionfs_lock_dentry(dentry);
+-		unlock_on_err = 1;
+-
+-		info->lower_paths = NULL;
+-	}
+-
++	int size;
+ 
+-	info->bstart = info->bend = info->bopaque = -1;
+-	info->bcount = sbmax(dentry->d_sb);
+-	atomic_set(&info->generation,
+-		   atomic_read(&UNIONFS_SB(dentry->d_sb)->generation));
++	BUG_ON(!info);
+ 
+ 	size = sizeof(struct path) * sbmax(dentry->d_sb);
+-
+ 	p = krealloc(info->lower_paths, size, GFP_ATOMIC);
+ 	if (!p)
+-		goto out_free;
++		return -ENOMEM;
+ 
+ 	info->lower_paths = p;
++
++	info->bstart = -1;
++	info->bend = -1;
++	info->bopaque = -1;
++	info->bcount = sbmax(dentry->d_sb);
++	atomic_set(&info->generation,
++			atomic_read(&UNIONFS_SB(dentry->d_sb)->generation));
++
+ 	memset(info->lower_paths, 0, size);
+ 
+ 	return 0;
++}
+ 
+-out_free:
+-	kfree(info->lower_paths);
+-	if (unlock_on_err)
+-		unionfs_unlock_dentry(dentry);
++/* UNIONFS_D(dentry)->lock must be locked */
++int realloc_dentry_private_data(struct dentry *dentry)
++{
++	if (!__realloc_dentry_private_data(dentry))
++		return 0;
+ 
+-out:
+-	free_dentry_private_data(info);
++	kfree(UNIONFS_D(dentry)->lower_paths);
++	free_dentry_private_data(UNIONFS_D(dentry));
+ 	dentry->d_fsdata = NULL;
+ 	return -ENOMEM;
+ }
+ 
++/* allocate new dentry private data */
++int new_dentry_private_data(struct dentry *dentry)
++{
++	struct unionfs_dentry_info *info = UNIONFS_D(dentry);
++
++	BUG_ON(info);
++
++	info = kmem_cache_alloc(unionfs_dentry_cachep, GFP_ATOMIC);
++	if (!info)
++		return -ENOMEM;
++
++	mutex_init(&info->lock);
++	mutex_lock(&info->lock);
++
++	info->lower_paths = NULL;
++
++	dentry->d_fsdata = info;
++
++	if (!__realloc_dentry_private_data(dentry))
++		return 0;
++
++	mutex_unlock(&info->lock);
++	free_dentry_private_data(dentry);
++	return -ENOMEM;
++}
++
+ /*
+  * scan through the lower dentry objects, and set bstart to reflect the
+  * starting branch
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index d157708..325a451 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -239,6 +239,7 @@ static inline void unionfs_double_lock_dentry(struct dentry *d1,
+ 	unionfs_lock_dentry(d2);
+ }
+ 
++extern int realloc_dentry_private_data(struct dentry *dentry);
+ extern int new_dentry_private_data(struct dentry *dentry);
+ extern void free_dentry_private_data(struct unionfs_dentry_info *udi);
+ extern void update_bstart(struct dentry *dentry);
+-- 
+1.5.4.3
+

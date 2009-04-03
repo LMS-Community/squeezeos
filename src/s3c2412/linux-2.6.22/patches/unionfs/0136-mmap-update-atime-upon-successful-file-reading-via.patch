@@ -1,0 +1,60 @@
+From e4e739d2a7129f6c71b98605457262f56fba9561 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 5 May 2007 20:41:46 -0400
+Subject: [PATCH] mmap: update atime upon successful file reading (via mmap or otherwise)
+
+---
+ fs/unionfs/file.c |   10 ++--------
+ fs/unionfs/mmap.c |    4 ++++
+ 2 files changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index c4deba6..1c20844 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -33,12 +33,9 @@ static ssize_t unionfs_read(struct file *file, char __user *buf,
+ 
+ 	err = do_sync_read(file, buf, count, ppos);
+ 
+-#if 0
+-	FIXME: do_sync_read updates a time
+ 	if (err >= 0)
+ 		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
+-				unionfs_lower_dentry(file->f_path.dentry));
+-#endif
++			    unionfs_lower_dentry(file->f_path.dentry));
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+@@ -56,12 +53,9 @@ static ssize_t unionfs_aio_read(struct kiocb *iocb, const struct iovec *iov,
+ 	if (err == -EIOCBQUEUED)
+ 		err = wait_on_sync_kiocb(iocb);
+ 
+-#if 0
+-	XXX: is this needed?
+ 	if (err >= 0)
+ 		touch_atime(unionfs_lower_mnt(iocb->ki_filp->f_path.dentry),
+-				unionfs_lower_dentry(iocb->ki_filp->f_path.dentry));
+-#endif
++			    unionfs_lower_dentry(iocb->ki_filp->f_path.dentry));
+ 
+ #if 0
+ out:
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index ade8c92..7d1e2f7 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -168,6 +168,10 @@ int unionfs_readpage(struct file *file, struct page *page)
+ 
+ 	err = unionfs_do_readpage(file, page);
+ 
++	if (!err)
++		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
++			    unionfs_lower_dentry(file->f_path.dentry));
++
+ 	/*
+ 	 * we have to unlock our page, b/c we _might_ have gotten a locked
+ 	 * page.  but we no longer have to wakeup on our page here, b/c
+-- 
+1.5.4.3
+

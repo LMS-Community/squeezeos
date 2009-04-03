@@ -1,0 +1,36 @@
+From a8720176942c24c18ee9a907741067be676148de Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] Unionfs: remove unnecessary lock when deleting whiteouts
+
+Lockdep complained, because we eventually call vfs_unlink which'd grab the
+necessary locks.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dirhelper.c |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index 2e52fc3..b40090a 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -110,7 +110,6 @@ int delete_whiteouts(struct dentry *dentry, int bindex,
+ 	lower_dir = lower_dir_dentry->d_inode;
+ 	BUG_ON(!S_ISDIR(lower_dir->i_mode));
+ 
+-	mutex_lock(&lower_dir->i_mutex);
+ 	if (!permission(lower_dir, MAY_WRITE | MAY_EXEC, NULL)) {
+ 		err = do_delete_whiteouts(dentry, bindex, namelist);
+ 	} else {
+@@ -120,7 +119,6 @@ int delete_whiteouts(struct dentry *dentry, int bindex,
+ 		run_sioq(__delete_whiteouts, &args);
+ 		err = args.err;
+ 	}
+-	mutex_unlock(&lower_dir->i_mutex);
+ 
+ out:
+ 	return err;
+-- 
+1.5.4.3
+

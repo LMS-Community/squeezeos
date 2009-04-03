@@ -1,0 +1,35 @@
+From 5d7c85182b75a5b0a6fb7c0843e5a43533ef53d3 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 17 Oct 2007 17:35:02 -0400
+Subject: [PATCH] Unionfs: don't bother validating dentry if it has no lower branches
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 9117394..2e0525f 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -132,6 +132,9 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	inode = dentry->d_inode;
+ 	dstart = dbstart(dentry);
+ 	dend = dbend(dentry);
++	/* don't check dentry/mnt if no lower branches */
++	if (dstart < 0 && dend < 0)
++		goto check_inode;
+ 	BUG_ON(dstart > dend);
+ 
+ 	if (unlikely((dstart == -1 && dend != -1) ||
+@@ -212,6 +215,7 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 		}
+ 	}
+ 
++check_inode:
+ 	/* for inodes now */
+ 	if (!inode)
+ 		return;
+-- 
+1.5.4.3
+

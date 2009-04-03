@@ -1,0 +1,74 @@
+From 83f501df8bd0943863e137fd56ec7536d098d45c Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 11 Jun 2007 10:52:21 -0400
+Subject: [PATCH] revert changes to new_dentry_private_data and document it
+
+Revert bad changes to this function, but this time explain better its precise
+semantics.  It can take a dentry whose private unionfs 'info' node exists or
+not, and it should allocate and un/lock it only if it's NULL.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |   30 ++++++++++++++++++++----------
+ 1 files changed, 20 insertions(+), 10 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index dadfd14..ea5bba1 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -477,24 +477,31 @@ void free_dentry_private_data(struct unionfs_dentry_info *udi)
+ /*
+  * Allocate new dentry private data, free old one if necessary.
+  * On success, returns a dentry whose ->info node is locked already.
++ *
++ * Note: this function may get a dentry with an already existing *and*
++ * locked info node!
+  */
+ int new_dentry_private_data(struct dentry *dentry)
+ {
+ 	int size;
+ 	struct unionfs_dentry_info *info = UNIONFS_D(dentry);
+ 	void *p;
++	int unlock_on_err = 0;
+ 
+-	BUG_ON(info);
++	if (!info) {
++		dentry->d_fsdata = kmem_cache_alloc(unionfs_dentry_cachep,
++						    GFP_ATOMIC);
++		info = UNIONFS_D(dentry);
++		if (!info)
++			goto out;
+ 
+-	dentry->d_fsdata = kmem_cache_alloc(unionfs_dentry_cachep,
+-					    GFP_ATOMIC);
+-	info = UNIONFS_D(dentry);
+-	if (!info)
+-		goto out;
++		mutex_init(&info->lock);
++		unionfs_lock_dentry(dentry);
++		unlock_on_err = 1;
++
++		info->lower_paths = NULL;
++	}
+ 
+-	mutex_init(&info->lock);
+-	info->lower_paths = NULL;
+-	unionfs_lock_dentry(dentry);
+ 
+ 	info->bstart = info->bend = info->bopaque = -1;
+ 	info->bcount = sbmax(dentry->d_sb);
+@@ -513,7 +520,10 @@ int new_dentry_private_data(struct dentry *dentry)
+ 	return 0;
+ 
+ out_free:
+-	unionfs_unlock_dentry(dentry);
++	kfree(info->lower_paths);
++	if (unlock_on_err)
++		unionfs_unlock_dentry(dentry);
++
+ out:
+ 	free_dentry_private_data(info);
+ 	dentry->d_fsdata = NULL;
+-- 
+1.5.4.3
+

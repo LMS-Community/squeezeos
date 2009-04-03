@@ -1,0 +1,35 @@
+From 45bb2cca6313f5236e8085138747b0d7335c3e29 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 31 Aug 2007 11:24:06 -0400
+Subject: [PATCH] Unionfs: document lockdep issues
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ Documentation/filesystems/unionfs/issues.txt |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/issues.txt b/Documentation/filesystems/unionfs/issues.txt
+index 6101ebf..c3a0aef 100644
+--- a/Documentation/filesystems/unionfs/issues.txt
++++ b/Documentation/filesystems/unionfs/issues.txt
+@@ -8,5 +8,17 @@ KNOWN Unionfs 2.1 ISSUES:
+    currently introducing VFS changes to fs/namei.c's do_path_lookup() to
+    allow proper file lookup and opening in stackable file systems.
+ 
++2. Lockdep (a debugging feature) isn't aware of stacking, and so it
++   incorrectly complains about locking problems.  The problem boils down to
++   this: Lockdep considers all objects of a certain type to be in the same
++   class, for example, all inodes.  Lockdep doesn't like to see a lock held
++   on two inodes within the same task, and warns that it could lead to a
++   deadlock.  However, stackable file systems do precisely that: they lock
++   an upper object, and then a lower object, in a strict order to avoid
++   locking problems; in addition, Unionfs, as a fan-out file system, may
++   have to lock several lower inodes.  We are currently looking into Lockdep
++   to see how to make it aware of stackable file systems.  In the mean time,
++   if you get any warnings from Lockdep, you can safely ignore them (or feel
++   free to report them to the Unionfs maintainers, just to be sure).
+ 
+ For more information, see <http://unionfs.filesystems.org/>.
+-- 
+1.5.4.3
+

@@ -1,0 +1,97 @@
+From 2106c28fc9bf2b4359e72818819557672064a6fc Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 25 Nov 2007 18:27:27 -0500
+Subject: [PATCH] Unionfs: minor cleanup in the debugging infrastructure
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |   64 ++++++++++++++++++++++++---------------------------
+ 1 files changed, 30 insertions(+), 34 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 78c1f24..14feaf1 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -97,24 +97,22 @@ void __unionfs_check_inode(const struct inode *inode,
+ 					 "istart/end=%d:%d\n", inode,
+ 					 lower_inode, bindex, istart, iend);
+ 			}
+-		} else {	/* lower_inode == NULL */
+-			if (bindex >= istart && bindex <= iend) {
+-				/*
+-				 * directories can have NULL lower inodes in
+-				 * b/t start/end, but NOT if at the
+-				 * start/end range.
+-				 */
+-				if (unlikely(!(S_ISDIR(inode->i_mode) &&
+-					       bindex > istart &&
+-					       bindex < iend))) {
+-					PRINT_CALLER(fname, fxn, line);
+-					pr_debug(" Ci7: inode/linode=%p:%p "
+-						 "bindex=%d istart/end=%d:%d\n",
+-						 inode, lower_inode, bindex,
+-						 istart, iend);
+-				}
+-			}
++			continue;
+ 		}
++		/* if we get here, then lower_inode == NULL */
++		if (bindex < istart || bindex > iend)
++			continue;
++		/*
++		 * directories can have NULL lower inodes in b/t start/end,
++		 * but NOT if at the start/end range.
++		 */
++		if (unlikely(S_ISDIR(inode->i_mode) &&
++			     bindex > istart && bindex < iend))
++			continue;
++		PRINT_CALLER(fname, fxn, line);
++		pr_debug(" Ci7: inode/linode=%p:%p "
++			 "bindex=%d istart/end=%d:%d\n",
++			 inode, lower_inode, bindex, istart, iend);
+ 	}
+ }
+ 
+@@ -274,24 +272,22 @@ check_inode:
+ 					 "istart/end=%d:%d\n", dentry,
+ 					 lower_inode, bindex, istart, iend);
+ 			}
+-		} else {	/* lower_inode == NULL */
+-			if (bindex >= istart && bindex <= iend) {
+-				/*
+-				 * directories can have NULL lower inodes in
+-				 * b/t start/end, but NOT if at the
+-				 * start/end range.
+-				 */
+-				if (unlikely(!(S_ISDIR(inode->i_mode) &&
+-					       bindex > istart &&
+-					       bindex < iend))) {
+-					PRINT_CALLER(fname, fxn, line);
+-					pr_debug(" CI7: dentry/linode=%p:%p "
+-						 "bindex=%d istart/end=%d:%d\n",
+-						 dentry, lower_inode, bindex,
+-						 istart, iend);
+-				}
+-			}
++			continue;
+ 		}
++		/* if we get here, then lower_inode == NULL */
++		if (bindex < istart || bindex > iend)
++			continue;
++		/*
++		 * directories can have NULL lower inodes in b/t start/end,
++		 * but NOT if at the start/end range.
++		 */
++		if (unlikely(S_ISDIR(inode->i_mode) &&
++			     bindex > istart && bindex < iend))
++			continue;
++		PRINT_CALLER(fname, fxn, line);
++		pr_debug(" CI7: dentry/linode=%p:%p "
++			 "bindex=%d istart/end=%d:%d\n",
++			 dentry, lower_inode, bindex, istart, iend);
+ 	}
+ 
+ 	/*
+-- 
+1.5.4.3
+

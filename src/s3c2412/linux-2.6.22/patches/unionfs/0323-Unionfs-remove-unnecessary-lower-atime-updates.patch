@@ -1,0 +1,60 @@
+From 1e5c09017b3fc54106f5dfdce81b25d31e7fc6d4 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Nov 2007 20:45:43 -0500
+Subject: [PATCH] Unionfs: remove unnecessary lower atime updates
+
+No need for this because our readpage calls vfs_read on the lower objects,
+which would update the atime as/if needed.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c |    8 --------
+ fs/unionfs/mmap.c |    6 ------
+ 2 files changed, 0 insertions(+), 14 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 75e7fff..251ffdc 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -31,10 +31,6 @@ static ssize_t unionfs_read(struct file *file, char __user *buf,
+ 
+ 	err = do_sync_read(file, buf, count, ppos);
+ 
+-	if (err >= 0)
+-		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
+-			    unionfs_lower_dentry(file->f_path.dentry));
+-
+ out:
+ 	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
+@@ -58,10 +54,6 @@ static ssize_t unionfs_aio_read(struct kiocb *iocb, const struct iovec *iov,
+ 	if (err == -EIOCBQUEUED)
+ 		err = wait_on_sync_kiocb(iocb);
+ 
+-	if (err >= 0)
+-		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
+-			    unionfs_lower_dentry(file->f_path.dentry));
+-
+ out:
+ 	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 4cec2b5..3c475d4 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -245,12 +245,6 @@ static int unionfs_readpage(struct file *file, struct page *page)
+ 
+ 	err = unionfs_do_readpage(file, page);
+ 
+-	if (!err) {
+-		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
+-			    unionfs_lower_dentry(file->f_path.dentry));
+-		unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+-	}
+-
+ 	/*
+ 	 * we have to unlock our page, b/c we _might_ have gotten a locked
+ 	 * page.  but we no longer have to wakeup on our page here, b/c
+-- 
+1.5.4.3
+

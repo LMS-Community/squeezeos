@@ -1,0 +1,28 @@
+From c713f407cc293ed587b45eebd5d3c6afbe477643 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 19 Sep 2008 00:02:56 -0400
+Subject: [PATCH] Unionfs: initialize lower mnt in lookup after vfs_path_lookup
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index fd894bf..6cc56ad 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -323,7 +323,9 @@ struct dentry *unionfs_lookup_full(struct dentry *dentry,
+ 			goto out_free;
+ 		}
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, lower_dentry);
+-		BUG_ON(!lower_mnt);
++		if (!lower_mnt)
++			lower_mnt = unionfs_mntget(dentry->d_sb->s_root,
++						   bindex);
+ 		unionfs_set_lower_mnt_idx(dentry, bindex, lower_mnt);
+ 
+ 		/* adjust dbstart/end */
+-- 
+1.5.4.3
+

@@ -1,0 +1,163 @@
+From 8053f60eec01bf7dc6dccbf791fd2d569197047b Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 27 Jul 2008 19:15:44 -0400
+Subject: [PATCH] Unionfs: cache coherency fixes
+
+Handle unhashed or silly-renamed lower dentries properly.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    3 +-
+ fs/unionfs/debug.c      |    2 +-
+ fs/unionfs/dentry.c     |   49 +++++++++++++++++++++++++++++++++++++++++-----
+ fs/unionfs/main.c       |    3 --
+ 4 files changed, 46 insertions(+), 11 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index df002d5..d64272b 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -466,7 +466,8 @@ reval_dentry:
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+ 
+ 	if (unlikely(sbgen > dgen)) {
+-		pr_debug("unionfs: retry (locked) dentry revalidation\n");
++		pr_debug("unionfs: retry (locked) dentry %s revalidation\n",
++			 dentry->d_name.name);
+ 		schedule();
+ 		goto reval_dentry;
+ 	}
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index c352b4d..6c2b42f 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -317,7 +317,7 @@ check_inode:
+ 			}
+ 		}
+ 	/* check if lower inode is newer than upper one (it shouldn't) */
+-	if (unlikely(is_newer_lower(dentry))) {
++	if (unlikely(is_newer_lower(dentry) && !is_negative_lower(dentry))) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		for (bindex = ibstart(inode); bindex <= ibend(inode);
+ 		     bindex++) {
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index e6a6332..db86648 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -23,11 +23,16 @@ bool is_negative_lower(const struct dentry *dentry)
+ 	int bindex;
+ 	struct dentry *lower_dentry;
+ 
+-	BUG_ON(!dentry || dbstart(dentry) < 0);
++	BUG_ON(!dentry);
++	/* cache coherency: check if file was deleted on lower branch */
++	if (dbstart(dentry) < 0)
++		return true;
+ 	for (bindex = dbstart(dentry); bindex <= dbend(dentry); bindex++) {
+ 		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+-		/* XXX: what if lower_dentry is NULL? */
+-		if (lower_dentry && lower_dentry->d_inode)
++		/* unhashed (i.e., unlinked) lower dentries don't count */
++		if (lower_dentry && lower_dentry->d_inode &&
++		    !d_deleted(lower_dentry) &&
++		    !(lower_dentry->d_flags & DCACHE_NFSFS_RENAMED))
+ 			return false;
+ 	}
+ 	return true;
+@@ -75,6 +80,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	verify_locked(dentry);
+ 	verify_locked(dentry->d_parent);
+ 
++	sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+ 	/* if the dentry is unhashed, do NOT revalidate */
+ 	if (d_deleted(dentry))
+ 		goto out;
+@@ -83,7 +89,6 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	if (dentry->d_inode)
+ 		positive = 1;
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+-	sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+ 	/*
+ 	 * If we are working on an unconnected dentry, then there is no
+ 	 * revalidation to be done, because this file does not exist within
+@@ -103,6 +108,21 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		/* Free the pointers for our inodes and this dentry. */
+ 		bstart = dbstart(dentry);
+ 		bend = dbend(dentry);
++
++		/*
++		 * mntput unhashed lower dentries, because those files got
++		 * deleted or rmdir'ed.
++		 */
++		for (bindex = bstart; bindex <= bend; bindex++) {
++			lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
++			if (!lower_dentry)
++				continue;
++			if (!d_deleted(lower_dentry) &&
++			    !(lower_dentry->d_flags & DCACHE_NFSFS_RENAMED))
++			    continue;
++			unionfs_mntput(dentry, bindex);
++		}
++
+ 		__dput_lowers(dentry, bstart, bend);
+ 		dbstart(dentry) = dbend(dentry) = -1;
+ 
+@@ -112,8 +132,12 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			iput_lowers_all(dentry->d_inode, true);
+ 		}
+ 
+-		result = unionfs_lookup_backend(dentry, &lowernd,
+-						interpose_flag);
++		if (realloc_dentry_private_data(dentry) != 0) {
++			valid = false;
++			goto out;
++		}
++
++		result = unionfs_lookup_full(dentry, &lowernd, interpose_flag);
+ 		if (result) {
+ 			if (IS_ERR(result)) {
+ 				valid = false;
+@@ -172,6 +196,9 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	}
+ 
+ out:
++	if (valid)
++		atomic_set(&UNIONFS_D(dentry)->generation, sbgen);
++
+ 	return valid;
+ }
+ 
+@@ -234,6 +261,16 @@ bool is_newer_lower(const struct dentry *dentry)
+ 			return true;
+ 		}
+ 	}
++
++	/*
++	 * Last check: if this is a positive dentry, but somehow all lower
++	 * dentries are negative or unhashed, then this dentry needs to be
++	 * revalidated, because someone probably deleted the objects from
++	 * the lower branches directly.
++	 */
++	if (is_negative_lower(dentry))
++		return true;
++
+ 	return false;		/* default: lower is not newer */
+ }
+ 
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 67a44d7..94e881a 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -88,9 +88,6 @@ struct dentry *unionfs_interpose(struct dentry *dentry, struct super_block *sb,
+ 
+ 	verify_locked(dentry);
+ 
+-	/* Make sure that we didn't get a negative dentry. */
+-	BUG_ON(is_negative_lower(dentry));
+-
+ 	/*
+ 	 * We allocate our new inode below, by calling iget.
+ 	 * iget will call our read_inode which will initialize some
+-- 
+1.5.4.3
+

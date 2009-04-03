@@ -1,0 +1,69 @@
+From 52b09f038004753729899ff4fa97161b358e2883 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 9 Jan 2008 16:38:27 -0500
+Subject: [PATCH] Unionfs: mmap fixes
+
+Ensure we have lower inodes in prepare/commit_write.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   26 +++++++++++++++++++++-----
+ 1 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index ec5696a..5a4a039 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -256,13 +256,26 @@ out:
+ static int unionfs_prepare_write(struct file *file, struct page *page,
+ 				 unsigned from, unsigned to)
+ {
++	int err;
++
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	/*
+-	 * Just copy lower inode attributes and return success.  Not much
+-	 * else to do here.  No need to lock either (lockdep won't like it).
+-	 * Let commit_write do all the hard work instead.
++	 * This is the only place where we unconditionally copy the lower
++	 * attribute times before calling unionfs_file_revalidate.  The
++	 * reason is that our ->write calls do_sync_write which in turn will
++	 * call our ->prepare_write and then ->commit_write.  Before our
++	 * ->write is called, the lower mtimes are in sync, but by the time
++	 * the VFS calls our ->commit_write, the lower mtimes have changed.
++	 * Therefore, the only reasonable time for us to sync up from the
++	 * changed lower mtimes, and avoid an invariant violation warning,
++	 * is here, in ->prepare_write.
+ 	 */
+ 	unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+-	return 0;
++	err = unionfs_file_revalidate(file, true);
++	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
++
++	return err;
+ }
+ 
+ static int unionfs_commit_write(struct file *file, struct page *page,
+@@ -284,7 +297,6 @@ static int unionfs_commit_write(struct file *file, struct page *page,
+ 	unionfs_check_file(file);
+ 
+ 	inode = page->mapping->host;
+-	lower_inode = unionfs_lower_inode(inode);
+ 
+ 	if (UNIONFS_F(file) != NULL)
+ 		lower_file = unionfs_lower_file(file);
+@@ -314,6 +326,10 @@ static int unionfs_commit_write(struct file *file, struct page *page,
+ 		goto out;
+ 
+ 	/* if vfs_write succeeded above, sync up our times/sizes */
++	lower_inode = lower_file->f_path.dentry->d_inode;
++	if (!lower_inode)
++		lower_inode = unionfs_lower_inode(inode);
++	BUG_ON(!lower_inode);
+ 	fsstack_copy_inode_size(inode, lower_inode);
+ 	unionfs_copy_attr_times(inode);
+ 	mark_inode_dirty_sync(inode);
+-- 
+1.5.4.3
+

@@ -1,0 +1,46 @@
+From a1ae4ececcd88f5b033448babe7846ec82e40405 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 5 May 2007 19:15:28 -0400
+Subject: [PATCH] mmap: remove unnecessary unionfs_bmap method
+
+Unionfs is not a block-based file system, so it should not define ->bmap.
+---
+ fs/unionfs/mmap.c |   16 ----------------
+ 1 files changed, 0 insertions(+), 16 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index f484984..5302dcd 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -250,21 +250,6 @@ out:
+ 	return err;		/* assume all is ok */
+ }
+ 
+-/* FIXME: does this make sense? */
+-sector_t unionfs_bmap(struct address_space * mapping, sector_t block)
+-{
+-	int err = 0;
+-	struct inode *inode, *lower_inode;
+-	sector_t (*bmap)(struct address_space *, sector_t);
+-
+-	inode = (struct inode *)mapping->host;
+-	lower_inode = unionfs_lower_inode(inode);
+-	bmap = lower_inode->i_mapping->a_ops->bmap;
+-	if (bmap)
+-		err = bmap(lower_inode->i_mapping, block);
+-	return err;
+-}
+-
+ void unionfs_sync_page(struct page *page)
+ {
+ 	struct inode *inode;
+@@ -297,6 +282,5 @@ struct address_space_operations unionfs_aops = {
+ 	.readpage	= unionfs_readpage,
+ 	.prepare_write	= unionfs_prepare_write,
+ 	.commit_write	= unionfs_commit_write,
+-	.bmap		= unionfs_bmap,
+ 	.sync_page	= unionfs_sync_page,
+ };
+-- 
+1.5.4.3
+

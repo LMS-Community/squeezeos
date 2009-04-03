@@ -1,0 +1,246 @@
+From c88d4096bf7f5b8fba279a495d16c5cd84a89d0f Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] Unionfs: create new special files only in first branch
+
+When creating a new special file, always create it in the first branch,
+which is always writeable, not in the branch which may have a whiteout in
+it.  This makes the policy for the creation of new special files consistent
+with that of new files/directories, as well as improves efficiency a bit.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |  174 +++++++++++++++++++++++++++------------------------
+ 1 files changed, 92 insertions(+), 82 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index bdefff1..69a6e58 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -677,15 +677,15 @@ out:
+ 	return err;
+ }
+ 
+-static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
++static int unionfs_mknod(struct inode *parent, struct dentry *dentry, int mode,
+ 			 dev_t dev)
+ {
+ 	int err = 0;
+-	struct dentry *lower_dentry = NULL, *whiteout_dentry = NULL;
++	struct dentry *lower_dentry = NULL;
++	struct dentry *wh_dentry = NULL;
+ 	struct dentry *lower_parent_dentry = NULL;
+-	int bindex = 0, bstart;
+ 	char *name = NULL;
+-	int whiteout_unlinked = 0;
++	int valid = 0;
+ 
+ 	unionfs_read_lock(dentry->d_sb);
+ 	unionfs_lock_dentry(dentry);
+@@ -696,115 +696,125 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 		goto out;
+ 	}
+ 
+-	bstart = dbstart(dentry);
+-
+-	lower_dentry = unionfs_lower_dentry(dentry);
++	/*
++	 * It's only a bug if this dentry was not negative and couldn't be
++	 * revalidated (shouldn't happen).
++	 */
++	BUG_ON(!valid && dentry->d_inode);
+ 
+ 	/*
+-	 * check if whiteout exists in this branch, i.e. lookup .wh.foo
+-	 * first.
++	 * We shouldn't create things in a read-only branch; this check is a
++	 * bit redundant as we don't allow branch 0 to be read-only at the
++	 * moment
+ 	 */
+-	name = alloc_whname(dentry->d_name.name, dentry->d_name.len);
+-	if (unlikely(IS_ERR(name))) {
+-		err = PTR_ERR(name);
++	err = is_robranch_super(dentry->d_sb, 0);
++	if (err) {
++		err = -EROFS;
+ 		goto out;
+ 	}
+ 
+-	whiteout_dentry = lookup_one_len(name, lower_dentry->d_parent,
+-					 dentry->d_name.len + UNIONFS_WHLEN);
+-	if (IS_ERR(whiteout_dentry)) {
+-		err = PTR_ERR(whiteout_dentry);
+-		goto out;
+-	}
++	/*
++	 * We _always_ create on branch 0
++	 */
++	lower_dentry = unionfs_lower_dentry_idx(dentry, 0);
++	if (lower_dentry) {
++		/*
++		 * check if whiteout exists in this branch, i.e. lookup .wh.foo
++		 * first.
++		 */
++		name = alloc_whname(dentry->d_name.name, dentry->d_name.len);
++		if (unlikely(IS_ERR(name))) {
++			err = PTR_ERR(name);
++			goto out;
++		}
+ 
+-	if (!whiteout_dentry->d_inode) {
+-		dput(whiteout_dentry);
+-		whiteout_dentry = NULL;
+-	} else {
+-		/* found .wh.foo, unlink it */
+-		lower_parent_dentry = lock_parent(whiteout_dentry);
++		wh_dentry = lookup_one_len(name, lower_dentry->d_parent,
++					   dentry->d_name.len + UNIONFS_WHLEN);
++		if (IS_ERR(wh_dentry)) {
++			err = PTR_ERR(wh_dentry);
++			wh_dentry = NULL;
++			goto out;
++		}
+ 
+-		/* found a.wh.foo entry, remove it then do vfs_mkdir */
+-		err = is_robranch_super(dentry->d_sb, bstart);
+-		if (!err)
+-			err = vfs_unlink(lower_parent_dentry->d_inode,
+-					 whiteout_dentry);
+-		dput(whiteout_dentry);
++		if (wh_dentry->d_inode) {
++			/*
++			 * .wh.foo has been found, so let's unlink it
++			 */
++			struct dentry *lower_dir_dentry;
+ 
+-		unlock_dir(lower_parent_dentry);
++			lower_dir_dentry = lock_parent(wh_dentry);
++			err = vfs_unlink(lower_dir_dentry->d_inode, wh_dentry);
++			unlock_dir(lower_dir_dentry);
+ 
+-		if (err) {
+-			if (!IS_COPYUP_ERR(err))
++			/*
++			 * Whiteouts are special files and should be deleted
++			 * no matter what (as if they never existed), in
++			 * order to allow this create operation to succeed.
++			 * This is especially important in sticky
++			 * directories: a whiteout may have been created by
++			 * one user, but the newly created file may be
++			 * created by another user.  Therefore, in order to
++			 * maintain Unix semantics, if the vfs_unlink above
++			 * ailed, then we have to try to directly unlink the
++			 * whiteout.  Note: in the ODF version of unionfs,
++			 * whiteout are handled much more cleanly.
++			 */
++			if (err == -EPERM) {
++				struct inode *inode = lower_dir_dentry->d_inode;
++				err = inode->i_op->unlink(inode, wh_dentry);
++			}
++			if (err) {
++				printk(KERN_ERR "unionfs: mknod: could not "
++				       "unlink whiteout, err = %d\n", err);
+ 				goto out;
+-			bstart--;
+-		} else {
+-			whiteout_unlinked = 1;
+-		}
+-	}
+-
+-	for (bindex = bstart; bindex >= 0; bindex--) {
+-		if (is_robranch_super(dentry->d_sb, bindex))
+-			continue;
+-
+-		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+-		if (!lower_dentry) {
+-			lower_dentry = create_parents(dir, dentry,
+-						      dentry->d_name.name,
+-						      bindex);
+-			if (IS_ERR(lower_dentry)) {
+-				printk(KERN_ERR "unionfs: failed to create "
+-				       "parents on %d, err = %ld\n",
+-				       bindex, PTR_ERR(lower_dentry));
+-				continue;
+ 			}
+ 		}
+-
+-		lower_parent_dentry = lock_parent(lower_dentry);
+-		if (IS_ERR(lower_parent_dentry)) {
+-			err = PTR_ERR(lower_parent_dentry);
++	} else {
++		/*
++		 * if lower_dentry is NULL, create the entire
++		 * dentry directory structure in branch 0.
++		 */
++		lower_dentry = create_parents(parent, dentry,
++					      dentry->d_name.name, 0);
++		if (IS_ERR(lower_dentry)) {
++			err = PTR_ERR(lower_dentry);
+ 			goto out;
+ 		}
++	}
+ 
+-		err = vfs_mknod(lower_parent_dentry->d_inode,
+-				lower_dentry, mode, dev);
+-
+-		if (err) {
+-			unlock_dir(lower_parent_dentry);
+-			break;
+-		}
++	lower_parent_dentry = lock_parent(lower_dentry);
++	if (IS_ERR(lower_parent_dentry)) {
++		err = PTR_ERR(lower_parent_dentry);
++		goto out;
++	}
+ 
+-		/*
+-		 * Only INTERPOSE_LOOKUP can return a value other than 0 on
+-		 * err.
+-		 */
+-		err = PTR_ERR(unionfs_interpose(dentry, dir->i_sb, 0));
++	err = vfs_mknod(lower_parent_dentry->d_inode, lower_dentry, mode, dev);
++	if (!err) {
++		err = PTR_ERR(unionfs_interpose(dentry, parent->i_sb, 0));
+ 		if (!err) {
+-			fsstack_copy_attr_times(dir,
+-						lower_parent_dentry->d_inode);
+-			fsstack_copy_inode_size(dir,
++			unionfs_copy_attr_times(parent);
++			fsstack_copy_inode_size(parent,
+ 						lower_parent_dentry->d_inode);
+-			/* update number of links on parent directory */
+-			dir->i_nlink = unionfs_get_nlinks(dir);
++			/* update no. of links on parent directory */
++			parent->i_nlink = unionfs_get_nlinks(parent);
+ 		}
+-		unlock_dir(lower_parent_dentry);
+-
+-		break;
+ 	}
+ 
+-out:
+-	if (!dentry->d_inode)
+-		d_drop(dentry);
++	unlock_dir(lower_parent_dentry);
+ 
++out:
++	dput(wh_dentry);
+ 	kfree(name);
+ 
+ 	if (!err)
+ 		unionfs_postcopyup_setmnt(dentry);
+ 
+-	unionfs_check_inode(dir);
++	unionfs_check_inode(parent);
++	if (!err)
++		unionfs_check_dentry(dentry->d_parent);
+ 	unionfs_check_dentry(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+-
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

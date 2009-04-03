@@ -1,0 +1,64 @@
+From da46610ac2bb8f97e4de2b6525a0d3d914b7e6e6 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Nov 2007 20:47:24 -0500
+Subject: [PATCH] Unionfs: writepage updates
+
+Don't set/reset the PageUptodate flag on our page.  Call flush_dcache_page
+on the lower page after copy_highpage, and set it uptodate.  Call
+set_page_dirty right before clear_page_dirty_for_io.
+
+CC: Hugh Dickins <hugh@veritas.com>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index f897dc1..cb45e85 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -56,6 +56,7 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	struct address_space *lower_mapping; /* lower inode mapping */
+ 	gfp_t mask;
+ 
++	BUG_ON(!PageUptodate(page));
+ 	inode = page->mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+ 	lower_mapping = lower_inode->i_mapping;
+@@ -81,6 +82,8 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 
+ 	/* copy page data from our upper page to the lower page */
+ 	copy_highpage(lower_page, page);
++	flush_dcache_page(lower_page);
++	SetPageUptodate(lower_page);
+ 
+ 	/*
+ 	 * Call lower writepage (expects locked page).  However, if we are
+@@ -100,13 +103,12 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 		wbc->for_writepages = 0;
+ 
+ 	BUG_ON(!lower_mapping->a_ops->writepage);
++	set_page_dirty(lower_page);
+ 	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
+ 	err = lower_mapping->a_ops->writepage(lower_page, wbc);
+ 	wbc->for_writepages = saved_for_writepages; /* restore value */
+-	if (err < 0) {
+-		ClearPageUptodate(page);
++	if (err < 0)
+ 		goto out_release;
+-	}
+ 
+ 	/*
+ 	 * Lower file systems such as ramfs and tmpfs, may return
+@@ -130,7 +132,7 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	}
+ 
+ 	/* all is well */
+-	SetPageUptodate(page);
++
+ 	/* lower mtimes have changed: update ours */
+ 	unionfs_copy_attr_times(inode);
+ 
+-- 
+1.5.4.3
+

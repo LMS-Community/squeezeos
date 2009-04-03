@@ -1,0 +1,78 @@
+From 6583098ea502a3df9b0c1520f3951467d3332e45 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 23 Mar 2007 13:10:46 -0400
+Subject: [PATCH] Unionfs: Don't inline do_remount_{add,del,mode}_option
+
+gcc4 decided to inline do_remount_{add,del,mode}_option creating an 600 byte
+stack abuser on a x86_64 test box.
+
+Reported by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |    2 +-
+ fs/unionfs/super.c  |   20 ++++++++++----------
+ 2 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 0572247..0fc5993 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -30,7 +30,7 @@ static int is_validname(const char *name)
+ }
+ 
+ /* The rest of these are utility functions for lookup. */
+-static int is_opaque_dir(struct dentry *dentry, int bindex)
++static noinline int is_opaque_dir(struct dentry *dentry, int bindex)
+ {
+ 	int err = 0;
+ 	struct dentry *hidden_dentry;
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index ec5706b..e6a6cc1 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -148,9 +148,9 @@ static int unionfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ }
+ 
+ /* handle mode changing during remount */
+-static int do_remount_mode_option(char *optarg, int cur_branches,
+-				  struct unionfs_data *new_data,
+-				  struct path *new_lower_paths)
++static noinline int do_remount_mode_option(char *optarg, int cur_branches,
++					   struct unionfs_data *new_data,
++					   struct path *new_lower_paths)
+ {
+ 	int err = -EINVAL;
+ 	int perms, idx;
+@@ -207,9 +207,9 @@ out:
+ }
+ 
+ /* handle branch deletion during remount */
+-static int do_remount_del_option(char *optarg, int cur_branches,
+-				 struct unionfs_data *new_data,
+-				 struct path *new_lower_paths)
++static noinline int do_remount_del_option(char *optarg, int cur_branches,
++					  struct unionfs_data *new_data,
++					  struct path *new_lower_paths)
+ {
+ 	int err = -EINVAL;
+ 	int idx;
+@@ -268,10 +268,10 @@ out:
+ }
+ 
+ /* handle branch insertion during remount */
+-static int do_remount_add_option(char *optarg, int cur_branches,
+-				 struct unionfs_data *new_data,
+-				 struct path *new_lower_paths,
+-				 int *high_branch_id)
++static noinline int do_remount_add_option(char *optarg, int cur_branches,
++					  struct unionfs_data *new_data,
++					  struct path *new_lower_paths,
++					  int *high_branch_id)
+ {
+ 	int err = -EINVAL;
+ 	int perms;
+-- 
+1.5.4.3
+

@@ -1,0 +1,45 @@
+From 049f5b815fa6fd7a1adf196205cb708685301cf5 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Dec 2007 16:55:17 -0500
+Subject: [PATCH] Unionfs: interpose cleanup and fix for spliced dentries
+
+Fix unionfs_interpose to fill lower inode info when d_splice_alias returns
+NULL.  Also cleanup impossible case (d_splice_alias doesn't return ERR_PTR).
+
+Signed-off-by: Rachita Kothiyal <rachita@fsl.cs.sunysb.edu>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/main.c |   10 +++++++---
+ 1 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 22aa6e6..ea8976d 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -149,9 +149,7 @@ skip:
+ 		break;
+ 	case INTERPOSE_LOOKUP:
+ 		spliced = d_splice_alias(inode, dentry);
+-		if (IS_ERR(spliced)) {
+-			err = PTR_ERR(spliced);
+-		} else if (spliced && spliced != dentry) {
++		if (spliced && spliced != dentry) {
+ 			/*
+ 			 * d_splice can return a dentry if it was
+ 			 * disconnected and had to be moved.  We must ensure
+@@ -169,6 +167,12 @@ skip:
+ 				unionfs_fill_inode(dentry, inode);
+ 			}
+ 			goto out_spliced;
++		} else if (!spliced) {
++			if (need_fill_inode) {
++				need_fill_inode = 0;
++				unionfs_fill_inode(dentry, inode);
++				goto out_spliced;
++			}
+ 		}
+ 		break;
+ 	case INTERPOSE_REVAL:
+-- 
+1.5.4.3
+

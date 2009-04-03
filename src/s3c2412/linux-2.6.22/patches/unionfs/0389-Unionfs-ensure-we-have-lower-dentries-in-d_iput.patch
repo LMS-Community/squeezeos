@@ -1,0 +1,29 @@
+From 5a1b112ad39d4d9a3edb989944a2736c8c444cf4 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 9 Jan 2008 19:15:55 -0500
+Subject: [PATCH] Unionfs: ensure we have lower dentries in d_iput
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 29ebf0b..77fe637 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -498,9 +498,10 @@ static void unionfs_d_iput(struct dentry *dentry, struct inode *inode)
+ {
+ 	int bindex, rc;
+ 
++	BUG_ON(!dentry);
+ 	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+ 
+-	if (dbstart(dentry) < 0)
++	if (!UNIONFS_D(dentry) || dbstart(dentry) < 0)
+ 		goto drop_lower_inodes;
+ 	for (bindex = dbstart(dentry); bindex <= dbend(dentry); bindex++) {
+ 		if (unionfs_lower_mnt_idx(dentry, bindex)) {
+-- 
+1.5.4.3
+

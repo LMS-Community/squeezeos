@@ -4,7 +4,7 @@ LICENSE = "GPL"
 
 LINUX_VERSION = "2.6.22"
 PV = "${LINUX_VERSION}+${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r2"
+PR = "r3"
 
 inherit kernel
 
@@ -16,6 +16,14 @@ SRC_URI = " \
 S = "${WORKDIR}/linux-${LINUX_VERSION}"
 
 COMPATIBLE_MACHINE = "(jive)"
+
+
+# new kernel patches are managed by quilt, and checked into svn.
+do_patch() {
+	cd ${S}
+	quilt push -a
+}
+
 
 do_configure_prepend() {
 

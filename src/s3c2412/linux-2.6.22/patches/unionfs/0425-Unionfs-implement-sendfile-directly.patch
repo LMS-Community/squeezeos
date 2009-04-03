@@ -1,0 +1,72 @@
+From 4c2b114f3e33650a24f9fb6a2c79fda340278e6f Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 16:20:58 -0400
+Subject: [PATCH] Unionfs: implement sendfile directly
+
+Must implement sendfile, because we can no longer rely on
+generic_file_sendfile: it needs the ->readpage address_space_operation
+implemented, which we no longer have.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c |   37 ++++++++++++++++++++++++++++++++++++-
+ 1 files changed, 36 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 6141efc..df18f55 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -233,6 +233,41 @@ out:
+ 	return err;
+ }
+ 
++static ssize_t unionfs_sendfile(struct file *file, loff_t *ppos, size_t count,
++				read_actor_t actor, void *target)
++{
++	ssize_t err;
++	struct file *lower_file;
++	struct dentry *dentry = file->f_path.dentry;
++
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
++	err = unionfs_file_revalidate(file, false);
++	if (unlikely(err))
++		goto out;
++
++	lower_file = unionfs_lower_file(file);
++
++	if (!lower_file->f_op || !lower_file->f_op->sendfile) {
++		err = -EINVAL;
++		goto out;
++	}
++
++	err = lower_file->f_op->sendfile(lower_file, ppos, count,
++					 actor, target);
++	/* update our inode atime upon a successful lower sendfile */
++	if (err >= 0) {
++		fsstack_copy_attr_atime(dentry->d_inode,
++					lower_file->f_path.dentry->d_inode);
++		unionfs_check_file(file);
++	}
++
++out:
++	unionfs_unlock_dentry(dentry);
++	unionfs_read_unlock(dentry->d_sb);
++	return err;
++}
++
+ struct file_operations unionfs_main_fops = {
+ 	.llseek		= generic_file_llseek,
+ 	.read		= do_sync_read,
+@@ -247,7 +282,7 @@ struct file_operations unionfs_main_fops = {
+ 	.release	= unionfs_file_release,
+ 	.fsync		= unionfs_fsync,
+ 	.fasync		= unionfs_fasync,
+-	.sendfile	= generic_file_sendfile,
++	.sendfile	= unionfs_sendfile,
+ 	.splice_read	= unionfs_splice_read,
+ 	.splice_write	= unionfs_splice_write,
+ };
+-- 
+1.5.4.3
+

@@ -1,0 +1,31 @@
+From ad70888af9ac1666edc3c42af052137b9386d3f9 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 19 Sep 2007 23:55:27 -0400
+Subject: [PATCH] Unionfs: cache-coherency fixes
+
+Do not update mtime if there is no upper branch for the inode.  This
+prevents from calling unionfs_lower_inode_idx() with a negative index, which
+triggers a bug.
+
+Signed-off-by: Olivier Blin <blino@mandriva.com>
+Acked-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/fanout.h |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index afeb9f6..51aa0de 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -308,7 +308,7 @@ static inline void unionfs_copy_attr_times(struct inode *upper)
+ 	int bindex;
+ 	struct inode *lower;
+ 
+-	if (!upper)
++	if (!upper || ibstart(upper) < 0)
+ 		return;
+ 	for (bindex=ibstart(upper); bindex <= ibend(upper); bindex++) {
+ 		lower = unionfs_lower_inode_idx(upper, bindex);
+-- 
+1.5.4.3
+

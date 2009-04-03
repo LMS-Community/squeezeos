@@ -1,0 +1,30 @@
+From 2984bb1573a2c59a5bda708b936db40b9b816118 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 21:25:11 -0500
+Subject: [PATCH] Unionfs: follow_link locking fixes
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index bd19f93..1798f27 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -812,7 +812,11 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	err = 0;
+ 
+ out:
+-	unionfs_check_dentry(dentry);
++	if (!err) {
++		unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
++		unionfs_check_dentry(dentry);
++		unionfs_unlock_dentry(dentry);
++	}
+ 	return ERR_PTR(err);
+ }
+ 
+-- 
+1.5.4.3
+

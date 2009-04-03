@@ -1,0 +1,55 @@
+From 6edf7c295f340139b357bc854451242e1c1e64f4 Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Sat, 24 Feb 2007 16:46:08 -0500
+Subject: [PATCH] fs/unionfs/: Several small cleanups in unionfs_interpose
+
+1) No need to lock the inode - lockdep was complaining about potential
+circular dependency
+
+2) No need to use temporary variable for iunique() inode number
+
+3) Removed unneeded comment
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/main.c |   11 ++---------
+ 1 files changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index bd64242..a37916d 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -66,19 +66,14 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 			err = -ENOMEM;
+ 			goto out;
+ 		}
+-		mutex_lock(&inode->i_mutex);
+ 	} else {
+-		ino_t ino;
+ 		/* get unique inode number for unionfs */
+-		ino = iunique(sb, UNIONFS_ROOT_INO);
+-
+-		inode = iget(sb, ino);
++		inode = iget(sb, iunique(sb, UNIONFS_ROOT_INO));
+ 		if (!inode) {
+-			err = -EACCES;	/* should be impossible??? */
++			err = -EACCES;
+ 			goto out;
+ 		}
+ 
+-		mutex_lock(&inode->i_mutex);
+ 		if (atomic_read(&inode->i_count) > 1)
+ 			goto skip;
+ 	}
+@@ -147,8 +142,6 @@ skip:
+ 		BUG();
+ 	}
+ 
+-	mutex_unlock(&inode->i_mutex);
+-
+ out:
+ 	return err;
+ }
+-- 
+1.5.4.3
+
