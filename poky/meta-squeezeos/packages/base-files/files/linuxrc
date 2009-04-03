@@ -63,10 +63,25 @@ fi
 
 
 # Mount overlay filesystem
-/bin/mount -t mini_fo -o base=/,sto=/mnt/storage / /mnt/overlay
+grep -q unionfs /proc/filesystems
+HAS_UNIONFS=$?
 
-# Mount devfs filesystem in overlay
-/bin/mount -o move /dev /mnt/overlay/dev
+if [ $HAS_UNIONFS -eq 0 ]
+then
+	/bin/echo "Filesystem overlay: unionfs"
+
+	/bin/mount -t unionfs -o dirs=/mnt/storage=rw:/=ro none /mnt/overlay
+	/bin/mount -o move /dev /mnt/overlay/dev
+
+	/bin/umount /proc
+	/bin/mount -t proc none /mnt/overlay/proc/
+else
+	/bin/echo "Filesystem overlay: mini_fo"
+
+	/bin/mount -t mini_fo -o base=/,sto=/mnt/storage / /mnt/overlay
+	/bin/mount -o move /dev /mnt/overlay/dev
+fi
+
 
 # Run init process
 exec /usr/sbin/chroot /mnt/overlay /sbin/init
