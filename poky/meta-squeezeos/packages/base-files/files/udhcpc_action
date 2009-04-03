@@ -12,10 +12,18 @@ RESOLV_CONF="/etc/resolv.conf"
 
 case "$1" in
 	deconfig)
+		killall zcip > /dev/null
 		/sbin/ifconfig $interface 0.0.0.0
 		;;
 
+	fail|leasefail)
+		killall zcip > /dev/null
+		# -v is needed to work around a bug in zcip - probably fixed in newer version
+		/sbin/zcip -v $interface /etc/network/zcip_action > /dev/null &
+		;;
+
 	renew|bound|zeroconf)
+		killall zcip > /dev/null
 		/sbin/ifconfig $interface $ip $BROADCAST $NETMASK
 
 		while route del default gw 0.0.0.0 dev $interface ; do
