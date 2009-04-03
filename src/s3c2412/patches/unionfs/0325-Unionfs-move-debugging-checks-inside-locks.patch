@@ -1,0 +1,342 @@
+From b3a9c6d08379235e389d4d636548555d036d4a2b Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Nov 2007 22:22:52 -0500
+Subject: [PATCH] Unionfs: move debugging checks inside locks
+
+This is to ensure that the objects we want to check aren't being destroyed
+or changed by another thread.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    7 ++++---
+ fs/unionfs/dentry.c     |    2 +-
+ fs/unionfs/file.c       |   10 +++++-----
+ fs/unionfs/inode.c      |   25 +++++++++++++------------
+ fs/unionfs/mmap.c       |    2 +-
+ fs/unionfs/super.c      |    4 ++--
+ fs/unionfs/xattr.c      |    8 ++++----
+ 7 files changed, 30 insertions(+), 28 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 624f920..b33917e 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -573,6 +573,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 		}
+ 	}
+ 
++	/* XXX: should this unlock be moved to the function bottom? */
+ 	unionfs_unlock_dentry(dentry);
+ 
+ out:
+@@ -582,12 +583,12 @@ out:
+ 		kfree(UNIONFS_F(file));
+ 	}
+ out_nofree:
+-	unionfs_read_unlock(inode->i_sb);
+ 	unionfs_check_inode(inode);
+ 	if (!err) {
+ 		unionfs_check_file(file);
+ 		unionfs_check_dentry(file->f_path.dentry->d_parent);
+ 	}
++	unionfs_read_unlock(inode->i_sb);
+ 	return err;
+ }
+ 
+@@ -786,8 +787,8 @@ long unionfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 	}
+ 
+ out:
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+ }
+ 
+@@ -825,7 +826,7 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 	unionfs_copy_attr_times(dentry->d_parent->d_inode);
+ 
+ out:
+-	unionfs_read_unlock(dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+ }
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 889d5a0..47a05e5 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -426,9 +426,9 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ 
+ 	unionfs_lock_dentry(dentry);
+ 	err = __unionfs_d_revalidate_chain(dentry, nd, false);
+-	unionfs_unlock_dentry(dentry);
+ 	if (likely(err > 0)) /* true==1: dentry is valid */
+ 		unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 251ffdc..2368009 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -32,8 +32,8 @@ static ssize_t unionfs_read(struct file *file, char __user *buf,
+ 	err = do_sync_read(file, buf, count, ppos);
+ 
+ out:
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+ }
+ 
+@@ -55,8 +55,8 @@ static ssize_t unionfs_aio_read(struct kiocb *iocb, const struct iovec *iov,
+ 		err = wait_on_sync_kiocb(iocb);
+ 
+ out:
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+ }
+ 
+@@ -127,13 +127,13 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 	}
+ 
+ out:
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	if (!err) {
+ 		/* copyup could cause parent dir times to change */
+ 		unionfs_copy_attr_times(file->f_path.dentry->d_parent->d_inode);
+ 		unionfs_check_file(file);
+ 		unionfs_check_dentry(file->f_path.dentry->d_parent);
+ 	}
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+ }
+ 
+@@ -180,8 +180,8 @@ int unionfs_fsync(struct file *file, struct dentry *dentry, int datasync)
+ 	unionfs_copy_attr_times(inode);
+ 
+ out:
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+ }
+ 
+@@ -226,8 +226,8 @@ int unionfs_fasync(int fd, struct file *file, int flag)
+ 	unionfs_copy_attr_times(inode);
+ 
+ out:
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 67f6114..6ec5f52 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -152,13 +152,13 @@ out:
+ 
+ 	if (!err)
+ 		unionfs_postcopyup_setmnt(dentry);
+-	unionfs_unlock_dentry(dentry);
+-	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	unionfs_check_inode(parent);
+ 	if (!err)
+ 		unionfs_check_dentry(dentry->d_parent);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
++	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+ }
+ 
+@@ -198,12 +198,13 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 			dentry = ret;
+ 		/* parent times may have changed */
+ 		unionfs_copy_attr_times(dentry->d_parent->d_inode);
+-		unionfs_unlock_dentry(dentry);
+ 	}
+ 
+ 	unionfs_check_inode(parent);
+ 	unionfs_check_dentry(dentry);
+ 	unionfs_check_dentry(dentry->d_parent);
++	if (!IS_ERR(ret))
++		unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return ret;
+@@ -347,12 +348,12 @@ out:
+ 	if (!err)
+ 		unionfs_postcopyup_setmnt(new_dentry);
+ 
+-	unionfs_unlock_dentry(new_dentry);
+-	unionfs_unlock_dentry(old_dentry);
+-
+ 	unionfs_check_inode(dir);
+ 	unionfs_check_dentry(new_dentry);
+ 	unionfs_check_dentry(old_dentry);
++
++	unionfs_unlock_dentry(new_dentry);
++	unionfs_unlock_dentry(old_dentry);
+ 	unionfs_read_unlock(old_dentry->d_sb);
+ 
+ 	return err;
+@@ -513,10 +514,10 @@ out:
+ 	kfree(name);
+ 	if (!err)
+ 		unionfs_postcopyup_setmnt(dentry);
+-	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_check_inode(dir);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return err;
+@@ -666,9 +667,9 @@ out:
+ 
+ 	if (!err)
+ 		unionfs_copy_attr_times(dentry->d_inode);
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_inode(parent);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return err;
+@@ -796,10 +797,10 @@ out:
+ 
+ 	if (!err)
+ 		unionfs_postcopyup_setmnt(dentry);
+-	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_check_inode(dir);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return err;
+@@ -834,8 +835,8 @@ static int unionfs_readlink(struct dentry *dentry, char __user *buf,
+ 					lower_dentry->d_inode);
+ 
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return err;
+@@ -896,10 +897,10 @@ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, nd, false)))
+ 		printk(KERN_ERR
+ 		       "unionfs: put_link failed to revalidate dentry\n");
+-	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_check_dentry(dentry);
+ 	kfree(nd_get_link(nd));
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ }
+ 
+@@ -1071,9 +1072,9 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	/* if setattr succeeded, then parent dir may have changed */
+ 	unionfs_copy_attr_times(dentry->d_parent->d_inode);
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
+ 	unionfs_check_dentry(dentry->d_parent);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return err;
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 69bb6ab..4d68947 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -329,8 +329,8 @@ out:
+ 	if (err < 0)
+ 		ClearPageUptodate(page);
+ 
+-	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;		/* assume all is ok */
+ }
+ 
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 58af71b..21a1ff9 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -153,8 +153,8 @@ static int unionfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	memset(&buf->f_spare, 0, sizeof(buf->f_spare));
+ 
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(sb);
+ 	return err;
+ }
+@@ -797,8 +797,8 @@ out_free:
+ 	kfree(new_data);
+ 	kfree(new_lower_inodes);
+ out_error:
+-	unionfs_write_unlock(sb);
+ 	unionfs_check_dentry(sb->s_root);
++	unionfs_write_unlock(sb);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 602cedf..00c6d0d 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -58,8 +58,8 @@ ssize_t unionfs_getxattr(struct dentry *dentry, const char *name, void *value,
+ 	err = vfs_getxattr(lower_dentry, (char *) name, value, size);
+ 
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+ }
+@@ -88,8 +88,8 @@ int unionfs_setxattr(struct dentry *dentry, const char *name,
+ 			   size, flags);
+ 
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+ }
+@@ -116,8 +116,8 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	err = vfs_removexattr(lower_dentry, (char *) name);
+ 
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+ }
+@@ -146,8 +146,8 @@ ssize_t unionfs_listxattr(struct dentry *dentry, char *list, size_t size)
+ 	err = vfs_listxattr(lower_dentry, encoded_list, size);
+ 
+ out:
+-	unionfs_unlock_dentry(dentry);
+ 	unionfs_check_dentry(dentry);
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+ }
+-- 
+1.5.4.3
+

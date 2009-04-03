@@ -1,0 +1,247 @@
+From 4acf5d7071ad10c8823836e59f0d1b4ec1860425 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 19 May 2007 18:22:53 -0400
+Subject: [PATCH] bugfix: fixed interpose to check if d_splice_alias returns a dentry
+
+Also in unionfs_interpose, ensure that this new dentry's private data is
+correct.  unionfs_interpose now returns a dentry if d_splice_alias has
+returned a dentry.  (This is a reimplementation of the same fix from the ODF
+code base.)
+---
+ fs/unionfs/inode.c  |   33 ++++++++++++++++++++++++++++-----
+ fs/unionfs/lookup.c |   14 +++++++++++++-
+ fs/unionfs/main.c   |   43 +++++++++++++++++++++++++++++++++++++------
+ fs/unionfs/union.h  |    4 ++--
+ 4 files changed, 80 insertions(+), 14 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index d0fc43e..5f5dccc 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -162,7 +162,12 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 						     wh_dentry);
+ 			wh_dentry = NULL;
+ 
+-			err = unionfs_interpose(dentry, parent->i_sb, 0);
++			/*
++			 * Only INTERPOSE_LOOKUP can return a value other
++			 * than 0 on err.
++			 */
++			err = PTR_ERR(unionfs_interpose(dentry,
++							parent->i_sb, 0));
+ 			goto out;
+ 		}
+ 	}
+@@ -204,7 +209,12 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 			if (!IS_COPYUP_ERR(err))
+ 				break;
+ 		} else {
+-			err = unionfs_interpose(dentry, parent->i_sb, 0);
++			/*
++			 * Only INTERPOSE_LOOKUP can return a value other
++			 * than 0 on err.
++			 */
++			err = PTR_ERR(unionfs_interpose(dentry,
++							parent->i_sb, 0));
+ 			if (!err) {
+ 				fsstack_copy_attr_times(parent,
+ 							hidden_parent_dentry->
+@@ -519,7 +529,12 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 			if (!IS_COPYUP_ERR(err))
+ 				break;
+ 		} else {
+-			err = unionfs_interpose(dentry, dir->i_sb, 0);
++			/*
++			 * Only INTERPOSE_LOOKUP can return a value other
++			 * than 0 on err.
++			 */
++			err = PTR_ERR(unionfs_interpose(dentry,
++							dir->i_sb, 0));
+ 			if (!err) {
+ 				fsstack_copy_attr_times(dir,
+ 							hidden_dir_dentry->
+@@ -654,7 +669,11 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 		}
+ 		set_dbend(dentry, bindex);
+ 
+-		err = unionfs_interpose(dentry, parent->i_sb, 0);
++		/*
++		 * Only INTERPOSE_LOOKUP can return a value other than 0 on
++		 * err.
++		 */
++		err = PTR_ERR(unionfs_interpose(dentry, parent->i_sb, 0));
+ 		if (!err) {
+ 			fsstack_copy_attr_times(parent,
+ 						hidden_parent_dentry->d_inode);
+@@ -776,7 +795,11 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 			break;
+ 		}
+ 
+-		err = unionfs_interpose(dentry, dir->i_sb, 0);
++		/*
++		 * Only INTERPOSE_LOOKUP can return a value other than 0 on
++		 * err.
++		 */
++		err = PTR_ERR(unionfs_interpose(dentry, dir->i_sb, 0));
+ 		if (!err) {
+ 			fsstack_copy_attr_times(dir,
+ 						hidden_parent_dentry->d_inode);
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 253fe4a..ffdc553 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -79,6 +79,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	struct dentry *wh_hidden_dentry = NULL;
+ 	struct dentry *hidden_dir_dentry = NULL;
+ 	struct dentry *parent_dentry = NULL;
++	struct dentry *d_interposed = NULL;
+ 	int bindex, bstart, bend, bopaque;
+ 	int dentry_count = 0;	/* Number of positive dentries. */
+ 	int first_dentry_offset = -1; /* -1 is uninitialized */
+@@ -366,7 +367,16 @@ out_positive:
+ 		bend = dbend(dentry);
+ 	}
+ 
+-	err = unionfs_interpose(dentry, dentry->d_sb, lookupmode);
++	/*
++	 * Interpose can return a dentry if d_splice returned a different
++	 * dentry.
++	 */
++	d_interposed = unionfs_interpose(dentry, dentry->d_sb, lookupmode);
++	if (IS_ERR(d_interposed))
++		err = PTR_ERR(d_interposed);
++	else if (d_interposed)
++		dentry = d_interposed;
++
+ 	if (err)
+ 		goto out_drop;
+ 
+@@ -402,6 +412,8 @@ out:
+ 	dput(parent_dentry);
+ 	if (locked_child || (err && allocated_new_info))
+ 		unionfs_unlock_dentry(dentry);
++	if (!err && d_interposed)
++		return d_interposed;
+ 	return ERR_PTR(err);
+ }
+ 
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index ffcd040..f5bec5b 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -26,7 +26,8 @@
+  *
+  * @sb: unionfs's super_block
+  */
+-int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
++struct dentry *unionfs_interpose(struct dentry *dentry, struct super_block *sb,
++				 int flag)
+ {
+ 	struct inode *hidden_inode;
+ 	struct dentry *hidden_dentry;
+@@ -34,6 +35,8 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 	struct inode *inode;
+ 	int is_negative_dentry = 1;
+ 	int bindex, bstart, bend;
++	int skipped = 1;
++	struct dentry *spliced = NULL;
+ 
+ 	verify_locked(dentry);
+ 
+@@ -80,11 +83,12 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 			err = -EACCES;
+ 			goto out;
+ 		}
+-
+ 		if (atomic_read(&inode->i_count) > 1)
+ 			goto skip;
+ 	}
+ 
++fill_i_info:
++	skipped = 0;
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		hidden_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 		if (!hidden_dentry) {
+@@ -132,6 +136,8 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 	fsstack_copy_attr_all(inode, hidden_inode, unionfs_get_nlinks);
+ 	fsstack_copy_inode_size(inode, hidden_inode);
+ 
++	if (spliced)
++		goto out_spliced;
+ skip:
+ 	/* only (our) lookup wants to do a d_add */
+ 	switch (flag) {
+@@ -140,7 +146,25 @@ skip:
+ 		d_instantiate(dentry, inode);
+ 		break;
+ 	case INTERPOSE_LOOKUP:
+-		err = PTR_ERR(d_splice_alias(inode, dentry));
++		spliced = d_splice_alias(inode, dentry);
++		if (IS_ERR(spliced))
++			err = PTR_ERR(spliced);
++
++		/*
++		 * d_splice can return a dentry if it was disconnected and
++		 * had to be moved.  We must ensure that the private data of
++		 * the new dentry is correct and that the inode info was
++		 * filled properly.  Finally we must return this new dentry.
++		 */
++		else if (spliced && spliced != dentry) {
++			spliced->d_op = &unionfs_dops;
++			spliced->d_fsdata = dentry->d_fsdata;
++			dentry->d_fsdata = NULL;
++			dentry = spliced;
++			if (skipped)
++				goto fill_i_info;
++			goto out_spliced;
++		}
+ 		break;
+ 	case INTERPOSE_REVAL:
+ 		/* Do nothing. */
+@@ -149,9 +173,13 @@ skip:
+ 		printk(KERN_ERR "unionfs: invalid interpose flag passed!");
+ 		BUG();
+ 	}
++	goto out;
+ 
++out_spliced:
++	if (!err)
++		return spliced;
+ out:
+-	return err;
++	return ERR_PTR(err);
+ }
+ 
+ /* like interpose above, but for an already existing dentry */
+@@ -625,8 +653,11 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 	/* Set the generation number to one, since this is for the mount. */
+ 	atomic_set(&UNIONFS_D(sb->s_root)->generation, 1);
+ 
+-	/* call interpose to create the upper level inode */
+-	err = unionfs_interpose(sb->s_root, sb, 0);
++	/*
++	 * Call interpose to create the upper level inode.  Only
++	 * INTERPOSE_LOOKUP can return a value other than 0 on err.
++	 */
++	err = PTR_ERR(unionfs_interpose(sb->s_root, sb, 0));
+ 	unionfs_unlock_dentry(sb->s_root);
+ 	if (!err)
+ 		goto out;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index b328289..d4e004f 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -318,8 +318,8 @@ extern int __unionfs_d_revalidate_chain(struct dentry *dentry,
+ #define INTERPOSE_REVAL_NEG	3
+ #define INTERPOSE_PARTIAL	4
+ 
+-extern int unionfs_interpose(struct dentry *this_dentry,
+-			     struct super_block *sb, int flag);
++extern struct dentry *unionfs_interpose(struct dentry *this_dentry,
++					struct super_block *sb, int flag);
+ 
+ #ifdef CONFIG_UNION_FS_XATTR
+ /* Extended attribute functions. */
+-- 
+1.5.4.3
+

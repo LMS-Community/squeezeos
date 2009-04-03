@@ -1,0 +1,84 @@
+From 8aaf896c02fd139010a69b345d8b4e098f4c1935 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 21:22:26 -0500
+Subject: [PATCH] Unionfs: grab lower super_block references
+
+This prevents the lower super_block from being destroyed too early, when a
+lower file system is being unmounted with MNT_FORCE or MNT_DETACH.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/main.c  |    3 +++
+ fs/unionfs/super.c |   14 ++++++++++++++
+ fs/unionfs/union.h |    2 +-
+ 3 files changed, 18 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 23c18f7..ba3471d 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -636,6 +636,7 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 	sbend(sb) = bend = lower_root_info->bend;
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		struct dentry *d = lower_root_info->lower_paths[bindex].dentry;
++		atomic_inc(&d->d_sb->s_active);
+ 		unionfs_set_lower_super_idx(sb, bindex, d->d_sb);
+ 	}
+ 
+@@ -711,6 +712,8 @@ out_dput:
+ 			dput(d);
+ 			/* initializing: can't use unionfs_mntput here */
+ 			mntput(m);
++			/* drop refs we took earlier */
++			atomic_dec(&d->d_sb->s_active);
+ 		}
+ 		kfree(lower_root_info->lower_paths);
+ 		kfree(lower_root_info);
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 3d1afaf..9b350be 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -116,6 +116,14 @@ static void unionfs_put_super(struct super_block *sb)
+ 		}
+ 	BUG_ON(leaks != 0);
+ 
++	/* decrement lower super references */
++	for (bindex = bstart; bindex <= bend; bindex++) {
++		struct super_block *s;
++		s = unionfs_lower_super_idx(sb, bindex);
++		unionfs_set_lower_super_idx(sb, bindex, NULL);
++		atomic_dec(&s->s_active);
++	}
++
+ 	kfree(spd->data);
+ 	kfree(spd);
+ 	sb->s_fs_info = NULL;
+@@ -729,6 +737,12 @@ out_no_change:
+ 	 */
+ 	purge_sb_data(sb);
+ 
++	/* grab new lower super references; release old ones */
++	for (i = 0; i < new_branches; i++)
++		atomic_inc(&new_data[i].sb->s_active);
++	for (i = 0; i < new_branches; i++)
++		atomic_dec(&UNIONFS_SB(sb)->data[i].sb->s_active);
++
+ 	/* copy new vectors into their correct place */
+ 	tmp_data = UNIONFS_SB(sb)->data;
+ 	UNIONFS_SB(sb)->data = new_data;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 2adbea7..7306a63 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -134,7 +134,7 @@ struct unionfs_dentry_info {
+ 
+ /* These are the pointers to our various objects. */
+ struct unionfs_data {
+-	struct super_block *sb;
++	struct super_block *sb;	/* lower super_block */
+ 	atomic_t open_files;	/* number of open files on branch */
+ 	int branchperms;
+ 	int branch_id;		/* unique branch ID at re/mount time */
+-- 
+1.5.4.3
+

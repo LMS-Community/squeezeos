@@ -1,0 +1,59 @@
+From ceaa4c6bed0c8c013d2e78408e4b0a3f9f5657ce Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 16 Jul 2007 23:54:11 -0400
+Subject: [PATCH] Unionfs: branch-management bug-fix to lower mnt counts
+
+When we revalidate opened files, the files may point to a different set of
+files on the lower branches: this could happen especially if we insert a new
+leftmost branch which happens to have duplicate file names of already-open
+files in lower-priority branches.  In this case, update the mnt counts of
+the old and new branches which hold the file accordingly.  Without this fix,
+the mntcnt of one branch is going to be one too high; and another will be
+one too low.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 18ade2f..46e5008 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -334,6 +334,9 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	 */
+ 	if (!d_deleted(dentry) &&
+ 	    (sbgen > fgen || dbstart(dentry) != fbstart(file))) {
++		int orig_brid =	/* save orig branch ID */
++			UNIONFS_F(file)->saved_branch_ids[fbstart(file)];
++
+ 		/* First we throw out the existing files. */
+ 		cleanup_file(file);
+ 
+@@ -360,10 +363,23 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 			if (err)
+ 				goto out;
+ 		} else {
++			int new_brid;
+ 			/* We only open the highest priority branch. */
+ 			err = open_highest_file(file, willwrite);
+ 			if (err)
+ 				goto out;
++			new_brid = UNIONFS_F(file)->saved_branch_ids[fbstart(file)];
++			if (new_brid != orig_brid) {
++				/*
++				 * If we re-opened the file on a different
++				 * branch than the original one, then update
++				 * the mnt counts of the old and new
++				 * branches accordingly.
++				 */
++				unionfs_mntget(dentry, bstart);	/* new branch */
++				unionfs_mntput(sb->s_root, /* orig branch */
++					       branch_id_to_idx(sb, orig_brid));
++			}
+ 		}
+ 		atomic_set(&UNIONFS_F(file)->generation,
+ 			   atomic_read(&UNIONFS_I(dentry->d_inode)->
+-- 
+1.5.4.3
+

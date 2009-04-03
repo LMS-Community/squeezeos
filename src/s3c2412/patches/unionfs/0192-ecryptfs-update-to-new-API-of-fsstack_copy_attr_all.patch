@@ -1,0 +1,69 @@
+From e05c7dcf8b5affd9c9790ff55bc165ef40f7f13f Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 17 Jun 2007 22:35:25 -0400
+Subject: [PATCH] ecryptfs: update to new API of fsstack_copy_attr_all
+
+Remove obsolete third argument to fsstack_copy_attr_all which was always
+NULL for ecryptfs.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/ecryptfs/dentry.c |    2 +-
+ fs/ecryptfs/inode.c  |    6 +++---
+ fs/ecryptfs/main.c   |    2 +-
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/fs/ecryptfs/dentry.c b/fs/ecryptfs/dentry.c
+index cb20b96..a8c1686 100644
+--- a/fs/ecryptfs/dentry.c
++++ b/fs/ecryptfs/dentry.c
+@@ -62,7 +62,7 @@ static int ecryptfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ 		struct inode *lower_inode =
+ 			ecryptfs_inode_to_lower(dentry->d_inode);
+ 
+-		fsstack_copy_attr_all(dentry->d_inode, lower_inode, NULL);
++		fsstack_copy_attr_all(dentry->d_inode, lower_inode);
+ 	}
+ out:
+ 	return rc;
+diff --git a/fs/ecryptfs/inode.c b/fs/ecryptfs/inode.c
+index d0f8028..fed495d 100644
+--- a/fs/ecryptfs/inode.c
++++ b/fs/ecryptfs/inode.c
+@@ -603,9 +603,9 @@ ecryptfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 			lower_new_dir_dentry->d_inode, lower_new_dentry);
+ 	if (rc)
+ 		goto out_lock;
+-	fsstack_copy_attr_all(new_dir, lower_new_dir_dentry->d_inode, NULL);
++	fsstack_copy_attr_all(new_dir, lower_new_dir_dentry->d_inode);
+ 	if (new_dir != old_dir)
+-		fsstack_copy_attr_all(old_dir, lower_old_dir_dentry->d_inode, NULL);
++		fsstack_copy_attr_all(old_dir, lower_old_dir_dentry->d_inode);
+ out_lock:
+ 	unlock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
+ 	dput(lower_new_dentry->d_parent);
+@@ -963,7 +963,7 @@ static int ecryptfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	}
+ 	rc = notify_change(lower_dentry, ia);
+ out:
+-	fsstack_copy_attr_all(inode, lower_inode, NULL);
++	fsstack_copy_attr_all(inode, lower_inode);
+ 	return rc;
+ }
+ 
+diff --git a/fs/ecryptfs/main.c b/fs/ecryptfs/main.c
+index 606128f..5f99404 100644
+--- a/fs/ecryptfs/main.c
++++ b/fs/ecryptfs/main.c
+@@ -151,7 +151,7 @@ int ecryptfs_interpose(struct dentry *lower_dentry, struct dentry *dentry,
+ 		d_add(dentry, inode);
+ 	else
+ 		d_instantiate(dentry, inode);
+-	fsstack_copy_attr_all(inode, lower_inode, NULL);
++	fsstack_copy_attr_all(inode, lower_inode);
+ 	/* This size will be overwritten for real files w/ headers and
+ 	 * other metadata */
+ 	fsstack_copy_inode_size(inode, lower_inode);
+-- 
+1.5.4.3
+

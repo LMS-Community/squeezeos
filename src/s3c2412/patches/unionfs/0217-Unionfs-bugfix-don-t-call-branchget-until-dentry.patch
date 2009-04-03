@@ -1,0 +1,36 @@
+From 61250471f24a44f0128b12a1967feb96316ac556 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 16 Jul 2007 23:56:26 -0400
+Subject: [PATCH] Unionfs: bugfix: don't call branchget() until dentry_open succeeded
+
+If dentry_open fails, we incorrectly have incremented our branch counts
+which would prevent unionfs from being unmounted (EBUSY).
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 46e5008..42678a6 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -216,7 +216,6 @@ static int open_highest_file(struct file *file, int willwrite)
+ 
+ 	dget(lower_dentry);
+ 	unionfs_mntget(dentry, bstart);
+-	branchget(sb, bstart);
+ 	lower_file = dentry_open(lower_dentry,
+ 				 unionfs_lower_mnt_idx(dentry, bstart),
+ 				 file->f_flags);
+@@ -224,6 +223,7 @@ static int open_highest_file(struct file *file, int willwrite)
+ 		err = PTR_ERR(lower_file);
+ 		goto out;
+ 	}
++	branchget(sb, bstart);
+ 	unionfs_set_lower_file(file, lower_file);
+ 	/* Fix up the position. */
+ 	lower_file->f_pos = file->f_pos;
+-- 
+1.5.4.3
+

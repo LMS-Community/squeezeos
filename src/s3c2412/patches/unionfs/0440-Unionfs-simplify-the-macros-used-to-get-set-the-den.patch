@@ -1,0 +1,353 @@
+From fda481ef3a37dc3a07ff55104020b83dcecd04a5 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 27 Jul 2008 19:25:26 -0400
+Subject: [PATCH] Unionfs: simplify the macros used to get/set the dentry start/end branches
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    6 ++--
+ fs/unionfs/copyup.c     |   14 ++++++------
+ fs/unionfs/dentry.c     |    6 +---
+ fs/unionfs/fanout.h     |   48 +++++-----------------------------------------
+ fs/unionfs/inode.c      |    2 +-
+ fs/unionfs/lookup.c     |   18 ++++++----------
+ fs/unionfs/main.c       |    4 +-
+ fs/unionfs/rename.c     |   10 ++++----
+ fs/unionfs/subr.c       |    4 +-
+ fs/unionfs/super.c      |    2 +-
+ 10 files changed, 36 insertions(+), 78 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 631e081..6f61fb0 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -290,7 +290,7 @@ static int do_delayed_copyup(struct file *file)
+ 	}
+ 	/* for reg file, we only open it "once" */
+ 	fbend(file) = fbstart(file);
+-	set_dbend(dentry, dbstart(dentry));
++	dbend(dentry) = dbstart(dentry);
+ 	ibend(dentry->d_inode) = ibstart(dentry->d_inode);
+ 
+ out:
+@@ -823,8 +823,8 @@ static int unionfs_ioctl_queryfile(struct file *file, unsigned int cmd,
+ 		}
+ 	}
+ 	/* restore original dentry's offsets */
+-	set_dbstart(dentry, orig_bstart);
+-	set_dbend(dentry, orig_bend);
++	dbstart(dentry) = orig_bstart;
++	dbend(dentry) = orig_bend;
+ 	ibstart(dentry->d_inode) = orig_bstart;
+ 	ibend(dentry->d_inode) = orig_bend;
+ 
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 02e909c..32f8941 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -348,8 +348,8 @@ static void __clear(struct dentry *dentry, struct dentry *old_lower_dentry,
+ {
+ 	/* get rid of the lower dentry and all its traces */
+ 	unionfs_set_lower_dentry_idx(dentry, new_bindex, NULL);
+-	set_dbstart(dentry, old_bstart);
+-	set_dbend(dentry, old_bend);
++	dbstart(dentry) = old_bstart;
++	dbend(dentry) = old_bend;
+ 
+ 	dput(new_lower_dentry);
+ 	dput(old_lower_dentry);
+@@ -627,8 +627,8 @@ static void __cleanup_dentry(struct dentry *dentry, int bindex,
+ 		new_bstart = bindex;
+ 	if (new_bend < 0)
+ 		new_bend = bindex;
+-	set_dbstart(dentry, new_bstart);
+-	set_dbend(dentry, new_bend);
++	dbstart(dentry) = new_bstart;
++	dbend(dentry) = new_bend;
+ 
+ }
+ 
+@@ -651,9 +651,9 @@ static void __set_dentry(struct dentry *upper, struct dentry *lower,
+ {
+ 	unionfs_set_lower_dentry_idx(upper, bindex, lower);
+ 	if (likely(dbstart(upper) > bindex))
+-		set_dbstart(upper, bindex);
++		dbstart(upper) = bindex;
+ 	if (likely(dbend(upper) < bindex))
+-		set_dbend(upper, bindex);
++		dbend(upper) = bindex;
+ }
+ 
+ /*
+@@ -877,6 +877,6 @@ void unionfs_postcopyup_release(struct dentry *dentry)
+ 		}
+ 	}
+ 	bindex = dbstart(dentry);
+-	set_dbend(dentry, bindex);
++	dbend(dentry) = bindex;
+ 	ibend(dentry->d_inode) = ibstart(dentry->d_inode) = bindex;
+ }
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index cb77c07..fabf5a6 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -106,8 +106,7 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		bstart = dbstart(dentry);
+ 		bend = dbend(dentry);
+ 		__dput_lowers(dentry, bstart, bend);
+-		set_dbstart(dentry, -1);
+-		set_dbend(dentry, -1);
++		dbstart(dentry) = dbend(dentry) = -1;
+ 
+ 		interpose_flag = INTERPOSE_REVAL_NEG;
+ 		if (positive) {
+@@ -534,8 +533,7 @@ static void unionfs_d_iput(struct dentry *dentry, struct inode *inode)
+ 			unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 		}
+ 	}
+-	set_dbstart(dentry, -1);
+-	set_dbend(dentry, -1);
++	dbstart(dentry) = dbend(dentry) = -1;
+ 
+ drop_lower_inodes:
+ 	rc = atomic_read(&inode->i_count);
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 29d42fb..69a8e8f 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -33,6 +33,12 @@ static inline struct unionfs_inode_info *UNIONFS_I(const struct inode *inode)
+ #define ibstart(ino) (UNIONFS_I(ino)->bstart)
+ #define ibend(ino) (UNIONFS_I(ino)->bend)
+ 
++/* Dentry to private data */
++#define UNIONFS_D(dent) ((struct unionfs_dentry_info *)(dent)->d_fsdata)
++#define dbstart(dent) (UNIONFS_D(dent)->bstart)
++#define dbend(dent) (UNIONFS_D(dent)->bend)
++#define dbopaque(dent) (UNIONFS_D(dent)->bopaque)
++
+ /* Superblock to private data */
+ #define UNIONFS_SB(super) ((struct unionfs_sb_info *)(super)->s_fs_info)
+ #define sbstart(sb) 0
+@@ -199,48 +205,6 @@ static inline void branchput(struct super_block *sb, int index)
+ }
+ 
+ /* Dentry macros */
+-static inline struct unionfs_dentry_info *UNIONFS_D(const struct dentry *dent)
+-{
+-	BUG_ON(!dent);
+-	return dent->d_fsdata;
+-}
+-
+-static inline int dbstart(const struct dentry *dent)
+-{
+-	BUG_ON(!dent);
+-	return UNIONFS_D(dent)->bstart;
+-}
+-
+-static inline void set_dbstart(struct dentry *dent, int val)
+-{
+-	BUG_ON(!dent);
+-	UNIONFS_D(dent)->bstart = val;
+-}
+-
+-static inline int dbend(const struct dentry *dent)
+-{
+-	BUG_ON(!dent);
+-	return UNIONFS_D(dent)->bend;
+-}
+-
+-static inline void set_dbend(struct dentry *dent, int val)
+-{
+-	BUG_ON(!dent);
+-	UNIONFS_D(dent)->bend = val;
+-}
+-
+-static inline int dbopaque(const struct dentry *dent)
+-{
+-	BUG_ON(!dent);
+-	return UNIONFS_D(dent)->bopaque;
+-}
+-
+-static inline void set_dbopaque(struct dentry *dent, int val)
+-{
+-	BUG_ON(!dent);
+-	UNIONFS_D(dent)->bopaque = val;
+-}
+-
+ static inline void unionfs_set_lower_dentry_idx(struct dentry *dent, int index,
+ 						struct dentry *val)
+ {
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 2f48b60..512d7c0 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -636,7 +636,7 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 				unionfs_set_lower_dentry_idx(dentry, i, NULL);
+ 			}
+ 		}
+-		set_dbend(dentry, bindex);
++		dbend(dentry) = bindex;
+ 
+ 		/*
+ 		 * Only INTERPOSE_LOOKUP can return a value other than 0 on
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 5abeb1e..556d361 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -206,8 +206,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 		if (wh_lower_dentry->d_inode) {
+ 			/* We found a whiteout so let's give up. */
+ 			if (S_ISREG(wh_lower_dentry->d_inode->i_mode)) {
+-				set_dbend(dentry, bindex);
+-				set_dbopaque(dentry, bindex);
++				dbend(dentry) = dbopaque(dentry) = bindex;
+ 				dput(wh_lower_dentry);
+ 				break;
+ 			}
+@@ -281,7 +280,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 
+ 		/* store underlying dentry */
+ 		if (dbstart(dentry) == -1)
+-			set_dbstart(dentry, bindex);
++			dbstart(dentry) = bindex;
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, lower_dentry);
+ 		/*
+ 		 * FIXME: the following line needs to get fixed to allow
+@@ -290,7 +289,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 		unionfs_set_lower_mnt_idx(dentry, bindex,
+ 					  unionfs_mntget(parent_dentry,
+ 							 bindex));
+-		set_dbend(dentry, bindex);
++		dbend(dentry) = bindex;
+ 
+ 		/* update parent directory's atime with the bindex */
+ 		fsstack_copy_attr_atime(parent_dentry->d_inode,
+@@ -311,8 +310,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 			err = opaque;
+ 			goto out_free;
+ 		} else if (opaque) {
+-			set_dbend(dentry, bindex);
+-			set_dbopaque(dentry, bindex);
++			dbend(dentry) = dbopaque(dentry) = bindex;
+ 			break;
+ 		}
+ 	}
+@@ -363,8 +361,7 @@ out_negative:
+ 				     first_lower_dentry);
+ 	unionfs_set_lower_mnt_idx(dentry, first_dentry_offset,
+ 				  first_lower_mnt);
+-	set_dbstart(dentry, first_dentry_offset);
+-	set_dbend(dentry, first_dentry_offset);
++	dbstart(dentry) = dbend(dentry) = first_dentry_offset;
+ 
+ 	if (lookupmode == INTERPOSE_REVAL_NEG)
+ 		BUG_ON(dentry->d_inode != NULL);
+@@ -431,8 +428,7 @@ out_free:
+ 	}
+ 	kfree(UNIONFS_D(dentry)->lower_paths);
+ 	UNIONFS_D(dentry)->lower_paths = NULL;
+-	set_dbstart(dentry, -1);
+-	set_dbend(dentry, -1);
++	dbstart(dentry) = dbend(dentry) = -1;
+ 
+ out:
+ 	if (!err && UNIONFS_D(dentry)) {
+@@ -592,7 +588,7 @@ void update_bstart(struct dentry *dentry)
+ 		if (!lower_dentry)
+ 			continue;
+ 		if (lower_dentry->d_inode) {
+-			set_dbstart(dentry, bindex);
++			dbstart(dentry) = bindex;
+ 			break;
+ 		}
+ 		dput(lower_dentry);
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 42dc8a8..96ca46d 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -676,8 +676,8 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 		unionfs_set_lower_dentry_idx(sb->s_root, bindex, d);
+ 		unionfs_set_lower_mnt_idx(sb->s_root, bindex, m);
+ 	}
+-	set_dbstart(sb->s_root, bstart);
+-	set_dbend(sb->s_root, bend);
++	dbstart(sb->s_root) = bstart;
++	dbend(sb->s_root) = bend;
+ 
+ 	/* Set the generation number to one, since this is for the mount. */
+ 	atomic_set(&UNIONFS_D(sb->s_root)->generation, 1);
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 173849f..3389dcf 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -156,9 +156,9 @@ out:
+ 	if (!err) {
+ 		/* Fixup the new_dentry. */
+ 		if (bindex < dbstart(new_dentry))
+-			set_dbstart(new_dentry, bindex);
++			dbstart(new_dentry) = bindex;
+ 		else if (bindex > dbend(new_dentry))
+-			set_dbend(new_dentry, bindex);
++			dbend(new_dentry) = bindex;
+ 	}
+ 
+ 	kfree(wh_name);
+@@ -294,7 +294,7 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 				       NULL);
+ 		unlock_dir(lower_parent);
+ 		if (!local_err) {
+-			set_dbopaque(old_dentry, bwh_old);
++			dbopaque(old_dentry) = bwh_old;
+ 		} else {
+ 			/*
+ 			 * we can't fix anything now, so we cop-out and use
+@@ -421,9 +421,9 @@ static int may_rename_dir(struct dentry *dentry)
+ 	if (dbend(dentry) == bstart || dbopaque(dentry) == bstart)
+ 		return 0;
+ 
+-	set_dbstart(dentry, bstart + 1);
++	dbstart(dentry) = bstart + 1;
+ 	err = check_empty(dentry, NULL);
+-	set_dbstart(dentry, bstart);
++	dbstart(dentry) = bstart;
+ 	if (err == -ENOTEMPTY)
+ 		err = -EXDEV;
+ 	return err;
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index d284aa5..f9508f2 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -102,7 +102,7 @@ int create_whiteout(struct dentry *dentry, int start)
+ 
+ 	/* set dbopaque so that lookup will not proceed after this branch */
+ 	if (!err)
+-		set_dbopaque(dentry, bindex);
++		dbopaque(dentry) = bindex;
+ 
+ out:
+ 	kfree(name);
+@@ -186,7 +186,7 @@ int make_dir_opaque(struct dentry *dentry, int bindex)
+ 	if (!diropq->d_inode)
+ 		err = vfs_create(lower_dir, diropq, S_IRUGO, NULL);
+ 	if (!err)
+-		set_dbopaque(dentry, bindex);
++		dbopaque(dentry) = bindex;
+ 
+ 	dput(diropq);
+ 
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 8dbaa47..1727400 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -761,7 +761,7 @@ out_no_change:
+ 	/* update our unionfs_sb_info and root dentry index of last branch */
+ 	i = sbmax(sb);		/* save no. of branches to release at end */
+ 	sbend(sb) = new_branches - 1;
+-	set_dbend(sb->s_root, new_branches - 1);
++	dbend(sb->s_root) = new_branches - 1;
+ 	old_ibstart = ibstart(sb->s_root->d_inode);
+ 	old_ibend = ibend(sb->s_root->d_inode);
+ 	ibend(sb->s_root->d_inode) = new_branches - 1;
+-- 
+1.5.4.3
+

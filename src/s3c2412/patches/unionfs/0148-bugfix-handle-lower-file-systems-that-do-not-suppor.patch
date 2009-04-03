@@ -1,0 +1,59 @@
+From 86a129326ea81a35403237a93354bc508470569a Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 23 May 2007 21:26:01 -0400
+Subject: [PATCH] bugfix: handle lower file systems that do not support writeable mappings
+
+File systems such as jffs2 (tested in 2.6.22-rc22) do not have a
+->writepage.  Make sure unionfs detects that conditions and returns EINVAL
+when a user tries to mmap such a file with VM_WRITE.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c |   24 +++++++++++++++++++++---
+ 1 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 59b1c91..24a14b3 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -97,6 +97,7 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ {
+ 	int err = 0;
+ 	int willwrite;
++	struct file *lower_file;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
+ 	unionfs_check_file(file);
+@@ -108,9 +109,26 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 	if ((err = unionfs_file_revalidate(file, willwrite)))
+ 		goto out;
+ 
+-	err = generic_file_mmap(file, vma);
+-	if (err)
+-		printk("unionfs: generic_file_mmap failed %d\n", err);
++	/*
++	 * File systems which do not implement ->writepage may use
++	 * generic_file_readonly_mmap as their ->mmap op.  If you call
++	 * generic_file_readonly_mmap with VM_WRITE, you'd get an -EINVAL.
++	 * But we cannot call the lower ->mmap op, so we can't tell that
++	 * writeable mappings won't work.  Therefore, our only choice is to
++	 * check if the lower file system supports the ->writepage, and if
++	 * not, return EINVAL (the same error that
++	 * generic_file_readonly_mmap returns in that case).
++	 */
++	lower_file = unionfs_lower_file(file);
++	if (willwrite && !lower_file->f_mapping->a_ops->writepage) {
++		err = -EINVAL;
++		printk("unionfs: branch %d file system does not support "
++		       "writeable mmap\n", fbstart(file));
++	} else {
++		err = generic_file_mmap(file, vma);
++		if (err)
++			printk("unionfs: generic_file_mmap failed %d\n", err);
++	}
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+-- 
+1.5.4.3
+

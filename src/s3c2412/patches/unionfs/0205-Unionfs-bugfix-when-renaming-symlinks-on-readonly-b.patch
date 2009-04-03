@@ -1,0 +1,36 @@
+From 338c822c97ca53652d30a23ea71879a285bc5ed2 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 7 Jul 2007 21:31:28 -0400
+Subject: [PATCH] Unionfs: bugfix when renaming symlinks on readonly branches
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 64bb5ef..6ae2e56 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -385,7 +385,7 @@ int copyup_dentry(struct inode *dir, struct dentry *dentry, int bstart,
+ 			(char __user *)symbuf,
+ 			PATH_MAX);
+ 		set_fs(oldfs);
+-		if (err) {
++		if (err < 0) {
+ 			__clear(dentry, old_lower_dentry,
+ 				old_bstart, old_bend,
+ 				new_lower_dentry, new_bindex);
+@@ -466,7 +466,8 @@ out_free:
+ 	 * functions we call above which operate on regular files.
+ 	 */
+ 	if (old_lower_dentry && old_lower_dentry->d_inode &&
+-	    S_ISDIR(old_lower_dentry->d_inode->i_mode))
++	    (S_ISDIR(old_lower_dentry->d_inode->i_mode) ||
++	     S_ISLNK(old_lower_dentry->d_inode->i_mode)))
+ 		dput(old_lower_dentry);
+ 	kfree(symbuf);
+ 
+-- 
+1.5.4.3
+

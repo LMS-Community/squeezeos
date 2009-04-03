@@ -1,0 +1,60 @@
+From a2d61031ed8d42b3be603875981d3e1e61465d86 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 23 Mar 2008 02:25:21 -0400
+Subject: [PATCH] Unionfs: document reasons for opaque directories
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ Documentation/filesystems/unionfs/concepts.txt |   36 ++++++++++++++++++++++++
+ 1 files changed, 36 insertions(+), 0 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/concepts.txt b/Documentation/filesystems/unionfs/concepts.txt
+index 0bc1a19..b853788 100644
+--- a/Documentation/filesystems/unionfs/concepts.txt
++++ b/Documentation/filesystems/unionfs/concepts.txt
+@@ -52,6 +52,42 @@ Later, when Unionfs traverses branches (due to lookup or readdir), it
+ eliminate 'foo' from the namespace (as well as the whiteout itself.)
+ 
+ 
++Opaque Directories:
++===================
++
++Assume we have a unionfs mount comprising of two branches.  Branch 0 is
++empty; branch 1 has the directory /a and file /a/f.  Let's say we mount a
++union of branch 0 as read-write and branch 1 as read-only.  Now, let's say
++we try to perform the following operation in the union:
++
++	rm -fr a
++
++Because branch 1 is not writable, we cannot physically remove the file /a/f
++or the directory /a.  So instead, we will create a whiteout in branch 0
++named /.wh.a, masking out the name "a" from branch 1.  Next, let's say we
++try to create a directory named "a" as follows:
++
++	mkdir a
++
++Because we have a whiteout for "a" already, Unionfs behaves as if "a"
++doesn't exist, and thus will delete the whiteout and replace it with an
++actual directory named "a".
++
++The problem now is that if you try to "ls" in the union, Unionfs will
++perform is normal directory name unification, for *all* directories named
++"a" in all branches.  This will cause the file /a/f from branch 1 to
++re-appear in the union's namespace, which violates Unix semantics.
++
++To avoid this problem, we have a different form of whiteouts for
++directories, called "opaque directories" (same as BSD Union Mount does).
++Whenever we replace a whiteout with a directory, that directory is marked as
++opaque.  In Unionfs 2.x, it means that we create a file named
++/a/.wh.__dir_opaque in branch 0, after having created directory /a there.
++When unionfs notices that a directory is opaque, it stops all namespace
++operations (including merging readdir contents) at that opaque directory.
++This prevents re-exposing names from masked out directories.
++
++
+ Duplicate Elimination:
+ ======================
+ 
+-- 
+1.5.4.3
+

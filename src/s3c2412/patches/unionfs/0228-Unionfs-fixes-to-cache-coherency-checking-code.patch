@@ -1,0 +1,40 @@
+From 4263b47bc1a93da210c159cf39dc1da2bfc6f391 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 31 Jul 2007 03:33:24 -0400
+Subject: [PATCH] Unionfs: fixes to cache-coherency checking code
+
+Under memory pressure, in_newer_lower could be called on uninitialized
+dentries or inodes.  So return 0 safely in that case (rather than oops).
+This is OK because is_newer_lower will be called again on the same object(s)
+and cache-coherency will be validated and maintained then.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 11d898d..f3c1258 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -189,10 +189,15 @@ out:
+ int is_newer_lower(const struct dentry *dentry)
+ {
+ 	int bindex;
+-	struct inode *inode = dentry->d_inode;
++	struct inode *inode;
+ 	struct inode *lower_inode;
+ 
+-	if (!inode)
++	/* ignore if we're called on semi-initialized dentries/inodes */
++	if (!dentry || !UNIONFS_D(dentry))
++		return 0;
++	inode = dentry->d_inode;
++	if (!inode || !UNIONFS_I(inode) ||
++	    ibstart(inode) < 0 || ibend(inode) < 0)
+ 		return 0;
+ 
+ 	for (bindex = ibstart(inode); bindex <= ibend(inode); bindex++) {
+-- 
+1.5.4.3
+

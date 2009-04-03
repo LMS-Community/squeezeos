@@ -1,0 +1,41 @@
+From 13ee6c418f722675834ce708a009acb914ee2430 Mon Sep 17 00:00:00 2001
+From: Hugh Dickins <hugh@veritas.com>
+Date: Sun, 25 Nov 2007 18:27:27 -0500
+Subject: [PATCH] Unionfs: minor cleanup in writepage
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    3 +--
+ 1 files changed, 1 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 4d68947..9b95c39 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -84,6 +84,7 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	copy_highpage(lower_page, page);
+ 	flush_dcache_page(lower_page);
+ 	SetPageUptodate(lower_page);
++	set_page_dirty(lower_page);
+ 
+ 	/*
+ 	 * Call lower writepage (expects locked page).  However, if we are
+@@ -94,7 +95,6 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	 * success.
+ 	 */
+ 	if (wbc->for_reclaim) {
+-		set_page_dirty(lower_page);
+ 		unlock_page(lower_page);
+ 		goto out_release;
+ 	}
+@@ -103,7 +103,6 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 		wbc->for_writepages = 0;
+ 
+ 	BUG_ON(!lower_mapping->a_ops->writepage);
+-	set_page_dirty(lower_page);
+ 	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
+ 	err = lower_mapping->a_ops->writepage(lower_page, wbc);
+ 	wbc->for_writepages = saved_for_writepages; /* restore value */
+-- 
+1.5.4.3
+

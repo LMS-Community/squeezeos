@@ -1,0 +1,36 @@
+From 4531f1efdbcb9d5dac316f69add13134361a33bd Mon Sep 17 00:00:00 2001
+From: Yiannis Pericleous <yiannos@agora2.fsl.cs.sunysb.edu>
+Date: Sat, 19 May 2007 15:23:22 -0400
+Subject: [PATCH] mmap: sync_page bug, call sync_page on lower page, not unionfs page
+
+---
+ fs/unionfs/mmap.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 7d1e2f7..93aba3a 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -269,7 +269,7 @@ void unionfs_sync_page(struct page *page)
+ 	struct inode *inode;
+ 	struct inode *lower_inode;
+ 	struct page *lower_page;
+-	struct address_space *mapping = page->mapping;
++	struct address_space *mapping;
+ 
+ 	inode = page->mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+@@ -280,8 +280,9 @@ void unionfs_sync_page(struct page *page)
+ 		goto out;
+ 
+ 	/* do the actual sync */
++	mapping = lower_page->mapping;
+ 	if (mapping && mapping->a_ops && mapping->a_ops->sync_page)
+-		mapping->a_ops->sync_page(page);
++		mapping->a_ops->sync_page(lower_page);
+ 
+ 	unlock_page(lower_page);	/* b/c grab_cache_page locked it */
+ 	page_cache_release(lower_page);	/* b/c grab_cache_page increased refcnt */
+-- 
+1.5.4.3
+

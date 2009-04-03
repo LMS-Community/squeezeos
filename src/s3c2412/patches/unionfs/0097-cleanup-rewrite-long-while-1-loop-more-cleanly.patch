@@ -1,0 +1,170 @@
+From 53d1c93c25b05aadfd55c395808a9ad86ea26d5c Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 28 Mar 2007 12:42:37 -0400
+Subject: [PATCH] cleanup: rewrite long while(1) loop more cleanly
+
+---
+ fs/unionfs/copyup.c |  136 ++++++++++++++++++++++++---------------------------
+ 1 files changed, 64 insertions(+), 72 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 747e657..56e1371 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -700,89 +700,81 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 	sb = dentry->d_sb;
+ 
+ 	/*
+-	 * This is basically while(child_dentry != dentry).  This loop is
+-	 * horrible to follow and should be replaced with cleaner code.
++	 * This code goes between the begin/end labels and basically
++	 * emulates a while(child_dentry != dentry), only cleaner and
++	 * shorter than what would be a much longer while loop.
+ 	 */
+-	while (1) {
+-		/* get hidden parent dir in the current branch */
+-		hidden_parent_dentry =
+-			unionfs_lower_dentry_idx(parent_dentry, bindex);
+-		unionfs_unlock_dentry(parent_dentry);
++begin:
++	/* get hidden parent dir in the current branch */
++	hidden_parent_dentry = unionfs_lower_dentry_idx(parent_dentry, bindex);
++	unionfs_unlock_dentry(parent_dentry);
++
++	/* init the values to lookup */
++	childname = child_dentry->d_name.name;
++	childnamelen = child_dentry->d_name.len;
++
++	if (child_dentry != dentry) {
++		/* lookup child in the underlying file system */
++		hidden_dentry = lookup_one_len(childname, hidden_parent_dentry,
++					       childnamelen);
++		if (IS_ERR(hidden_dentry))
++			goto out;
++	} else {
++		/*
++		 * Is the name a whiteout of the child name ?  lookup the
++		 * whiteout child in the underlying file system
++		 */
++		hidden_dentry = lookup_one_len(name, hidden_parent_dentry,
++					       strlen(name));
++		if (IS_ERR(hidden_dentry))
++			goto out;
+ 
+-		/* init the values to lookup */
+-		childname = child_dentry->d_name.name;
+-		childnamelen = child_dentry->d_name.len;
++		/* Replace the current dentry (if any) with the new one */
++		dput(unionfs_lower_dentry_idx(dentry, bindex));
++		unionfs_set_lower_dentry_idx(dentry, bindex,
++					     hidden_dentry);
+ 
+-		if (child_dentry != dentry) {
+-			/* lookup child in the underlying file system */
+-			hidden_dentry =
+-				lookup_one_len(childname, hidden_parent_dentry,
+-					       childnamelen);
+-			if (IS_ERR(hidden_dentry))
+-				goto out;
+-		} else {
++		__cleanup_dentry(dentry, bindex, old_bstart, old_bend);
++		goto out;
++	}
+ 
+-			/*
+-			 * is the name a whiteout of the child name ?
+-			 * lookup the whiteout child in the underlying file
+-			 * system
+-			 */
+-			hidden_dentry =
+-				lookup_one_len(name, hidden_parent_dentry,
+-					       strlen(name));
+-			if (IS_ERR(hidden_dentry))
+-				goto out;
++	if (hidden_dentry->d_inode) {
++		/*
++		 * since this already exists we dput to avoid
++		 * multiple references on the same dentry
++		 */
++		dput(hidden_dentry);
++	} else {
++		struct sioq_args args;
+ 
+-			/*
+-			 * Replace the current dentry (if any) with the new
+-			 * one.
+-			 */
+-			dput(unionfs_lower_dentry_idx(dentry, bindex));
+-			unionfs_set_lower_dentry_idx(dentry, bindex,
+-						     hidden_dentry);
++		/* it's a negative dentry, create a new dir */
++		hidden_parent_dentry = lock_parent(hidden_dentry);
+ 
+-			__cleanup_dentry(dentry, bindex, old_bstart, old_bend);
+-			break;
+-		}
++		args.mkdir.parent = hidden_parent_dentry->d_inode;
++		args.mkdir.dentry = hidden_dentry;
++		args.mkdir.mode = child_dentry->d_inode->i_mode;
+ 
+-		if (hidden_dentry->d_inode) {
+-			/*
+-			 * since this already exists we dput to avoid
+-			 * multiple references on the same dentry
+-			 */
+-			dput(hidden_dentry);
+-		} else {
+-			struct sioq_args args;
+-
+-			/* its a negative dentry, create a new dir */
+-			hidden_parent_dentry = lock_parent(hidden_dentry);
+-
+-			args.mkdir.parent = hidden_parent_dentry->d_inode;
+-			args.mkdir.dentry = hidden_dentry;
+-			args.mkdir.mode = child_dentry->d_inode->i_mode;
+-
+-			run_sioq(__unionfs_mkdir, &args);
+-			err = args.err;
+-
+-			if (!err)
+-				err = copyup_permissions(dir->i_sb,
+-							 child_dentry,
+-							 hidden_dentry);
+-			unlock_dir(hidden_parent_dentry);
+-			if (err) {
+-				dput(hidden_dentry);
+-				hidden_dentry = ERR_PTR(err);
+-				goto out;
+-			}
++		run_sioq(__unionfs_mkdir, &args);
++		err = args.err;
+ 
++		if (!err)
++			err = copyup_permissions(dir->i_sb, child_dentry,
++						 hidden_dentry);
++		unlock_dir(hidden_parent_dentry);
++		if (err) {
++			dput(hidden_dentry);
++			hidden_dentry = ERR_PTR(err);
++			goto out;
+ 		}
+ 
+-		__set_inode(child_dentry, hidden_dentry, bindex);
+-		__set_dentry(child_dentry, hidden_dentry, bindex);
+-
+-		parent_dentry = child_dentry;
+-		child_dentry = path[--count];
+ 	}
++
++	__set_inode(child_dentry, hidden_dentry, bindex);
++	__set_dentry(child_dentry, hidden_dentry, bindex);
++
++	parent_dentry = child_dentry;
++	child_dentry = path[--count];
++	goto begin;
+ out:
+ 	kfree(path);
+ 	return hidden_dentry;
+-- 
+1.5.4.3
+

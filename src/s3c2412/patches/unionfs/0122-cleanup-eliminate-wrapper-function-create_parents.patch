@@ -1,0 +1,187 @@
+From cdfc1280dc59410d706df9b37d85ea14370985f7 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 03:41:05 -0400
+Subject: [PATCH] cleanup: eliminate wrapper function create_parents
+
+Eliminate simple wrapper function create_parents which trivially called
+create_parents_named with one more arg derived from the caller.  Instead,
+remove the wrapper, rename create_parents_named to create_parents, and make
+everyone call create_parents directly.  This clarifies the code a bit more
+and saves a bit on stack space.
+---
+ fs/unionfs/copyup.c |   24 +++---------------------
+ fs/unionfs/inode.c  |   22 ++++++++++++++++------
+ fs/unionfs/rename.c |    3 ++-
+ fs/unionfs/subr.c   |    4 +++-
+ fs/unionfs/union.h  |    2 +-
+ 5 files changed, 25 insertions(+), 30 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index fcdc124..c7d0f0d 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -23,11 +23,6 @@
+  * Documentation/filesystems/unionfs/concepts.txt
+  */
+ 
+-/* forward definitions */
+-static struct dentry *create_parents_named(struct inode *dir,
+-					   struct dentry *dentry,
+-					   const char *name, int bindex);
+-
+ #ifdef CONFIG_UNION_FS_XATTR
+ /* copyup all extended attrs for a given dentry */
+ static int copyup_xattrs(struct dentry *old_hidden_dentry,
+@@ -364,8 +359,7 @@ int copyup_dentry(struct inode *dir, struct dentry *dentry, int bstart,
+ 		goto out;
+ 
+ 	/* Create the directory structure above this dentry. */
+-	new_hidden_dentry =
+-		create_parents_named(dir, dentry, name, new_bindex);
++	new_hidden_dentry = create_parents(dir, dentry, name, new_bindex);
+ 	if (IS_ERR(new_hidden_dentry)) {
+ 		err = PTR_ERR(new_hidden_dentry);
+ 		goto out;
+@@ -547,17 +541,6 @@ int copyup_file(struct inode *dir, struct file *file, int bstart,
+ 	return err;
+ }
+ 
+-/*
+- * This function replicates the directory structure up-to given dentry in the
+- * bindex branch. Can create directory structure recursively to the right
+- * also.
+- */
+-struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
+-			      int bindex)
+-{
+-	return create_parents_named(dir, dentry, dentry->d_name.name, bindex);
+-}
+-
+ /* purge a dentry's lower-branch states (dput/mntput, etc.) */
+ static void __cleanup_dentry(struct dentry *dentry, int bindex,
+ 			     int old_bstart, int old_bend)
+@@ -637,9 +620,8 @@ static void __set_dentry(struct dentry *upper, struct dentry *lower,
+  * This function replicates the directory structure up-to given dentry
+  * in the bindex branch.
+  */
+-static struct dentry *create_parents_named(struct inode *dir,
+-					   struct dentry *dentry,
+-					   const char *name, int bindex)
++struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
++			      const char *name, int bindex)
+ {
+ 	int err;
+ 	struct dentry *child_dentry;
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 8a41999..d0fc43e 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -177,7 +177,9 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 			 * because lookup passed as a negative unionfs dentry
+ 			 * pointing to a lone negative underlying dentry.
+ 			 */
+-			hidden_dentry = create_parents(parent, dentry, bindex);
++			hidden_dentry = create_parents(parent, dentry,
++						       dentry->d_name.name,
++						       bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				if (IS_ERR(hidden_dentry))
+ 					err = PTR_ERR(hidden_dentry);
+@@ -318,8 +320,9 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	}
+ 
+ 	if (dbstart(old_dentry) != dbstart(new_dentry)) {
+-		hidden_new_dentry =
+-			create_parents(dir, new_dentry, dbstart(old_dentry));
++		hidden_new_dentry = create_parents(dir, new_dentry,
++						   new_dentry->d_name.name,
++						   dbstart(old_dentry));
+ 		err = PTR_ERR(hidden_new_dentry);
+ 		if (IS_COPYUP_ERR(err))
+ 			goto docopyup;
+@@ -350,6 +353,7 @@ docopyup:
+ 			if (!err) {
+ 				hidden_new_dentry =
+ 					create_parents(dir, new_dentry,
++						       new_dentry->d_name.name,
+ 						       bindex);
+ 				hidden_old_dentry =
+ 					unionfs_lower_dentry(old_dentry);
+@@ -483,7 +487,9 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 			 * unionfs dentry pointing to a lone negative
+ 			 * underlying dentry
+ 			 */
+-			hidden_dentry = create_parents(dir, dentry, bindex);
++			hidden_dentry = create_parents(dir, dentry,
++						       dentry->d_name.name,
++						       bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				if (IS_ERR(hidden_dentry))
+ 					err = PTR_ERR(hidden_dentry);
+@@ -614,7 +620,9 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 
+ 		hidden_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 		if (!hidden_dentry) {
+-			hidden_dentry = create_parents(parent, dentry, bindex);
++			hidden_dentry = create_parents(parent, dentry,
++						       dentry->d_name.name,
++						       bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				printk(KERN_DEBUG "unionfs: hidden dentry "
+ 				       " NULL for bindex = %d\n", bindex);
+@@ -743,7 +751,9 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 
+ 		hidden_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 		if (!hidden_dentry) {
+-			hidden_dentry = create_parents(dir, dentry, bindex);
++			hidden_dentry = create_parents(dir, dentry,
++						       dentry->d_name.name,
++						       bindex);
+ 			if (IS_ERR(hidden_dentry)) {
+ 				printk(KERN_DEBUG "unionfs: failed to create "
+ 				       "parents on %d, err = %ld\n",
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index d4963e4..38fd7ff 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -37,7 +37,8 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	if (!hidden_new_dentry) {
+ 		hidden_new_dentry =
+ 			create_parents(new_dentry->d_parent->d_inode,
+-				       new_dentry, bindex);
++				       new_dentry, new_dentry->d_name.name,
++				       bindex);
+ 		if (IS_ERR(hidden_new_dentry)) {
+ 			printk(KERN_DEBUG "unionfs: error creating directory "
+ 			       "tree for rename, bindex = %d, err = %ld\n",
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index d5689f5..3a23ec0 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -56,7 +56,9 @@ int create_whiteout(struct dentry *dentry, int start)
+ 			 * this dentry.
+ 			 */
+ 			hidden_dentry = create_parents(dentry->d_inode,
+-						       dentry, bindex);
++						       dentry,
++						       dentry->d_name.name,
++						       bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				printk(KERN_DEBUG "unionfs: create_parents "
+ 				       "failed for bindex = %d\n", bindex);
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 7c54ef7..b328289 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -242,7 +242,7 @@ extern void update_bstart(struct dentry *dentry);
+ 
+ /* replicates the directory structure up to given dentry in given branch */
+ extern struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
+-				     int bindex);
++				     const char *name, int bindex);
+ extern int make_dir_opaque(struct dentry *dir, int bindex);
+ 
+ /* partial lookup */
+-- 
+1.5.4.3
+

@@ -1,0 +1,40 @@
+From 020a403c980668302127f6a4b5af0108b65accb4 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 28 May 2007 19:45:45 -0400
+Subject: [PATCH] Revert "invariants: don't complain about directories with some NULL lower objects"
+
+This reverts commit 9d8ee83d478be30faf351af7628066ec6658efb5.
+---
+ fs/unionfs/union.h |   16 +++-------------
+ 1 files changed, 3 insertions(+), 13 deletions(-)
+
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 753eb2a..bb8d2b8 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -510,19 +510,9 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 			return;
+ 		if (!mnt && bindex >= 0) {
+ #ifdef UNIONFS_DEBUG
+-			/*
+-			 * Directories can have NULL lower objects in
+-			 * between start/end, but NOT if at the start/end
+-			 * range.  We cannot verify that this dentry is a
+-			 * type=DIR, because it may already be a negative
+-			 * dentry.  But if dbstart is greater than dbend, we
+-			 * know that this couldn't have been a regular file:
+-			 * it had to have been a directory.
+-			 */
+-			if (!(bindex > dbstart(dentry) && bindex < dbend(dentry)))
+-				printk(KERN_WARNING
+-				       "unionfs_mntput: mnt=%p bindex=%d (%s:%d)\n",
+-				       mnt, bindex, fxn, line);
++			printk(KERN_DEBUG
++			       "unionfs_mntput: mnt=%p bindex=%d\n",
++			       mnt, bindex);
+ #endif /* UNIONFS_DEBUG */
+ 			return;
+ 		}
+-- 
+1.5.4.3
+

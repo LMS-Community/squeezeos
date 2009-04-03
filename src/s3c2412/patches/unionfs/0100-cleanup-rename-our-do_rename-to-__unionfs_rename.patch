@@ -1,0 +1,74 @@
+From a84c9d3f811161fa071b8d6e755fdac38a9af497 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Sun, 15 Apr 2007 17:43:53 -0400
+Subject: [PATCH] cleanup: rename our "do_rename" to __unionfs_rename.
+
+To avoid confusion with the VFS-named function do_rename, and to help ctags,
+rename our utility (static) function "do_rename" to "__unionfs_rename".
+---
+ fs/unionfs/rename.c |   21 +++++++++++----------
+ 1 files changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 0e1e71a..edc5a5c 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -18,9 +18,9 @@
+ 
+ #include "union.h"
+ 
+-static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
+-		     struct inode *new_dir, struct dentry *new_dentry,
+-		     int bindex, struct dentry **wh_old)
++static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
++			    struct inode *new_dir, struct dentry *new_dentry,
++			    int bindex, struct dentry **wh_old)
+ {
+ 	int err = 0;
+ 	struct dentry *hidden_old_dentry;
+@@ -144,7 +144,7 @@ out:
+ /*
+  * Main rename code.  This is sufficienly complex, that it's documented in
+  * Docmentation/filesystems/unionfs/rename.txt.  This routine calls
+- * do_rename() above to perform some of the work.
++ * __unionfs_rename() above to perform some of the work.
+  */
+ static int do_unionfs_rename(struct inode *old_dir,
+ 			     struct dentry *old_dentry,
+@@ -171,8 +171,8 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 	new_bend = dbend(new_dentry);
+ 
+ 	/* Rename source to destination. */
+-	err = do_rename(old_dir, old_dentry, new_dir, new_dentry, old_bstart,
+-			&wh_old);
++	err = __unionfs_rename(old_dir, old_dentry, new_dir, new_dentry,
++			       old_bstart, &wh_old);
+ 	if (err) {
+ 		if (!IS_COPYUP_ERR(err))
+ 			goto out;
+@@ -230,8 +230,9 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 			if (!err) {
+ 				dput(wh_old);
+ 				bwh_old = bindex;
+-				err = do_rename(old_dir, old_dentry, new_dir,
+-						new_dentry, bindex, &wh_old);
++				err = __unionfs_rename(old_dir, old_dentry,
++						       new_dir, new_dentry,
++						       bindex, &wh_old);
+ 				break;
+ 			}
+ 		}
+@@ -306,8 +307,8 @@ revert:
+ 		goto revert_out;
+ 	}
+ 
+-	local_err = do_rename(new_dir, new_dentry,
+-			      old_dir, old_dentry, old_bstart, NULL);
++	local_err = __unionfs_rename(new_dir, new_dentry,
++				     old_dir, old_dentry, old_bstart, NULL);
+ 
+ 	/* If we can't fix it, then we cop-out with -EIO. */
+ 	if (local_err) {
+-- 
+1.5.4.3
+

@@ -1,0 +1,190 @@
+From e7781e2fb1a8b23c208f76d9be5c64236d8454f1 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 19 May 2007 19:10:42 -0400
+Subject: [PATCH] mmap: minor code and comment reformatting
+
+Conflicts:
+
+	fs/unionfs/file.c
+---
+ fs/unionfs/file.c |   97 ++--------------------------------------------------
+ fs/unionfs/mmap.c |   24 ++++++-------
+ 2 files changed, 15 insertions(+), 106 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 4f6859c..0650cb9 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -93,109 +93,20 @@ static int unionfs_file_readdir(struct file *file, void *dirent,
+ 	return -ENOTDIR;
+ }
+ 
+-static unsigned int unionfs_poll(struct file *file, poll_table *wait)
+-{
+-	unsigned int mask = DEFAULT_POLLMASK;
+-	struct file *hidden_file = NULL;
+-
+-	unionfs_read_lock(file->f_dentry->d_sb);
+-	if (unionfs_file_revalidate(file, 0)) {
+-		/* We should pretend an error happened. */
+-		mask = POLLERR | POLLIN | POLLOUT;
+-		goto out;
+-	}
+-
+-	hidden_file = unionfs_lower_file(file);
+-
+-	if (!hidden_file->f_op || !hidden_file->f_op->poll)
+-		goto out;
+-
+-	mask = hidden_file->f_op->poll(hidden_file, wait);
+-
+-out:
+-	unionfs_read_unlock(file->f_dentry->d_sb);
+-	unionfs_check_file(file);
+-	return mask;
+-}
+-
+-static int __do_mmap(struct file *file, struct vm_area_struct *vma)
+-{
+-	int err;
+-	struct file *hidden_file;
+-
+-	hidden_file = unionfs_lower_file(file);
+-
+-	err = -ENODEV;
+-	if (!hidden_file->f_op || !hidden_file->f_op->mmap)
+-		goto out;
+-
+-	vma->vm_file = hidden_file;
+-	err = hidden_file->f_op->mmap(hidden_file, vma);
+-	get_file(hidden_file);	/* make sure it doesn't get freed on us */
+-	fput(file);		/* no need to keep extra ref on ours */
+-out:
+-	return err;
+-}
+-
+ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ {
+ 	int err = 0;
+ 	int willwrite;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
+-	/* This might could be deferred to mmap's writepage. */
++	/* This might be deferred to mmap's writepage */
+ 	willwrite = ((vma->vm_flags | VM_SHARED | VM_WRITE) == vma->vm_flags);
+ 	if ((err = unionfs_file_revalidate(file, willwrite)))
+ 		goto out;
+ 
+-	err = __do_mmap(file, vma);
+-
+-out:
+-	unionfs_read_unlock(file->f_dentry->d_sb);
+-	unionfs_check_file(file);
+-	return err;
+-}
+-
+-static int unionfs_fsync(struct file *file, struct dentry *dentry,
+-			 int datasync)
+-{
+-	int err;
+-	struct file *hidden_file = NULL;
+-
+-	unionfs_read_lock(file->f_dentry->d_sb);
+-	if ((err = unionfs_file_revalidate(file, 1)))
+-		goto out;
+-
+-	hidden_file = unionfs_lower_file(file);
+-
+-	err = -EINVAL;
+-	if (!hidden_file->f_op || !hidden_file->f_op->fsync)
+-		goto out;
+-
+-	mutex_lock(&hidden_file->f_dentry->d_inode->i_mutex);
+-	err = hidden_file->f_op->fsync(hidden_file, hidden_file->f_dentry,
+-				       datasync);
+-	mutex_unlock(&hidden_file->f_dentry->d_inode->i_mutex);
+-
+-out:
+-	unionfs_read_unlock(file->f_dentry->d_sb);
+-	unionfs_check_file(file);
+-	return err;
+-}
+-
+-static int unionfs_fasync(int fd, struct file *file, int flag)
+-{
+-	int err = 0;
+-	struct file *hidden_file = NULL;
+-
+-	unionfs_read_lock(file->f_dentry->d_sb);
+-	if ((err = unionfs_file_revalidate(file, 1)))
+-		goto out;
+-
+-	hidden_file = unionfs_lower_file(file);
+-
+-	if (hidden_file->f_op && hidden_file->f_op->fasync)
+-		err = hidden_file->f_op->fasync(fd, hidden_file, flag);
++	err = generic_file_mmap(file, vma);
++	if (err)
++		printk("unionfs: generic_file_mmap failed %d\n", err);
+ 
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 99b3b2f..f484984 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -114,10 +114,10 @@ int unionfs_do_readpage(struct file *file, struct page *page)
+ 	wait_on_page_locked(lower_page);
+ 	if (!PageUptodate(lower_page)) {
+ 		/*
+-		 * call readpage() again if we returned from wait_on_page with a
+-		 * page that's not up-to-date; that can happen when a partial
+-		 * page has a few buffers which are ok, but not the whole
+-		 * page.
++		 * call readpage() again if we returned from wait_on_page
++		 * with a page that's not up-to-date; that can happen when a
++		 * partial page has a few buffers which are ok, but not the
++		 * whole page.
+ 		 */
+ 		lock_page(lower_page);
+ 		err = lower_inode->i_mapping->a_ops->readpage(lower_file,
+@@ -168,9 +168,9 @@ int unionfs_readpage(struct file *file, struct page *page)
+ 	err = unionfs_do_readpage(file, page);
+ 
+ 	/*
+-	 * we have to unlock our page, b/c we _might_ have gotten a locked page.
+-	 * but we no longer have to wakeup on our page here, b/c UnlockPage does
+-	 * it
++	 * we have to unlock our page, b/c we _might_ have gotten a locked
++	 * page.  but we no longer have to wakeup on our page here, b/c
++	 * UnlockPage does it
+ 	 */
+ 
+ out_err:
+@@ -255,14 +255,13 @@ sector_t unionfs_bmap(struct address_space * mapping, sector_t block)
+ {
+ 	int err = 0;
+ 	struct inode *inode, *lower_inode;
++	sector_t (*bmap)(struct address_space *, sector_t);
+ 
+ 	inode = (struct inode *)mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+-
+-	if (lower_inode->i_mapping->a_ops->bmap)
+-		err =
+-		    lower_inode->i_mapping->a_ops->bmap(lower_inode->i_mapping,
+-							block);
++	bmap = lower_inode->i_mapping->a_ops->bmap;
++	if (bmap)
++		err = bmap(lower_inode->i_mapping, block);
+ 	return err;
+ }
+ 
+@@ -301,4 +300,3 @@ struct address_space_operations unionfs_aops = {
+ 	.bmap		= unionfs_bmap,
+ 	.sync_page	= unionfs_sync_page,
+ };
+-
+-- 
+1.5.4.3
+

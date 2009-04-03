@@ -1,0 +1,149 @@
+From e4576c9b0b8f2b846aa0fb75a660685c6516a08c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 21:22:26 -0500
+Subject: [PATCH] Unionfs: uninline unionfs_copy_attr_times and unionfs_copy_attr_all
+
+This reduces text size by about 6k.
+
+Cc: Hugh Dickins <hugh@veritas.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/fanout.h |   50 --------------------------------------------------
+ fs/unionfs/subr.c   |   50 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/unionfs/union.h  |    2 ++
+ 3 files changed, 52 insertions(+), 50 deletions(-)
+
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 4d9a45f..29d42fb 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -313,54 +313,4 @@ static inline void verify_locked(struct dentry *d)
+ 	BUG_ON(!mutex_is_locked(&UNIONFS_D(d)->lock));
+ }
+ 
+-/* copy a/m/ctime from the lower branch with the newest times */
+-static inline void unionfs_copy_attr_times(struct inode *upper)
+-{
+-	int bindex;
+-	struct inode *lower;
+-
+-	if (!upper || ibstart(upper) < 0)
+-		return;
+-	for (bindex = ibstart(upper); bindex <= ibend(upper); bindex++) {
+-		lower = unionfs_lower_inode_idx(upper, bindex);
+-		if (!lower)
+-			continue; /* not all lower dir objects may exist */
+-		if (unlikely(timespec_compare(&upper->i_mtime,
+-					      &lower->i_mtime) < 0))
+-			upper->i_mtime = lower->i_mtime;
+-		if (unlikely(timespec_compare(&upper->i_ctime,
+-					      &lower->i_ctime) < 0))
+-			upper->i_ctime = lower->i_ctime;
+-		if (unlikely(timespec_compare(&upper->i_atime,
+-					      &lower->i_atime) < 0))
+-			upper->i_atime = lower->i_atime;
+-	}
+-}
+-
+-/*
+- * A unionfs/fanout version of fsstack_copy_attr_all.  Uses a
+- * unionfs_get_nlinks to properly calcluate the number of links to a file.
+- * Also, copies the max() of all a/m/ctimes for all lower inodes (which is
+- * important if the lower inode is a directory type)
+- */
+-static inline void unionfs_copy_attr_all(struct inode *dest,
+-					 const struct inode *src)
+-{
+-	dest->i_mode = src->i_mode;
+-	dest->i_uid = src->i_uid;
+-	dest->i_gid = src->i_gid;
+-	dest->i_rdev = src->i_rdev;
+-
+-	unionfs_copy_attr_times(dest);
+-
+-	dest->i_blkbits = src->i_blkbits;
+-	dest->i_flags = src->i_flags;
+-
+-	/*
+-	 * Update the nlinks AFTER updating the above fields, because the
+-	 * get_links callback may depend on them.
+-	 */
+-	dest->i_nlink = unionfs_get_nlinks(dest);
+-}
+-
+ #endif	/* not _FANOUT_H */
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index 803971d..75e0267 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -230,3 +230,53 @@ char *alloc_whname(const char *name, int len)
+ 
+ 	return buf;
+ }
++
++/* copy a/m/ctime from the lower branch with the newest times */
++void unionfs_copy_attr_times(struct inode *upper)
++{
++	int bindex;
++	struct inode *lower;
++
++	if (!upper || ibstart(upper) < 0)
++		return;
++	for (bindex = ibstart(upper); bindex <= ibend(upper); bindex++) {
++		lower = unionfs_lower_inode_idx(upper, bindex);
++		if (!lower)
++			continue; /* not all lower dir objects may exist */
++		if (unlikely(timespec_compare(&upper->i_mtime,
++					      &lower->i_mtime) < 0))
++			upper->i_mtime = lower->i_mtime;
++		if (unlikely(timespec_compare(&upper->i_ctime,
++					      &lower->i_ctime) < 0))
++			upper->i_ctime = lower->i_ctime;
++		if (unlikely(timespec_compare(&upper->i_atime,
++					      &lower->i_atime) < 0))
++			upper->i_atime = lower->i_atime;
++	}
++}
++
++/*
++ * A unionfs/fanout version of fsstack_copy_attr_all.  Uses a
++ * unionfs_get_nlinks to properly calcluate the number of links to a file.
++ * Also, copies the max() of all a/m/ctimes for all lower inodes (which is
++ * important if the lower inode is a directory type)
++ */
++void unionfs_copy_attr_all(struct inode *dest,
++			   const struct inode *src)
++{
++	dest->i_mode = src->i_mode;
++	dest->i_uid = src->i_uid;
++	dest->i_gid = src->i_gid;
++	dest->i_rdev = src->i_rdev;
++
++	unionfs_copy_attr_times(dest);
++
++	dest->i_blkbits = src->i_blkbits;
++	dest->i_flags = src->i_flags;
++
++	/*
++	 * Update the nlinks AFTER updating the above fields, because the
++	 * get_links callback may depend on them.
++	 */
++	dest->i_nlink = unionfs_get_nlinks(dest);
++}
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 7306a63..9be163f 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -206,6 +206,8 @@ struct unionfs_dir_state {
+ 
+ /* externs needed for fanout.h or sioq.h */
+ extern int unionfs_get_nlinks(const struct inode *inode);
++extern void unionfs_copy_attr_times(struct inode *upper);
++extern void unionfs_copy_attr_all(struct inode *dest, const struct inode *src);
+ 
+ /* include miscellaneous macros */
+ #include "fanout.h"
+-- 
+1.5.4.3
+

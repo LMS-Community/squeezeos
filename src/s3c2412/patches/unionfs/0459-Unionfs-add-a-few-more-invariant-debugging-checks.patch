@@ -1,0 +1,49 @@
+From 4ef4931ba6654c8f248ca77b9d934941cbdfdd05 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 19 Sep 2008 00:02:56 -0400
+Subject: [PATCH] Unionfs: add a few more invariant debugging checks
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dirfops.c |    4 ++++
+ fs/unionfs/unlink.c  |    2 ++
+ 2 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/dirfops.c b/fs/unionfs/dirfops.c
+index 14ca7d3..7c44d09 100644
+--- a/fs/unionfs/dirfops.c
++++ b/fs/unionfs/dirfops.c
+@@ -187,6 +187,8 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 	}
+ 
+ out:
++	if (!err)
++		unionfs_check_file(file);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+@@ -270,6 +272,8 @@ static loff_t unionfs_dir_llseek(struct file *file, loff_t offset, int origin)
+ 	}
+ 
+ out:
++	if (!err)
++		unionfs_check_file(file);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index fb236cd..d711e9d 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -267,6 +267,8 @@ out:
+ 		d_drop(dentry);
+ 		/* update our lower vfsmnts, in case a copyup took place */
+ 		unionfs_postcopyup_setmnt(dentry);
++		unionfs_check_dentry(dentry);
++		unionfs_check_inode(dir);
+ 	}
+ 
+ 	if (namelist)
+-- 
+1.5.4.3
+

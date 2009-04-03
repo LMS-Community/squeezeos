@@ -1,0 +1,74 @@
+From 514b98737488455b992e9e1d9ea5a4f5f488c138 Mon Sep 17 00:00:00 2001
+From: Josef "Jeff" Sipek <jsipek@cs.sunysb.edu>
+Date: Sun, 29 Apr 2007 15:36:03 -0400
+Subject: [PATCH] lookup_one_len_nd - lookup_one_len with nameidata argument
+
+This patch renames lookup_one_len to lookup_one_len_nd, and adds a nameidata
+argument. An inline function, lookup_one_len (which calls lookup_one_len_nd
+with nd == NULL) preserves original behavior.
+
+The following Unionfs patches depend on this one.
+
+Signed-off-by: Josef "Jeff" Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/namei.c            |    7 ++++---
+ include/linux/namei.h |    9 ++++++++-
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index 8e209ce..1a594d7 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -1325,7 +1325,8 @@ static inline int __lookup_one_len(const char *name, struct qstr *this, struct d
+ 	return 0;
+ }
+ 
+-struct dentry *lookup_one_len(const char *name, struct dentry *base, int len)
++struct dentry *lookup_one_len_nd(const char *name, struct dentry *base, 
++				 int len, struct nameidata *nd)
+ {
+ 	int err;
+ 	struct qstr this;
+@@ -1333,7 +1334,7 @@ struct dentry *lookup_one_len(const char *name, struct dentry *base, int len)
+ 	err = __lookup_one_len(name, &this, base, len);
+ 	if (err)
+ 		return ERR_PTR(err);
+-	return __lookup_hash(&this, base, NULL);
++	return __lookup_hash(&this, base, nd);
+ }
+ 
+ struct dentry *lookup_one_len_kern(const char *name, struct dentry *base, int len)
+@@ -2766,7 +2767,7 @@ EXPORT_SYMBOL(follow_up);
+ EXPORT_SYMBOL(get_write_access); /* binfmt_aout */
+ EXPORT_SYMBOL(getname);
+ EXPORT_SYMBOL(lock_rename);
+-EXPORT_SYMBOL(lookup_one_len);
++EXPORT_SYMBOL(lookup_one_len_nd);
+ EXPORT_SYMBOL(page_follow_link_light);
+ EXPORT_SYMBOL(page_put_link);
+ EXPORT_SYMBOL(page_readlink);
+diff --git a/include/linux/namei.h b/include/linux/namei.h
+index b7dd249..f8e1e12 100644
+--- a/include/linux/namei.h
++++ b/include/linux/namei.h
+@@ -81,9 +81,16 @@ extern struct file *lookup_instantiate_filp(struct nameidata *nd, struct dentry
+ extern struct file *nameidata_to_filp(struct nameidata *nd, int flags);
+ extern void release_open_intent(struct nameidata *);
+ 
+-extern struct dentry * lookup_one_len(const char *, struct dentry *, int);
++extern struct dentry * lookup_one_len_nd(const char *, struct dentry *,
++					 int, struct nameidata *);
+ extern struct dentry *lookup_one_len_kern(const char *, struct dentry *, int);
+ 
++static inline struct dentry *lookup_one_len(const char *name,
++			struct dentry *dir, int len)
++{
++	return lookup_one_len_nd(name, dir, len, NULL);
++}
++
+ extern int follow_down(struct vfsmount **, struct dentry **);
+ extern int follow_up(struct vfsmount **, struct dentry **);
+ 
+-- 
+1.5.4.3
+

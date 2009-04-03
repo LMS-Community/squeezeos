@@ -1,0 +1,30 @@
+From 747909b76e1cb7da360463578d19c8612bd7d0aa Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 28 May 2007 23:24:58 -0400
+Subject: [PATCH] invariants: don't complain if no lower dentry of a deleted dentry
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 821ef65..ab168cc 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -148,9 +148,10 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	/*
+ 	 * Directories can have NULL lower inodes in b/t start/end, but NOT
+ 	 * if at the start/end range.  Ignore this rule, however, if this is
+-	 * a NULL dentry.
++	 * a NULL dentry or a deleted dentry.
+ 	 */
+-	if (inode && !(inode && S_ISDIR(inode->i_mode) &&
++	if (!d_deleted((struct dentry *) dentry) &&
++	    inode && !(inode && S_ISDIR(inode->i_mode) &&
+ 		       bindex > dstart && bindex < dend)) {
+ 	  PRINT_CALLER;
+ 	  printk(" CD2: dentry/lower=%p:%p(%p) bindex=%d dstart/end=%d:%d\n",
+-- 
+1.5.4.3
+

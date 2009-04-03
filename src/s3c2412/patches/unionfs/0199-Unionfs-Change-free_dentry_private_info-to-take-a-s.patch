@@ -1,0 +1,88 @@
+From 218cb0aedbd61bf05eab5fbcc4b25475a0faf711 Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Fri, 8 Jun 2007 10:58:22 -0400
+Subject: [PATCH] Unionfs: Change free_dentry_private_info to take a struct dentry
+
+This makes it more symmetric with new_dentry_private_info.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    3 +--
+ fs/unionfs/lookup.c |   10 +++++-----
+ fs/unionfs/main.c   |    2 +-
+ fs/unionfs/union.h  |    2 +-
+ 4 files changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 364881c..6310c32 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -456,8 +456,7 @@ static void unionfs_d_release(struct dentry *dentry)
+ 
+ out_free:
+ 	/* No need to unlock it, because it is disappeared. */
+-	free_dentry_private_data(UNIONFS_D(dentry));
+-	dentry->d_fsdata = NULL;	/* just to be safe */
++	free_dentry_private_data(dentry);
+ 
+ out:
+ 	return;
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 93b9298..4e89a3c 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -478,11 +478,12 @@ void unionfs_destroy_dentry_cache(void)
+ 		kmem_cache_destroy(unionfs_dentry_cachep);
+ }
+ 
+-void free_dentry_private_data(struct unionfs_dentry_info *udi)
++void free_dentry_private_data(struct dentry *dentry)
+ {
+-	if (!udi)
++	if (!dentry || !dentry->d_fsdata)
+ 		return;
+-	kmem_cache_free(unionfs_dentry_cachep, udi);
++	kmem_cache_free(unionfs_dentry_cachep, dentry->d_fsdata);
++	dentry->d_fsdata = NULL;
+ }
+ 
+ static inline int __realloc_dentry_private_data(struct dentry *dentry)
+@@ -519,8 +520,7 @@ int realloc_dentry_private_data(struct dentry *dentry)
+ 		return 0;
+ 
+ 	kfree(UNIONFS_D(dentry)->lower_paths);
+-	free_dentry_private_data(UNIONFS_D(dentry));
+-	dentry->d_fsdata = NULL;
++	free_dentry_private_data(dentry);
+ 	return -ENOMEM;
+ }
+ 
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 1ad790f..2f884ab 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -665,7 +665,7 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ out_freedpd:
+ 	if (UNIONFS_D(sb->s_root)) {
+ 		kfree(UNIONFS_D(sb->s_root)->lower_paths);
+-		free_dentry_private_data(UNIONFS_D(sb->s_root));
++		free_dentry_private_data(sb->s_root);
+ 	}
+ 	dput(sb->s_root);
+ 
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 325a451..b66ff60 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -241,7 +241,7 @@ static inline void unionfs_double_lock_dentry(struct dentry *d1,
+ 
+ extern int realloc_dentry_private_data(struct dentry *dentry);
+ extern int new_dentry_private_data(struct dentry *dentry);
+-extern void free_dentry_private_data(struct unionfs_dentry_info *udi);
++extern void free_dentry_private_data(struct dentry *dentry);
+ extern void update_bstart(struct dentry *dentry);
+ 
+ /*
+-- 
+1.5.4.3
+

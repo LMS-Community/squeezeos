@@ -1,0 +1,132 @@
+From e8634800df9d25b571eebebdc7a9d3dbb7ec3a94 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 21:32:32 -0500
+Subject: [PATCH] Unionfs: branch management/configuration fixes
+
+Remove unnecessary calls to update branch m/ctimes, and use them only when
+needed.  Update branch vfsmounts after operations that could cause a copyup.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    9 +++------
+ fs/unionfs/copyup.c     |    3 ++-
+ fs/unionfs/dentry.c     |    4 +++-
+ fs/unionfs/mmap.c       |   17 ++++-------------
+ fs/unionfs/rename.c     |    7 +++++--
+ 5 files changed, 17 insertions(+), 23 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 491e2ff..2add167 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -604,6 +604,7 @@ out:
+ 	}
+ out_nofree:
+ 	if (!err) {
++		unionfs_postcopyup_setmnt(dentry);
+ 		unionfs_copy_attr_times(inode);
+ 		unionfs_check_file(file);
+ 		unionfs_check_inode(inode);
+@@ -839,13 +840,9 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 
+ 	}
+ 
+-	/* on success, update our times */
+-	unionfs_copy_attr_times(dentry->d_inode);
+-	/* parent time could have changed too (async) */
+-	unionfs_copy_attr_times(dentry->d_parent->d_inode);
+-
+ out:
+-	unionfs_check_file(file);
++	if (!err)
++		unionfs_check_file(file);
+ 	unionfs_unlock_dentry(file->f_path.dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 81f5431..a2ec459 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -813,7 +813,8 @@ begin:
+ 	 * update times of this dentry, but also the parent, because if
+ 	 * we changed, the parent may have changed too.
+ 	 */
+-	unionfs_copy_attr_times(parent_dentry->d_inode);
++	fsstack_copy_attr_times(parent_dentry->d_inode,
++				lower_parent_dentry->d_inode);
+ 	unionfs_copy_attr_times(child_dentry->d_inode);
+ 
+ 	parent_dentry = child_dentry;
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 9ffa518..b1fe356 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -474,8 +474,10 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ 
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 	err = __unionfs_d_revalidate_chain(dentry, nd, false);
+-	if (likely(err > 0)) /* true==1: dentry is valid */
++	if (likely(err > 0)) { /* true==1: dentry is valid */
++		unionfs_postcopyup_setmnt(dentry);
+ 		unionfs_check_dentry(dentry);
++	}
+ 	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_read_unlock(dentry->d_sb);
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 5a4a039..36e911d 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -259,20 +259,11 @@ static int unionfs_prepare_write(struct file *file, struct page *page,
+ 	int err;
+ 
+ 	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+-	/*
+-	 * This is the only place where we unconditionally copy the lower
+-	 * attribute times before calling unionfs_file_revalidate.  The
+-	 * reason is that our ->write calls do_sync_write which in turn will
+-	 * call our ->prepare_write and then ->commit_write.  Before our
+-	 * ->write is called, the lower mtimes are in sync, but by the time
+-	 * the VFS calls our ->commit_write, the lower mtimes have changed.
+-	 * Therefore, the only reasonable time for us to sync up from the
+-	 * changed lower mtimes, and avoid an invariant violation warning,
+-	 * is here, in ->prepare_write.
+-	 */
+-	unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+ 	err = unionfs_file_revalidate(file, true);
+-	unionfs_check_file(file);
++	if (!err) {
++		unionfs_copy_attr_times(file->f_path.dentry->d_inode);
++		unionfs_check_file(file);
++	}
+ 	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 
+ 	return err;
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 6ba8824..173849f 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -138,6 +138,11 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	err = vfs_rename(lower_old_dir_dentry->d_inode, lower_old_dentry,
+ 			 lower_new_dir_dentry->d_inode, lower_new_dentry);
+ out_err_unlock:
++	if (!err) {
++		/* update parent dir times */
++		fsstack_copy_attr_times(old_dir, lower_old_dir_dentry->d_inode);
++		fsstack_copy_attr_times(new_dir, lower_new_dir_dentry->d_inode);
++	}
+ 	unlock_rename(lower_old_dir_dentry, lower_new_dir_dentry);
+ 	lockdep_on();
+ 
+@@ -521,8 +526,6 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 		}
+ 	}
+ 	/* if all of this renaming succeeded, update our times */
+-	unionfs_copy_attr_times(old_dir);
+-	unionfs_copy_attr_times(new_dir);
+ 	unionfs_copy_attr_times(old_dentry->d_inode);
+ 	unionfs_copy_attr_times(new_dentry->d_inode);
+ 	unionfs_check_inode(old_dir);
+-- 
+1.5.4.3
+

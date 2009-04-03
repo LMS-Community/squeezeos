@@ -1,0 +1,296 @@
+From 599ebe1aad17582bd42e626ef1d1f7de152ae453 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 19 Mar 2007 20:57:49 -0400
+Subject: [PATCH] Unionfs: Introduce unionfs_mnt{get,put}
+
+Helper inline functions to perform Unionfs's mntget/put ops on lower
+branches.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+[jsipek: cleanup branching in unionfs_mnt{get,put} and compile fixes]
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    8 ++++----
+ fs/unionfs/copyup.c     |    6 +++---
+ fs/unionfs/dentry.c     |    2 +-
+ fs/unionfs/dirhelper.c  |    2 +-
+ fs/unionfs/lookup.c     |   25 +++++++++++++------------
+ fs/unionfs/main.c       |    7 ++++---
+ fs/unionfs/union.h      |   35 ++++++++++++++++++++++++++++++++++-
+ 7 files changed, 60 insertions(+), 25 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 8d0f8d1..c20dd6f 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -169,7 +169,7 @@ static int open_all_files(struct file *file)
+ 			continue;
+ 
+ 		dget(hidden_dentry);
+-		mntget(unionfs_lower_mnt_idx(dentry, bindex));
++		unionfs_mntget(dentry, bindex);
+ 		branchget(sb, bindex);
+ 
+ 		hidden_file = dentry_open(hidden_dentry,
+@@ -214,7 +214,7 @@ static int open_highest_file(struct file *file, int willwrite)
+ 	}
+ 
+ 	dget(hidden_dentry);
+-	mntget(unionfs_lower_mnt_idx(dentry, bstart));
++	unionfs_mntget(dentry, bstart);
+ 	branchget(sb, bstart);
+ 	hidden_file = dentry_open(hidden_dentry,
+ 			unionfs_lower_mnt_idx(dentry, bstart), file->f_flags);
+@@ -371,7 +371,7 @@ static int __open_dir(struct inode *inode, struct file *file)
+ 			continue;
+ 
+ 		dget(hidden_dentry);
+-		mntget(unionfs_lower_mnt_idx(file->f_dentry, bindex));
++		unionfs_mntget(file->f_dentry, bindex);
+ 		hidden_file = dentry_open(hidden_dentry,
+ 				unionfs_lower_mnt_idx(file->f_dentry, bindex),
+ 				file->f_flags);
+@@ -431,7 +431,7 @@ static int __open_file(struct inode *inode, struct file *file)
+ 	/* dentry_open will decrement mnt refcnt if err.
+ 	 * otherwise fput() will do an mntput() for us upon file close.
+ 	 */
+-	mntget(unionfs_lower_mnt_idx(file->f_dentry, bstart));
++	unionfs_mntget(file->f_dentry, bstart);
+ 	hidden_file = dentry_open(hidden_dentry,
+ 				  unionfs_lower_mnt_idx(file->f_dentry, bstart),
+ 				  hidden_flags);
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index e24d940..4ccef81 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -206,7 +206,7 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 	int err = 0;
+ 
+ 	/* open old file */
+-	mntget(unionfs_lower_mnt_idx(dentry, old_bindex));
++	unionfs_mntget(dentry, old_bindex);
+ 	branchget(sb, old_bindex);
+ 	input_file = dentry_open(old_hidden_dentry,
+ 				unionfs_lower_mnt_idx(dentry, old_bindex),
+@@ -223,7 +223,7 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 
+ 	/* open new file */
+ 	dget(new_hidden_dentry);
+-	mntget(unionfs_lower_mnt_idx(dentry, new_bindex));
++	unionfs_mntget(dentry, new_bindex);
+ 	branchget(sb, new_bindex);
+ 	output_file = dentry_open(new_hidden_dentry,
+ 				unionfs_lower_mnt_idx(dentry, new_bindex),
+@@ -555,7 +555,7 @@ static void __cleanup_dentry(struct dentry * dentry, int bindex,
+ 			dput(unionfs_lower_dentry_idx(dentry, i));
+ 			unionfs_set_lower_dentry_idx(dentry, i, NULL);
+ 
+-			mntput(unionfs_lower_mnt_idx(dentry, i));
++			unionfs_mntput(dentry, i);
+ 			unionfs_set_lower_mnt_idx(dentry, i, NULL);
+ 		} else {
+ 			if (new_bstart < 0)
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index cae4897..5ee1451 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -206,7 +206,7 @@ static void unionfs_d_release(struct dentry *dentry)
+ 	bend = dbend(dentry);
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		dput(unionfs_lower_dentry_idx(dentry, bindex));
+-		mntput(unionfs_lower_mnt_idx(dentry, bindex));
++		unionfs_mntput(dentry, bindex);
+ 
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 		unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index 0da8a8e..bb5f7bc 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -225,7 +225,7 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 			continue;
+ 
+ 		dget(hidden_dentry);
+-		mntget(unionfs_lower_mnt_idx(dentry, bindex));
++		unionfs_mntget(dentry, bindex);
+ 		branchget(sb, bindex);
+ 		hidden_file =
+ 		    dentry_open(hidden_dentry, unionfs_lower_mnt_idx(dentry, bindex),
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 967bb5b..0572247 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -79,7 +79,8 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 	struct dentry *parent_dentry = NULL;
+ 	int bindex, bstart, bend, bopaque;
+ 	int dentry_count = 0;	/* Number of positive dentries. */
+-	int first_dentry_offset = -1;
++	int first_dentry_offset = -1; /* -1 is uninitialized */
++	struct dentry *first_dentry = NULL;
+ 	struct dentry *first_hidden_dentry = NULL;
+ 	struct vfsmount *first_hidden_mnt = NULL;
+ 	int locked_parent = 0;
+@@ -176,7 +177,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 						  namelen + UNIONFS_WHLEN);
+ 		if (IS_ERR(wh_hidden_dentry)) {
+ 			dput(first_hidden_dentry);
+-			mntput(first_hidden_mnt);
++			unionfs_mntput(first_dentry, first_dentry_offset);
+ 			err = PTR_ERR(wh_hidden_dentry);
+ 			goto out_free;
+ 		}
+@@ -194,7 +195,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 			       " %d.\n", wh_hidden_dentry->d_inode->i_mode);
+ 			dput(wh_hidden_dentry);
+ 			dput(first_hidden_dentry);
+-			mntput(first_hidden_mnt);
++			unionfs_mntput(first_dentry, first_dentry_offset);
+ 			goto out_free;
+ 		}
+ 
+@@ -210,7 +211,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 					       namelen, nd);
+ 		if (IS_ERR(hidden_dentry)) {
+ 			dput(first_hidden_dentry);
+-			mntput(first_hidden_mnt);
++			unionfs_mntput(first_dentry, first_dentry_offset);
+ 			err = PTR_ERR(hidden_dentry);
+ 			goto out_free;
+ 		}
+@@ -224,9 +225,8 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 				/* FIXME: following line needs to be changed
+ 				 * to allow mountpoint crossing
+ 				 */
+-				first_hidden_mnt = mntget(
+-					unionfs_lower_mnt_idx(parent_dentry,
+-								bindex));
++				first_dentry = parent_dentry;
++				first_hidden_mnt = unionfs_mntget(parent_dentry, bindex);
+ 				first_dentry_offset = bindex;
+ 			} else
+ 				dput(hidden_dentry);
+@@ -245,7 +245,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 		 * mountpoint crossing
+ 		 */
+ 		unionfs_set_lower_mnt_idx(dentry, bindex,
+-			mntget(unionfs_lower_mnt_idx(parent_dentry, bindex)));
++					  unionfs_mntget(parent_dentry, bindex));
+ 		set_dbend(dentry, bindex);
+ 
+ 		/* update parent directory's atime with the bindex */
+@@ -266,7 +266,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry, struct nameidata *n
+ 		opaque = is_opaque_dir(dentry, bindex);
+ 		if (opaque < 0) {
+ 			dput(first_hidden_dentry);
+-			mntput(first_hidden_mnt);
++			unionfs_mntput(first_dentry, first_dentry_offset);
+ 			err = opaque;
+ 			goto out_free;
+ 		} else if (opaque) {
+@@ -309,7 +309,8 @@ out_negative:
+ 		/* FIXME: the following line needs to be changed to allow
+ 		 * mountpoint crossing
+ 		 */
+-		first_hidden_mnt = mntget(unionfs_lower_mnt_idx(dentry, bindex));
++		first_dentry = dentry;
++		first_hidden_mnt = unionfs_mntget(dentry, bindex);
+ 	}
+ 	unionfs_set_lower_dentry_idx(dentry, first_dentry_offset, first_hidden_dentry);
+ 	unionfs_set_lower_mnt_idx(dentry, first_dentry_offset, first_hidden_mnt);
+@@ -330,7 +331,7 @@ out_positive:
+ 	 * vfsmount - throw it out.
+ 	 */
+ 	dput(first_hidden_dentry);
+-	mntput(first_hidden_mnt);
++	unionfs_mntput(first_dentry, first_dentry_offset);
+ 
+ 	/* Partial lookups need to reinterpose, or throw away older negs. */
+ 	if (lookupmode == INTERPOSE_PARTIAL) {
+@@ -365,7 +366,7 @@ out_free:
+ 		bend = dbend(dentry);
+ 		for (bindex = bstart; bindex <= bend; bindex++) {
+ 			dput(unionfs_lower_dentry_idx(dentry, bindex));
+-			mntput(unionfs_lower_mnt_idx(dentry, bindex));
++			unionfs_mntput(dentry, bindex);
+ 		}
+ 	}
+ 	kfree(UNIONFS_D(dentry)->lower_paths);
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 1c93b13..b80b554 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -358,6 +358,7 @@ out:
+ 		for (i = 0; i < branches; i++)
+ 			if (hidden_root_info->lower_paths[i].dentry) {
+ 				dput(hidden_root_info->lower_paths[i].dentry);
++				/* initializing: can't use unionfs_mntput here */
+ 				mntput(hidden_root_info->lower_paths[i].mnt);
+ 			}
+ 
+@@ -466,9 +467,8 @@ out_error:
+ 			m = hidden_root_info->lower_paths[bindex].mnt;
+ 
+ 			dput(d);
+-
+-			if (m)
+-				mntput(m);
++			/* initializing: can't use unionfs_mntput here */
++			mntput(m);
+ 		}
+ 	}
+ 
+@@ -618,6 +618,7 @@ out_dput:
+ 			m = hidden_root_info->lower_paths[bindex].mnt;
+ 
+ 			dput(d);
++			/* initializing: can't use unionfs_mntput here */
+ 			mntput(m);
+ 		}
+ 		kfree(hidden_root_info->lower_paths);
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 715a3ad..53c7c2c 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -434,5 +434,38 @@ static inline void unlock_dir(struct dentry *dir)
+ 
+ extern int make_dir_opaque(struct dentry *dir, int bindex);
+ 
+-#endif	/* not _UNION_H_ */
++static inline struct vfsmount *unionfs_mntget(struct dentry *dentry, int bindex)
++{
++	struct vfsmount *mnt;
++	if (!dentry) {
++		if (bindex < 0)
++			return NULL;
++		BUG_ON(bindex < 0);
++	}
++	mnt = unionfs_lower_mnt_idx(dentry, bindex);
++	if (!mnt) {
++		if (bindex < 0)
++			return NULL;
++		BUG_ON(mnt && bindex < 0);
++	}
++	mnt = mntget(mnt);
++	return mnt;
++}
+ 
++static inline void unionfs_mntput(struct dentry *dentry, int bindex)
++{
++	struct vfsmount *mnt;
++	if (!dentry) {
++		if (bindex < 0)
++			return;
++		BUG_ON(dentry && bindex < 0);
++	}
++	mnt = unionfs_lower_mnt_idx(dentry, bindex);
++	if (!mnt) {
++		if (bindex < 0)
++			return;
++		BUG_ON(mnt && bindex < 0);
++	}
++	mntput(mnt);
++}
++#endif	/* not _UNION_H_ */
+-- 
+1.5.4.3
+

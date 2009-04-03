@@ -1,0 +1,48 @@
+From 5c8eb9bc29a8a859ead59e8f3fcb8e6def065705 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 13:26:15 -0400
+Subject: [PATCH] Unionfs: lock inode around calls to notify_change()
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    2 ++
+ fs/unionfs/inode.c  |    2 ++
+ 2 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index a2ec459..02e909c 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -135,6 +135,7 @@ static int copyup_permissions(struct super_block *sb,
+ 	newattrs.ia_valid = ATTR_CTIME | ATTR_ATIME | ATTR_MTIME |
+ 		ATTR_ATIME_SET | ATTR_MTIME_SET | ATTR_FORCE |
+ 		ATTR_GID | ATTR_UID;
++	mutex_lock(&new_lower_dentry->d_inode->i_mutex);
+ 	err = notify_change(new_lower_dentry, &newattrs);
+ 	if (err)
+ 		goto out;
+@@ -152,6 +153,7 @@ static int copyup_permissions(struct super_block *sb,
+ 	}
+ 
+ out:
++	mutex_unlock(&new_lower_dentry->d_inode->i_mutex);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index c490303..04429a1 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -1022,7 +1022,9 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	}
+ 
+ 	/* notify the (possibly copied-up) lower inode */
++	mutex_lock(&lower_dentry->d_inode->i_mutex);
+ 	err = notify_change(lower_dentry, ia);
++	mutex_unlock(&lower_dentry->d_inode->i_mutex);
+ 	if (err)
+ 		goto out;
+ 
+-- 
+1.5.4.3
+

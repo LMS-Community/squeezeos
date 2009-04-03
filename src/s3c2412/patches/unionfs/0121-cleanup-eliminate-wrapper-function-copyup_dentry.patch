@@ -1,0 +1,146 @@
+From 8f5c7ba83694df09962c7631ac07c0fa5bf12122 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 03:27:02 -0400
+Subject: [PATCH] cleanup: eliminate wrapper function copyup_dentry
+
+Eliminate simple wrapper function copyup_dentry which trivially called
+copyup_named_dentry with 2 more args derived from the caller.  Instead,
+remove the wrapper, rename copyup_named_dentry to copyup_dentry, and make
+everyone call copyup_dentry directly.  This clarifies the code a bit more
+and saves a bit on stack space.
+---
+ fs/unionfs/copyup.c |   29 ++++++++---------------------
+ fs/unionfs/inode.c  |    9 ++++++---
+ fs/unionfs/rename.c |    2 ++
+ fs/unionfs/union.h  |    6 +++---
+ 4 files changed, 19 insertions(+), 27 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 3a303d1..fcdc124 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -24,10 +24,6 @@
+  */
+ 
+ /* forward definitions */
+-static int copyup_named_dentry(struct inode *dir, struct dentry *dentry,
+-			       int bstart, int new_bindex, const char *name,
+-			       int namelen, struct file **copyup_file,
+-			       loff_t len);
+ static struct dentry *create_parents_named(struct inode *dir,
+ 					   struct dentry *dentry,
+ 					   const char *name, int bindex);
+@@ -128,15 +124,6 @@ static int copyup_permissions(struct super_block *sb,
+ 	return err;
+ }
+ 
+-int copyup_dentry(struct inode *dir, struct dentry *dentry,
+-		  int bstart, int new_bindex,
+-		  struct file **copyup_file, loff_t len)
+-{
+-	return copyup_named_dentry(dir, dentry, bstart, new_bindex,
+-				   dentry->d_name.name,
+-				   dentry->d_name.len, copyup_file, len);
+-}
+-
+ /*
+  * create the new device/file/directory - use copyup_permission to copyup
+  * times, and mode
+@@ -347,10 +334,9 @@ static void __clear(struct dentry *dentry, struct dentry *old_hidden_dentry,
+  * @copyup_file: the "struct file" to return (optional)
+  * @len: how many bytes to copy-up?
+  */
+-static int copyup_named_dentry(struct inode *dir, struct dentry *dentry,
+-			       int bstart, int new_bindex, const char *name,
+-			       int namelen, struct file **copyup_file,
+-			       loff_t len)
++int copyup_dentry(struct inode *dir, struct dentry *dentry, int bstart,
++		  int new_bindex, const char *name, int namelen,
++		  struct file **copyup_file, loff_t len)
+ {
+ 	struct dentry *new_hidden_dentry;
+ 	struct dentry *old_hidden_dentry = NULL;
+@@ -529,9 +515,8 @@ int copyup_named_file(struct inode *dir, struct file *file, char *name,
+ 	int err = 0;
+ 	struct file *output_file = NULL;
+ 
+-	err = copyup_named_dentry(dir, file->f_dentry, bstart,
+-				  new_bindex, name, strlen(name), &output_file,
+-				  len);
++	err = copyup_dentry(dir, file->f_dentry, bstart, new_bindex,
++			    name, strlen(name), &output_file, len);
+ 	if (!err) {
+ 		fbstart(file) = new_bindex;
+ 		unionfs_set_lower_file_idx(file, new_bindex, output_file);
+@@ -549,8 +534,10 @@ int copyup_file(struct inode *dir, struct file *file, int bstart,
+ {
+ 	int err = 0;
+ 	struct file *output_file = NULL;
++	struct dentry *dentry = file->f_dentry;
+ 
+-	err = copyup_dentry(dir, file->f_dentry, bstart, new_bindex,
++	err = copyup_dentry(dir, dentry, bstart, new_bindex,
++			    dentry->d_name.name, dentry->d_name.len,
+ 			    &output_file, len);
+ 	if (!err) {
+ 		fbstart(file) = new_bindex;
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 02bea8f..8a41999 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -344,7 +344,8 @@ docopyup:
+ 		for (bindex = old_bstart - 1; bindex >= 0; bindex--) {
+ 			err = copyup_dentry(old_dentry->d_parent->d_inode,
+ 					    old_dentry, old_bstart,
+-					    bindex, NULL,
++					    bindex, old_dentry->d_name.name,
++					    old_dentry->d_name.len, NULL,
+ 					    old_dentry->d_inode->i_size);
+ 			if (!err) {
+ 				hidden_new_dentry =
+@@ -1024,8 +1025,10 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 				if (ia->ia_valid & ATTR_SIZE)
+ 					size = ia->ia_size;
+ 				err = copyup_dentry(dentry->d_parent->d_inode,
+-						    dentry, bstart, i, NULL,
+-						    size);
++						    dentry, bstart, i,
++						    dentry->d_name.name,
++						    dentry->d_name.len,
++						    NULL, size);
+ 
+ 				if (!err) {
+ 					copyup = 1;
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index a19957f..d4963e4 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -226,6 +226,8 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 			 */
+ 			err = copyup_dentry(old_dentry->d_parent->d_inode,
+ 					    old_dentry, old_bstart, bindex,
++					    old_dentry->d_name.name,
++					    old_dentry->d_name.len,
+ 					    NULL, old_dentry->d_inode->i_size);
+ 			if (!err) {
+ 				dput(wh_old);
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index be5e61b..7c54ef7 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -262,9 +262,9 @@ extern int copyup_named_file(struct inode *dir, struct file *file,
+ 			     char *name, int bstart, int new_bindex,
+ 			     loff_t len);
+ /* copies a dentry from dbstart to newbindex branch */
+-extern int copyup_dentry(struct inode *dir, struct dentry *dentry, int bstart,
+-			 int new_bindex, struct file **copyup_file,
+-			 loff_t len);
++extern int copyup_dentry(struct inode *dir, struct dentry *dentry,
++			 int bstart, int new_bindex, const char *name,
++			 int namelen, struct file **copyup_file, loff_t len);
+ /* helper functions for post-copyup cleanup */
+ extern void unionfs_inherit_mnt(struct dentry *dentry);
+ extern void unionfs_purge_extras(struct dentry *dentry);
+-- 
+1.5.4.3
+

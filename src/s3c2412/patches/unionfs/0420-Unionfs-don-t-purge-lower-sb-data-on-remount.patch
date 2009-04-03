@@ -1,0 +1,59 @@
+From 979c3acaee0d67b1363b2806cdb5ba94e87c43e3 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 31 Mar 2008 19:09:34 -0400
+Subject: [PATCH] Unionfs: don't purge lower sb data on remount
+
+This is no longer needed, as we don't have upper and lower pages.  Plus this
+was racy, requiring the unexported inode_lock variable.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   11 -----------
+ fs/unionfs/super.c  |    8 +++++---
+ 2 files changed, 5 insertions(+), 14 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index eefc007..374750e 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -266,17 +266,6 @@ static inline void purge_inode_data(struct inode *inode)
+ 	 */
+ }
+ 
+-void purge_sb_data(struct super_block *sb)
+-{
+-	struct inode *inode;
+-
+-	list_for_each_entry(inode, &sb->s_inodes, i_sb_list) {
+-		if (inode->i_state & (I_FREEING|I_WILL_FREE))
+-			continue;
+-		purge_inode_data(inode);
+-	}
+-}
+-
+ /*
+  * Revalidate a single file/symlink/special dentry.  Assume that info nodes
+  * of the dentry and its parent are locked.  Assume that parent(s) are all
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index b85c96a..8dbaa47 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -737,10 +737,12 @@ out_no_change:
+ 	 * function).  This revalidation will happen lazily and
+ 	 * incrementally, as users perform operations on cached inodes.  We
+ 	 * would like to encourage this revalidation to happen sooner if
+-	 * possible, so we try to invalidate as many other pages in our
+-	 * superblock as we can.
++	 * possible, so we like to try to invalidate as many other pages in
++	 * our superblock as we can.  We used to call drop_pagecache_sb() or
++	 * a variant thereof, but either method was racy (drop_caches alone
++	 * is known to be racy).  So now we let the revalidation happen on a
++	 * per file basis in ->d_revalidate.
+ 	 */
+-	purge_sb_data(sb);
+ 
+ 	/* grab new lower super references; release old ones */
+ 	for (i = 0; i < new_branches; i++)
+-- 
+1.5.4.3
+

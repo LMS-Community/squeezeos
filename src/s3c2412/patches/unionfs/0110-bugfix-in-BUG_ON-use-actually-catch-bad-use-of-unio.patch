@@ -1,0 +1,32 @@
+From 7058114b69a1623683a568f820bb7d85d6a1b0f4 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 11 May 2007 01:51:48 -0400
+Subject: [PATCH] bugfix in BUG_ON use: actually catch bad use of unionfs_mntput
+
+---
+ fs/unionfs/union.h |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 3652277..9b54ed5 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -480,13 +480,13 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 	if (!dentry) {
+ 		if (bindex < 0)
+ 			return;
+-		BUG_ON(dentry && bindex < 0);
++		BUG_ON(!dentry && bindex >= 0);
+ 	}
+ 	mnt = unionfs_lower_mnt_idx(dentry, bindex);
+ 	if (!mnt) {
+ 		if (bindex < 0)
+ 			return;
+-		BUG_ON(mnt && bindex < 0);
++		BUG_ON(!mnt && bindex >= 0);
+ 	}
+ 	mntput(mnt);
+ }
+-- 
+1.5.4.3
+
