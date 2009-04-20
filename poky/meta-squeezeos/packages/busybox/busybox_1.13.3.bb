@@ -1,10 +1,11 @@
 require busybox.inc
-PR = "r0"
+PR = "r1"
 
 SRC_URI = "http://www.busybox.net/downloads/busybox-${PV}.tar.gz \
 	   file://busybox_mdev_subdir.patch;patch=1 \
 	   file://busybox_udhcpd_syslog.patch;patch=1 \
 	   file://busybox_ifupdown_hostname.patch;patch=1 \
+	   file://busybox_udhcpd_hostname_nak.patch;patch=1 \
            file://defconfig"
 
 S = "${WORKDIR}/busybox-${PV}"
