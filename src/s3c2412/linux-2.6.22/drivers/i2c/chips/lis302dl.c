@@ -64,6 +64,7 @@ struct lis302dl_data {
 
 	unsigned int		 threshold;
 	unsigned int		 duration;
+	unsigned int		 config;
 	unsigned int		 resume_en : 1;
 
 	struct mutex		 lock;
@@ -193,15 +194,13 @@ static void lis302dl_init_client(struct i2c_client *client)
 	/* I1CFG=FF_WU_1 */
 	lis302dl_write_value(client, LIS302DL_REG_CTRL_REG3, 0x01);
 
-	/* threshold, duration */
+	/* threshold, duration, cfg_1 */
 	lis302dl_write_value(client, LIS302DL_REG_FF_WU_THS_1, data->threshold);
 	lis302dl_write_value(client, LIS302DL_REG_FF_WU_DURATION_1, data->duration);
+	lis302dl_write_value(client, LIS302DL_REG_FF_WU_CFG_1, data->config);
 
 	/* reset HPF */
 	lis302dl_read_value(client, LIS302DL_REG_HP_FILTER_RESET);
-
-	/* LIR, ZHIE, YHIE, XHIE */
-	lis302dl_write_value(client, LIS302DL_REG_FF_WU_CFG_1, 0x6A);
 
 	INIT_WORK(&data->irq_work, lis302dl_irq_work);
 }
@@ -281,6 +280,44 @@ static ssize_t lis302dl_duration_store(struct device *dev,
 static DEVICE_ATTR(duration, 0644, lis302dl_duration_show, lis302dl_duration_store);
 
 
+static ssize_t lis302dl_config_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct lis302dl_data *data = i2c_get_clientdata(client);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->config);
+}
+
+static ssize_t lis302dl_config_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct lis302dl_data *data = i2c_get_clientdata(client);
+	char *ptr;
+	unsigned long val;
+
+	val = simple_strtoul(buf, &ptr, 10);
+	if (ptr == buf)
+		return -EINVAL;
+
+	if (val != data->config) {
+		data->config = val;
+
+		mutex_lock(&data->lock);
+
+		lis302dl_write_value(client, LIS302DL_REG_FF_WU_CFG_1, data->config);
+
+		mutex_unlock(&data->lock);
+	}
+	
+	return count;
+}
+
+static DEVICE_ATTR(config, 0644, lis302dl_config_show, lis302dl_config_store);
+
+
 #ifdef CONFIG_PM
 static ssize_t lis302dl_resume_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
@@ -354,6 +391,7 @@ static int __devinit lis302dl_probe(struct i2c_client *client)
 
 	memset(data, 0, sizeof(struct lis302dl_data));
 	data->threshold = 0x14; // 350mg default
+	data->config = 0x6A; // LIR, ZHIE, YHIE, XHIE
 
 	mutex_init(&data->lock);
 
@@ -413,7 +451,8 @@ static int __devinit lis302dl_probe(struct i2c_client *client)
 	}
 
 	if ((err = device_create_file(&client->dev, &dev_attr_threshold)) ||
-	    (err = device_create_file(&client->dev, &dev_attr_duration))) {
+	    (err = device_create_file(&client->dev, &dev_attr_duration)) ||
+	    (err = device_create_file(&client->dev, &dev_attr_config))) {
 		dev_err(&client->dev, "cannot attach resume attribute\n");
 	}
 
