@@ -66,7 +66,7 @@ echo "*** Building ***"
 run_bitbake "squeezeos-image"
 
 # Do not leave the source code on the build machine, cleanup private modules
-for PKG in 'marvell-wlan-tools-src' 'marvell-gspi-module-src' 'squeezeplay-private'
+for PKG in 'marvell-wlan-tools-src' 'marvell-gspi-module-src'
 do
 	echo "*** Cleaning $PKG ***"
 	run_bitbake "$PKG -c clean -f"
