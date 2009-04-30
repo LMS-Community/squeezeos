@@ -4,7 +4,7 @@ SECTION = "console/utils"
 LICENSE = "GPL"
 DEPENDS = "alsa-lib ncurses"
 
-SRC_URI = "ftp://ftp.alsa-project.org/pub/utils/alsa-utils-${PV}.tar.bz2 \
+SRC_URI = "ftp://ftp.task.gda.pl/pub/linux/misc/alsa/utils/alsa-utils-${PV}.tar.bz2 \
            file://no-midi.patch;patch=1"
 	
 

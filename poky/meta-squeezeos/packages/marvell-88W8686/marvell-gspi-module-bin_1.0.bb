@@ -6,6 +6,7 @@ PR = "r2"
 
 PROVIDES = "marvell-gspi-module"
 
+DEPENDS = "virtual/kernel"
 RDEPENDS = "wireless-tools"
 
 SRC_URI=" \
