@@ -17,9 +17,9 @@ source poky-init-build-env
 
 if [ -f $PARABUILD_ENV_SCRIPT ]
 then
-	sh $PARABUILD_ENV_SCRIPT
+	source $PARABUILD_ENV_SCRIPT
 else
-	echo "ERROR: No $PARABUILD_ENV_SCRIPT found. Can Not Continue!"
+	echo "ERROR: No $PARABUILD_ENV_SCRIPT found. Can Not Continue"
 	exit 1
 fi
 
