@@ -1,6 +1,6 @@
 #!/bin/sh
 
-PARABUILD_ENV_SCRIPT="/home/parabuild/private-env-7.3.sh"
+PARABUILD_ENV_SCRIPT="/home/parabuild/private-env-7.4.sh"
 
 # Figure out how many CPUs we have, and set our multithreading
 # options accordingly. 
