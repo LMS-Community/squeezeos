@@ -57,7 +57,7 @@ fi
 echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Make build use all available CPUs
-echo "BB_NUMBER_THREADS = $CPUCOUNT
+echo "BB_NUMBER_THREADS = 2
 DL_DIR = $HOME/.poky_dl_dir
 PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
 
