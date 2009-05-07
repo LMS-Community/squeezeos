@@ -59,3 +59,9 @@ do_deploy() {
 	ln -sf ${KERNEL_IMAGETYPE}-${PV}-${MACHINE}-${DATETIME}.bin ${KERNEL_IMAGETYPE}-${MACHINE}.bin
 	tar -cvzf ${DEPLOY_DIR_IMAGE}/modules-${KERNEL_RELEASE}-${MACHINE}.tgz -C ${D} lib	
 }
+
+do_rm_work() {
+        # modules use the kernel source, don't remove it
+        echo "** DID NOT REMOVE KERNEL SOURCE, MODULES USE THIS **"
+}
+
