@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r19"
+PR = "r20"
 
 SRC_URI = " \
 	file://config \
