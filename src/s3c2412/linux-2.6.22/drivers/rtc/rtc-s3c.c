@@ -36,7 +36,7 @@
 
 static struct resource *s3c_rtc_mem;
 
-static void __iomem *s3c_rtc_base;
+void __iomem *s3c_rtc_base;
 static int s3c_rtc_alarmno = NO_IRQ;
 static int s3c_rtc_tickno  = NO_IRQ;
 static int s3c_rtc_freq    = 1;
