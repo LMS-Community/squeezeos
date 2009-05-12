@@ -22,7 +22,7 @@
 #endif
 
 #ifdef CONFIG_LOGO_LOGITECH_CLUT224
-extern bool jive_is_battery_flat(void);
+extern bool jive_is_battery_flat(int *pbat);
 #endif
 
 extern const struct linux_logo logo_linux_mono;
@@ -108,7 +108,7 @@ const struct linux_logo *fb_find_logo(int depth)
 #endif
 #ifdef CONFIG_LOGO_LOGITECH_CLUT224
 		{
-			if (jive_is_battery_flat()) {
+			if (jive_is_battery_flat(NULL)) {
 				logo = &logo_battery_clut224;
 			}
 			else {

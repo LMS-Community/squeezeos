@@ -2,9 +2,9 @@ DESCRIPTION = "SqueezePlay - Private code"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-#PR = "r0"
+PR = "r1"
 
-DEPENDS += "axtls"
+DEPENDS += "libsdl lua axtls"
 
 SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=squeezeplay_private"
 

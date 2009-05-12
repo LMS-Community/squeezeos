@@ -35,6 +35,7 @@
 #include <linux/ioport.h>
 #include <linux/delay.h>
 #include <linux/serial_core.h>
+#include <linux/bcd.h>
 
 #include <asm/cacheflush.h>
 #include <asm/hardware.h>
@@ -45,6 +46,7 @@
 #include <asm/arch/regs-gpio.h>
 #include <asm/arch/regs-mem.h>
 #include <asm/arch/regs-irq.h>
+#include <asm/arch/regs-rtc.h>
 
 #include <asm/mach/time.h>
 
@@ -118,6 +120,7 @@ static struct sleep_save gpio_save[] = {
 	SAVE_ITEM(S3C2410_DCLKCON),
 };
 
+#define CONFIG_S3C2410_PM_DEBUG
 #ifdef CONFIG_S3C2410_PM_DEBUG
 
 #define SAVE_UART(va) \
@@ -612,8 +615,47 @@ static int s3c2410_pm_enter(suspend_state_t state)
 	return 0;
 }
 
+
+extern void __iomem *s3c_rtc_base;
+extern bool jive_is_battery_flat(int *pbat);
+
+static int jive_pm_enter(suspend_state_t state)
+{
+	void __iomem *rtc_base = s3c_rtc_base;
+	unsigned int rtc_hour, alm_hour, alrm_en;
+	int rtc_wakeup, bat_lvl, bat_flat;
+
+	do {
+		/* set rtc alarm to wake up every three hours */
+		rtc_hour = readb(rtc_base + S3C2410_RTCHOUR);
+		BCD_TO_BIN(rtc_hour);
+
+		alm_hour = (rtc_hour + 3) % 12;
+		alrm_en = S3C2410_RTCALM_HOUREN | S3C2410_RTCALM_ALMEN;
+		DBG("rtc_hour=%d alm_hour=%d\n", rtc_hour, alm_hour);
+
+		writeb(BIN2BCD(alm_hour), rtc_base + S3C2410_ALMHOUR);
+		writeb(alrm_en, rtc_base + S3C2410_RTCALM);
+
+		/* suspend */
+		s3c2410_pm_enter(state);
+
+		/* woken by rtc? */
+		rtc_wakeup = (__raw_readl(S3C2410_SRCPND) == 0);
+
+		/* check battery */
+		bat_flat = jive_is_battery_flat(&bat_lvl);
+		DBG("battery flat=%d level=%d\n", bat_flat, bat_lvl);
+
+		if (bat_flat) {
+			kernel_power_off();
+		}
+	} while (rtc_wakeup);
+}
+
+
 static struct pm_ops s3c2410_pm_ops = {
-	.enter		= s3c2410_pm_enter,
+	.enter		= jive_pm_enter,
 	.valid		= pm_valid_only_mem,
 };
 
