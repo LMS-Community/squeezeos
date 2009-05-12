@@ -634,7 +634,7 @@ module_exit(jive_mgmt_exit);
 /* Called from logo.c to determine if the battery is flat during boot.
  * Note this is called before jive_mgmt_init.
  */
-bool jive_is_battery_flat(void) {
+bool jive_is_battery_flat(int *pbat) {
 	int bat, nacpr;
 
 	bat = get_battery();
@@ -646,6 +646,10 @@ bool jive_is_battery_flat(void) {
 	battery_flat = (bat < BATTERY_FLAT_LEVEL) && nacpr;
 
 	printk("battery flat? %s (level=%d nacpr=%d)\n", battery_flat?"yes":"no", bat, nacpr);
+
+	if (pbat) {
+		*pbat = bat;
+	}
 
 	return battery_flat;
 }
