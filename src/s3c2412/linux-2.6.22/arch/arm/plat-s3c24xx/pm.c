@@ -626,11 +626,11 @@ static int jive_pm_enter(suspend_state_t state)
 	int rtc_wakeup, bat_lvl, bat_flat;
 
 	do {
-		/* set rtc alarm to wake up every three hours */
+		/* set rtc alarm to wake up every hour */
 		rtc_hour = readb(rtc_base + S3C2410_RTCHOUR);
 		BCD_TO_BIN(rtc_hour);
 
-		alm_hour = (rtc_hour + 3) % 12;
+		alm_hour = (rtc_hour + 1) % 24;
 		alrm_en = S3C2410_RTCALM_HOUREN | S3C2410_RTCALM_ALMEN;
 		DBG("rtc_hour=%d alm_hour=%d\n", rtc_hour, alm_hour);
 
