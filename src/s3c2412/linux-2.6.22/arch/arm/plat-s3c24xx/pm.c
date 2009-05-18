@@ -120,7 +120,6 @@ static struct sleep_save gpio_save[] = {
 	SAVE_ITEM(S3C2410_DCLKCON),
 };
 
-#define CONFIG_S3C2410_PM_DEBUG
 #ifdef CONFIG_S3C2410_PM_DEBUG
 
 #define SAVE_UART(va) \
@@ -641,7 +640,8 @@ static int jive_pm_enter(suspend_state_t state)
 		s3c2410_pm_enter(state);
 
 		/* woken by rtc? */
-		rtc_wakeup = (__raw_readl(S3C2410_SRCPND) == 0);
+		rtc_wakeup = (__raw_readl(S3C2410_SRCPND) == 0 &&
+			      __raw_readl(S3C2410_EINTPEND) == 0);
 
 		/* check battery */
 		bat_flat = jive_is_battery_flat(&bat_lvl);
