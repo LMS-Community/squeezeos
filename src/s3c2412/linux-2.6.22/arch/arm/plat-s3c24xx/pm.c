@@ -120,7 +120,6 @@ static struct sleep_save gpio_save[] = {
 	SAVE_ITEM(S3C2410_DCLKCON),
 };
 
-#define CONFIG_S3C2410_PM_DEBUG
 #ifdef CONFIG_S3C2410_PM_DEBUG
 
 #define SAVE_UART(va) \
@@ -626,11 +625,11 @@ static int jive_pm_enter(suspend_state_t state)
 	int rtc_wakeup, bat_lvl, bat_flat;
 
 	do {
-		/* set rtc alarm to wake up every three hours */
+		/* set rtc alarm to wake up every hour */
 		rtc_hour = readb(rtc_base + S3C2410_RTCHOUR);
 		BCD_TO_BIN(rtc_hour);
 
-		alm_hour = (rtc_hour + 3) % 12;
+		alm_hour = (rtc_hour + 1) % 24;
 		alrm_en = S3C2410_RTCALM_HOUREN | S3C2410_RTCALM_ALMEN;
 		DBG("rtc_hour=%d alm_hour=%d\n", rtc_hour, alm_hour);
 
@@ -641,7 +640,8 @@ static int jive_pm_enter(suspend_state_t state)
 		s3c2410_pm_enter(state);
 
 		/* woken by rtc? */
-		rtc_wakeup = (__raw_readl(S3C2410_SRCPND) == 0);
+		rtc_wakeup = (__raw_readl(S3C2410_SRCPND) == 0 &&
+			      __raw_readl(S3C2410_EINTPEND) == 0);
 
 		/* check battery */
 		bat_flat = jive_is_battery_flat(&bat_lvl);
