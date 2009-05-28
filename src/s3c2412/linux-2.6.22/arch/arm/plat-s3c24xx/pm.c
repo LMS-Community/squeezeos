@@ -622,9 +622,10 @@ static int jive_pm_enter(suspend_state_t state)
 {
 	void __iomem *rtc_base = s3c_rtc_base;
 	unsigned int rtc_hour, alm_hour, alrm_en;
-	int rtc_wakeup, bat_lvl, bat_flat;
+	int eint_wakeup, bat_lvl, bat_flat;
 
 	do {
+#if 1
 		/* set rtc alarm to wake up every hour */
 		rtc_hour = readb(rtc_base + S3C2410_RTCHOUR);
 		BCD_TO_BIN(rtc_hour);
@@ -635,13 +636,28 @@ static int jive_pm_enter(suspend_state_t state)
 
 		writeb(BIN2BCD(alm_hour), rtc_base + S3C2410_ALMHOUR);
 		writeb(alrm_en, rtc_base + S3C2410_RTCALM);
+#else
+		/* every ten minute for testing */
+		rtc_hour = readb(rtc_base + S3C2410_RTCMIN);
+		BCD_TO_BIN(rtc_hour);
+
+		alm_hour = (rtc_hour + 10) % 60;
+		alrm_en = S3C2410_RTCALM_MINEN | S3C2410_RTCALM_ALMEN;
+		DBG("rtc_min=%d alm_min=%d\n", rtc_hour, alm_hour);
+
+		writeb(BIN2BCD(alm_hour), rtc_base + S3C2410_ALMMIN);
+		writeb(alrm_en, rtc_base + S3C2410_RTCALM);
+#endif
 
 		/* suspend */
 		s3c2410_pm_enter(state);
 
+		/* only wake up on EINT4_7 and EINT8_23 */
+#define WAKEUP_MASK ((1 << 4) | (1 << 5))
+
 		/* woken by rtc? */
-		rtc_wakeup = (__raw_readl(S3C2410_SRCPND) == 0 &&
-			      __raw_readl(S3C2410_EINTPEND) == 0);
+		eint_wakeup = ((__raw_readl(S3C2410_SRCPND) & WAKEUP_MASK) != 0);
+		DBG("eint_wakeup=%d %08x %08x\n", eint_wakeup, __raw_readl(S3C2410_SRCPND), WAKEUP_MASK);
 
 		/* check battery */
 		bat_flat = jive_is_battery_flat(&bat_lvl);
@@ -650,7 +666,7 @@ static int jive_pm_enter(suspend_state_t state)
 		if (bat_flat) {
 			kernel_power_off();
 		}
-	} while (rtc_wakeup);
+	} while (!eint_wakeup);
 }
 
 
