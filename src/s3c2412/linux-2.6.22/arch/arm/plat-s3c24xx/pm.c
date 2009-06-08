@@ -120,6 +120,8 @@ static struct sleep_save gpio_save[] = {
 	SAVE_ITEM(S3C2410_DCLKCON),
 };
 
+//#define CONFIG_S3C2410_PM_DEBUG
+
 #ifdef CONFIG_S3C2410_PM_DEBUG
 
 #define SAVE_UART(va) \
@@ -652,8 +654,8 @@ static int jive_pm_enter(suspend_state_t state)
 		/* suspend */
 		s3c2410_pm_enter(state);
 
-		/* only wake up on EINT4_7 and EINT8_23 */
-#define WAKEUP_MASK ((1 << 4) | (1 << 5))
+		/* only wake up on EINT3, EINT4_7 and EINT8_23 */
+#define WAKEUP_MASK ((1 << 3) | (1 << 4) | (1 << 5))
 
 		/* woken by rtc? */
 		eint_wakeup = ((__raw_readl(S3C2410_SRCPND) & WAKEUP_MASK) != 0);
