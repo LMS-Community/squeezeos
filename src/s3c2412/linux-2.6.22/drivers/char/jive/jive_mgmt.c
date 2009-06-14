@@ -642,6 +642,7 @@ bool jive_is_battery_flat(int *pbat) {
 	s3c2410_gpio_cfgpin(S3C2410_GPG3, S3C2410_GPG3_INP);
 	s3c2410_gpio_pullup(S3C2410_GPG3, 1);
 	nacpr = (s3c2410_gpio_getpin(S3C2410_GPG3) > 0);
+	s3c2410_gpio_cfgpin(S3C2410_GPG3, S3C2410_GPG3_EINT11);
 
 	battery_flat = (bat < BATTERY_FLAT_LEVEL) && nacpr;
 
