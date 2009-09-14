@@ -1,0 +1,143 @@
+Index: AR6kSDK.build_sw.62/host/Makefile
+===================================================================
+--- AR6kSDK.build_sw.62.orig/host/Makefile	2009-06-15 20:20:23.000000000 +0100
++++ AR6kSDK.build_sw.62/host/Makefile	2009-06-16 23:43:18.000000000 +0100
+@@ -82,6 +82,7 @@
+ export  ATH_SDIO_STACK_BASE
+ export  ATH_BUS_TYPE
+ export  ATH_HC_DRIVERS
++export  ATH_BUS_SUBTYPE
+ 
+ ATH_SRC_BASE :=$(shell pwd)
+ MAKE :=make
+@@ -182,8 +183,8 @@
+ 	$(MAKE) -C tests/floodtest/
+ 	$(MAKE) -C tests/mboxping/
+ #	$(MAKE) -C tests/dsetpatch/
+-	$(MAKE) -C 3rdparty/supplicant/opensrc_0_4_9/
+-	$(MAKE) -C 3rdparty/pgen/
++#	$(MAKE) -C 3rdparty/supplicant/opensrc_0_4_9/
++#	$(MAKE) -C 3rdparty/pgen/
+ #	$(MAKE) -C 3rdparty/WPS/Intel_SDK_1_0_5/linux/	
+ #	$(MAKE) -C dwsim/
+ ifeq ($(ATH_BUILD_BTFILTER),yes) 	
+@@ -232,13 +233,13 @@
+ 	fi	
+ endif	
+ 	cp -f tools/dbgParser/dbgParser $(COMPILED_IMAGE_OBJECTS_PATH)
+-	cp -f 3rdparty/supplicant/opensrc_0_4_9/wpa_supplicant  $(COMPILED_IMAGE_OBJECTS_PATH)
+-	cp -f 3rdparty/supplicant/opensrc_0_4_9/wpa_cli  $(COMPILED_IMAGE_OBJECTS_PATH)	
+-	cp -f 3rdparty/pgen/pgen  $(COMPILED_IMAGE_OBJECTS_PATH)	
+-	cp -f 3rdparty/pgen/pget  $(COMPILED_IMAGE_OBJECTS_PATH)	
+-	cp -f 3rdparty/pgen/phone  $(COMPILED_IMAGE_OBJECTS_PATH)	
+-	cp -f 3rdparty/pgen/staut  $(COMPILED_IMAGE_OBJECTS_PATH)	
+-	cp -f 3rdparty/pgen/upsd  $(COMPILED_IMAGE_OBJECTS_PATH)	
++#	cp -f 3rdparty/supplicant/opensrc_0_4_9/wpa_supplicant  $(COMPILED_IMAGE_OBJECTS_PATH)
++#	cp -f 3rdparty/supplicant/opensrc_0_4_9/wpa_cli  $(COMPILED_IMAGE_OBJECTS_PATH)
++#	cp -f 3rdparty/pgen/pgen  $(COMPILED_IMAGE_OBJECTS_PATH)
++#	cp -f 3rdparty/pgen/pget  $(COMPILED_IMAGE_OBJECTS_PATH)
++#	cp -f 3rdparty/pgen/phone  $(COMPILED_IMAGE_OBJECTS_PATH)
++#	cp -f 3rdparty/pgen/staut  $(COMPILED_IMAGE_OBJECTS_PATH)
++#	cp -f 3rdparty/pgen/upsd  $(COMPILED_IMAGE_OBJECTS_PATH)
+ #	cp -f 3rdparty/WPS/Intel_SDK_1_0_5/linux/wsccmd  $(COMPILED_IMAGE_OBJECTS_PATH)			
+ #	cp -f 3rdparty/WPS/Intel_SDK_1_0_5/linux/wsc_config.txt  $(COMPILED_IMAGE_OBJECTS_PATH)				
+ #	if [ -r  $(ATH_SRC_BASE)/3rdparty/supplicant/ds/linux/bin/$(ATH_BUILD_TYPE) ]; then \
+@@ -261,8 +262,7 @@
+ 	tools/rompatcher/rompatcher tools/rompatcher/fwpatch tests/floodtest/floodtest            \
+ 	tests/mboxping/mboxping tools/wmiconfig/wmiconfig tools/mkdsetimg/mkdsetimg               \
+ 	tools/eeprom/eeprom dwsim/*.o dwsim/dwsim tools/eeprom/eeprom.AR6001                      \
+-	tools/eeprom/eeprom.AR6002 3rdparty/supplicant/opensrc_0_4_9/*.d                          \
+-	tools/athbtfilter/bluez/abtfilt
++	tools/eeprom/eeprom.AR6002 tools/athbtfilter/bluez/abtfilt
+ 
+ # The kernel module build process leaves some intermediate files, this will clean up all these files
+ 	find $(ATH_SRC_BASE) \( -not -path "*.output*" -a -name '*.[oas]' -o -name core -o -name '.*.flags' -o -name '.ko' -o -name '.*.cmd' \) -type f -print \
+Index: AR6kSDK.build_sw.62/host/os/linux/wireless_ext.c
+===================================================================
+--- AR6kSDK.build_sw.62.orig/host/os/linux/wireless_ext.c	2009-06-15 19:56:14.000000000 +0100
++++ AR6kSDK.build_sw.62/host/os/linux/wireless_ext.c	2009-06-16 23:43:18.000000000 +0100
+@@ -59,7 +59,7 @@
+ {
+     struct iw_event iwe;
+ #if WIRELESS_EXT > 14
+-    char buf[256];
++    static char buf[8192];
+ #endif
+     struct ar_giwscan_param *param;
+     A_CHAR *current_ev;
+Index: AR6kSDK.build_sw.62/host/wlan/src/wlan_node.c
+===================================================================
+--- AR6kSDK.build_sw.62.orig/host/wlan/src/wlan_node.c	2009-06-15 20:08:53.000000000 +0100
++++ AR6kSDK.build_sw.62/host/wlan/src/wlan_node.c	2009-06-16 23:43:18.000000000 +0100
+@@ -216,8 +216,22 @@
+ static void
+ wlan_node_dec_free(bss_t *ni)
+ {
++	if (ni == NULL) {
++		printk(KERN_INFO "wlan_node_dec_free NULL\n");
++	} else {
++		if (ni->ni_buf == NULL) {
++			printk(KERN_INFO "ni_buf == NULL\n");
++		}
++	}
+     if (ieee80211_node_dectestref(ni)) {
+-        wlan_node_free(ni);
++	    if (ni == NULL) {
++		    printk(KERN_INFO "2:wlan_node_dec_free NULL\n");
++	    } else {
++		    if (ni->ni_buf == NULL) {
++			    printk(KERN_INFO "2:ni_buf == NULL\n");
++		    }
++	    }
++	    wlan_node_free(ni);
+     }
+ }
+ 
+Index: AR6kSDK.build_sw.62/host/localmake.linux.inc
+===================================================================
+--- AR6kSDK.build_sw.62.orig/host/localmake.linux.inc	2009-06-15 20:20:23.000000000 +0100
++++ AR6kSDK.build_sw.62/host/localmake.linux.inc	2009-06-16 23:43:18.000000000 +0100
+@@ -15,10 +15,11 @@
+ # packaged in the release
+ #
+ 
++ATH_BUILD_TYPE := NATIVEMMC
++ATH_BUS_TYPE := SDIO
++ATH_BUS_SUBTYPE := linux_sdio
++ATH_LINUXPATH := ${KERNEL_SOURCE}
++ATH_ARCH_CPU_TYPE := arm
++ATH_CROSS_COMPILE_TYPE := ${CROSS_COMPILE}
++ATH_OS_SUB_TYPE := linux_2_6
+ 
+-#ATH_BUILD_TYPE := <Platform (Eg: LOCAL_i686)>
+-#ATH_BUS_TYPE := <Interconnect type (Eg: SDIO, SPI)>
+-#ATH_LINUXPATH := <Pointer to kernel source (Eg: /<path>/fc3-i686-2.6.9)>
+-#ATH_ARCH_CPU_TYPE := <Type of architecture (Eg: arm)>
+-#ATH_CROSS_COMPILE_TYPE := <Path to the compiler toolchain - Eg: (/<path>/arm_v4t_le-)
+-#ATH_OS_SUB_TYPE := <Kernel version - (Eg: linux_2_4, linux_2_6)>
+Index: AR6kSDK.build_sw.62/host/os/linux/Makefile
+===================================================================
+--- AR6kSDK.build_sw.62.orig/host/os/linux/Makefile	2009-06-15 19:56:14.000000000 +0100
++++ AR6kSDK.build_sw.62/host/os/linux/Makefile	2009-06-16 23:43:18.000000000 +0100
+@@ -39,7 +39,7 @@
+ EXTRA_CFLAGS += -I$(ATH_SRC_BASE)/os/
+ EXTRA_CFLAGS += -I$(ATH_SRC_BASE)/bmi/include
+ 
+-EXTRA_CFLAGS += -DLINUX -DDEBUG -D__KERNEL__ -DHTC_RAW_INTERFACE\
++EXTRA_CFLAGS += -DLINUX -D__KERNEL__ -DHTC_RAW_INTERFACE\
+                 -DTCMD -DSEND_EVENT_TO_APP -DUSER_KEYS \
+                 -DNO_SYNC_FLUSH #\
+                 -DMULTIPLE_FRAMES_PER_INTERRUPT -DAR6000REV$(REV) \
+Index: AR6kSDK.build_sw.62/host/os/linux/ar6000_drv.c
+===================================================================
+--- AR6kSDK.build_sw.62.orig/host/os/linux/ar6000_drv.c	2009-06-19 10:29:28.000000000 +0100
++++ AR6kSDK.build_sw.62/host/os/linux/ar6000_drv.c	2009-06-19 10:29:35.000000000 +0100
+@@ -2580,7 +2580,7 @@
+     TARGET_STATS *pStats = &ar->arTargetStats;
+     A_UINT8 ac;
+ 
+-    A_PRINTF("AR6000 updating target stats\n");
++    AR_DEBUG_PRINTF("AR6000 updating target stats\n");
+ 
+     // Update the RSSI of the connected bss.
+     if (ar->arConnected) {

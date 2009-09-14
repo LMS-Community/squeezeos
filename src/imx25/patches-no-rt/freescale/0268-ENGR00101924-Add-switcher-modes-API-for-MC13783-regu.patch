@@ -1,0 +1,338 @@
+From 061c928e1900f03c0d78c6b3a66132bfe37c57e5 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Mon, 8 Dec 2008 15:06:05 -0600
+Subject: [PATCH] ENGR00101924 Add switcher modes API for MC13783 regulator
+
+Add switcher modes API for MC13783 regulator
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ drivers/regulator/mc13783/reg-mc13783.c |  262 ++++++++++++++++++++++++++++++-
+ 1 files changed, 261 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/regulator/mc13783/reg-mc13783.c b/drivers/regulator/mc13783/reg-mc13783.c
+index 95417cc..536366f 100644
+--- a/drivers/regulator/mc13783/reg-mc13783.c
++++ b/drivers/regulator/mc13783/reg-mc13783.c
+@@ -419,10 +419,14 @@ enum {
+  */
+ #define SW1A_MODE_LSH		0
+ #define SW1A_MODE_WID		2
++#define SW1A_STBY_MODE_LSH		2
++#define SW1A_STBY_MODE_WID		2
+ #define SW1A_DVS_SPEED_LSH		6
+ #define SW1A_DVS_SPEED_WID		2
+ #define SW1B_MODE_LSH		10
+ #define SW1B_MODE_WID		2
++#define SW1B_STBY_MODE_LSH		12
++#define SW1B_STBY_MODE_WID		2
+ #define SW1B_DVS_SPEED_LSH		14
+ #define SW1B_DVS_SPEED_WID		2
+ 
+@@ -431,10 +435,14 @@ enum {
+  */
+ #define SW2A_MODE_LSH		0
+ #define SW2A_MODE_WID		2
++#define SW2A_STBY_MODE_LSH		2
++#define SW2A_STBY_MODE_WID		2
+ #define SW2A_DVS_SPEED_LSH		6
+ #define SW2A_DVS_SPEED_WID		2
+ #define SW2B_MODE_LSH		10
+ #define SW2B_MODE_WID		2
++#define SW2B_STBY_MODE_LSH		12
++#define SW2B_STBY_MODE_WID		2
+ #define SW2B_DVS_SPEED_LSH		14
+ #define SW2B_DVS_SPEED_WID		2
+ #define SW3_LSH			18
+@@ -464,6 +472,14 @@ enum {
+ #define GPO4_EN_ENABLE	1
+ #define GPO4_EN_DISABLE	0
+ 
++/*
++ * Switcher mode configuration
++ */
++#define SW_MODE_SYNC_RECT_EN	0
++#define SW_MODE_PULSE_NO_SKIP_EN	1
++#define SW_MODE_PULSE_SKIP_EN	2
++#define SW_MODE_LOW_POWER_EN	3
++
+ #define NUM_MC13783_REGULATORS 33
+ #define dvs_speed E25mvEach16us
+ 
+@@ -2466,6 +2482,244 @@ static int mc13783_sw_get_stby_voltage(struct regulator *reg)
+ 	return mV * 1000;
+ }
+ 
++static int mc13783_sw_set_normal_mode(struct regulator *reg, unsigned int mode)
++{
++	unsigned int reg_val = 0, reg_mask = 0;
++	unsigned int register1 = 0;
++	unsigned int l_mode;
++	int sw = reg->id;
++
++	switch (mode) {
++	case REGULATOR_MODE_FAST:
++		/* SYNC RECT mode */
++		l_mode = SW_MODE_SYNC_RECT_EN;
++		break;
++	case REGULATOR_MODE_NORMAL:
++		/* PULSE SKIP mode */
++		l_mode = SW_MODE_PULSE_SKIP_EN;
++		break;
++	case REGULATOR_MODE_IDLE:
++		/* LOW POWER mode */
++		l_mode = SW_MODE_LOW_POWER_EN;
++		break;
++	case REGULATOR_MODE_STANDBY:
++		/* NO PULSE SKIP mode */
++		l_mode = SW_MODE_PULSE_NO_SKIP_EN;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	switch (sw) {
++	case MC13783_SW1A:
++		reg_val = BITFVAL(SW1A_MODE, l_mode);
++		reg_mask = BITFMASK(SW1A_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW1B:
++		reg_val = BITFVAL(SW1B_MODE, l_mode);
++		reg_mask = BITFMASK(SW1B_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW2A:
++		reg_val = BITFVAL(SW2A_MODE, l_mode);
++		reg_mask = BITFMASK(SW2A_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	case MC13783_SW2B:
++		reg_val = BITFVAL(SW2B_MODE, l_mode);
++		reg_mask = BITFMASK(SW2B_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return (pmic_write_reg(register1, reg_val, reg_mask));
++}
++
++static unsigned int mc13783_sw_get_normal_mode(struct regulator *reg)
++{
++	unsigned int reg_val = 0, reg_mask = 0;
++	unsigned int register1 = 0;
++	unsigned int l_mode = 0;
++	int sw = reg->id;
++	int ret = 0;
++
++	switch (sw) {
++	case MC13783_SW1A:
++		reg_mask = BITFMASK(SW1A_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW1B:
++		reg_mask = BITFMASK(SW1B_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW2A:
++		reg_mask = BITFMASK(SW2A_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	case MC13783_SW2B:
++		reg_mask = BITFMASK(SW2B_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	ret = (pmic_read_reg(register1, &reg_val, reg_mask));
++	if (ret != 0)
++		return ret;
++
++	switch (sw) {
++	case MC13783_SW1A:
++		l_mode = BITFEXT(reg_val, SW1A_MODE);
++		break;
++	case MC13783_SW1B:
++		l_mode = BITFEXT(reg_val, SW1B_MODE);
++		break;
++	case MC13783_SW2A:
++		l_mode = BITFEXT(reg_val, SW2A_MODE);
++		break;
++	case MC13783_SW2B:
++		l_mode = BITFEXT(reg_val, SW2B_MODE);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (l_mode == SW_MODE_SYNC_RECT_EN) {
++		return REGULATOR_MODE_FAST;
++	} else if (l_mode == SW_MODE_PULSE_NO_SKIP_EN) {
++		return REGULATOR_MODE_STANDBY;
++	} else if (l_mode == SW_MODE_PULSE_SKIP_EN) {
++		return REGULATOR_MODE_NORMAL;
++	} else if (l_mode == SW_MODE_LOW_POWER_EN) {
++		return REGULATOR_MODE_IDLE;
++	} else {
++		return -EINVAL;
++	}
++}
++
++static int mc13783_sw_set_stby_mode(struct regulator *reg, unsigned int mode)
++{
++	unsigned int reg_val = 0, reg_mask = 0;
++	unsigned int register1 = 0;
++	unsigned int l_mode;
++	int sw = reg->id;
++
++	switch (mode) {
++	case REGULATOR_MODE_FAST:
++		/* SYNC RECT mode */
++		l_mode = SW_MODE_SYNC_RECT_EN;
++		break;
++	case REGULATOR_MODE_NORMAL:
++		/* PULSE SKIP mode */
++		l_mode = SW_MODE_PULSE_SKIP_EN;
++		break;
++	case REGULATOR_MODE_IDLE:
++		/* LOW POWER mode */
++		l_mode = SW_MODE_LOW_POWER_EN;
++		break;
++	case REGULATOR_MODE_STANDBY:
++		/* NO PULSE SKIP mode */
++		l_mode = SW_MODE_PULSE_NO_SKIP_EN;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	switch (sw) {
++	case MC13783_SW1A:
++		reg_val = BITFVAL(SW1A_STBY_MODE, l_mode);
++		reg_mask = BITFMASK(SW1A_STBY_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW1B:
++		reg_val = BITFVAL(SW1B_STBY_MODE, l_mode);
++		reg_mask = BITFMASK(SW1B_STBY_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW2A:
++		reg_val = BITFVAL(SW2A_STBY_MODE, l_mode);
++		reg_mask = BITFMASK(SW2A_STBY_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	case MC13783_SW2B:
++		reg_val = BITFVAL(SW2B_STBY_MODE, l_mode);
++		reg_mask = BITFMASK(SW2B_STBY_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return (pmic_write_reg(register1, reg_val, reg_mask));
++}
++
++static unsigned int mc13783_sw_get_stby_mode(struct regulator *reg)
++{
++	unsigned int reg_val = 0, reg_mask = 0;
++	unsigned int register1 = 0;
++	unsigned int l_mode = 0;
++	int sw = reg->id;
++	int ret = 0;
++
++	switch (sw) {
++	case MC13783_SW1A:
++		reg_mask = BITFMASK(SW1A_STBY_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW1B:
++		reg_mask = BITFMASK(SW1B_STBY_MODE);
++		register1 = REG_SWITCHERS_4;
++		break;
++	case MC13783_SW2A:
++		reg_mask = BITFMASK(SW2A_STBY_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	case MC13783_SW2B:
++		reg_mask = BITFMASK(SW2B_STBY_MODE);
++		register1 = REG_SWITCHERS_5;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	ret = (pmic_read_reg(register1, &reg_val, reg_mask));
++	if (ret != 0)
++		return ret;
++
++	switch (sw) {
++	case MC13783_SW1A:
++		l_mode = BITFEXT(reg_val, SW1A_STBY_MODE);
++		break;
++	case MC13783_SW1B:
++		l_mode = BITFEXT(reg_val, SW1B_STBY_MODE);
++		break;
++	case MC13783_SW2A:
++		l_mode = BITFEXT(reg_val, SW2A_STBY_MODE);
++		break;
++	case MC13783_SW2B:
++		l_mode = BITFEXT(reg_val, SW2B_STBY_MODE);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (l_mode == SW_MODE_SYNC_RECT_EN) {
++		return REGULATOR_MODE_FAST;
++	} else if (l_mode == SW_MODE_PULSE_NO_SKIP_EN) {
++		return REGULATOR_MODE_STANDBY;
++	} else if (l_mode == SW_MODE_PULSE_SKIP_EN) {
++		return REGULATOR_MODE_NORMAL;
++	} else if (l_mode == SW_MODE_LOW_POWER_EN) {
++		return REGULATOR_MODE_IDLE;
++	} else {
++		return -EINVAL;
++	}
++}
++
+ static struct regulator_ops mc13783_vaudio_ops = {
+ 	.enable = mc13783_vaudio_enable,
+ 	.disable = mc13783_vaudio_disable,
+@@ -2575,6 +2829,8 @@ static struct regulator_ops mc13783_sw3_ops = {
+ static struct regulator_ops mc13783_sw_normal_ops = {
+ 	.set_voltage = mc13783_sw_set_normal_voltage,
+ 	.get_voltage = mc13783_sw_get_normal_voltage,
++	.get_mode = mc13783_sw_get_normal_mode,
++	.set_mode = mc13783_sw_set_normal_mode,
+ };
+ 
+ static struct regulator_ops mc13783_sw_dvs_ops = {
+@@ -2585,6 +2841,8 @@ static struct regulator_ops mc13783_sw_dvs_ops = {
+ static struct regulator_ops mc13783_sw_stby_ops = {
+ 	.set_voltage = mc13783_sw_set_stby_voltage,
+ 	.get_voltage = mc13783_sw_get_stby_voltage,
++	.get_mode = mc13783_sw_get_stby_mode,
++	.set_mode = mc13783_sw_set_stby_mode,
+ };
+ 
+ struct regulation_constraints violo_regulation_constraints = {
+@@ -2668,7 +2926,9 @@ struct regulation_constraints sw3_regulation_constraints = {
+ struct regulation_constraints sw_regulation_constraints = {
+ 	.min_uV = mV_to_uV(900),
+ 	.max_uV = mV_to_uV(2200),
+-	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE | REGULATOR_CHANGE_MODE,
++	.valid_modes_mask = REGULATOR_MODE_FAST | REGULATOR_MODE_NORMAL |
++	    REGULATOR_MODE_IDLE | REGULATOR_MODE_STANDBY,
+ };
+ 
+ struct mc13783_regulator {
+-- 
+1.5.4.4
+

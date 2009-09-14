@@ -1,0 +1,47 @@
+From 34a145e548a2f8e248c60751578a55510ecc1337 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 25 Nov 2007 23:01:28 -0500
+Subject: [PATCH] Unionfs: create opaque directories' whiteouts unconditionally
+
+Needed to maintain Unix semantics (LTP testing).
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/subr.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index 968ee8c..1a26c57 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -162,6 +162,19 @@ int make_dir_opaque(struct dentry *dentry, int bindex)
+ 	struct dentry *lower_dentry, *diropq;
+ 	struct inode *lower_dir;
+ 	struct nameidata nd;
++	kernel_cap_t orig_cap;
++
++	/*
++	 * Opaque directory whiteout markers are special files (like regular
++	 * whiteouts), and should appear to the users as if they don't
++	 * exist.  They should be created/deleted regardless of directory
++	 * search/create permissions, but only for the duration of this
++	 * creation of the .wh.__dir_opaque: file.  Note, this does not
++	 * circumvent normal ->permission).
++	 */
++	orig_cap = current->cap_effective;
++	cap_raise(current->cap_effective, CAP_DAC_READ_SEARCH);
++	cap_raise(current->cap_effective, CAP_DAC_OVERRIDE);
+ 
+ 	lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 	lower_dir = lower_dentry->d_inode;
+@@ -189,6 +202,7 @@ int make_dir_opaque(struct dentry *dentry, int bindex)
+ 
+ out:
+ 	mutex_unlock(&lower_dir->i_mutex);
++	current->cap_effective = orig_cap;
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

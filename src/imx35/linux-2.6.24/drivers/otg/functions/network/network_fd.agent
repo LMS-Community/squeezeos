@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# Network hotplug policy agent for Linux 2.4 kernels
+#
+# Kernel NET hotplug params include:
+#
+#	ACTION=%s [register or unregister]
+#	INTERFACE=%s
+#
+# HISTORY:
+#
+
+#echo $0: $* $INTERFACE $ACTION $IP $COUNT >> /tmp/NETWORK_FD
+#set >> /tmp/NETWORK_FD
+
+#exit 0
+
+cd /etc/hotplug
+
+if [ "$INTERFACE" = "" ]; then
+	exit 0
+fi
+
+case $ACTION in
+attach)
+
+	case $INTERFACE in
+
+	usbl*)
+                if [ "$IP" != "0.0.0.0" ] ; then
+
+                        ifconfig $INTERFACE $IP up
+
+                elif which pump > /dev/null ; then
+
+                        pump -i $INTERFACE
+
+		elif which udhcpc > /dev/null ; then
+
+			udhcpc -i $INTERFACE &
+
+                else
+                        ifconfig $INTERFACE 192.168.1.1 up
+                fi
+
+		;;
+
+	usbb*)
+		ifconfig $INTERFACE 192.168.1.1 up
+		;;
+
+	esac
+	;;
+
+
+detach)
+
+	case $INTERFACE in
+
+	usbl*)
+		ifconfig $INTERFACE 0.0.0.0 down
+		;;
+
+	usbb*)
+		ifconfig $INTERFACE 0.0.0.0 down
+		;;
+
+	esac
+	;;
+
+*)
+
+	exit 0
+	;;
+
+esac
+
+/etc/rc.d/init.d/S91samba stop
+sleep 2
+/etc/rc.d/init.d/S91samba start
+
+
+exit 0

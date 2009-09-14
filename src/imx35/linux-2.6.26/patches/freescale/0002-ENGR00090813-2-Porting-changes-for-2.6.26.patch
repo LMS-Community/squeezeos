@@ -1,0 +1,3187 @@
+From f37af3e2955a92b5a172b5144b357768e8437f2c Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Thu, 11 Sep 2008 14:29:07 -0500
+Subject: [PATCH] ENGR00090813-2 Porting changes for 2.6.26
+
+Convert class_device_* functions to device_*
+Update system devices to use dynamic names
+Update new-style i2c drivers to use device_id based enumeration
+libata driver model updates
+Fix mxc_nandv1 driver for back to back READID command
+Fix build warnings
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ arch/arm/mach-mx21/Kconfig                        |    6 +
+ arch/arm/mach-mx27/Kconfig                        |    7 +
+ arch/arm/mach-mx3/Kconfig                         |    9 +
+ arch/arm/mach-mx3/dvfs_v2.c                       |    2 +-
+ arch/arm/mach-mx3/mx3_3stack.c                    |    8 +-
+ arch/arm/mach-mx35/Kconfig                        |   15 +-
+ arch/arm/mach-mx35/dvfs.c                         |    2 +-
+ arch/arm/mach-mx35/mx35_3stack.c                  |   16 +-
+ arch/arm/mach-mx37/Kconfig                        |   10 +
+ arch/arm/mach-mx37/mx37_3stack.c                  |    4 +-
+ arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c      |    8 +-
+ arch/arm/mm/cache-l2x0.c                          |    1 +
+ arch/arm/plat-mxc/Kconfig                         |   20 +-
+ arch/arm/plat-mxc/gpio.c                          |    2 +-
+ arch/arm/plat-mxc/irq.c                           |    2 +-
+ drivers/ata/pata_fsl.c                            |   37 +--
+ drivers/char/mxc_si4702.c                         |   20 +-
+ drivers/hwmon/mxc_mma7450.c                       |   12 +-
+ drivers/i2c-slave/i2c_slave_device.c              |    7 +-
+ drivers/input/keyboard/mpr084.c                   |   17 +-
+ drivers/input/touchscreen/tsc2007.c               |   17 +-
+ drivers/media/video/mxc/capture/adv7180.c         |   11 +-
+ drivers/media/video/mxc/capture/ov2640.c          |   11 +-
+ drivers/mmc/card/unifi_fs/fs_lx.c                 |    2 +
+ drivers/mtd/nand/mxc_nd.c                         |    4 +-
+ drivers/mxc/asrc/mxc_asrc.c                       |   11 +-
+ drivers/mxc/dam/dam_v1.c                          |   10 +-
+ drivers/mxc/hmp4e/mxc_hmp4e.c                     |    8 +-
+ drivers/mxc/ipu/ipu_device.c                      |    7 +-
+ drivers/mxc/ipu/pf/mxc_pf.c                       |    9 +-
+ drivers/mxc/mlb/mxc_mlb.c                         |   11 +-
+ drivers/mxc/pm/dptc_mx27.c                        |   11 +-
+ drivers/mxc/pmic/core/max8660.c                   |   10 +-
+ drivers/mxc/pmic/core/mc9sdz60.c                  |   10 +-
+ drivers/mxc/pmic/core/pmic-dev.c                  |   11 +-
+ drivers/mxc/pmic/core/pmic_core_i2c.c             |    9 +-
+ drivers/mxc/pmic/mc13783/pmic_adc.c               |   11 +-
+ drivers/mxc/pmic/mc13783/pmic_battery.c           |   10 +-
+ drivers/mxc/pmic/mc13783/pmic_light.c             |   12 +-
+ drivers/mxc/pmic/mc13783/pmic_power.c             |    6 +-
+ drivers/mxc/pmic/mc13783/pmic_rtc.c               |   15 +-
+ drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c          |   22 +-
+ drivers/mxc/security/sahara2/include/linux_port.h |   10 +-
+ drivers/mxc/vpu/mxc_vpu.c                         |   10 +-
+ drivers/regulator/reg-core.c                      |   41 +--
+ drivers/regulator/wm8350/reg-wm8350-i2c.c         |    7 +
+ drivers/usb/gadget/arcotg_udc.c                   |    8 +-
+ drivers/usb/host/ehci-arc.c                       |    5 +-
+ drivers/video/mxc/ch7024.c                        |   11 +-
+ drivers/video/mxc/tve.c                           |    4 +-
+ include/asm-arm/arch-mxc/pmic_power.h             |    2 +-
+ include/linux/regulator/regulator-drv.h           |    2 +-
+ sound/arm/mxc-alsa-mixer.c                        |    1 -
+ sound/arm/mxc-alsa-pmic.c                         |    1 -
+ sound/arm/mxc-alsa-spdif.c                        |    1 -
+ sound/soc/codecs/ak4647.c                         |   10 +-
+ sound/soc/codecs/wm8350.c                         |  381 ++++++++++-----------
+ sound/soc/codecs/wm8580.c                         |    1 -
+ sound/soc/imx/imx-3stack-ak4647.c                 |    6 +-
+ sound/soc/imx/imx-3stack-wm8350.c                 |    1 -
+ sound/soc/imx/imx-3stack-wm8580.c                 |    1 -
+ sound/soc/imx/imx-esai.c                          |    1 -
+ sound/soc/imx/imx-pcm.c                           |    1 -
+ sound/soc/imx/imx-ssi.c                           |    1 -
+ 64 files changed, 508 insertions(+), 431 deletions(-)
+
+diff --git a/arch/arm/mach-mx21/Kconfig b/arch/arm/mach-mx21/Kconfig
+index dae7c10..d41ad0d 100644
+--- a/arch/arm/mach-mx21/Kconfig
++++ b/arch/arm/mach-mx21/Kconfig
+@@ -1,6 +1,12 @@
+ menu "MX21 Options"
+ 	depends on ARCH_MX21
+ 
++config MX21_OPTIONS
++	bool
++	default y
++	select CPU_ARM926T
++	select MXC_EMMA
++
+ config MACH_MX21ADS
+ 	bool "Support MX21 ADS platforms"
+ 	default y
+diff --git a/arch/arm/mach-mx27/Kconfig b/arch/arm/mach-mx27/Kconfig
+index 062dd29..979c557 100644
+--- a/arch/arm/mach-mx27/Kconfig
++++ b/arch/arm/mach-mx27/Kconfig
+@@ -1,6 +1,13 @@
+ menu "MX27 Options"
+ 	depends on ARCH_MX27
+ 
++config MX27_OPTIONS
++	bool
++	default y
++	select CPU_ARM926T
++	select MXC_EMMA
++	select USB_ARCH_HAS_EHCI
++
+ config MACH_MX27ADS
+ 	bool "Support MX27ADS platforms"
+ 	default y
+diff --git a/arch/arm/mach-mx3/Kconfig b/arch/arm/mach-mx3/Kconfig
+index 735ac86..6cb7564 100644
+--- a/arch/arm/mach-mx3/Kconfig
++++ b/arch/arm/mach-mx3/Kconfig
+@@ -1,6 +1,15 @@
+ menu "MX3 Options"
+ 	depends on ARCH_MX3
+ 
++config MX3_OPTIONS
++	bool
++	default y
++	select CPU_V6
++	select CACHE_L2X0
++	select OUTER_CACHE
++	select USB_ARCH_HAS_EHCI
++	select ARCH_HAS_EVTMON
++
+ config MACH_MX31ADS
+ 	bool "Support MX31ADS platforms"
+ 	help
+diff --git a/arch/arm/mach-mx3/dvfs_v2.c b/arch/arm/mach-mx3/dvfs_v2.c
+index 152caf0..cda0e8a 100644
+--- a/arch/arm/mach-mx3/dvfs_v2.c
++++ b/arch/arm/mach-mx3/dvfs_v2.c
+@@ -403,7 +403,7 @@ static SYSDEV_ATTR(enable, 0200, NULL, dvfs_enable_store);
+ static SYSDEV_ATTR(status, 0644, dvfs_status_show, dvfs_status_store);
+ 
+ static struct sysdev_class dvfs_sysclass = {
+-	set_kset_name("dvfs"),
++	.name = "dvfs",
+ };
+ 
+ static struct sys_device dvfs_device = {
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index c941167..e961515 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -308,21 +308,21 @@ static struct mxc_mma7450_platform_data mma7450_data = {
+ 
+ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	{
+-	 .driver_name = "ov2640",
++	 .type = "ov2640",
+ 	 .addr = 0x30,
+ 	 .platform_data = (void *)&camera_data,},
+ 	{
+-	 .driver_name = "ch7024",
++	 .type = "ch7024",
+ 	 .addr = 0x76,
+ 	 .platform_data = (void *)&tvout_data,
+ 	 .irq = IOMUX_TO_IRQ(MX31_PIN_BATT_LINE),},
+ 	{
+-	 .driver_name = "si4702",
++	 .type = "si4702",
+ 	 .addr = 0x10,
+ 	 .platform_data = (void *)&si4702_data,
+ 	 },
+ 	{
+-	 .driver_name = "mma7450",
++	 .type = "mma7450",
+ 	 .addr = 0x1d,
+ 	 .platform_data = (void *)&mma7450_data,
+ 	 },
+diff --git a/arch/arm/mach-mx35/Kconfig b/arch/arm/mach-mx35/Kconfig
+index 698a014..6d222a9 100644
+--- a/arch/arm/mach-mx35/Kconfig
++++ b/arch/arm/mach-mx35/Kconfig
+@@ -1,10 +1,19 @@
+ menu "MX35 Options"
+ 	depends on ARCH_MX35
+ 
++config MX35_OPTIONS
++	bool
++	default y
++	select CPU_V6
++	select CACHE_L2X0
++	select OUTER_CACHE
++	select USB_ARCH_HAS_EHCI
++	select ARCH_HAS_EVTMON
++
+ config MACH_MX35_3DS
+ 	bool "Support MX35 3STACK platforms"
+ 	default y
+-	select MXC_PSEUDO_IRQS if MXC_PMIC 
++	select MXC_PSEUDO_IRQS if MXC_PMIC
+ 	help
+ 	  Include support for MX35 3STACK platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -72,6 +81,6 @@ config I2C_MXC_SELECT3
+ endmenu
+ 
+ config MXC_PSEUDO_IRQS
+-	bool 
+- 
++	bool
++
+ endmenu
+diff --git a/arch/arm/mach-mx35/dvfs.c b/arch/arm/mach-mx35/dvfs.c
+index 5b6bd07..4121da9 100644
+--- a/arch/arm/mach-mx35/dvfs.c
++++ b/arch/arm/mach-mx35/dvfs.c
+@@ -483,7 +483,7 @@ static SYSDEV_ATTR(enable, 0200, NULL, dvfs_enable_store);
+ static SYSDEV_ATTR(status, 0644, dvfs_status_show, dvfs_status_store);
+ 
+ static struct sysdev_class dvfs_sysclass = {
+-	set_kset_name("dvfs"),
++	.name = "dvfs",
+ };
+ 
+ static struct sys_device dvfs_device = {
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 74ac988..cc64f5a 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -346,41 +346,41 @@ static struct mxc_fm_platform_data si4702_data = {
+ 
+ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	{
+-	 .driver_name = "mc9sdz60",
++	 .type = "mc9sdz60",
+ 	 .addr = 0x69,
+ 	 },
+ 	{
+-	 .driver_name = "max8660",
++	 .type = "max8660",
+ 	 .addr = 0x34,
+ 	 },
+ 	{
+-	 .driver_name = "TSC2007",
++	 .type = "tsc2007",
+ 	 .addr = 0x48,
+ 	 .platform_data = &tsc2007_data,
+ 	 .irq = IOMUX_TO_IRQ(MX35_PIN_CAPTURE),
+ 	 },
+ 	{
+-	 .driver_name = "ov2640",
++	 .type = "ov2640",
+ 	 .addr = 0x30,
+ 	 .platform_data = (void *)&camera_data,
+ 	 },
+ 	{
+-	 .driver_name = "ak4647-i2c",
++	 .type = "ak4647-i2c",
+ 	 .addr = 0x12,
+ 	 },
+ #if defined(CONFIG_I2C_SLAVE_CLIENT)
+ 	{
+-	 .driver_name = "i2c-slave-client",
++	 .type = "i2c-slave-client",
+ 	 .addr = 0x55,
+ 	 },
+ #endif
+ 	{
+-	 .driver_name = "si4702",
++	 .type = "si4702",
+ 	 .addr = 0x10,
+ 	 .platform_data = (void *)&si4702_data,
+ 	 },
+ 	{
+-	 .driver_name = "adv7180",
++	 .type = "adv7180",
+ 	 .addr = 0x21,
+ 	 },
+ };
+diff --git a/arch/arm/mach-mx37/Kconfig b/arch/arm/mach-mx37/Kconfig
+index 445fff8..6f7f651 100644
+--- a/arch/arm/mach-mx37/Kconfig
++++ b/arch/arm/mach-mx37/Kconfig
+@@ -1,6 +1,16 @@
+ menu "MX37 Options"
+ 	depends on ARCH_MX37
+ 
++config MX37_OPTIONS
++	bool
++	default y
++	select CPU_V6
++	select CACHE_L2X0
++	select OUTER_CACHE
++	select USB_ARCH_HAS_EHCI
++	select ARCH_HAS_EVTMON
++	select MXC_TZIC
++
+ config MACH_MX37_3DS
+ 	bool "Support MX37 3-Stack platforms"
+ 	default y
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 40a0a97..da33290 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -209,12 +209,12 @@ static struct mxc_keyp_platform_data keypad_data = {
+ };
+ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	{
+-	 .driver_name = "TSC2007",
++	 .type = "tsc2007",
+ 	 .addr = 0x48,
+ 	 .irq = IOMUX_TO_IRQ(MX37_PIN_AUD5_RXFS),
+ 	 },
+ 	{
+-	 .driver_name = "MPR084",
++	 .type = "mpr084",
+ 	 .addr = 0x5D,
+ 	 .platform_data = &keypad_data,
+ 	 .irq = IOMUX_TO_IRQ(MX37_PIN_GPIO1_3),
+diff --git a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+index a764fc1..98fd462 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
++++ b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+@@ -83,13 +83,13 @@ void wm8350_free(struct wm8350 *wm8350)
+ 
+ 	flush_scheduled_work();
+ 
+-	if (wm8350->pmic.dev.is_registered)
++	if (device_is_registered(&wm8350->pmic.dev))
+ 		device_unregister(&wm8350->pmic.dev);
+-	if (wm8350->rtc.dev.is_registered)
++	if (device_is_registered(&wm8350->rtc.dev))
+ 		device_unregister(&wm8350->rtc.dev);
+-	if (wm8350->wdg.dev.is_registered)
++	if (device_is_registered(&wm8350->wdg.dev))
+ 		device_unregister(&wm8350->wdg.dev);
+-	if (wm8350->power.dev.is_registered)
++	if (device_is_registered(&wm8350->power.dev))
+ 		device_unregister(&wm8350->power.dev);
+ 
+ 	platform_device_unregister(imx_snd_device);
+diff --git a/arch/arm/mm/cache-l2x0.c b/arch/arm/mm/cache-l2x0.c
+index b48c993..edc4201 100644
+--- a/arch/arm/mm/cache-l2x0.c
++++ b/arch/arm/mm/cache-l2x0.c
+@@ -18,6 +18,7 @@
+  */
+ #include <linux/init.h>
+ #include <linux/spinlock.h>
++#include <linux/module.h>
+ 
+ #include <asm/cacheflush.h>
+ #include <asm/io.h>
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index 100a44d..c1d2501 100644
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -7,45 +7,27 @@ choice
+ 	default ARCH_MX3
+ 
+ config ARCH_MX37
+-    bool "MX37-based"
+-	select CPU_V6
+-	select CACHE_L2X0
+-	select USB_ARCH_HAS_EHCI
+-	select ARCH_HAS_EVTMON
+-	select MXC_TZIC
++	bool "MX37-based"
+     help
+       This enables support for systems based on Freescale i.MX37
+ 
+ config ARCH_MX35
+     bool "MX35-based"
+-        select CPU_V6
+-        select CACHE_L2X0
+-        select USB_ARCH_HAS_EHCI
+-        select ARCH_HAS_EVTMON
+     help
+       This enables support for systems based on Freescale i.MX35
+ 
+ config ARCH_MX3
+ 	bool "MX3-based"
+-	select CPU_V6
+-	select CACHE_L2X0
+-	select USB_ARCH_HAS_EHCI
+-	select ARCH_HAS_EVTMON
+ 	help
+ 	  This enables support for systems based on the Freescale i.MX31 and i.MX32
+ 
+ config ARCH_MX27
+ 	bool "MX27-based"
+-	select CPU_ARM926T
+-	select MXC_EMMA
+-	select USB_ARCH_HAS_EHCI
+ 	help
+ 	  This enables support for systems based on the Freescale i.MX27
+ 
+ config ARCH_MX21
+ 	bool "MX21-based"
+-	select CPU_ARM926T
+-	select MXC_EMMA
+ 	help
+ 	  This enables support for systems based on the Freescale i.MX21
+ 
+diff --git a/arch/arm/plat-mxc/gpio.c b/arch/arm/plat-mxc/gpio.c
+index da22803..eaf1bdf 100644
+--- a/arch/arm/plat-mxc/gpio.c
++++ b/arch/arm/plat-mxc/gpio.c
+@@ -663,7 +663,7 @@ static int mxc_gpio_resume(struct sys_device *dev)
+  * This structure contains pointers to the power management callback functions.
+  */
+ static struct sysdev_class mxc_gpio_sysclass = {
+-	set_kset_name("mxc_gpio"),
++	.name = "mxc_gpio",
+ 	.suspend = mxc_gpio_suspend,
+ 	.resume = mxc_gpio_resume,
+ };
+diff --git a/arch/arm/plat-mxc/irq.c b/arch/arm/plat-mxc/irq.c
+index 94c5485..4b38226 100644
+--- a/arch/arm/plat-mxc/irq.c
++++ b/arch/arm/plat-mxc/irq.c
+@@ -286,7 +286,7 @@ static int mxc_avic_resume(struct sys_device *dev)
+  * This structure contains pointers to the power management callback functions.
+  */
+ static struct sysdev_class mxc_avic_sysclass = {
+-	set_kset_name("mxc_irq"),
++	.name = "mxc_irq",
+ 	.suspend = mxc_avic_suspend,
+ 	.resume = mxc_avic_resume,
+ };
+diff --git a/drivers/ata/pata_fsl.c b/drivers/ata/pata_fsl.c
+index a605c6e..3c87392 100644
+--- a/drivers/ata/pata_fsl.c
++++ b/drivers/ata/pata_fsl.c
+@@ -366,7 +366,7 @@ static irqreturn_t pata_fsl_adma_intr(int irq, void *dev_instance)
+ 			qc = ata_qc_from_tag(ap, ap->link.active_tag);
+ 			if (qc && (!(qc->tf.flags & ATA_TFLAG_POLLING)) &&
+ 			    (qc->flags & ATA_QCFLAG_ACTIVE))
+-				handled |= ata_host_intr(ap, qc);
++				handled |= ata_sff_host_intr(ap, qc);
+ 		}
+ 	}
+ 
+@@ -387,6 +387,7 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 	struct fsl_ata_platform_data *plat = ap->dev->platform_data;
+ 	struct scatterlist tmp[plat->max_sg], *tsg, *sg;
+ 	int err;
++	unsigned int si;
+ 
+ 	priv->dma_dir = qc->dma_dir;
+ 
+@@ -431,7 +432,7 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 	 * Copy the sg list to an array.
+ 	 */
+ 	tsg = tmp;
+-	ata_for_each_sg(sg, qc) {
++	for_each_sg(qc->sg, sg, qc->n_elem, si) {
+ 		memcpy(tsg, sg, sizeof *sg);
+ 		tsg++;
+ 		nr_sg++;
+@@ -505,7 +506,7 @@ static void pata_fsl_bmdma_start(struct ata_queued_cmd *qc)
+ 
+ 	priv->dma_done = 0;
+ 
+-	ap->ops->exec_command(ap, &qc->tf);
++	ata_sff_exec_command(ap, &qc->tf);
+ }
+ 
+ static void pata_fsl_bmdma_stop(struct ata_queued_cmd *qc)
+@@ -525,7 +526,7 @@ static void pata_fsl_bmdma_stop(struct ata_queued_cmd *qc)
+ 	}
+ 
+ 	/* do a dummy read as in ata_bmdma_stop */
+-	ata_altstatus(ap);
++	ata_sff_dma_pause(ap);
+ }
+ 
+ static u8 pata_fsl_bmdma_status(struct ata_port *ap)
+@@ -571,7 +572,7 @@ static u8 pata_fsl_irq_ack(struct ata_port *ap, unsigned int chk_drq)
+ 	unsigned int bits = chk_drq ? ATA_BUSY | ATA_DRQ : ATA_BUSY;
+ 	u8 status;
+ 
+-	status = ata_busy_wait(ap, bits, 1000);
++	status = ata_sff_busy_wait(ap, bits, 1000);
+ 	if (status & bits)
+ 		if (ata_msg_err(ap))
+ 			printk(KERN_ERR "abnormal status 0x%X\n", status);
+@@ -603,36 +604,24 @@ static struct scsi_host_template pata_fsl_sht = {
+ };
+ 
+ static struct ata_port_operations pata_fsl_port_ops = {
++	.inherits = &ata_bmdma_port_ops,
+ 	.set_piomode = pata_fsl_set_piomode,
+ 	.set_dmamode = pata_fsl_set_dmamode,
+ 
+-	.tf_load = ata_tf_load,
+-	.tf_read = ata_tf_read,
+-	.check_status = ata_check_status,
+-	.exec_command = ata_exec_command,
+-	.dev_select = ata_std_dev_select,
+-
+-	.freeze = ata_bmdma_freeze,
+-	.thaw = ata_bmdma_thaw,
+-	.error_handler = ata_bmdma_error_handler,
+-	.post_internal_cmd = ata_bmdma_post_internal_cmd,
+ 	.cable_detect = ata_cable_unknown,
+ 
+ 	.bmdma_setup = pata_fsl_bmdma_setup,
+ 	.bmdma_start = pata_fsl_bmdma_start,
++	.bmdma_stop = pata_fsl_bmdma_stop,
++	.bmdma_status = pata_fsl_bmdma_status,
+ 
+ 	.qc_prep = ata_noop_qc_prep,
+-	.qc_issue = ata_qc_issue_prot,
+-
+-	.data_xfer = ata_data_xfer_noirq,
+ 
+-	.irq_clear = ata_dummy_noret,
+-	.irq_on = ata_irq_on,
++	.sff_data_xfer = ata_sff_data_xfer_noirq,
++	.sff_irq_clear = ata_dummy_noret,
++	.sff_irq_on = ata_sff_irq_on,
+ 
+ 	.port_start = pata_fsl_port_start,
+-
+-	.bmdma_stop = pata_fsl_bmdma_stop,
+-	.bmdma_status = pata_fsl_bmdma_status,
+ };
+ 
+ static void fsl_setup_port(struct ata_ioports *ioaddr)
+@@ -790,7 +779,7 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 					pata_fsl_adma_intr, 0, &pata_fsl_sht);
+ 	else
+ 		ret = ata_host_activate(host, platform_get_irq(pdev, 0),
+-					ata_interrupt, 0, &pata_fsl_sht);
++					ata_sff_interrupt, 0, &pata_fsl_sht);
+ 
+ 	if (ret < 0)
+ 		goto err2;
+diff --git a/drivers/char/mxc_si4702.c b/drivers/char/mxc_si4702.c
+index fce241a..0d6a923 100644
+--- a/drivers/char/mxc_si4702.c
++++ b/drivers/char/mxc_si4702.c
+@@ -67,7 +67,7 @@ struct si4702_info {
+ static struct regulator *reg_vio;
+ static struct regulator *reg_vdd;
+ static struct class *radio_class;
+-static struct class_device *class_dev;
++static struct device *class_dev;
+ static struct si4702_info dev_info;
+ /*by default, dev major is zero, and it's alloc dynamicaly. */
+ static int dev_major = DEV_MAJOR;
+@@ -78,7 +78,7 @@ DEFINE_SPINLOCK(count_lock);
+ static struct i2c_client *si4702_client;
+ static unsigned char reg_rw_buf[SI4702_REG_BYTE];
+ static int si4702_id_detect(struct i2c_client *client);
+-static int __devinit si4702_probe(struct i2c_client *client);
++static int __devinit si4702_probe(struct i2c_client *client, const struct i2c_device_id *id);
+ static int __devexit si4702_remove(struct i2c_client *client);
+ static int si4702_suspend(struct i2c_client *client, pm_message_t state);
+ static int si4702_resume(struct i2c_client *client);
+@@ -107,12 +107,20 @@ static struct device_attribute si4702_dev_attr = {
+ 	.show = si4702_show,
+ 	.store = si4702_store,
+ };
++
++static const struct i2c_device_id si4702_id[] = {
++	{ "si4702", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, si4702_id);
++
+ static struct i2c_driver i2c_si4702_driver = {
+ 	.driver = {
+ 		   .name = "si4702",
+ 		   },
+ 	.probe = si4702_probe,
+ 	.remove = si4702_remove,
++	.id_table = si4702_id,
+ 	.suspend = si4702_suspend,
+ 	.resume = si4702_resume,
+ };
+@@ -123,7 +131,7 @@ static struct file_operations si4702_fops = {
+ 	.ioctl = ioctl_si4702,
+ };
+ 
+-static int __devinit si4702_probe(struct i2c_client *client)
++static int __devinit si4702_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	int ret = 0;
+ 	dev_t dev;
+@@ -199,8 +207,8 @@ static int __devinit si4702_probe(struct i2c_client *client)
+ 	}
+ 
+ 	class_dev =
+-	    class_device_create(radio_class, NULL, MKDEV(dev_major, dev_minor),
+-				NULL, SI4702_DEV_NAME);
++	    device_create(radio_class, NULL, MKDEV(dev_major, dev_minor),
++			  SI4702_DEV_NAME);
+ 	if (IS_ERR(class_dev)) {
+ 		dev_err(&si4702_client->dev,
+ 			"SI4702: failed to create radio class device\n");
+@@ -239,7 +247,7 @@ static int __devexit si4702_remove(struct i2c_client *client)
+ 
+ 	data = (struct mxc_fm_platform_data *)client->dev.platform_data;
+ 
+-	class_device_destroy(radio_class, MKDEV(dev_major, dev_minor));
++	device_destroy(radio_class, MKDEV(dev_major, dev_minor));
+ 	class_destroy(radio_class);
+ 	cdev_del(&si4702_dev);
+ 	device_remove_file(&client->dev, &si4702_dev_attr);
+diff --git a/drivers/hwmon/mxc_mma7450.c b/drivers/hwmon/mxc_mma7450.c
+index 8248b90..535ba95 100644
+--- a/drivers/hwmon/mxc_mma7450.c
++++ b/drivers/hwmon/mxc_mma7450.c
+@@ -90,7 +90,7 @@ static ssize_t mma7450_show(struct device *dev,
+ static ssize_t mma7450_store(struct device *dev,
+ 			     struct device_attribute *attr, const char *buf,
+ 			     size_t count);
+-static int mma7450_probe(struct i2c_client *client);
++static int mma7450_probe(struct i2c_client *client, const struct i2c_device_id *id);
+ static int mma7450_remove(struct i2c_client *client);
+ static int mma7450_suspend(struct i2c_client *client, pm_message_t state);
+ static int mma7450_resume(struct i2c_client *client);
+@@ -112,6 +112,13 @@ static struct device_attribute mma7450_dev_attr = {
+ 	.show = mma7450_show,
+ 	.store = mma7450_store,
+ };
++
++static const struct i2c_device_id mma7450_id[] = {
++	{ "mma7450", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, mma7450_id);
++
+ static struct i2c_driver i2c_mma7450_driver = {
+ 	.driver = {
+ 		   .name = "mma7450",
+@@ -120,6 +127,7 @@ static struct i2c_driver i2c_mma7450_driver = {
+ 	.remove = mma7450_remove,
+ 	.suspend = mma7450_suspend,
+ 	.resume = mma7450_resume,
++	.id_table = mma7450_id,
+ };
+ 
+ static struct mma7450_status mma_status = {
+@@ -591,7 +599,7 @@ error_bad_int:
+ 	return IRQ_RETVAL(1);
+ }
+ 
+-static int mma7450_probe(struct i2c_client *client)
++static int mma7450_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	int ret;
+ 	struct input_dev *idev;
+diff --git a/drivers/i2c-slave/i2c_slave_device.c b/drivers/i2c-slave/i2c_slave_device.c
+index 1f07afc..e1d9a83 100644
+--- a/drivers/i2c-slave/i2c_slave_device.c
++++ b/drivers/i2c-slave/i2c_slave_device.c
+@@ -112,10 +112,9 @@ void i2c_slave_device_free(i2c_slave_device_t *dev)
+ 
+ int i2c_slave_device_register(i2c_slave_device_t *device)
+ {
+-	device->dev =
+-	    class_device_create(i2c_slave_class, NULL,
+-				(dev_t) MKDEV(i2c_slave_major, device->id),
+-				NULL, "slave-i2c-%d", device->id);
++	device->dev = device_create(i2c_slave_class, NULL,
++				    MKDEV(i2c_slave_major, device->id),
++				    "slave-i2c-%d", device->id);
+ 	if (!device->dev) {
+ 		return -1;
+ 	}
+diff --git a/drivers/input/keyboard/mpr084.c b/drivers/input/keyboard/mpr084.c
+index f1109ab..bc417ff 100644
+--- a/drivers/input/keyboard/mpr084.c
++++ b/drivers/input/keyboard/mpr084.c
+@@ -77,7 +77,7 @@
+ #define MPR084_FIFO_PAD_IS_TOUCHED              0x10
+ #define MPR084_FIFO_POSITION_MASK               0x0F
+ 
+-#define DRIVER_NAME "MPR084"
++#define DRIVER_NAME "mpr084"
+ 
+ struct mpr084_data {
+ 	struct i2c_client *client;
+@@ -186,7 +186,7 @@ static int mpr084ts_thread(void *v)
+ 
+ static int mpr084_idev_open(struct input_dev *idev)
+ {
+-	struct mpr084_data *d = idev->private;
++	struct mpr084_data *d = input_get_drvdata(idev);
+ 	int ret = 0;
+ 
+ 	d->tstask = kthread_run(mpr084ts_thread, d, DRIVER_NAME "kpd");
+@@ -197,7 +197,7 @@ static int mpr084_idev_open(struct input_dev *idev)
+ 
+ static void mpr084_idev_close(struct input_dev *idev)
+ {
+-	struct mpr084_data *d = idev->private;
++	struct mpr084_data *d = input_get_drvdata(idev);
+ 
+ 	if (!IS_ERR(d->tstask))
+ 		kthread_stop(d->tstask);
+@@ -222,7 +222,7 @@ static int mpr084_driver_register(struct mpr084_data *data)
+ 	}
+ 	idev = input_allocate_device();
+ 	data->idev = idev;
+-	idev->private = data;
++	input_set_drvdata(idev, data);
+ 	idev->name = DRIVER_NAME;
+ 	idev->open = mpr084_idev_open;
+ 	idev->close = mpr084_idev_close;
+@@ -320,7 +320,7 @@ err:
+ 	return -ENODEV;
+ }
+ 
+-static int mpr084_i2c_probe(struct i2c_client *client)
++static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	struct mpr084_data *data;
+ 	int err = 0, i = 0;
+@@ -359,6 +359,12 @@ exit_free:
+ 	return err;
+ }
+ 
++static const struct i2c_device_id mpr084_id[] = {
++	{ "mpr084", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, mpr084_id);
++
+ static struct i2c_driver mpr084_driver = {
+ 	.driver = {
+ 		   .name = DRIVER_NAME,
+@@ -366,6 +372,7 @@ static struct i2c_driver mpr084_driver = {
+ 	.probe = mpr084_i2c_probe,
+ 	.remove = mpr084_i2c_remove,
+ 	.command = NULL,
++	.id_table = mpr084_id,
+ };
+ static int __init mpr084_init(void)
+ {
+diff --git a/drivers/input/touchscreen/tsc2007.c b/drivers/input/touchscreen/tsc2007.c
+index 82f14f0..c089e8a 100644
+--- a/drivers/input/touchscreen/tsc2007.c
++++ b/drivers/input/touchscreen/tsc2007.c
+@@ -38,7 +38,7 @@
+ #include <linux/regulator/regulator.h>
+ #include <asm/mach/irq.h>
+ 
+-#define DRIVER_NAME "TSC2007"
++#define DRIVER_NAME "tsc2007"
+ 
+ enum tsc2007_pd {
+ 	PD_POWERDOWN = 0,	/* penirq */
+@@ -220,7 +220,7 @@ static int tsc2007ts_thread(void *v)
+ 
+ static int tsc2007_idev_open(struct input_dev *idev)
+ {
+-	struct tsc2007_data *d = idev->private;
++	struct tsc2007_data *d = input_get_drvdata(idev);
+ 	int ret = 0;
+ 
+ 	d->penirq_timer.data = (unsigned long)d;
+@@ -237,7 +237,7 @@ static int tsc2007_idev_open(struct input_dev *idev)
+ 
+ static void tsc2007_idev_close(struct input_dev *idev)
+ {
+-	struct tsc2007_data *d = idev->private;
++	struct tsc2007_data *d = input_get_drvdata(idev);
+ 	if (!IS_ERR(d->tstask))
+ 		kthread_stop(d->tstask);
+ 
+@@ -269,7 +269,7 @@ static int tsc2007_driver_register(struct tsc2007_data *data)
+ 	}
+ 	idev = input_allocate_device();
+ 	data->idev = idev;
+-	idev->private = data;
++	input_set_drvdata(idev, data);
+ 	idev->name = DRIVER_NAME;
+ 	idev->evbit[0] = BIT(EV_ABS);
+ 	idev->open = tsc2007_idev_open;
+@@ -313,7 +313,7 @@ static int tsc2007_i2c_remove(struct i2c_client *client)
+ 	return 0;
+ }
+ 
+-static int tsc2007_i2c_probe(struct i2c_client *client)
++static int tsc2007_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	struct tsc2007_data *data;
+ 	struct mxc_tsc_platform_data *tsc_data;
+@@ -361,6 +361,12 @@ static int tsc2007_i2c_probe(struct i2c_client *client)
+ 	return err;
+ }
+ 
++static const struct i2c_device_id tsc2007_id[] = {
++	{ "tsc2007", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, tsc2007_id);
++
+ static struct i2c_driver tsc2007_driver = {
+ 	.driver = {
+ 		   .name = DRIVER_NAME,
+@@ -368,6 +374,7 @@ static struct i2c_driver tsc2007_driver = {
+ 	.probe = tsc2007_i2c_probe,
+ 	.remove = tsc2007_i2c_remove,
+ 	.command = NULL,
++	.id_table = tsc2007_id,
+ };
+ 
+ static int __init tsc2007_init(void)
+diff --git a/drivers/media/video/mxc/capture/adv7180.c b/drivers/media/video/mxc/capture/adv7180.c
+index a2b8cce..90749f9 100644
+--- a/drivers/media/video/mxc/capture/adv7180.c
++++ b/drivers/media/video/mxc/capture/adv7180.c
+@@ -38,9 +38,15 @@ extern PMIC_STATUS pmic_gpio_set_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+ 					 unsigned int val);
+ struct i2c_client *adv7180_i2c_client;
+ 
+-static int adv7180_probe(struct i2c_client *adapter);
++static int adv7180_probe(struct i2c_client *adapter, const struct i2c_device_id *id);
+ static int adv7180_detach(struct i2c_client *client);
+ 
++static const struct i2c_device_id adv7180_id[] = {
++	{ "adv7180", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, adv7180_id);
++
+ static struct i2c_driver adv7180_i2c_driver = {
+ 	.driver = {
+ 		   .owner = THIS_MODULE,
+@@ -48,6 +54,7 @@ static struct i2c_driver adv7180_i2c_driver = {
+ 		   },
+ 	.probe = adv7180_probe,
+ 	.remove = adv7180_detach,
++	.id_table = adv7180_id,
+ };
+ 
+ /*! Structure initialized by adv7180_interface() and used to configure the
+@@ -369,7 +376,7 @@ static void adv7180_hard_reset(void)
+  *
+  *  @return		Error code indicating success or failure.
+  */
+-static int adv7180_probe(struct i2c_client *client)
++static int adv7180_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	int rev_id;
+ 
+diff --git a/drivers/media/video/mxc/capture/ov2640.c b/drivers/media/video/mxc/capture/ov2640.c
+index f768291..c6b5de0 100644
+--- a/drivers/media/video/mxc/capture/ov2640.c
++++ b/drivers/media/video/mxc/capture/ov2640.c
+@@ -145,9 +145,15 @@ struct i2c_client *ov2640_i2c_client;
+ 
+ static sensor_interface *interface_param;
+ static int reset_frame_rate = 30;
+-static int ov2640_probe(struct i2c_client *adapter);
++static int ov2640_probe(struct i2c_client *adapter, const struct i2c_device_id *id);
+ static int ov2640_remove(struct i2c_client *client);
+ 
++static const struct i2c_device_id ov2640_id[] = {
++	{ "ov2640", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, ov2640_id);
++
+ static struct i2c_driver ov2640_i2c_driver = {
+ 	.driver = {
+ 		   .owner = THIS_MODULE,
+@@ -155,6 +161,7 @@ static struct i2c_driver ov2640_i2c_driver = {
+ 		   },
+ 	.probe = ov2640_probe,
+ 	.remove = ov2640_remove,
++	.id_table = ov2640_id,
+ };
+ 
+ /*!
+@@ -163,7 +170,7 @@ static struct i2c_driver ov2640_i2c_driver = {
+  * @param adapter            struct i2c_adapter *
+  * @return  Error code indicating success or failure
+  */
+-static int ov2640_probe(struct i2c_client *client)
++static int ov2640_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	struct mxc_camera_platform_data *plat_data = client->dev.platform_data;
+ 
+diff --git a/drivers/mmc/card/unifi_fs/fs_lx.c b/drivers/mmc/card/unifi_fs/fs_lx.c
+index a879cd3..fbd8999 100644
+--- a/drivers/mmc/card/unifi_fs/fs_lx.c
++++ b/drivers/mmc/card/unifi_fs/fs_lx.c
+@@ -38,6 +38,8 @@
+ #include <linux/mmc/sdio_ids.h>
+ 
+ #include <linux/clk.h>
++#include <linux/err.h>
++
+ #include <asm/arch/pmic_power.h>
+ #include <asm/arch/mmc.h>
+ #include <asm/arch/gpio.h>
+diff --git a/drivers/mtd/nand/mxc_nd.c b/drivers/mtd/nand/mxc_nd.c
+index e858a5b..c07c547 100644
+--- a/drivers/mtd/nand/mxc_nd.c
++++ b/drivers/mtd/nand/mxc_nd.c
+@@ -873,13 +873,15 @@ static void mxc_nand_command(struct mtd_info *mtd, unsigned command,
+ 	 */
+ 	g_nandfc_info.bStatusRequest = false;
+ 
++	/* Reset column address to 0 */
++	g_nandfc_info.colAddr = 0;
++
+ 	/*
+ 	 * Command pre-processing step
+ 	 */
+ 	switch (command) {
+ 
+ 	case NAND_CMD_STATUS:
+-		g_nandfc_info.colAddr = 0;
+ 		g_nandfc_info.bStatusRequest = true;
+ 		break;
+ 
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 9ad3ed4..19bb2d6 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -1159,7 +1159,7 @@ static int mxc_asrc_probe(struct platform_device *pdev)
+ {
+ 	int err = 0;
+ 	struct resource *res;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res)
+@@ -1189,9 +1189,8 @@ static int mxc_asrc_probe(struct platform_device *pdev)
+ 		goto err_out_chrdev;
+ 	}
+ 
+-	temp_class = class_device_create(asrc_class, NULL,
+-					 MKDEV(asrc_major, 0), NULL,
+-					 "mxc_asrc");
++	temp_class = device_create(asrc_class, NULL, MKDEV(asrc_major, 0),
++				   "mxc_asrc");
+ 	if (IS_ERR(temp_class)) {
+ 		err = PTR_ERR(temp_class);
+ 		goto err_out_class;
+@@ -1213,7 +1212,7 @@ static int mxc_asrc_probe(struct platform_device *pdev)
+ 
+       err_out_class:
+ 	clk_disable(mxc_asrc_data->asrc_core_clk);
+-	class_device_destroy(asrc_class, MKDEV(asrc_major, 0));
++	device_destroy(asrc_class, MKDEV(asrc_major, 0));
+ 	class_destroy(asrc_class);
+       err_out_chrdev:
+ 	unregister_chrdev(asrc_major, "mxc_asrc");
+@@ -1238,7 +1237,7 @@ static int mxc_asrc_remove(struct platform_device *pdev)
+ 	mxc_asrc_data = NULL;
+ 	iounmap((unsigned long __iomem *)asrc_vrt_base_addr);
+ 	remove_proc_entry(proc_asrc->name, NULL);
+-	class_device_destroy(asrc_class, MKDEV(asrc_major, 0));
++	device_destroy(asrc_class, MKDEV(asrc_major, 0));
+ 	class_destroy(asrc_class);
+ 	unregister_chrdev(asrc_major, "mxc_asrc");
+ 	return 0;
+diff --git a/drivers/mxc/dam/dam_v1.c b/drivers/mxc/dam/dam_v1.c
+index ee55752..eff45eb 100644
+--- a/drivers/mxc/dam/dam_v1.c
++++ b/drivers/mxc/dam/dam_v1.c
+@@ -563,7 +563,7 @@ static struct file_operations dam_fops = {
+ static int __init dam_init(void)
+ {
+ #ifdef TEST_DAM
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 	printk(KERN_DEBUG "dam : dam_init(void) \n");
+ 
+ 	major_dam = register_chrdev(0, DAM_NAME, &dam_fops);
+@@ -577,8 +577,8 @@ static int __init dam_init(void)
+ 		goto err_out;
+ 	}
+ 
+-	temp_class = class_device_create(mxc_dam_class, NULL,
+-					 MKDEV(major_dam, 0), NULL, DAM_NAME);
++	temp_class = device_create(mxc_dam_class, NULL,
++				   MKDEV(major_dam, 0), DAM_NAME);
+ 	if (IS_ERR(temp_class)) {
+ 		goto err_out;
+ 	}
+@@ -587,7 +587,7 @@ static int __init dam_init(void)
+ 
+       err_out:
+ 	printk(KERN_ERR "Error creating dam class device.\n");
+-	class_device_destroy(mxc_dam_class, MKDEV(major_dam, 0));
++	device_destroy(mxc_dam_class, MKDEV(major_dam, 0));
+ 	class_destroy(mxc_dam_class);
+ 	unregister_chrdev(major_dam, DAM_NAME);
+ 	return -1;
+@@ -601,7 +601,7 @@ static int __init dam_init(void)
+ static void __exit dam_exit(void)
+ {
+ #ifdef TEST_DAM
+-	class_device_destroy(mxc_dam_class, MKDEV(major_dam, 0));
++	device_destroy(mxc_dam_class, MKDEV(major_dam, 0));
+ 	class_destroy(mxc_dam_class);
+ 	unregister_chrdev(major_dam, DAM_NAME);
+ 	printk(KERN_DEBUG "dam : successfully unloaded\n");
+diff --git a/drivers/mxc/hmp4e/mxc_hmp4e.c b/drivers/mxc/hmp4e/mxc_hmp4e.c
+index b1dee13..221e2e4 100644
+--- a/drivers/mxc/hmp4e/mxc_hmp4e.c
++++ b/drivers/mxc/hmp4e/mxc_hmp4e.c
+@@ -543,7 +543,7 @@ static s32 hmp4e_probe(struct platform_device *pdev)
+ {
+ 	s32 result;
+ 	u32 hwid;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	hmp4e_data.iobaseaddr = base_port;
+ 	hmp4e_data.irq = irq;
+@@ -610,8 +610,8 @@ static s32 hmp4e_probe(struct platform_device *pdev)
+ 		goto error3;
+ 	}
+ 
+-	temp_class = class_device_create(hmp4e_class, NULL,
+-					 MKDEV(hmp4e_major, 0), NULL, "hmp4e");
++	temp_class = device_create(hmp4e_class, NULL, MKDEV(hmp4e_major, 0),
++				   "hmp4e");
+ 	if (IS_ERR(temp_class)) {
+ 		pr_debug("Error creating hmp4e class device.\n");
+ 		goto error4;
+@@ -652,7 +652,7 @@ static s32 hmp4e_probe(struct platform_device *pdev)
+  */
+ static s32 hmp4e_remove(struct platform_device *pdev)
+ {
+-	class_device_destroy(hmp4e_class, MKDEV(hmp4e_major, 0));
++	device_destroy(hmp4e_class, MKDEV(hmp4e_major, 0));
+ 	class_destroy(hmp4e_class);
+ 	unregister_chrdev(hmp4e_major, "hmp4e");
+ 	hmp4e_free();
+diff --git a/drivers/mxc/ipu/ipu_device.c b/drivers/mxc/ipu/ipu_device.c
+index c777d14..3ef5a9e 100644
+--- a/drivers/mxc/ipu/ipu_device.c
++++ b/drivers/mxc/ipu/ipu_device.c
+@@ -563,7 +563,7 @@ static struct file_operations mxc_ipu_fops = {
+ int register_ipu_device()
+ {
+ 	int ret = 0;
+-	struct class_device *temp;
++	struct device *temp;
+ 	mxc_ipu_major = register_chrdev(0, "mxc_ipu", &mxc_ipu_fops);
+ 	if (mxc_ipu_major < 0) {
+ 		printk(KERN_ERR
+@@ -578,9 +578,8 @@ int register_ipu_device()
+ 		goto err1;
+ 	}
+ 
+-	temp =
+-	    class_device_create(mxc_ipu_class, NULL, MKDEV(mxc_ipu_major, 0),
+-				NULL, "mxc_ipu");
++	temp = device_create(mxc_ipu_class, NULL, MKDEV(mxc_ipu_major, 0),
++			     "mxc_ipu");
+ 
+ 	if (IS_ERR(temp)) {
+ 		printk(KERN_ERR "Unable to create class device for Mxc Ipu\n");
+diff --git a/drivers/mxc/ipu/pf/mxc_pf.c b/drivers/mxc/ipu/pf/mxc_pf.c
+index 80a93e3..d796a4c 100644
+--- a/drivers/mxc/ipu/pf/mxc_pf.c
++++ b/drivers/mxc/ipu/pf/mxc_pf.c
+@@ -938,7 +938,7 @@ static int mxc_pf_major = 0;
+ int mxc_pf_dev_init(void)
+ {
+ 	int ret = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	mxc_pf_major = register_chrdev(0, "mxc_ipu_pf", &mxc_pf_fops);
+ 
+@@ -954,9 +954,8 @@ int mxc_pf_dev_init(void)
+ 		goto err_out1;
+ 	}
+ 
+-	temp_class = class_device_create(mxc_pf_class, NULL,
+-					 MKDEV(mxc_pf_major, 0), NULL,
+-					 "mxc_ipu_pf");
++	temp_class = device_create(mxc_pf_class, NULL, MKDEV(mxc_pf_major, 0),
++				   "mxc_ipu_pf");
+ 	if (IS_ERR(temp_class)) {
+ 		printk(KERN_ERR "Error creating mxc_ipu_pf class device.\n");
+ 		ret = PTR_ERR(temp_class);
+@@ -980,7 +979,7 @@ int mxc_pf_dev_init(void)
+ static void mxc_pf_exit(void)
+ {
+ 	if (mxc_pf_major > 0) {
+-		class_device_destroy(mxc_pf_class, MKDEV(mxc_pf_major, 0));
++		device_destroy(mxc_pf_class, MKDEV(mxc_pf_major, 0));
+ 		class_destroy(mxc_pf_class);
+ 		unregister_chrdev(mxc_pf_major, "mxc_ipu_pf");
+ 	}
+diff --git a/drivers/mxc/mlb/mxc_mlb.c b/drivers/mxc/mlb/mxc_mlb.c
+index d7d3f45..a10e87b 100644
+--- a/drivers/mxc/mlb/mxc_mlb.c
++++ b/drivers/mxc/mlb/mxc_mlb.c
+@@ -212,7 +212,7 @@ static struct clk *mlb_clk;
+ static struct cdev mxc_mlb_dev;	/* chareset device */
+ static dev_t dev;
+ static struct class *mlb_class;	/* device class */
+-static struct class_device *class_dev;
++static struct device *class_dev;
+ static unsigned long mlb_base;	/* mlb module base address */
+ static unsigned int irq;
+ 
+@@ -846,9 +846,8 @@ static int __devinit mxc_mlb_probe(struct platform_device *pdev)
+ 
+ 	for (i = 0; i < MLB_MINOR_DEVICES; i++) {
+ 
+-		class_dev =
+-		    class_device_create(mlb_class, NULL, MKDEV(mlb_major, i),
+-					NULL, mlb_devinfo[i].dev_name);
++		class_dev = device_create(mlb_class, NULL, MKDEV(mlb_major, i),
++					  mlb_devinfo[i].dev_name);
+ 		if (IS_ERR(class_dev)) {
+ 			dev_err(&pdev->dev, "failed to create mlb %s"
+ 				" class device\n", mlb_devinfo[i].dev_name);
+@@ -953,7 +952,7 @@ err0:
+ 	free_irq(irq, NULL);
+ err1:
+ 	for (--i; i >= 0; i--)
+-		class_device_destroy(mlb_class, MKDEV(mlb_major, i));
++		device_destroy(mlb_class, MKDEV(mlb_major, i));
+ 
+ 	class_destroy(mlb_class);
+ err2:
+@@ -991,7 +990,7 @@ static int __devexit mxc_mlb_remove(struct platform_device *pdev)
+ 
+ 	/* destroy mlb device class */
+ 	for (i = MLB_MINOR_DEVICES - 1; i >= 0; i--)
+-		class_device_destroy(mlb_class, MKDEV(MAJOR(dev), i));
++		device_destroy(mlb_class, MKDEV(MAJOR(dev), i));
+ 	class_destroy(mlb_class);
+ 
+ 	/* Unregister the two MLB devices */
+diff --git a/drivers/mxc/pm/dptc_mx27.c b/drivers/mxc/pm/dptc_mx27.c
+index ce54ae9..3e1f743 100644
+--- a/drivers/mxc/pm/dptc_mx27.c
++++ b/drivers/mxc/pm/dptc_mx27.c
+@@ -1299,7 +1299,7 @@ static struct platform_device mxc_dptc_device = {
+ static int __init dptc_mx27_init(void)
+ {
+ 	int res;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	res = dvfs_dptc_init_default_table();
+ 
+@@ -1339,9 +1339,8 @@ static int __init dptc_mx27_init(void)
+ 		goto err_out;
+ 	}
+ 
+-	temp_class =
+-	    class_device_create(mxc_dvfs_dptc_class, NULL, MKDEV(major, 0),
+-				NULL, DEVICE_NAME);
++	temp_class = device_create(mxc_dvfs_dptc_class, NULL, MKDEV(major, 0),
++				   DEVICE_NAME);
+ 	if (IS_ERR(temp_class)) {
+ 		printk(KERN_ERR "DPTC: Error creating class device.\n");
+ 		goto err_out;
+@@ -1377,7 +1376,7 @@ static int __init dptc_mx27_init(void)
+ 
+       err_out:
+ 	printk(KERN_WARNING "MX27 DPTC driver was not initialized\n");
+-	class_device_destroy(mxc_dvfs_dptc_class, MKDEV(major, 0));
++	device_destroy(mxc_dvfs_dptc_class, MKDEV(major, 0));
+ 	class_destroy(mxc_dvfs_dptc_class);
+ 	unregister_chrdev(major, DEVICE_NAME);
+ 	return -1;
+@@ -1393,7 +1392,7 @@ static void __exit dptc_mx27_cleanup(void)
+ 	free_dvfs_dptc_table();
+ 
+ 	/* Un-register the driver and remove its node */
+-	class_device_destroy(mxc_dvfs_dptc_class, MKDEV(major, 0));
++	device_destroy(mxc_dvfs_dptc_class, MKDEV(major, 0));
+ 	class_destroy(mxc_dvfs_dptc_class);
+ 	unregister_chrdev(major, DEVICE_NAME);
+ 
+diff --git a/drivers/mxc/pmic/core/max8660.c b/drivers/mxc/pmic/core/max8660.c
+index 6f5cf3b..bdffd66 100644
+--- a/drivers/mxc/pmic/core/max8660.c
++++ b/drivers/mxc/pmic/core/max8660.c
+@@ -92,7 +92,7 @@ int max8660_write_reg(u8 reg, u8 value)
+  * @param adapter            struct i2c_client *
+  * @return  Always 0 because max8660 is write-only and can not be detected
+  */
+-static int max8660_probe(struct i2c_client *client)
++static int max8660_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	max8660_i2c_client = client;
+ 	return 0;
+@@ -108,12 +108,20 @@ static int max8660_remove(struct i2c_client *client)
+ {
+ 	return 0;
+ }
++
++static const struct i2c_device_id max8660_id[] = {
++	{ "max8660", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, max8660_id);
++
+ static struct i2c_driver max8660_i2c_driver = {
+ 	.driver = {
+ 		   .owner = THIS_MODULE,
+ 		   .name = "max8660",},
+ 	.probe = max8660_probe,
+ 	.remove = max8660_remove,
++	.id_table = max8660_id,
+ };
+ 
+ /* called by pmic core when init*/
+diff --git a/drivers/mxc/pmic/core/mc9sdz60.c b/drivers/mxc/pmic/core/mc9sdz60.c
+index ee8c3e9..132369f 100644
+--- a/drivers/mxc/pmic/core/mc9sdz60.c
++++ b/drivers/mxc/pmic/core/mc9sdz60.c
+@@ -55,7 +55,7 @@ int mc9sdz60_write_reg(u8 reg, u8 value)
+  * @param adapter            struct i2c_adapter *
+  * @return  0
+  */
+-static int mc9sdz60_probe(struct i2c_client *client)
++static int mc9sdz60_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	mc9sdz60_i2c_client = client;
+ 	return 0;
+@@ -71,12 +71,20 @@ static int mc9sdz60_remove(struct i2c_client *client)
+ {
+ 	return 0;
+ }
++
++static const struct i2c_device_id mc9sdz60_id[] = {
++	{ "mc9sdz60", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, mc9sdz60_id);
++
+ static struct i2c_driver mc9sdz60_i2c_driver = {
+ 	.driver = {.owner = THIS_MODULE,
+ 		   .name = "mc9sdz60",
+ 		   },
+ 	.probe = mc9sdz60_probe,
+ 	.remove = mc9sdz60_remove,
++	.id_table = mc9sdz60_id,
+ };
+ 
+ #define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
+diff --git a/drivers/mxc/pmic/core/pmic-dev.c b/drivers/mxc/pmic/core/pmic-dev.c
+index ffdeb68..ea4477c 100644
+--- a/drivers/mxc/pmic/core/pmic-dev.c
++++ b/drivers/mxc/pmic/core/pmic-dev.c
+@@ -240,7 +240,7 @@ static struct file_operations pmic_fops = {
+ static int __init pmic_dev_init(void)
+ {
+ 	int ret = 0;
+-	struct class_device *pmic_device;
++	struct device *pmic_device;
+ 	pmic_version_t pmic_ver;
+ 
+ 	pmic_ver = pmic_get_version();
+@@ -262,9 +262,8 @@ static int __init pmic_dev_init(void)
+ 		goto err;
+ 	}
+ 
+-	pmic_device =
+-	    class_device_create(pmic_class, NULL, MKDEV(pmic_major, 0),
+-				NULL, PMIC_NAME);
++	pmic_device = device_create(pmic_class, NULL, MKDEV(pmic_major, 0),
++				    PMIC_NAME);
+ 	if (IS_ERR(pmic_device)) {
+ 		printk(KERN_ERR "Error creating pmic class device.\n");
+ 		ret = PMIC_ERROR;
+@@ -281,7 +280,7 @@ static int __init pmic_dev_init(void)
+ 	printk(KERN_INFO "PMIC Character device: successfully loaded\n");
+ 	return ret;
+       err2:
+-	class_device_destroy(pmic_class, MKDEV(pmic_major, 0));
++	device_destroy(pmic_class, MKDEV(pmic_major, 0));
+       err1:
+ 	class_destroy(pmic_class);
+       err:
+@@ -298,7 +297,7 @@ static int __init pmic_dev_init(void)
+  */
+ static void __exit pmic_dev_exit(void)
+ {
+-	class_device_destroy(pmic_class, MKDEV(pmic_major, 0));
++	device_destroy(pmic_class, MKDEV(pmic_major, 0));
+ 	class_destroy(pmic_class);
+ 
+ 	unregister_chrdev(pmic_major, PMIC_NAME);
+diff --git a/drivers/mxc/pmic/core/pmic_core_i2c.c b/drivers/mxc/pmic/core/pmic_core_i2c.c
+index 0e1a5fc..ddc5db2 100644
+--- a/drivers/mxc/pmic/core/pmic_core_i2c.c
++++ b/drivers/mxc/pmic/core/pmic_core_i2c.c
+@@ -231,7 +231,7 @@ static struct device_attribute mc13892_dev_attr = {
+ 	.store = mc13892_store,
+ };
+ 
+-static int __devinit pmic_probe(struct i2c_client *client)
++static int __devinit pmic_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	int ret = 0;
+ 	int pmic_irq;
+@@ -303,6 +303,12 @@ static int pmic_resume(struct i2c_client *client)
+ 	return 0;
+ }
+ 
++static const struct i2c_device_id mc13892_id[] = {
++	{ "mc13892", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, mc13892_id);
++
+ static struct i2c_driver pmic_driver = {
+ 	.driver = {
+ 		   .name = "mc13892",
+@@ -312,6 +318,7 @@ static struct i2c_driver pmic_driver = {
+ 	.remove = pmic_remove,
+ 	.suspend = pmic_suspend,
+ 	.resume = pmic_resume,
++	.id_table = mc13892_id,
+ };
+ 
+ static int __init pmic_init(void)
+diff --git a/drivers/mxc/pmic/mc13783/pmic_adc.c b/drivers/mxc/pmic/mc13783/pmic_adc.c
+index 0587424..d11bc47 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_adc.c
++++ b/drivers/mxc/pmic/mc13783/pmic_adc.c
+@@ -1443,7 +1443,7 @@ static struct file_operations mc13783_adc_fops = {
+ static int pmic_adc_module_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	pmic_adc_major = register_chrdev(0, "pmic_adc", &mc13783_adc_fops);
+ 
+@@ -1460,9 +1460,8 @@ static int pmic_adc_module_probe(struct platform_device *pdev)
+ 		goto err_out1;
+ 	}
+ 
+-	temp_class = class_device_create(pmic_adc_class, NULL,
+-					 MKDEV(pmic_adc_major, 0),
+-					 NULL, "pmic_adc");
++	temp_class = device_create(pmic_adc_class, NULL,
++				   MKDEV(pmic_adc_major, 0), "pmic_adc");
+ 	if (IS_ERR(temp_class)) {
+ 		pr_debug(KERN_ERR "Error creating pmic_adc class device.\n");
+ 		ret = PTR_ERR(temp_class);
+@@ -1479,7 +1478,7 @@ static int pmic_adc_module_probe(struct platform_device *pdev)
+ 	return ret;
+ 
+       err_out4:
+-	class_device_destroy(pmic_adc_class, MKDEV(pmic_adc_major, 0));
++	device_destroy(pmic_adc_class, MKDEV(pmic_adc_major, 0));
+       err_out2:
+ 	class_destroy(pmic_adc_class);
+       err_out1:
+@@ -1490,7 +1489,7 @@ static int pmic_adc_module_probe(struct platform_device *pdev)
+ static int pmic_adc_module_remove(struct platform_device *pdev)
+ {
+ 	pmic_adc_deinit();
+-	class_device_destroy(pmic_adc_class, MKDEV(pmic_adc_major, 0));
++	device_destroy(pmic_adc_class, MKDEV(pmic_adc_major, 0));
+ 	class_destroy(pmic_adc_class);
+ 	unregister_chrdev(pmic_adc_major, "pmic_adc");
+ 	pr_debug(KERN_INFO "PMIC ADC successfully removed\n");
+diff --git a/drivers/mxc/pmic/mc13783/pmic_battery.c b/drivers/mxc/pmic/mc13783/pmic_battery.c
+index f28f373..57cb49a 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_battery.c
++++ b/drivers/mxc/pmic/mc13783/pmic_battery.c
+@@ -1132,7 +1132,7 @@ static struct file_operations pmic_battery_fops = {
+ 
+ static int pmic_battery_remove(struct platform_device *pdev)
+ {
+-	class_device_destroy(pmic_battery_class, MKDEV(pmic_battery_major, 0));
++	device_destroy(pmic_battery_class, MKDEV(pmic_battery_major, 0));
+ 	class_destroy(pmic_battery_class);
+ 	unregister_chrdev(pmic_battery_major, PMIC_BATTERY_STRING);
+ 	return 0;
+@@ -1141,7 +1141,7 @@ static int pmic_battery_remove(struct platform_device *pdev)
+ static int pmic_battery_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	pmic_battery_major = register_chrdev(0, PMIC_BATTERY_STRING,
+ 					     &pmic_battery_fops);
+@@ -1159,9 +1159,9 @@ static int pmic_battery_probe(struct platform_device *pdev)
+ 		goto err_out1;
+ 	}
+ 
+-	temp_class = class_device_create(pmic_battery_class, NULL,
+-					 MKDEV(pmic_battery_major, 0),
+-					 NULL, PMIC_BATTERY_STRING);
++	temp_class = device_create(pmic_battery_class, NULL,
++				   MKDEV(pmic_battery_major, 0),
++				   PMIC_BATTERY_STRING);
+ 	if (IS_ERR(temp_class)) {
+ 		printk(KERN_ERR "Error creating PMIC battery class device.\n");
+ 		ret = PTR_ERR(temp_class);
+diff --git a/drivers/mxc/pmic/mc13783/pmic_light.c b/drivers/mxc/pmic/mc13783/pmic_light.c
+index ba3a688..c4772b2 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_light.c
++++ b/drivers/mxc/pmic/mc13783/pmic_light.c
+@@ -2672,7 +2672,7 @@ static struct file_operations pmic_light_fops = {
+ 
+ static int pmic_light_remove(struct platform_device *pdev)
+ {
+-	class_device_destroy(pmic_light_class, MKDEV(pmic_light_major, 0));
++	device_destroy(pmic_light_class, MKDEV(pmic_light_major, 0));
+ 	class_destroy(pmic_light_class);
+ 	unregister_chrdev(pmic_light_major, "pmic_light");
+ 	return 0;
+@@ -2681,7 +2681,7 @@ static int pmic_light_remove(struct platform_device *pdev)
+ static int pmic_light_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	while (suspend_flag == 1) {
+ 		swait++;
+@@ -2705,9 +2705,9 @@ static int pmic_light_probe(struct platform_device *pdev)
+ 		goto err_out1;
+ 	}
+ 
+-	temp_class = class_device_create(pmic_light_class, NULL,
+-					 MKDEV(pmic_light_major, 0),
+-					 NULL, "pmic_light");
++	temp_class = device_create(pmic_light_class, NULL,
++				   MKDEV(pmic_light_major, 0),
++				   "pmic_light");
+ 	if (IS_ERR(temp_class)) {
+ 		printk(KERN_ERR "Error creating pmic_light class device.\n");
+ 		ret = PTR_ERR(temp_class);
+@@ -2723,7 +2723,7 @@ static int pmic_light_probe(struct platform_device *pdev)
+ 	return ret;
+ 
+       err_out3:
+-	class_device_destroy(pmic_light_class, MKDEV(pmic_light_major, 0));
++	device_destroy(pmic_light_class, MKDEV(pmic_light_major, 0));
+       err_out2:
+ 	class_destroy(pmic_light_class);
+       err_out1:
+diff --git a/drivers/mxc/pmic/mc13783/pmic_power.c b/drivers/mxc/pmic/mc13783/pmic_power.c
+index 7691c9f..e0ae538 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_power.c
++++ b/drivers/mxc/pmic/mc13783/pmic_power.c
+@@ -113,7 +113,7 @@ static int pmic_power_resume(struct platform_device *pdev)
+  *
+  * @return       This function returns PMIC_SUCCESS if successful.
+  */
+-PMIC_STATUS pmic_power_off(void)
++void pmic_power_off(void)
+ {
+ 	unsigned int mask, value;
+ 
+@@ -121,9 +121,7 @@ PMIC_STATUS pmic_power_off(void)
+ 	value = BITFVAL(MC13783_PWRCTRL_USER_OFF_SPI,
+ 			MC13783_PWRCTRL_USER_OFF_SPI_ENABLE);
+ 
+-	CHECK_ERROR(pmic_write_reg(REG_POWER_CONTROL_0, value, mask));
+-
+-	return PMIC_SUCCESS;
++	pmic_write_reg(REG_POWER_CONTROL_0, value, mask);
+ }
+ 
+ /*!
+diff --git a/drivers/mxc/pmic/mc13783/pmic_rtc.c b/drivers/mxc/pmic/mc13783/pmic_rtc.c
+index 9c32033..5383fce 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_rtc.c
++++ b/drivers/mxc/pmic/mc13783/pmic_rtc.c
+@@ -177,8 +177,11 @@ PMIC_STATUS pmic_rtc_set_time_alarm(struct timeval * pmic_time)
+ 	unsigned int tod_reg_val = 0;
+ 	unsigned int day_reg_val = 0;
+ 	unsigned int mask, value;
++	int ret;
++
++	if ((ret = down_interruptible(&mutex)) < 0)
++		return ret;
+ 
+-	down_interruptible(&mutex);
+ 	tod_reg_val = pmic_time->tv_sec % 86400;
+ 	day_reg_val = pmic_time->tv_sec / 86400;
+ 
+@@ -471,7 +474,7 @@ int pmic_rtc_loaded(void)
+ 
+ static int pmic_rtc_remove(struct platform_device *pdev)
+ {
+-	class_device_destroy(pmic_rtc_class, MKDEV(pmic_rtc_major, 0));
++	device_destroy(pmic_rtc_class, MKDEV(pmic_rtc_major, 0));
+ 	class_destroy(pmic_rtc_class);
+ 	unregister_chrdev(pmic_rtc_major, "pmic_rtc");
+ 	return 0;
+@@ -480,7 +483,7 @@ static int pmic_rtc_remove(struct platform_device *pdev)
+ static int pmic_rtc_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	pmic_rtc_major = register_chrdev(0, "pmic_rtc", &pmic_rtc_fops);
+ 	if (pmic_rtc_major < 0) {
+@@ -495,9 +498,9 @@ static int pmic_rtc_probe(struct platform_device *pdev)
+ 		goto err_out1;
+ 	}
+ 
+-	temp_class = class_device_create(pmic_rtc_class, NULL,
+-					 MKDEV(pmic_rtc_major, 0),
+-					 NULL, "pmic_rtc");
++	temp_class = device_create(pmic_rtc_class, NULL,
++				   MKDEV(pmic_rtc_major, 0),
++				   "pmic_rtc");
+ 	if (IS_ERR(temp_class)) {
+ 		printk(KERN_ERR "Error creating pmic rtc class device.\n");
+ 		ret = PTR_ERR(temp_class);
+diff --git a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c
+index 858637f..5c85dd6 100644
+--- a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c
++++ b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c
+@@ -66,24 +66,21 @@ static struct pmic_rtc_data mcu_pmic_rtc_data;
+ static int mcu_pmic_rtc_event_subscribe(int event,
+ 					pmic_event_callback_t callback)
+ {
+-	down_interruptible(&event_mutex);
+ 	rtc_event_callback.func = callback.func;
+-	up(&event_mutex);
+ 	return 0;
+ }
+ 
+ static int mcu_pmic_rtc_event_unsubscribe(int event,
+ 					  pmic_event_callback_t callback)
+ {
+-	down_interruptible(&event_mutex);
+ 	rtc_event_callback.func = NULL;
+-	up(&event_mutex);
+ 	return 0;
+ }
+ 
+ static void rtc_alarm_handler(struct work_struct *work)
+ {
+-	down_interruptible(&event_mutex);
++	if (down_interruptible(&event_mutex) < 0)
++		return;
+ 	if (NULL != rtc_event_callback.func)
+ 		rtc_event_callback.func(rtc_event_callback.param);
+ 	up(&event_mutex);
+@@ -235,10 +232,13 @@ EXPORT_SYMBOL(pmic_rtc_get_time);
+  */
+ PMIC_STATUS pmic_rtc_set_time_alarm(struct timeval *pmic_time)
+ {
++	int ret;
+ 	u8 reg_val;
+ 	struct rtc_time greg_time;
+ 
+-	down_interruptible(&mutex);
++	ret = down_interruptible(&mutex);
++	if (ret < 0)
++		return ret;
+ 
+ 	rtc_time_to_tm(pmic_time->tv_sec, &greg_time);
+ 	rtc_time_to_tm(pmic_time->tv_sec, &alarm_greg_time);
+@@ -541,7 +541,7 @@ EXPORT_SYMBOL(pmic_rtc_loaded);
+ 
+ static int pmic_rtc_remove(struct platform_device *pdev)
+ {
+-	class_device_destroy(pmic_rtc_class, MKDEV(pmic_rtc_major, 0));
++	device_destroy(pmic_rtc_class, MKDEV(pmic_rtc_major, 0));
+ 	class_destroy(pmic_rtc_class);
+ 	unregister_chrdev(pmic_rtc_major, MCU_PMIC_RTC_NAME);
+ 	free_irq(mcu_pmic_rtc_data.irq, pdev);
+@@ -559,7 +559,7 @@ static int pmic_rtc_probe(struct platform_device *pdev)
+ {
+ 	int val;
+ 	int ret = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 
+ 	pmic_rtc_major = register_chrdev(0, MCU_PMIC_RTC_NAME, &pmic_rtc_fops);
+ 	if (pmic_rtc_major < 0) {
+@@ -572,9 +572,9 @@ static int pmic_rtc_probe(struct platform_device *pdev)
+ 		goto err_out1;
+ 	}
+ 
+-	temp_class = class_device_create(pmic_rtc_class, NULL,
+-					 MKDEV(pmic_rtc_major, 0),
+-					 NULL, MCU_PMIC_RTC_NAME);
++	temp_class = device_create(pmic_rtc_class, NULL,
++				   MKDEV(pmic_rtc_major, 0),
++				   MCU_PMIC_RTC_NAME);
+ 	if (IS_ERR(temp_class)) {
+ 		ret = PTR_ERR(temp_class);
+ 		goto err_out2;
+diff --git a/drivers/mxc/security/sahara2/include/linux_port.h b/drivers/mxc/security/sahara2/include/linux_port.h
+index aff25e6..fad1ef1 100644
+--- a/drivers/mxc/security/sahara2/include/linux_port.h
++++ b/drivers/mxc/security/sahara2/include/linux_port.h
+@@ -184,7 +184,7 @@ typedef struct {
+ #else
+     struct class        *cs;    /**< results of class_create() */
+ #endif
+-    struct class_device *cd;    /**< Result of class_simple_device_add() */
++    struct device *cd;    /**< Result of class_simple_device_add() */
+     unsigned power_complete;    /**< TRUE if next inits succeeded */
+ #if  LINUX_VERSION_CODE < KERNEL_VERSION(2,6,11)
+     struct device_driver   dd;  /**< struct for register_driver() */
+@@ -426,11 +426,9 @@ inline static int os_drv_do_reg(os_driver_reg_t *handle,
+                     code = (os_error_code)handle->cs;
+                     handle->cs = NULL;
+                 } else {
+-                    handle->cd = class_device_create(handle->cs, NULL,
+-                                                        handle->dev, NULL,
+-                                                        driver_name);
++                    handle->cd = device_create(handle->cs, NULL, handle->dev,
++                                               driver_name);
+                     if (IS_ERR(handle->cd)) {
+-                        class_device_destroy(handle->cs, handle->dev);
+                         class_destroy(handle->cs);
+                         unregister_chrdev(MAJOR(handle->dev), driver_name);
+                         code = (os_error_code)handle->cs;
+@@ -527,7 +525,7 @@ inline static int os_drv_rmv_reg(os_driver_reg_t* handle)
+         unregister_chrdev(MAJOR(handle->dev), handle->dd.name);
+ #else
+         if (handle->cd != NULL) {
+-            class_device_destroy(handle->cs, handle->dev);
++            device_destroy(handle->cs, handle->dev);
+             handle->cd = NULL;
+         }
+         if (handle->cs != NULL) {
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 75aadd8..2af91bb 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -394,7 +394,7 @@ struct file_operations vpu_fops = {
+ static int vpu_dev_probe(struct platform_device *pdev)
+ {
+ 	int err = 0;
+-	struct class_device *temp_class;
++	struct device *temp_class;
+ 	struct resource *res;
+ 
+ 	if (cpu_is_mx32()) {
+@@ -433,8 +433,8 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 		goto err_out_chrdev;
+ 	}
+ 
+-	temp_class = class_device_create(vpu_class, NULL,
+-					 MKDEV(vpu_major, 0), NULL, "mxc_vpu");
++	temp_class = device_create(vpu_class, NULL, MKDEV(vpu_major, 0),
++				   "mxc_vpu");
+ 	if (IS_ERR(temp_class)) {
+ 		err = PTR_ERR(temp_class);
+ 		goto err_out_class;
+@@ -455,7 +455,7 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 	goto out;
+ 
+       err_out_class:
+-	class_device_destroy(vpu_class, MKDEV(vpu_major, 0));
++	device_destroy(vpu_class, MKDEV(vpu_major, 0));
+ 	class_destroy(vpu_class);
+       err_out_chrdev:
+ 	unregister_chrdev(vpu_major, "mxc_vpu");
+@@ -490,7 +490,7 @@ static void __exit vpu_exit(void)
+ {
+ 	free_irq(MXC_INT_VPU, (void *)(&vpu_data));
+ 	if (vpu_major > 0) {
+-		class_device_destroy(vpu_class, MKDEV(vpu_major, 0));
++		device_destroy(vpu_class, MKDEV(vpu_major, 0));
+ 		class_destroy(vpu_class);
+ 		unregister_chrdev(vpu_major, "mxc_vpu");
+ 		vpu_major = 0;
+diff --git a/drivers/regulator/reg-core.c b/drivers/regulator/reg-core.c
+index ff9c233..bba711c 100644
+--- a/drivers/regulator/reg-core.c
++++ b/drivers/regulator/reg-core.c
+@@ -116,14 +116,14 @@ static ssize_t dev_load_show(struct device *dev,
+ 	return sprintf(buf, "%d\n", load->uA_load);
+ }
+ 
+-static ssize_t regulator_uV_show(struct class_device *cdev, char *buf)
++static ssize_t regulator_uV_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 
+ 	return sprintf(buf, "%d\n", regulator_get_voltage(regulator));
+ }
+ 
+-static ssize_t regulator_uV_store(struct class_device *cdev,
++static ssize_t regulator_uV_store(struct device *cdev, struct device_attribute *attr,
+ 				  const char *buf, size_t count)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+@@ -140,14 +140,14 @@ static ssize_t regulator_uV_store(struct class_device *cdev,
+ 	return count;
+ }
+ 
+-static ssize_t regulator_uA_show(struct class_device *cdev, char *buf)
++static ssize_t regulator_uA_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 
+ 	return sprintf(buf, "%d\n", regulator_get_current(regulator));
+ }
+ 
+-static ssize_t regulator_mode_show(struct class_device *cdev, char *buf)
++static ssize_t regulator_mode_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 	int mode = regulator_get_mode(regulator);
+@@ -165,7 +165,7 @@ static ssize_t regulator_mode_show(struct class_device *cdev, char *buf)
+ 	return sprintf(buf, "unknown\n");
+ }
+ 
+-static ssize_t regulator_state_show(struct class_device *cdev, char *buf)
++static ssize_t regulator_state_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 	int state = regulator_is_enabled(regulator);
+@@ -179,7 +179,7 @@ static ssize_t regulator_state_show(struct class_device *cdev, char *buf)
+ }
+ 
+ static ssize_t
+-regulator_constraint_uA_show(struct class_device *cdev, char *buf)
++regulator_constraint_uA_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 
+@@ -191,7 +191,7 @@ regulator_constraint_uA_show(struct class_device *cdev, char *buf)
+ }
+ 
+ static ssize_t
+-regulator_constraint_uV_show(struct class_device *cdev, char *buf)
++regulator_constraint_uV_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 
+@@ -203,7 +203,7 @@ regulator_constraint_uV_show(struct class_device *cdev, char *buf)
+ }
+ 
+ static ssize_t
+-regulator_constraint_modes_show(struct class_device *cdev, char *buf)
++regulator_constraint_modes_show(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 	int count = 0;
+@@ -223,7 +223,7 @@ regulator_constraint_modes_show(struct class_device *cdev, char *buf)
+ 	return count;
+ }
+ 
+-static ssize_t regulator_total_dev_load(struct class_device *cdev, char *buf)
++static ssize_t regulator_total_dev_load(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 	struct regulator_load *load;
+@@ -235,13 +235,13 @@ static ssize_t regulator_total_dev_load(struct class_device *cdev, char *buf)
+ 	return sprintf(buf, "%d\n", uA);
+ }
+ 
+-static ssize_t regulator_enabled_use_count(struct class_device *cdev, char *buf)
++static ssize_t regulator_enabled_use_count(struct device *cdev, struct device_attribute *attr, char *buf)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+ 	return sprintf(buf, "%d\n", regulator->use_count);
+ }
+ 
+-static ssize_t regulator_ctl(struct class_device *cdev,
++static ssize_t regulator_ctl(struct device *cdev, struct device_attribute *attr,
+ 			     const char *buf, size_t count)
+ {
+ 	struct regulator *regulator = to_regulator(cdev);
+@@ -257,7 +257,7 @@ static ssize_t regulator_ctl(struct class_device *cdev,
+ 	return count;
+ }
+ 
+-static struct class_device_attribute regulator_dev_attrs[] = {
++static struct device_attribute regulator_dev_attrs[] = {
+ 	__ATTR(uV, 0666, regulator_uV_show, regulator_uV_store),
+ 	__ATTR(uA, 0444, regulator_uA_show, NULL),
+ 	__ATTR(mode, 0444, regulator_mode_show, NULL),
+@@ -271,14 +271,9 @@ static struct class_device_attribute regulator_dev_attrs[] = {
+ 	__ATTR_NULL,
+ };
+ 
+-static void regulator_dev_release(struct class_device *class_dev)
+-{
+-}
+-
+ struct class regulator_class = {
+ 	.name = "regulator",
+-	.release = regulator_dev_release,
+-	.class_dev_attrs = regulator_dev_attrs,
++	.dev_attrs = regulator_dev_attrs,
+ };
+ 
+ static struct regulator_load *create_load_dev(struct regulator *regulator,
+@@ -673,13 +668,13 @@ int regulator_register(struct regulator *regulator)
+ 	BLOCKING_INIT_NOTIFIER_HEAD(&regulator->notifier);
+ 
+ 	regulator->cdev.class = &regulator_class;
+-	class_device_initialize(&regulator->cdev);
+-	snprintf(regulator->cdev.class_id, sizeof(regulator->cdev.class_id),
+-		 "regulator-%ld-%s",
++	device_initialize(&regulator->cdev);
++	snprintf(regulator->cdev.bus_id, sizeof(regulator->cdev.bus_id),
++		 "regulator_%ld_%s",
+ 		 (unsigned long)atomic_inc_return(&regulator_no) - 1,
+ 		 regulator->name);
+ 
+-	ret = class_device_add(&regulator->cdev);
++	ret = device_add(&regulator->cdev);
+ 	if (ret == 0)
+ 		list_add(&regulator->list, &regulators);
+ 	mutex_unlock(&list_mutex);
+@@ -697,7 +692,7 @@ void regulator_unregister(struct regulator *regulator)
+ 	list_del(&regulator->list);
+ 	if (regulator->parent)
+ 		sysfs_remove_link(&regulator->cdev.kobj, "source");
+-	class_device_unregister(&regulator->cdev);
++	device_unregister(&regulator->cdev);
+ 	mutex_unlock(&list_mutex);
+ }
+ 
+diff --git a/drivers/regulator/wm8350/reg-wm8350-i2c.c b/drivers/regulator/wm8350/reg-wm8350-i2c.c
+index e2bbf8d..b9c037c 100644
+--- a/drivers/regulator/wm8350/reg-wm8350-i2c.c
++++ b/drivers/regulator/wm8350/reg-wm8350-i2c.c
+@@ -147,6 +147,12 @@ static int wm8350_i2c_resume(struct i2c_client *client)
+ #define wm8350_i2c_resume	NULL
+ #endif
+ 
++static const struct i2c_device_id wm8350_id[] = {
++	{ "WM8350", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, wm8350_id);
++
+ static struct i2c_driver wm8350_i2c_driver = {
+ 	.driver = {
+ 		.name = "WM8350",
+@@ -156,6 +162,7 @@ static struct i2c_driver wm8350_i2c_driver = {
+ 	.suspend	= wm8350_i2c_suspend,
+ 	.resume		= wm8350_i2c_resume,
+ 	.command =        NULL,
++	.id_table	= wm8350_id,
+ };
+ 
+ 
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 38a27ad..211bf4c 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -86,8 +86,8 @@ fsl_ep0_desc = {
+ };
+ 
+ static int udc_suspend(struct fsl_udc *udc);
+-static int fsl_udc_suspend(struct device *dev, pm_message_t state);
+-static int fsl_udc_resume(struct device *dev);
++static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state);
++static int fsl_udc_resume(struct platform_device *pdev);
+ static void fsl_ep_fifo_flush(struct usb_ep *_ep);
+ 
+ #ifdef CONFIG_USB_OTG
+@@ -2639,7 +2639,7 @@ static int udc_suspend(struct fsl_udc *udc)
+  * Modify Power management attributes
+  * Used by OTG statemachine to disable gadget temporarily
+  -----------------------------------------------------------------*/
+-static int fsl_udc_suspend(struct device *dev, pm_message_t state)
++static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	return udc_suspend(udc_controller);
+ }
+@@ -2648,7 +2648,7 @@ static int fsl_udc_suspend(struct device *dev, pm_message_t state)
+  * Invoked on USB resume. May be called in_interrupt.
+  * Here we start the DR controller and enable the irq
+  *-----------------------------------------------------------------*/
+-static int fsl_udc_resume(struct device *dev)
++static int fsl_udc_resume(struct platform_device *pdev)
+ {
+ 	/* Enable DR irq reg and set controller Run */
+ 	if (udc_controller->stopped) {
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 188a7e9..95d3d8a 100644
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -351,7 +351,7 @@ static int ehci_fsl_setup(struct usb_hcd *hcd)
+ 	if (retval)
+ 		return retval;
+ 
+-	ehci->is_tdi_rh_tt = 1;
++	hcd->has_tt = 1;
+ 
+ 	ehci->sbrn = 0x20;
+ 
+@@ -447,9 +447,6 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 	hcd->state = HC_STATE_SUSPENDED;
+ 	pdev->dev.power.power_state = PMSG_SUSPEND;
+ 
+-	if (hcd->driver->suspend)
+-		return hcd->driver->suspend(hcd, message);
+-
+ 	/* ignore non-host interrupts */
+ 	clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+ 
+diff --git a/drivers/video/mxc/ch7024.c b/drivers/video/mxc/ch7024.c
+index eff448f..0f5c1d0 100644
+--- a/drivers/video/mxc/ch7024.c
++++ b/drivers/video/mxc/ch7024.c
+@@ -432,7 +432,7 @@ static void hp_detect_wq_handler(struct work_struct *work)
+ 
+ 	enable_irq(ch7024_client->irq);
+ 
+-	sysfs_notify(&ch7024_client->driver->driver.kobj, NULL, "headphone");
++	sysfs_notify(&ch7024_client->dev.kobj, NULL, "headphone");
+ 
+ 	/* send hw event by netlink */
+ 	event.args = detect;
+@@ -676,7 +676,7 @@ static ssize_t store_sharpness(struct device_driver *dev, const char *buf,
+ 
+ DRIVER_ATTR(sharpness, 0644, show_sharpness, store_sharpness);
+ 
+-static int ch7024_probe(struct i2c_client *client)
++static int ch7024_probe(struct i2c_client *client, const struct i2c_device_id *dev_id)
+ {
+ 	int ret, i;
+ 	u32 id;
+@@ -823,6 +823,12 @@ static int ch7024_resume(struct i2c_client *client)
+ #define ch7024_resume	NULL
+ #endif
+ 
++static const struct i2c_device_id ch7024_id[] = {
++	{ "ch7024", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, ch7024_id);
++
+ static struct i2c_driver ch7024_driver = {
+ 	.driver = {
+ 		   .name = "ch7024",
+@@ -831,6 +837,7 @@ static struct i2c_driver ch7024_driver = {
+ 	.remove = ch7024_remove,
+ 	.suspend = ch7024_suspend,
+ 	.resume = ch7024_resume,
++	.id_table = ch7024_id,
+ };
+ 
+ static int __init ch7024_init(void)
+diff --git a/drivers/video/mxc/tve.c b/drivers/video/mxc/tve.c
+index 2d4709f..fe4224f 100644
+--- a/drivers/video/mxc/tve.c
++++ b/drivers/video/mxc/tve.c
+@@ -173,7 +173,7 @@ static int tve_update_detect_status(void)
+ 		     tve.base + TVE_STAT_REG);
+ 
+ 	if (old_detect != tve.detect)
+-		sysfs_notify(&tve.pdev->dev.driver->kobj, NULL, "headphone");
++		sysfs_notify(&tve.pdev->dev.kobj, NULL, "headphone");
+ 
+ 	dev_dbg(&tve.pdev->dev, "detect = %d\n", tve.detect);
+ 	return tve.detect;
+@@ -218,7 +218,7 @@ static irqreturn_t tve_detect_handler(int irq, void *data)
+ 	__raw_writel(stat | CD_MON_END_INT, tve.base + TVE_STAT_REG);
+ 
+ 	if (old_detect != tve.detect)
+-		sysfs_notify(&tve.pdev->dev.driver->kobj, NULL, "headphone");
++		sysfs_notify(&tve.pdev->dev.kobj, NULL, "headphone");
+ 
+ 	return IRQ_HANDLED;
+ }
+diff --git a/include/asm-arm/arch-mxc/pmic_power.h b/include/asm-arm/arch-mxc/pmic_power.h
+index 9608004..26a2b00 100644
+--- a/include/asm-arm/arch-mxc/pmic_power.h
++++ b/include/asm-arm/arch-mxc/pmic_power.h
+@@ -909,7 +909,7 @@ typedef enum {
+  *
+  * @return       This function returns PMIC_SUCCESS if successful.
+  */
+-PMIC_STATUS pmic_power_off(void);
++void pmic_power_off(void);
+ 
+ /*!
+  * This function sets the power control configuration.
+diff --git a/include/linux/regulator/regulator-drv.h b/include/linux/regulator/regulator-drv.h
+index 5235af9..0af0d3c 100644
+--- a/include/linux/regulator/regulator-drv.h
++++ b/include/linux/regulator/regulator-drv.h
+@@ -67,7 +67,7 @@ struct regulator {
+ 	struct blocking_notifier_head notifier;
+ 	struct mutex mutex;
+ 	struct module *owner;
+-	struct class_device cdev;
++	struct device cdev;
+ 
+ 	struct regulator *parent; /* for tree */
+ 
+diff --git a/sound/arm/mxc-alsa-mixer.c b/sound/arm/mxc-alsa-mixer.c
+index 7ded3fc..bbeeecb 100644
+--- a/sound/arm/mxc-alsa-mixer.c
++++ b/sound/arm/mxc-alsa-mixer.c
+@@ -25,7 +25,6 @@
+   * @ingroup SOUND_DRV
+   */
+ 
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/control.h>
+ #include <sound/pcm.h>
+diff --git a/sound/arm/mxc-alsa-pmic.c b/sound/arm/mxc-alsa-pmic.c
+index c59c11d..298386e 100644
+--- a/sound/arm/mxc-alsa-pmic.c
++++ b/sound/arm/mxc-alsa-pmic.c
+@@ -34,7 +34,6 @@
+   * @ingroup SOUND_DRV
+   */
+ 
+-#include <sound/driver.h>
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/platform_device.h>
+diff --git a/sound/arm/mxc-alsa-spdif.c b/sound/arm/mxc-alsa-spdif.c
+index 740bd2b..5070817 100644
+--- a/sound/arm/mxc-alsa-spdif.c
++++ b/sound/arm/mxc-alsa-spdif.c
+@@ -26,7 +26,6 @@
+  * @ingroup SOUND_DRV
+  */
+ 
+-#include <sound/driver.h>
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/platform_device.h>
+diff --git a/sound/soc/codecs/ak4647.c b/sound/soc/codecs/ak4647.c
+index 2c9c365..8503093 100644
+--- a/sound/soc/codecs/ak4647.c
++++ b/sound/soc/codecs/ak4647.c
+@@ -26,7 +26,6 @@
+ #include <linux/platform_device.h>
+ #include <linux/i2c.h>
+ 
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -635,7 +634,7 @@ static struct snd_soc_device_driver ak4647_hifi_dai_driver = {
+ 		   },
+ };
+ 
+-static int ak4647_i2c_probe(struct i2c_client *client)
++static int ak4647_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	ak4647_i2c_client = client;
+ 	return 0;
+@@ -646,12 +645,19 @@ static int ak4647_i2c_remove(struct i2c_client *client)
+ 	return 0;
+ }
+ 
++static const struct i2c_device_id ak4647_id[] = {
++	{ "ak4647-i2c", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, ak4647_id);
++
+ static struct i2c_driver ak4647_i2c_driver = {
+ 	.driver = {.owner = THIS_MODULE,
+ 		   .name = "ak4647-i2c",
+ 		   },
+ 	.probe = ak4647_i2c_probe,
+ 	.remove = ak4647_i2c_remove,
++	.id_table = ak4647_id,
+ };
+ 
+ static __init int ak4647_init(void)
+diff --git a/sound/soc/codecs/wm8350.c b/sound/soc/codecs/wm8350.c
+index 7313dd0..bb53b81 100644
+--- a/sound/soc/codecs/wm8350.c
++++ b/sound/soc/codecs/wm8350.c
+@@ -19,7 +19,6 @@
+ #include <linux/regulator/wm8350/wm8350.h>
+ #include <linux/regulator/wm8350/wm8350-bus.h>
+ #include <linux/regulator/wm8350/wm8350-audio.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -75,7 +74,7 @@ static unsigned int wm8350_codec_cache_read(struct snd_soc_codec *codec,
+ 	return wm8350->reg_cache[reg];
+ }
+ 
+-static unsigned int wm8350_codec_read(struct snd_soc_codec *codec, 
++static unsigned int wm8350_codec_read(struct snd_soc_codec *codec,
+ 	unsigned int reg)
+ {
+ 	struct wm8350* wm8350 = codec->control_data;
+@@ -99,7 +98,7 @@ static inline int wm8350_out1_ramp_step(struct snd_soc_codec *codec)
+ 	struct wm8350 *wm8350 = codec->control_data;
+ 	int left_complete = 0, right_complete = 0;
+ 	u16 reg, val;
+-		
++
+ 	/* left channel */
+ 	reg = wm8350_reg_read(wm8350, WM8350_LOUT1_VOLUME);
+ 	val = (reg & WM8350_OUT1L_VOL_MASK) >> WM8350_OUT1L_VOL_SHIFT;
+@@ -109,7 +108,7 @@ static inline int wm8350_out1_ramp_step(struct snd_soc_codec *codec)
+ 		if (val < output->left_vol) {
+ 			val++;
+ 			reg &= ~WM8350_OUT1L_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_LOUT1_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_LOUT1_VOLUME,
+ 				reg | (val << WM8350_OUT1L_VOL_SHIFT));
+ 		} else
+ 			left_complete = 1;
+@@ -118,7 +117,7 @@ static inline int wm8350_out1_ramp_step(struct snd_soc_codec *codec)
+ 		if (val > 0) {
+ 			val--;
+ 			reg &= ~WM8350_OUT1L_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_LOUT1_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_LOUT1_VOLUME,
+ 				reg | (val << WM8350_OUT1L_VOL_SHIFT));
+ 		} else
+ 			left_complete = 1;
+@@ -133,7 +132,7 @@ static inline int wm8350_out1_ramp_step(struct snd_soc_codec *codec)
+ 		if (val < output->right_vol) {
+ 			val++;
+ 			reg &= ~WM8350_OUT1R_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_ROUT1_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_ROUT1_VOLUME,
+ 				reg | (val << WM8350_OUT1R_VOL_SHIFT));
+ 		} else
+ 			right_complete = 1;
+@@ -142,17 +141,17 @@ static inline int wm8350_out1_ramp_step(struct snd_soc_codec *codec)
+ 		if (val > 0) {
+ 			val--;
+ 			reg &= ~WM8350_OUT1R_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_ROUT1_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_ROUT1_VOLUME,
+ 				reg | (val << WM8350_OUT1R_VOL_SHIFT));
+ 		} else
+ 			right_complete = 1;
+ 	}
+-	
++
+ 	/* only hit the update bit if either volume has changed this step */
+-	if (!left_complete || !right_complete) 
++	if (!left_complete || !right_complete)
+ 		wm8350_set_bits(wm8350, WM8350_LOUT1_VOLUME, WM8350_OUT1_VU);
+-	
+-	return left_complete & right_complete; 
++
++	return left_complete & right_complete;
+ }
+ 
+ /*
+@@ -165,7 +164,7 @@ static inline int wm8350_out2_ramp_step(struct snd_soc_codec *codec)
+ 	struct wm8350 *wm8350 = codec->control_data;
+ 	int left_complete = 0, right_complete = 0;
+ 	u16 reg, val;
+-		
++
+ 	/* left channel */
+ 	reg = wm8350_reg_read(wm8350, WM8350_LOUT2_VOLUME);
+ 	val = (reg & WM8350_OUT2L_VOL_MASK) >> WM8350_OUT1L_VOL_SHIFT;
+@@ -174,7 +173,7 @@ static inline int wm8350_out2_ramp_step(struct snd_soc_codec *codec)
+ 		if (val < output->left_vol) {
+ 			val++;
+ 			reg &= ~WM8350_OUT2L_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_LOUT2_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_LOUT2_VOLUME,
+ 				reg | (val << WM8350_OUT1L_VOL_SHIFT));
+ 		} else
+ 			left_complete = 1;
+@@ -183,7 +182,7 @@ static inline int wm8350_out2_ramp_step(struct snd_soc_codec *codec)
+ 		if (val > 0) {
+ 			val--;
+ 			reg &= ~WM8350_OUT2L_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_LOUT2_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_LOUT2_VOLUME,
+ 				reg | (val << WM8350_OUT1L_VOL_SHIFT));
+ 		} else
+ 			left_complete = 1;
+@@ -198,7 +197,7 @@ static inline int wm8350_out2_ramp_step(struct snd_soc_codec *codec)
+ 		if (val < output->right_vol) {
+ 			val++;
+ 			reg &= ~WM8350_OUT2R_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_ROUT2_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_ROUT2_VOLUME,
+ 				reg | (val << WM8350_OUT1R_VOL_SHIFT));
+ 		} else
+ 			right_complete = 1;
+@@ -207,23 +206,23 @@ static inline int wm8350_out2_ramp_step(struct snd_soc_codec *codec)
+ 		if (val > 0) {
+ 			val--;
+ 			reg &= ~WM8350_OUT2R_VOL_MASK;
+-			wm8350_reg_write(wm8350, WM8350_ROUT2_VOLUME, 
++			wm8350_reg_write(wm8350, WM8350_ROUT2_VOLUME,
+ 				reg | (val << WM8350_OUT1R_VOL_SHIFT));
+ 		} else
+ 			right_complete = 1;
+ 	}
+-	
++
+ 	/* only hit the update bit if either volume has changed this step */
+ 	if (!left_complete || !right_complete)
+ 		wm8350_set_bits(wm8350, WM8350_LOUT2_VOLUME, WM8350_OUT2_VU);
+-	
+-	return left_complete & right_complete; 
++
++	return left_complete & right_complete;
+ }
+ 
+-/* 
++/*
+  * This work ramps both output PGA's at stream start/stop time to
+  * minimise pop associated with DAPM power switching.
+- * It's best to enable Zero Cross when ramping occurs to minimise any 
++ * It's best to enable Zero Cross when ramping occurs to minimise any
+  * zipper noises.
+  */
+ static void wm8350_pga_work(struct work_struct *work)
+@@ -233,7 +232,7 @@ static void wm8350_pga_work(struct work_struct *work)
+ 	struct wm8350_out_ramp *or = codec->private_data;
+ 	struct wm8350_output *out1 = &or->out1, *out2 = &or->out2;
+ 	int i, out1_complete, out2_complete;
+-	
++
+ 	/* do we need to ramp at all ? */
+ 	if (out1->ramp == WM8350_RAMP_NONE && out2->ramp == WM8350_RAMP_NONE)
+ 		return;
+@@ -250,12 +249,12 @@ static void wm8350_pga_work(struct work_struct *work)
+ 		/* ramp finished ? */
+ 		if (out1_complete && out2_complete)
+ 			break;
+-		
++
+ 		/* we need to delay longer on the up ramp */
+-		if (out1->ramp == WM8350_RAMP_UP || 
++		if (out1->ramp == WM8350_RAMP_UP ||
+ 			out2->ramp == WM8350_RAMP_UP) {
+ 			/* delay is longer over 0dB as increases are larger */
+-			if (i >= WM8350_OUTn_0dB) 
++			if (i >= WM8350_OUTn_0dB)
+ 				schedule_timeout_interruptible(
+ 					msecs_to_jiffies(2));
+ 			else
+@@ -264,7 +263,7 @@ static void wm8350_pga_work(struct work_struct *work)
+ 		} else
+ 			udelay(50); /* doesn't matter if we delay longer */
+ 	}
+-	
++
+ 	out1->ramp = WM8350_RAMP_NONE;
+ 	out2->ramp = WM8350_RAMP_NONE;
+ }
+@@ -272,12 +271,12 @@ static void wm8350_pga_work(struct work_struct *work)
+ /*
+  * WM8350 Controls
+  */
+- 
+-static int pga_event(struct snd_soc_dapm_widget *w, int event)
++
++static int pga_event(struct snd_soc_dapm_widget *w, struct snd_kcontrol *kcontrol, int event)
+ {
+ 	struct snd_soc_codec *codec = w->codec;
+ 	struct wm8350_out_ramp *or = codec->private_data;
+-	
++
+ 	switch (event) {
+ 	case SND_SOC_DAPM_POST_PMU:
+ 		/* ramp vol up */
+@@ -313,8 +312,8 @@ static int pga_event(struct snd_soc_dapm_widget *w, int event)
+ 		break;
+ 	}
+ 	return 0;
+-} 
+- 
++}
++
+ static int wm8350_put_volsw_2r_vu(struct snd_kcontrol *kcontrol,
+ 	struct snd_ctl_elem_value *ucontrol)
+ {
+@@ -323,8 +322,8 @@ static int wm8350_put_volsw_2r_vu(struct snd_kcontrol *kcontrol,
+ 	struct wm8350_output *out1 = &or->out1, *out2 = &or->out2;
+ 	int ret, reg = kcontrol->private_value & 0xff;
+ 	u16 val;
+-	
+-	/* we cache the OUT1/2 volumes when the codec is inactive to keep 
++
++	/* we cache the OUT1/2 volumes when the codec is inactive to keep
+ 	 * pops to a low during ramping */
+ 	if (reg == WM8350_LOUT1_VOLUME) {
+ 		out1->left_vol = ucontrol->value.integer.value[0];
+@@ -337,11 +336,11 @@ static int wm8350_put_volsw_2r_vu(struct snd_kcontrol *kcontrol,
+ 		if (!codec->active)
+ 			return 1;
+ 	}
+-	
++
+ 	ret = snd_soc_put_volsw_2r(kcontrol, ucontrol);
+ 	if (ret < 0)
+ 		return ret;
+-		
++
+ 	/* now hit the volume update bits (always bit 8) */
+ 	val = wm8350_codec_read(codec, reg);
+ 	wm8350_codec_write(codec, reg, val | WM8350_OUT1_VU);
+@@ -377,10 +376,10 @@ static int wm8350_get_volsw_2r(struct snd_kcontrol *kcontrol,
+ 		(snd_soc_read(codec, reg) >> shift) & mask;
+ 	ucontrol->value.integer.value[1] =
+ 		(snd_soc_read(codec, reg2) >> shift) & mask;
+-	
++
+ 	return 0;
+-} 
+- 
++}
++
+ /* double control with volume update */
+ #define SOC_WM8350_DOUBLE_R_TLV(xname, reg_left, reg_right, shift, mask, invert, tlv_array) \
+ {	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
+@@ -428,7 +427,7 @@ static const unsigned int capture_sd_tlv[] = {
+ static const struct snd_kcontrol_new wm8350_snd_controls[] = {
+ SOC_ENUM("Playback Deemphasis", wm8350_enum[0]),
+ SOC_ENUM("Playback DAC Inversion", wm8350_enum[1]),
+-SOC_WM8350_DOUBLE_R_TLV("Playback PCM Volume", WM8350_DAC_DIGITAL_VOLUME_L, 
++SOC_WM8350_DOUBLE_R_TLV("Playback PCM Volume", WM8350_DAC_DIGITAL_VOLUME_L,
+ 	WM8350_DAC_DIGITAL_VOLUME_R, 0, 255, 0, dac_pcm_tlv),
+ SOC_ENUM("Playback PCM Mute Function", wm8350_enum[2]),
+ SOC_ENUM("Playback PCM Mute Speed", wm8350_enum[3]),
+@@ -436,12 +435,12 @@ SOC_ENUM("Playback PCM Filter", wm8350_enum[4]),
+ SOC_ENUM("Capture PCM Filter", wm8350_enum[5]),
+ SOC_ENUM("Capture PCM HP Filter", wm8350_enum[6]),
+ SOC_ENUM("Capture ADC Inversion", wm8350_enum[7]),
+-SOC_WM8350_DOUBLE_R_TLV("Capture PCM Volume", WM8350_ADC_DIGITAL_VOLUME_L, 
++SOC_WM8350_DOUBLE_R_TLV("Capture PCM Volume", WM8350_ADC_DIGITAL_VOLUME_L,
+ 	WM8350_ADC_DIGITAL_VOLUME_R, 0, 255, 0, adc_pcm_tlv),
+ SOC_DOUBLE_TLV("Capture Sidetone Volume", WM8350_ADC_DIVIDER, 8, 4, 15, 1, capture_sd_tlv),
+-SOC_WM8350_DOUBLE_R_TLV("Capture Volume", WM8350_LEFT_INPUT_VOLUME, 
++SOC_WM8350_DOUBLE_R_TLV("Capture Volume", WM8350_LEFT_INPUT_VOLUME,
+ 	WM8350_RIGHT_INPUT_VOLUME, 2, 63, 0, pre_amp_tlv),
+-SOC_DOUBLE_R("Capture ZC Switch", WM8350_LEFT_INPUT_VOLUME, 
++SOC_DOUBLE_R("Capture ZC Switch", WM8350_LEFT_INPUT_VOLUME,
+ 	WM8350_RIGHT_INPUT_VOLUME, 13, 1, 0),
+ SOC_SINGLE_TLV("Left Input Left Sidetone Volume", WM8350_OUTPUT_LEFT_MIXER_VOLUME,
+ 	1, 7, 0, out_mix_tlv),
+@@ -457,35 +456,35 @@ SOC_SINGLE_TLV("Right Input Bypass Volume", WM8350_OUTPUT_RIGHT_MIXER_VOLUME,
+ 	13, 7, 0, out_mix_tlv),
+ SOC_SINGLE("Left Input Mixer +20dB Switch", WM8350_INPUT_MIXER_VOLUME_L,
+ 	0, 1, 0),
+-SOC_SINGLE("Right Input Mixer +20dB Switch", WM8350_INPUT_MIXER_VOLUME_R, 
++SOC_SINGLE("Right Input Mixer +20dB Switch", WM8350_INPUT_MIXER_VOLUME_R,
+ 	0, 1, 0),
+ SOC_SINGLE_TLV("Out4 Capture Volume", WM8350_INPUT_MIXER_VOLUME, 1, 7, 0, out_mix_tlv),
+-SOC_WM8350_DOUBLE_R_TLV("Out1 Playback Volume", WM8350_LOUT1_VOLUME, 
++SOC_WM8350_DOUBLE_R_TLV("Out1 Playback Volume", WM8350_LOUT1_VOLUME,
+ 	WM8350_ROUT1_VOLUME, 2, 63, 0, out_pga_tlv),
+-SOC_DOUBLE_R("Out1 Playback ZC Switch", WM8350_LOUT1_VOLUME, 
++SOC_DOUBLE_R("Out1 Playback ZC Switch", WM8350_LOUT1_VOLUME,
+ 	WM8350_ROUT1_VOLUME, 13, 1, 0),
+-SOC_WM8350_DOUBLE_R_TLV("Out2 Playback Volume", WM8350_LOUT2_VOLUME, 
++SOC_WM8350_DOUBLE_R_TLV("Out2 Playback Volume", WM8350_LOUT2_VOLUME,
+ 	WM8350_ROUT2_VOLUME, 2, 63, 0, out_pga_tlv),
+-SOC_DOUBLE_R("Out2 Playback ZC Switch", WM8350_LOUT2_VOLUME, 
++SOC_DOUBLE_R("Out2 Playback ZC Switch", WM8350_LOUT2_VOLUME,
+ 	WM8350_ROUT2_VOLUME, 13, 1, 0),
+ SOC_SINGLE("Out2 Right Invert Switch", WM8350_ROUT2_VOLUME, 10, 1, 0),
+ SOC_SINGLE_TLV("Out2 Beep Volume", WM8350_BEEP_VOLUME, 5, 7, 0, out_mix_tlv),
+ 
+-SOC_DOUBLE_R("Out1 Playback Switch", WM8350_LOUT1_VOLUME, WM8350_ROUT1_VOLUME, 
++SOC_DOUBLE_R("Out1 Playback Switch", WM8350_LOUT1_VOLUME, WM8350_ROUT1_VOLUME,
+ 	14, 1, 1),
+-SOC_DOUBLE_R("Out2 Playback Switch", WM8350_LOUT2_VOLUME, WM8350_ROUT2_VOLUME, 
++SOC_DOUBLE_R("Out2 Playback Switch", WM8350_LOUT2_VOLUME, WM8350_ROUT2_VOLUME,
+ 	14, 1, 1),
+ };
+ 
+ /* add non dapm controls */
+-static int wm8350_add_controls(struct snd_soc_codec *codec, 
++static int wm8350_add_controls(struct snd_soc_codec *codec,
+ 	struct snd_card *card)
+ {
+ 	int err, i;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(wm8350_snd_controls); i++) {
+ 		err = snd_ctl_add(card,
+-				snd_soc_cnew(&wm8350_snd_controls[i], 
++				snd_soc_cnew(&wm8350_snd_controls[i],
+ 					codec, NULL));
+ 		if (err < 0)
+ 			return err;
+@@ -496,7 +495,7 @@ static int wm8350_add_controls(struct snd_soc_codec *codec,
+ /*
+  * DAPM Controls
+  */
+- 
++
+ /* Left Playback Mixer */
+ static const struct snd_kcontrol_new wm8350_left_play_mixer_controls[] = {
+ SOC_DAPM_SINGLE("Playback Switch", WM8350_LEFT_MIXER_CONTROL, 11, 1, 0),
+@@ -535,9 +534,9 @@ SOC_DAPM_SINGLE("Left Mixer Switch", WM8350_OUT3_MIXER_CONTROL, 0, 1, 0),
+ 
+ /* Left Input Mixer */
+ static const struct snd_kcontrol_new wm8350_left_capt_mixer_controls[] = {
+-SOC_DAPM_SINGLE_TLV("L2 Capture Volume", 
++SOC_DAPM_SINGLE_TLV("L2 Capture Volume",
+ 	WM8350_INPUT_MIXER_VOLUME_L, 1, 7, 0, out_mix_tlv),
+-SOC_DAPM_SINGLE_TLV("AUX Capture Volume", 
++SOC_DAPM_SINGLE_TLV("AUX Capture Volume",
+ 	WM8350_INPUT_MIXER_VOLUME_L, 9, 7, 0, out_mix_tlv),
+ SOC_DAPM_SINGLE("PGA Capture Switch",
+ 	WM8350_LEFT_INPUT_VOLUME, 14, 1, 1),
+@@ -545,9 +544,9 @@ SOC_DAPM_SINGLE("PGA Capture Switch",
+ 
+ /* Right Input Mixer */
+ static const struct snd_kcontrol_new wm8350_right_capt_mixer_controls[] = {
+-SOC_DAPM_SINGLE_TLV("L2 Capture Volume", 
++SOC_DAPM_SINGLE_TLV("L2 Capture Volume",
+ 	WM8350_INPUT_MIXER_VOLUME_R, 5, 7, 0, out_mix_tlv),
+-SOC_DAPM_SINGLE_TLV("AUX Capture Volume", 
++SOC_DAPM_SINGLE_TLV("AUX Capture Volume",
+ 	WM8350_INPUT_MIXER_VOLUME_R, 13, 7, 0, out_mix_tlv),
+ SOC_DAPM_SINGLE("PGA Capture Switch",
+ 	WM8350_RIGHT_INPUT_VOLUME, 14, 1, 1),
+@@ -577,7 +576,7 @@ SOC_DAPM_ENUM("Route", wm8350_enum[8]);
+ 
+ 
+ static const struct snd_soc_dapm_widget wm8350_dapm_widgets[] = {
+-	
++
+ 	SND_SOC_DAPM_PGA("Right Aux PGA", WM8350_POWER_MGMT_2, 11, 0, NULL, 0),
+ 	SND_SOC_DAPM_PGA("Left Aux PGA", WM8350_POWER_MGMT_2, 10, 0, NULL, 0),
+ 	SND_SOC_DAPM_PGA("Right Input PGA", WM8350_POWER_MGMT_2, 9, 0, NULL, 0),
+@@ -586,60 +585,60 @@ static const struct snd_soc_dapm_widget wm8350_dapm_widgets[] = {
+ 		pga_event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+ 	SND_SOC_DAPM_PGA_E("Left Out2 PGA", WM8350_POWER_MGMT_3, 2, 0, NULL, 0,
+ 		pga_event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+-	SND_SOC_DAPM_PGA_E("Right Out1 PGA", WM8350_POWER_MGMT_3, 1, 0, NULL, 0, 
++	SND_SOC_DAPM_PGA_E("Right Out1 PGA", WM8350_POWER_MGMT_3, 1, 0, NULL, 0,
+ 		pga_event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+-	SND_SOC_DAPM_PGA_E("Left Out1 PGA", WM8350_POWER_MGMT_3, 0, 0, NULL, 0, 
++	SND_SOC_DAPM_PGA_E("Left Out1 PGA", WM8350_POWER_MGMT_3, 0, 0, NULL, 0,
+ 		pga_event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+-	
+-	SND_SOC_DAPM_MIXER("Right Capture Mixer", WM8350_POWER_MGMT_2, 
++
++	SND_SOC_DAPM_MIXER("Right Capture Mixer", WM8350_POWER_MGMT_2,
+ 		7, 0, &wm8350_right_capt_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_right_capt_mixer_controls)),
+-		
+-	SND_SOC_DAPM_MIXER("Left Capture Mixer", WM8350_POWER_MGMT_2, 
++
++	SND_SOC_DAPM_MIXER("Left Capture Mixer", WM8350_POWER_MGMT_2,
+ 		6, 0, &wm8350_left_capt_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_left_capt_mixer_controls)),
+-	
++
+ 	SND_SOC_DAPM_MIXER("Out4 Mixer", WM8350_POWER_MGMT_2, 5, 0,
+ 		&wm8350_out4_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_out4_mixer_controls)),
+-	
++
+ 	SND_SOC_DAPM_MIXER("Out3 Mixer", WM8350_POWER_MGMT_2, 4, 0,
+ 		&wm8350_out3_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_out3_mixer_controls)),
+-		
++
+ 	SND_SOC_DAPM_MIXER("Right Playback Mixer", WM8350_POWER_MGMT_2, 1, 0,
+ 		&wm8350_right_play_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_right_play_mixer_controls)),
+-	
++
+ 	SND_SOC_DAPM_MIXER("Left Playback Mixer", WM8350_POWER_MGMT_2, 0, 0,
+ 		&wm8350_left_play_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_left_play_mixer_controls)),
+-		
++
+ 	SND_SOC_DAPM_MIXER("Left Mic Mixer", WM8350_POWER_MGMT_2, 8, 0,
+ 		&wm8350_left_mic_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_left_mic_mixer_controls)),
+-		
++
+ 	SND_SOC_DAPM_MIXER("Right Mic Mixer", WM8350_POWER_MGMT_2, 9, 0,
+ 		&wm8350_right_mic_mixer_controls[0],
+ 		ARRAY_SIZE(wm8350_right_mic_mixer_controls)),
+-		
++
+ 	/* virtual mixer for Beep and Out2R */
+ 	SND_SOC_DAPM_MIXER("Out2 Mixer", SND_SOC_NOPM, 0, 0, NULL, 0),
+-		
++
+ 	SND_SOC_DAPM_SWITCH("Beep", WM8350_POWER_MGMT_3, 7, 0,
+ 		&wm8350_beep_switch_controls),
+ 
+-	SND_SOC_DAPM_ADC("Right ADC", "Right Capture", 
++	SND_SOC_DAPM_ADC("Right ADC", "Right Capture",
+ 		WM8350_POWER_MGMT_4, 3, 0),
+-	SND_SOC_DAPM_ADC("Left ADC", "Left Capture", 
++	SND_SOC_DAPM_ADC("Left ADC", "Left Capture",
+ 		WM8350_POWER_MGMT_4, 2, 0),
+-	SND_SOC_DAPM_DAC("Right DAC", "Right Playback", 
++	SND_SOC_DAPM_DAC("Right DAC", "Right Playback",
+ 		WM8350_POWER_MGMT_4, 5, 0),
+-	SND_SOC_DAPM_DAC("Left DAC", "Left Playback", 
++	SND_SOC_DAPM_DAC("Left DAC", "Left Playback",
+ 		WM8350_POWER_MGMT_4, 4, 0),
+ 
+ 	SND_SOC_DAPM_MICBIAS("Mic Bias", WM8350_POWER_MGMT_1, 4, 0),
+-	
++
+ 	SND_SOC_DAPM_MUX("Out4 Capture Channel", SND_SOC_NOPM, 0, 0,
+ 		&wm8350_out4_capture_controls),
+ 
+@@ -733,34 +732,34 @@ static const char *audio_map[][3] = {
+ 	{"Right Input PGA", NULL, "IN1RP"},
+ 	{"Right Input PGA", NULL, "IN2R"},
+ 	{"Right Capture Mixer", NULL, "Right Input PGA"},
+-	
++
+ 	/* Left Mic mixer */
+ 	{"Left Mic Mixer", "INN Capture Switch", "IN1LN"},
+ 	{"Left Mic Mixer", "INP Capture Switch", "IN1LP"},
+ 	{"Left Mic Mixer", "IN2 Capture Switch", "IN2L"},
+-	
++
+ 	/* Right Mic mixer */
+ 	{"Right Mic Mixer", "INN Capture Switch", "IN1RN"},
+ 	{"Right Mic Mixer", "INP Capture Switch", "IN1RP"},
+ 	{"Right Mic Mixer", "IN2 Capture Switch", "IN2R"},
+-	
++
+ 	/* out 4 capture */
+ 	{"Out4 Capture Channel", NULL, "Out4 Mixer"},
+ 
+ 	/* Beep */
+ 	{"Beep", NULL, "Right Aux PGA"},
+-	
++
+ 	/* terminator */
+ 	{NULL, NULL, NULL},
+ };
+ 
+-static int wm8350_add_widgets(struct snd_soc_codec *codec, 
++static int wm8350_add_widgets(struct snd_soc_codec *codec,
+ 	struct snd_soc_machine *machine)
+ {
+ 	int i;
+ 
+ 	for(i = 0; i < ARRAY_SIZE(wm8350_dapm_widgets); i++) {
+-		snd_soc_dapm_new_control(machine, codec, 
++		snd_soc_dapm_new_control(machine, codec,
+ 			&wm8350_dapm_widgets[i]);
+ 	}
+ 
+@@ -780,82 +779,82 @@ static int wm8350_set_dai_sysclk(struct snd_soc_dai *codec_dai,
+ 	struct snd_soc_codec *codec = codec_dai->codec;
+ 	struct wm8350* wm8350 = codec->control_data;
+ 	u16 fll_4;
+-	
++
+ 	switch(clk_id) {
+ 	case WM8350_MCLK_SEL_MCLK:
+-		wm8350_clear_bits(wm8350, WM8350_CLOCK_CONTROL_1, 
++		wm8350_clear_bits(wm8350, WM8350_CLOCK_CONTROL_1,
+ 			WM8350_MCLK_SEL);
+ 		break;
+ 	case WM8350_MCLK_SEL_PLL_MCLK:
+ 	case WM8350_MCLK_SEL_PLL_DAC:
+ 	case WM8350_MCLK_SEL_PLL_ADC:
+ 	case WM8350_MCLK_SEL_PLL_32K:
+-		wm8350_set_bits(wm8350, WM8350_CLOCK_CONTROL_1, 
++		wm8350_set_bits(wm8350, WM8350_CLOCK_CONTROL_1,
+ 			WM8350_MCLK_SEL);
+-		fll_4 = wm8350_codec_read(codec, WM8350_FLL_CONTROL_4) & 
++		fll_4 = wm8350_codec_read(codec, WM8350_FLL_CONTROL_4) &
+ 			~WM8350_FLL_CLK_SRC_MASK;
+-		wm8350_codec_write(codec, WM8350_FLL_CONTROL_4, 
++		wm8350_codec_write(codec, WM8350_FLL_CONTROL_4,
+ 			fll_4 | clk_id);
+ 		break;
+ 	}
+-		
++
+ 	/* MCLK direction */
+ 	if (dir == WM8350_MCLK_DIR_OUT)
+-		wm8350_set_bits(wm8350, WM8350_CLOCK_CONTROL_2, 
++		wm8350_set_bits(wm8350, WM8350_CLOCK_CONTROL_2,
+ 			WM8350_MCLK_DIR);
+-	else 
+-		wm8350_clear_bits(wm8350, WM8350_CLOCK_CONTROL_2, 
++	else
++		wm8350_clear_bits(wm8350, WM8350_CLOCK_CONTROL_2,
+ 			WM8350_MCLK_DIR);
+-				
++
+ 	return 0;
+ }
+ 
+-static int wm8350_set_clkdiv(struct snd_soc_dai *codec_dai, 
++static int wm8350_set_clkdiv(struct snd_soc_dai *codec_dai,
+ 	int div_id, int div)
+ {
+ 	struct snd_soc_codec *codec = codec_dai->codec;
+ 	u16 val;
+-	
++
+ 	switch (div_id) {
+ 	case  WM8350_ADC_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_ADC_DIVIDER) &
+-			~WM8350_ADC_CLKDIV_MASK;    
++			~WM8350_ADC_CLKDIV_MASK;
+ 		wm8350_codec_write(codec, WM8350_ADC_DIVIDER, val | div);
+ 	break;
+ 	case WM8350_DAC_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_DAC_CLOCK_CONTROL) &
+-			~WM8350_DAC_CLKDIV_MASK;    
++			~WM8350_DAC_CLKDIV_MASK;
+ 		wm8350_codec_write(codec, WM8350_DAC_CLOCK_CONTROL, val | div);
+ 	break;
+ 	case WM8350_BCLK_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_CLOCK_CONTROL_1) &
+-			~WM8350_BCLK_DIV_MASK;    
++			~WM8350_BCLK_DIV_MASK;
+ 		wm8350_codec_write(codec, WM8350_CLOCK_CONTROL_1, val | div);
+ 	break;
+ 	case WM8350_OPCLK_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_CLOCK_CONTROL_1) &
+-			~WM8350_OPCLK_DIV_MASK;    
++			~WM8350_OPCLK_DIV_MASK;
+ 		wm8350_codec_write(codec, WM8350_CLOCK_CONTROL_1, val | div);
+ 	break;
+ 	case WM8350_SYS_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_CLOCK_CONTROL_1) &
+-			~WM8350_MCLK_DIV_MASK;    
++			~WM8350_MCLK_DIV_MASK;
+ 		wm8350_codec_write(codec, WM8350_CLOCK_CONTROL_1, val | div);
+ 	break;
+ 	case WM8350_DACLR_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_DAC_LR_RATE) &
+-			~WM8350_DACLRC_RATE_MASK;    
++			~WM8350_DACLRC_RATE_MASK;
+ 		wm8350_codec_write(codec, WM8350_DAC_LR_RATE, val | div);
+ 	break;
+ 	case WM8350_ADCLR_CLKDIV:
+ 		val = wm8350_codec_read(codec, WM8350_ADC_LR_RATE) &
+-			~WM8350_ADCLRC_RATE_MASK;    
++			~WM8350_ADCLRC_RATE_MASK;
+ 		wm8350_codec_write(codec, WM8350_ADC_LR_RATE, val | div);
+ 	break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+-	
++
+ 	return 0;
+ }
+ 
+@@ -864,14 +863,14 @@ static int wm8350_set_dai_fmt(struct snd_soc_dai *codec_dai,
+ {
+ 	struct snd_soc_codec *codec = codec_dai->codec;
+ 	u16 iface = wm8350_codec_read(codec, WM8350_AI_FORMATING) &
+-		~(WM8350_AIF_BCLK_INV | WM8350_AIF_LRCLK_INV | 
++		~(WM8350_AIF_BCLK_INV | WM8350_AIF_LRCLK_INV |
+ 		WM8350_AIF_FMT_MASK);
+ 	u16 master = wm8350_codec_read(codec, WM8350_AI_DAC_CONTROL) &
+ 		~WM8350_BCLK_MSTR;
+ 	u16 dac_lrc = wm8350_codec_read(codec, WM8350_DAC_LR_RATE) &
+ 		~WM8350_DACLRC_ENA;
+ 	u16 adc_lrc = wm8350_codec_read(codec, WM8350_ADC_LR_RATE) &
+-		~WM8350_ADCLRC_ENA;  
++		~WM8350_ADCLRC_ENA;
+ 
+ 
+ 	/* set master/slave audio interface */
+@@ -971,7 +970,7 @@ static int wm8350_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	struct snd_soc_pcm_link *pcm_link = substream->private_data;
+ 	struct snd_soc_codec *codec = pcm_link->codec;
+ 	u16 iface = wm8350_codec_read(codec, WM8350_AI_FORMATING) &
+-		~WM8350_AIF_WL_MASK; 
++		~WM8350_AIF_WL_MASK;
+ 
+ 	/* bit size */
+ 	switch (params_format(params)) {
+@@ -1007,7 +1006,7 @@ static int wm8350_mute(struct snd_soc_dai *dai, int mute)
+ /* FLL divisors */
+ struct _fll_div {
+ 	int div; /* FLL_OUTDIV */
+-	int n;	
++	int n;
+ 	int k;
+ 	int ratio; /* FLL_FRATIO */
+ };
+@@ -1034,18 +1033,18 @@ static inline int fll_factors(struct _fll_div *fll_div, unsigned int input,
+ 		printk(KERN_ERR "wm8350: fll freq %d out of range\n", output);
+ 		return -EINVAL;
+ 	}
+-	
++
+ 	if (input > 48000)
+ 		fll_div->ratio = 1;
+ 	else
+ 		fll_div->ratio = 8;
+-	
++
+ 	t1 = output * (1 << (fll_div->div + 1));
+ 	t2 = input * fll_div->ratio;
+-	
++
+ 	fll_div->n = t1 / t2;
+ 	Nmod = t1 % t2;
+-	
++
+ 	if (Nmod) {
+ 		Kpart = FIXED_FLL_SIZE * (long long)Nmod;
+ 		do_div(Kpart, t2);
+@@ -1060,7 +1059,7 @@ static inline int fll_factors(struct _fll_div *fll_div, unsigned int input,
+ 		fll_div->k = K;
+ 	} else
+ 		fll_div->k = 0;
+-	
++
+ 	return 0;
+ }
+ 
+@@ -1073,53 +1072,53 @@ static int wm8350_set_fll(struct snd_soc_dai *codec_dai,
+ 	struct _fll_div fll_div;
+ 	int ret = 0;
+ 	u16 fll_1, fll_4;
+-	
++
+ 	if (freq_out == 0 || freq_in == 0) {
+ 		/* power down FLL */
+-		wm8350_clear_bits(wm8350, WM8350_POWER_MGMT_4, 
++		wm8350_clear_bits(wm8350, WM8350_POWER_MGMT_4,
+ 			WM8350_FLL_ENA | WM8350_FLL_OSC_ENA);
+ 		return ret;
+ 	}
+-	
++
+ 	ret = fll_factors(&fll_div, freq_in, freq_out);
+ 	if (ret < 0)
+ 		return ret;
+-		
++
+ 	/* set up N.K & dividers */
+-	fll_1 = wm8350_codec_read(codec, WM8350_FLL_CONTROL_1) & 
++	fll_1 = wm8350_codec_read(codec, WM8350_FLL_CONTROL_1) &
+ 		~(WM8350_FLL_OUTDIV_MASK | 0xc000);
+-	wm8350_codec_write(codec, WM8350_FLL_CONTROL_1, 
++	wm8350_codec_write(codec, WM8350_FLL_CONTROL_1,
+ 		fll_1 | (fll_div.div << 8));
+-	wm8350_codec_write(codec, WM8350_FLL_CONTROL_2, 
++	wm8350_codec_write(codec, WM8350_FLL_CONTROL_2,
+ 		 (fll_div.ratio << 11) | (fll_div.n & WM8350_FLL_N_MASK));
+ 	wm8350_codec_write(codec, WM8350_FLL_CONTROL_3, fll_div.k);
+-	fll_4 = wm8350_codec_read(codec, WM8350_FLL_CONTROL_4) & 
++	fll_4 = wm8350_codec_read(codec, WM8350_FLL_CONTROL_4) &
+ 		~(WM8350_FLL_FRAC | WM8350_FLL_SLOW_LOCK_REF);
+-	wm8350_codec_write(codec, WM8350_FLL_CONTROL_4, 
+-		fll_4 | (fll_div.k ? WM8350_FLL_FRAC : 0) | 
++	wm8350_codec_write(codec, WM8350_FLL_CONTROL_4,
++		fll_4 | (fll_div.k ? WM8350_FLL_FRAC : 0) |
+ 		(fll_div.ratio == 8 ? WM8350_FLL_SLOW_LOCK_REF : 0));
+-		
++
+ 	/* power FLL on */
+ 	wm8350_set_bits(wm8350, WM8350_POWER_MGMT_4, WM8350_FLL_OSC_ENA);
+ 	/* do we need to wait here ? */
+ 	wm8350_set_bits(wm8350, WM8350_POWER_MGMT_4, WM8350_FLL_ENA);
+-	return 0;	
++	return 0;
+ }
+ 
+ static int wm8350_set_tdm_slot(struct snd_soc_dai *codec_dai,
+ 		unsigned int mask, int slots)
+ {
+ 	//struct snd_soc_codec *codec = codec_dai->codec;
+-	
++
+ 	return 0;
+ }
+ 
+ 
+-static int wm8350_set_tristate(struct snd_soc_dai *codec_dai, 
++static int wm8350_set_tristate(struct snd_soc_dai *codec_dai,
+ 	int tristate)
+ {
+ 	//struct snd_soc_codec *codec = codec_dai->codec;
+-	
++
+ 	return 0;
+ }
+ 
+@@ -1128,17 +1127,17 @@ static int wm8350_dapm_event(struct snd_soc_codec *codec, int event)
+ 	struct wm8350 *wm8350 = codec->control_data;
+ 	struct wm8350_audio_platform_data *platform = codec->platform_data;
+ 	u16 pm1;
+-	
++
+ 	snd_assert(wm8350 != NULL, return -EINVAL);
+ 	snd_assert(platform != NULL, return -EINVAL);
+ 
+ 	switch (event) {
+ 	case SNDRV_CTL_POWER_D0: /* full On */
+ 		/* set vmid to 10k and current to 1.0x */
+-		pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) & 
++		pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) &
+ 			~(WM8350_VMID_MASK | WM8350_CODEC_ISEL_MASK);
+-		wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
+-			pm1 | WM8350_VMID_10K | 
++		wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
++			pm1 | WM8350_VMID_10K |
+ 			platform->codec_current_d0 << 14);
+ 		break;
+ 	case SNDRV_CTL_POWER_D1: /* partial On */
+@@ -1148,123 +1147,123 @@ static int wm8350_dapm_event(struct snd_soc_codec *codec, int event)
+ 			/* D3hot --> D0 */
+ 			/* enable bias */
+ 			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1);
+-			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
+-				pm1 | WM8350_BIASEN); 
++			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
++				pm1 | WM8350_BIASEN);
+ 		}
+ 		break;
+ 	case SNDRV_CTL_POWER_D3hot: /* Off, with power */
+ 		if (codec->dapm_state == SNDRV_CTL_POWER_D3cold) {
+ 			/* D3cold --> D3hot */
+ 			/* mute DAC & outputs */
+-			wm8350_set_bits(wm8350, WM8350_DAC_MUTE, 
++			wm8350_set_bits(wm8350, WM8350_DAC_MUTE,
+ 				WM8350_DAC_MUTE_ENA);
+-	
++
+ 			/* discharge cap memory */
+-			wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL, 
+-				platform->dis_out1 | 
++			wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL,
++				platform->dis_out1 |
+ 				(platform->dis_out2 << 2) |
+-				(platform->dis_out3 << 4) | 
++				(platform->dis_out3 << 4) |
+ 				(platform->dis_out4 << 6));
+-			
++
+ 			/* wait for discharge */
+ 			schedule_timeout_interruptible(msecs_to_jiffies(
+ 				platform->cap_discharge_msecs));
+-			
++
+ 			/* enable antipop */
+-			wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL, 
+-				(platform->vmid_s_curve << 8)); 
+-		
++			wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL,
++				(platform->vmid_s_curve << 8));
++
+ 			/* ramp up vmid */
+-			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
++			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
+ 				(platform->codec_current_charge << 14) |
+ 				WM8350_VMID_10K | WM8350_VMIDEN | WM8350_VBUFEN);
+-			
++
+ 			/* wait for vmid */
+ 			schedule_timeout_interruptible(msecs_to_jiffies(
+ 				platform->vmid_charge_msecs));
+-			
++
+ 			/* turn on vmid 500k  */
+-			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) & 
++			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) &
+ 				~(WM8350_VMID_MASK | WM8350_CODEC_ISEL_MASK);
+-			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
+-				pm1 | WM8350_VMID_500K | 
++			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
++				pm1 | WM8350_VMID_500K |
+ 				(platform->codec_current_d3 << 14));
+-						
++
+ 			/* disable antipop */
+ 			wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL, 0);
+ 
+ 		} else {
+ 			/* D1,D2 --> D3hot */
+ 			/* turn on vmid 500k and reduce current */
+-			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) & 
++			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) &
+ 			~(WM8350_VMID_MASK | WM8350_CODEC_ISEL_MASK);
+-			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
+-				pm1 | WM8350_VMID_500K | 
++			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
++				pm1 | WM8350_VMID_500K |
+ 				(platform->codec_current_d3 << 14));
+-				
++
+ 			/* disable bias */
+-			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) & 
++			pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) &
+ 				~WM8350_BIASEN;
+-			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
+-				pm1); 
++			wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
++				pm1);
+ 		}
+-	
++
+ 		break;
+ 	case SNDRV_CTL_POWER_D3cold: /* Off, without power */
+ 
+ 		/* mute DAC & enable outputs */
+-		wm8350_set_bits(wm8350, WM8350_DAC_MUTE, 
++		wm8350_set_bits(wm8350, WM8350_DAC_MUTE,
+ 			WM8350_DAC_MUTE_ENA);
+ 
+-		wm8350_set_bits(wm8350, WM8350_POWER_MGMT_3, 
+-			WM8350_OUT1L_ENA | WM8350_OUT1R_ENA | 
++		wm8350_set_bits(wm8350, WM8350_POWER_MGMT_3,
++			WM8350_OUT1L_ENA | WM8350_OUT1R_ENA |
+ 			WM8350_OUT2L_ENA | WM8350_OUT2R_ENA);
+ 
+-		/* enable anti pop S curve */ 
++		/* enable anti pop S curve */
+ 		wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL,
+ 			(platform->vmid_s_curve << 8));
+-			
++
+ 		/* turn off vmid  */
+-		pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) & 
++		pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) &
+ 				~WM8350_VMIDEN;
+-		wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, pm1);		
++		wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, pm1);
+ 
+ 		/* wait */
+ 		schedule_timeout_interruptible(msecs_to_jiffies(
+ 			platform->vmid_discharge_msecs));
+ 
+ 		wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL,
+-			(platform->vmid_s_curve << 8) | 
+-			platform->dis_out1 | 
++			(platform->vmid_s_curve << 8) |
++			platform->dis_out1 |
+ 			(platform->dis_out2 << 2) |
+-			(platform->dis_out3 << 4) | 
++			(platform->dis_out3 << 4) |
+ 			(platform->dis_out4 << 6));
+ 
+ 		/* turn off VBuf and drain */
+-		pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) & 
++		pm1 = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_1) &
+ 				~(WM8350_VBUFEN | WM8350_VMID_MASK);
+-		wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1, 
++		wm8350_reg_write(wm8350, WM8350_POWER_MGMT_1,
+ 			pm1 | WM8350_OUTPUT_DRAIN_EN);
+-			
++
+ 		/* wait */
+ 		schedule_timeout_interruptible(msecs_to_jiffies(
+ 			platform->drain_msecs));
+-		
+-		/* disable anti-pop */	
++
++		/* disable anti-pop */
+ 		wm8350_reg_write(wm8350, WM8350_ANTI_POP_CONTROL, 0);
+-		
+-		wm8350_clear_bits(wm8350, WM8350_LOUT1_VOLUME, 
++
++		wm8350_clear_bits(wm8350, WM8350_LOUT1_VOLUME,
+ 			WM8350_OUT1L_ENA);
+-		wm8350_clear_bits(wm8350, WM8350_ROUT1_VOLUME, 
++		wm8350_clear_bits(wm8350, WM8350_ROUT1_VOLUME,
+ 			WM8350_OUT1R_ENA);
+-		wm8350_clear_bits(wm8350, WM8350_LOUT2_VOLUME, 
++		wm8350_clear_bits(wm8350, WM8350_LOUT2_VOLUME,
+ 			WM8350_OUT2L_ENA);
+-		wm8350_clear_bits(wm8350, WM8350_ROUT2_VOLUME, 
++		wm8350_clear_bits(wm8350, WM8350_ROUT2_VOLUME,
+ 			WM8350_OUT2R_ENA);
+-	
++
+ 		/* disable clock gen */
+ 		wm8350_clear_bits(wm8350, WM8350_POWER_MGMT_4, WM8350_SYSCLK_ENA);
+-				
++
+ 		break;
+ 	}
+ 	codec->dapm_state = event;
+@@ -1317,7 +1316,7 @@ static const struct snd_soc_ops wm8350_hifi_dai_audio_ops = {
+ static int wm8350_suspend(struct device *dev, pm_message_t state)
+ {
+ 	struct snd_soc_codec *codec = to_snd_soc_codec(dev);
+-// lg save status 
++// lg save status
+ 	wm8350_dapm_event(codec, SNDRV_CTL_POWER_D3cold);
+ 	return 0;
+ }
+@@ -1325,7 +1324,7 @@ static int wm8350_suspend(struct device *dev, pm_message_t state)
+ static int wm8350_resume(struct device *dev)
+ {
+ 	struct snd_soc_codec *codec = to_snd_soc_codec(dev);
+-	
++
+ 	wm8350_dapm_event(codec, SNDRV_CTL_POWER_D3hot);
+ 
+ 	/* charge wm8350 caps */
+@@ -1343,23 +1342,23 @@ static int wm8350_codec_io_probe(struct snd_soc_codec *codec,
+ 	struct wm8350* wm8350 = codec->control_data;
+ 	struct wm8350_out_ramp *or = codec->private_data;
+ 	struct wm8350_output *out1 = &or->out1, *out2 = &or->out2;
+-	
++
+ 	snd_assert(wm8350 != NULL, return -EINVAL);
+-	
++
+ 	/* reset codec */
+ 	wm8350_clear_bits(wm8350, WM8350_POWER_MGMT_5, WM8350_CODEC_ENA);
+ 	wm8350_set_bits(wm8350, WM8350_POWER_MGMT_5, WM8350_CODEC_ENA);
+-	
++
+ 	/* enable clock gen - lg need to move in new silicon */
+ 	wm8350_set_bits(wm8350, WM8350_POWER_MGMT_4, WM8350_SYSCLK_ENA);
+ 
+ 	/* charge output caps */
+ 	codec->dapm_state = SNDRV_CTL_POWER_D3cold;
+ 	wm8350_dapm_event(codec, SNDRV_CTL_POWER_D3hot);
+-	
++
+ 	wm8350_add_controls(codec, machine->card);
+ 	wm8350_add_widgets(codec, machine);
+-	
++
+ 	/* read OUT1 & OUT2 volumes */
+ 	out1->left_vol = (wm8350_reg_read(wm8350, WM8350_LOUT1_VOLUME) &
+ 		WM8350_OUT1L_VOL_MASK) >> WM8350_OUT1L_VOL_SHIFT;
+@@ -1375,7 +1374,7 @@ static int wm8350_codec_io_probe(struct snd_soc_codec *codec,
+ 	wm8350_reg_write(wm8350, WM8350_LOUT2_VOLUME, 0);
+ 	wm8350_reg_write(wm8350, WM8350_ROUT2_VOLUME, 0);
+ 	wm8350_set_bits(wm8350, WM8350_LOUT2_VOLUME, WM8350_OUT2_VU);
+-	
++
+ 	return 0;
+ }
+ 
+@@ -1402,11 +1401,11 @@ static int wm8350_codec_io_remove(struct snd_soc_codec *codec,
+ 	struct snd_soc_machine *machine)
+ {
+ 	struct wm8350* wm8350 = codec->control_data;
+-	
++
+ 	snd_assert(wm8350 != NULL, return -EINVAL);
+ 	run_delayed_work(&codec->delayed_work);
+ 	wm8350_dapm_event(codec, SNDRV_CTL_POWER_D3cold);
+-	return 0;	
++	return 0;
+ }
+ 
+ static const struct snd_soc_codec_ops wm8350_codec_ops = {
+@@ -1447,7 +1446,7 @@ static int wm8350_codec_remove(struct device *dev)
+ static int wm8350_hifi_dai_probe(struct device *dev)
+ {
+ 	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
+-		
++
+ 	dai->ops = &wm8350_hifi_dai_ops;
+ 	dai->audio_ops = &wm8350_hifi_dai_audio_ops;
+ 	dai->capture = &wm8350_hifi_dai_capture;
+@@ -1488,7 +1487,7 @@ static struct snd_soc_device_driver wm8350_hifi_dai_driver = {
+ static __init int wm8350_init(void)
+ {
+ 	int ret = 0;
+-	
++
+ 	ret = driver_register(&wm8350_codec_driver.driver);
+ 	if (ret < 0)
+ 		return ret;
+diff --git a/sound/soc/codecs/wm8580.c b/sound/soc/codecs/wm8580.c
+index e12a32d..1651ab2 100644
+--- a/sound/soc/codecs/wm8580.c
++++ b/sound/soc/codecs/wm8580.c
+@@ -27,7 +27,6 @@
+ #include <linux/i2c.h>
+ #include <linux/spi/spi.h>
+ #include <linux/platform_device.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+diff --git a/sound/soc/imx/imx-3stack-ak4647.c b/sound/soc/imx/imx-3stack-ak4647.c
+index 29543ce..b2d9b0b 100644
+--- a/sound/soc/imx/imx-3stack-ak4647.c
++++ b/sound/soc/imx/imx-3stack-ak4647.c
+@@ -19,7 +19,6 @@
+ #include <linux/i2c.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/soc.h>
+@@ -243,7 +242,8 @@ static int ak4647_set_spk(struct snd_kcontrol *kcontrol,
+ 	return 1;
+ }
+ 
+-static int spk_amp_event(struct snd_soc_dapm_widget *w, int event)
++static int spk_amp_event(struct snd_soc_dapm_widget *w,
++			 struct snd_kcontrol *kcontrol, int event)
+ {
+ 	if (SND_SOC_DAPM_EVENT_ON(event))
+ 		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 1);
+@@ -307,7 +307,7 @@ static const struct snd_kcontrol_new ak4647_machine_controls[] = {
+ 
+ static void headphone_detect_handler(struct work_struct *work)
+ {
+-	sysfs_notify(&imx_3stack_mach->pdev->dev.driver->kobj, NULL,
++	sysfs_notify(&imx_3stack_mach->pdev->dev.kobj, NULL,
+ 		     "headphone");
+ 
+ }
+diff --git a/sound/soc/imx/imx-3stack-wm8350.c b/sound/soc/imx/imx-3stack-wm8350.c
+index 6607d86..bca4529 100644
+--- a/sound/soc/imx/imx-3stack-wm8350.c
++++ b/sound/soc/imx/imx-3stack-wm8350.c
+@@ -29,7 +29,6 @@
+ #include <linux/regulator/wm8350/wm8350.h>
+ #include <linux/regulator/wm8350/wm8350-audio.h>
+ #include <linux/regulator/wm8350/wm8350-bus.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+diff --git a/sound/soc/imx/imx-3stack-wm8580.c b/sound/soc/imx/imx-3stack-wm8580.c
+index f4a533c..685aaf7 100644
+--- a/sound/soc/imx/imx-3stack-wm8580.c
++++ b/sound/soc/imx/imx-3stack-wm8580.c
+@@ -19,7 +19,6 @@
+ #include <linux/i2c.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/soc.h>
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index 762a94f..63260b7 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -23,7 +23,6 @@
+ #include <linux/slab.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/clk.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+diff --git a/sound/soc/imx/imx-pcm.c b/sound/soc/imx/imx-pcm.c
+index 3800a5b..427b2b8 100644
+--- a/sound/soc/imx/imx-pcm.c
++++ b/sound/soc/imx/imx-pcm.c
+@@ -20,7 +20,6 @@
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ #include <linux/dma-mapping.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 6aaf132..5720677 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -27,7 +27,6 @@
+ #include <linux/slab.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/clk.h>
+-#include <sound/driver.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+-- 
+1.5.4.4
+

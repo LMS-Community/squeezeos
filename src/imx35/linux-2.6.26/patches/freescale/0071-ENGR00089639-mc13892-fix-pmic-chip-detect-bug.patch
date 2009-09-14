@@ -1,0 +1,51 @@
+From c2a9135e86e54359db80031c8cecf37f122f8869 Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Fri, 29 Aug 2008 14:21:11 +0800
+Subject: [PATCH] ENGR00089639 mc13892: fix pmic chip detect bug
+
+fix pmic chip detect bug and remove some compile warning
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ drivers/mxc/pmic/core/pmic_core_i2c.c   |    4 +++-
+ drivers/regulator/mc13892/reg-mc13892.c |    2 +-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/pmic/core/pmic_core_i2c.c b/drivers/mxc/pmic/core/pmic_core_i2c.c
+index b8520af..928ce70 100644
+--- a/drivers/mxc/pmic/core/pmic_core_i2c.c
++++ b/drivers/mxc/pmic/core/pmic_core_i2c.c
+@@ -101,7 +101,6 @@ static void pmic_pdev_register(void)
+ 	platform_device_register(&rleds_ldm);
+ 	platform_device_register(&gleds_ldm);
+ 	platform_device_register(&bleds_ldm);
+-	reg_mc13783_probe();
+ }
+ 
+ /*!
+@@ -174,6 +173,9 @@ static int __devinit is_chip_onboard(struct i2c_client *client)
+ 	/*bind the right device to the driver */
+ 	ret = pmic_i2c_24bit_read(client, REG_IDENTIFICATION);
+ 
++	if (ret == -1)
++		return ret;
++
+ 	if (MC13892_GEN_ID_VALUE != BITFEXT(ret, MC13892_GENERATION_ID)) {
+ 		/*compare the address value */
+ 		dev_err(&client->dev,
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index 728858e..69e47d1 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -257,7 +257,7 @@ enum {
+ 
+ static int mc13892_get_sw_hi_bit(int sw)
+ {
+-	unsigned int register_val = 0, register_mask = 0;
++	unsigned int register_val = 0;
+ 	unsigned int reg = 0;
+ 
+ 	switch (sw) {
+-- 
+1.5.4.4
+

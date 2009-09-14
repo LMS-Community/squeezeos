@@ -1,0 +1,153 @@
+From d1a50b0af01a185ba09a32eb6fc630bb772390f1 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 29 Jan 2009 16:34:30 +0200
+Subject: [PATCH] UBIFS: remove fast unmounting
+
+This UBIFS feature has never worked properly, and it was a mistake
+to add it because we simply have no use-cases. So, lets still accept
+the fast_unmount mount option, but ignore it. This does not change
+much, because UBIFS commit in sync_fs anyway, and sync_fs is called
+while unmounting.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ Documentation/filesystems/ubifs.txt |    7 -----
+ fs/ubifs/super.c                    |   50 +++-------------------------------
+ fs/ubifs/ubifs.h                    |    2 -
+ 3 files changed, 5 insertions(+), 54 deletions(-)
+
+diff --git a/Documentation/filesystems/ubifs.txt b/Documentation/filesystems/ubifs.txt
+index 3449c75..87f2281 100644
+--- a/Documentation/filesystems/ubifs.txt
++++ b/Documentation/filesystems/ubifs.txt
+@@ -79,13 +79,6 @@ Mount options
+ 
+ (*) == default.
+ 
+-norm_unmount (*)	commit on unmount; the journal is committed
+-			when the file-system is unmounted so that the
+-			next mount does not have to replay the journal
+-			and it becomes very fast;
+-fast_unmount		do not commit on unmount; this option makes
+-			unmount faster, but the next mount slower
+-			because of the need to replay the journal.
+ bulk_read		read more in one go to take advantage of flash
+ 			media that read faster sequentially
+ no_bulk_read (*)	do not bulk-read
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 05400f2..ebd5199 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -955,13 +955,16 @@ static int ubifs_parse_options(struct ubifs_info *c, char *options,
+ 
+ 		token = match_token(p, tokens, args);
+ 		switch (token) {
++		/*
++		 * %Opt_fast_unmount and %Opt_norm_unmount options are ignored.
++		 * We accepte them in order to be backware-compatible. But this
++		 * should be removed at some point.
++		 */
+ 		case Opt_fast_unmount:
+ 			c->mount_opts.unmount_mode = 2;
+-			c->fast_unmount = 1;
+ 			break;
+ 		case Opt_norm_unmount:
+ 			c->mount_opts.unmount_mode = 1;
+-			c->fast_unmount = 0;
+ 			break;
+ 		case Opt_bulk_read:
+ 			c->mount_opts.bulk_read = 2;
+@@ -1357,7 +1360,6 @@ static int mount_ubifs(struct ubifs_info *c)
+ 	       c->uuid[4], c->uuid[5], c->uuid[6], c->uuid[7],
+ 	       c->uuid[8], c->uuid[9], c->uuid[10], c->uuid[11],
+ 	       c->uuid[12], c->uuid[13], c->uuid[14], c->uuid[15]);
+-	dbg_msg("fast unmount:        %d", c->fast_unmount);
+ 	dbg_msg("big_lpt              %d", c->big_lpt);
+ 	dbg_msg("log LEBs:            %d (%d - %d)",
+ 		c->log_lebs, UBIFS_LOG_LNUM, c->log_last);
+@@ -1614,38 +1616,6 @@ out:
+ }
+ 
+ /**
+- * commit_on_unmount - commit the journal when un-mounting.
+- * @c: UBIFS file-system description object
+- *
+- * This function is called during un-mounting and re-mounting, and it commits
+- * the journal unless the "fast unmount" mode is enabled.
+- */
+-static void commit_on_unmount(struct ubifs_info *c)
+-{
+-	long long bud_bytes;
+-
+-	if (!c->fast_unmount) {
+-		dbg_gen("skip committing - fast unmount enabled");
+-		return;
+-	}
+-
+-	/*
+-	 * This function is called before the background thread is stopped, so
+-	 * we may race with ongoing commit, which means we have to take
+-	 * @c->bud_lock to access @c->bud_bytes.
+-	 */
+-	spin_lock(&c->buds_lock);
+-	bud_bytes = c->bud_bytes;
+-	spin_unlock(&c->buds_lock);
+-
+-	if (bud_bytes) {
+-		dbg_gen("run commit");
+-		ubifs_run_commit(c);
+-	} else
+-		dbg_gen("journal is empty, do not run commit");
+-}
+-
+-/**
+  * ubifs_remount_ro - re-mount in read-only mode.
+  * @c: UBIFS file-system description object
+  *
+@@ -1659,7 +1629,6 @@ static void ubifs_remount_ro(struct ubifs_info *c)
+ 	ubifs_assert(!c->need_recovery);
+ 	ubifs_assert(!(c->vfs_sb->s_flags & MS_RDONLY));
+ 
+-	commit_on_unmount(c);
+ 	mutex_lock(&c->umount_mutex);
+ 	if (c->bgt) {
+ 		kthread_stop(c->bgt);
+@@ -2075,15 +2044,6 @@ out_close:
+ 
+ static void ubifs_kill_sb(struct super_block *sb)
+ {
+-	struct ubifs_info *c = sb->s_fs_info;
+-
+-	/*
+-	 * We do 'commit_on_unmount()' here instead of 'ubifs_put_super()'
+-	 * in order to be outside BKL.
+-	 */
+-	if (sb->s_root && !(sb->s_flags & MS_RDONLY))
+-		commit_on_unmount(c);
+-	/* The un-mount routine is actually done in put_super() */
+ 	generic_shutdown_super(sb);
+ }
+ 
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index db3dd87..656ba00 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -957,7 +957,6 @@ struct ubifs_debug_info;
+  * @cs_lock: commit state lock
+  * @cmt_wq: wait queue to sleep on if the log is full and a commit is running
+  *
+- * @fast_unmount: do not run journal commit before un-mounting
+  * @big_lpt: flag that LPT is too big to write whole during commit
+  * @no_chk_data_crc: do not check CRCs when reading data nodes (except during
+  *                   recovery)
+@@ -1198,7 +1197,6 @@ struct ubifs_info {
+ 	spinlock_t cs_lock;
+ 	wait_queue_head_t cmt_wq;
+ 
+-	unsigned int fast_unmount:1;
+ 	unsigned int big_lpt:1;
+ 	unsigned int no_chk_data_crc:1;
+ 	unsigned int bulk_read:1;
+-- 
+1.5.4.3
+

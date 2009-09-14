@@ -1,0 +1,105 @@
+From 734651ba421591de406ee42120a2b88bbb612ccb Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Tue, 13 Jan 2009 21:48:35 -0600
+Subject: [PATCH] ENGR00105903 sgtl5000: check before doing regulator operations
+
+Need to check that regulator fields are not NULL before doing
+regulator operations.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/imx/imx-3stack-sgtl5000.c |   50 +++++++++++++++++++++++-----------
+ 1 files changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index dedd1e3..715aa49 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -384,6 +384,10 @@ static int spk_amp_event(struct snd_soc_dapm_widget *w,
+ 	struct imx_3stack_priv *priv;
+ 	priv = sgtl5000_3stack_pcm_link->machine->platform_data;
+ 	plat = sgtl5000_3stack_pcm_link->machine->pdev->dev.platform_data;
++
++	if ((priv->reg_amp_gpo == NULL) || (priv->reg_vdda == NULL))
++		return 0;
++
+ 	hp_status = plat->hp_status();
+ 	if (SND_SOC_DAPM_EVENT_ON(event)) {
+ 		if (hp_status) {
+@@ -455,22 +459,30 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 			goto err_reg_vddio;
+ 		priv->reg_vddio = reg;
+ 	}
+-	reg = regulator_get(&pdev->dev, plat->vdda_reg);
+-	if (IS_ERR(reg))
+-		goto err_reg_vdda;
+-	priv->reg_vdda = reg;
+-	reg = regulator_get(&pdev->dev, plat->amp_gpo);
+-	if (IS_ERR(reg))
+-		goto err_reg_gpo;
+-	priv->reg_amp_gpo = reg;
++	if (plat->vdda_reg) {
++		reg = regulator_get(&pdev->dev, plat->vdda_reg);
++		if (IS_ERR(reg))
++			goto err_reg_vdda;
++		priv->reg_vdda = reg;
++	}
++	if (plat->amp_gpo) {
++		reg = regulator_get(&pdev->dev, plat->amp_gpo);
++		if (IS_ERR(reg))
++			goto err_reg_gpo;
++		priv->reg_amp_gpo = reg;
++	}
+ 	machine->platform_data = priv;
+ 
+-	ret = regulator_set_voltage(priv->reg_vdda, plat->vdda);
+-	regulator_enable(priv->reg_vdda);
++	if (priv->reg_vdda) {
++		ret = regulator_set_voltage(priv->reg_vdda, plat->vdda);
++		regulator_enable(priv->reg_vdda);
++	}
+ 	if (priv->reg_vddio) {
+ 		regulator_set_voltage(priv->reg_vddio, plat->vddio);
+ 		regulator_enable(priv->reg_vddio);
+ 	}
++	if (priv->reg_amp_gpo)
++		regulator_enable(priv->reg_amp_gpo);
+ 
+ 	codec_data->vddio = plat->vddio / 1000; /* uV to mV */
+ 	codec_data->vdda = plat->vdda / 1000;
+@@ -534,9 +546,11 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 	return 0;
+ 
+ err_card_reg:
+-	regulator_put(priv->reg_amp_gpo, &pdev->dev);
++	if (priv->reg_amp_gpo)
++		regulator_put(priv->reg_amp_gpo, &pdev->dev);
+ err_reg_gpo:
+-	regulator_put(priv->reg_vdda, &pdev->dev);
++	if (priv->reg_vdda)
++		regulator_put(priv->reg_vdda, &pdev->dev);
+ err_reg_vdda:
+ 	if (priv->reg_vddio)
+ 		regulator_put(priv->reg_vddio, &pdev->dev);
+@@ -574,10 +588,14 @@ static int mach_remove(struct snd_soc_machine *machine)
+ 		priv = machine->platform_data;
+ 		if (priv->reg_vddio)
+ 			regulator_disable(priv->reg_vddio);
+-		regulator_disable(priv->reg_vdda);
+-		regulator_disable(priv->reg_amp_gpo);
+-		regulator_put(priv->reg_amp_gpo, &pdev->dev);
+-		regulator_put(priv->reg_vdda, &pdev->dev);
++		if (priv->reg_vdda)
++			regulator_disable(priv->reg_vdda);
++		if (priv->reg_amp_gpo) {
++			regulator_disable(priv->reg_amp_gpo);
++			regulator_put(priv->reg_amp_gpo, &pdev->dev);
++		}
++		if (priv->reg_vdda)
++			regulator_put(priv->reg_vdda, &pdev->dev);
+ 		if (priv->reg_vddio)
+ 			regulator_put(priv->reg_vddio, &pdev->dev);
+ 		kfree(machine->platform_data);
+-- 
+1.5.4.4
+

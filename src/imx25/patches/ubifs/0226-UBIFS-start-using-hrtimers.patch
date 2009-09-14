@@ -1,0 +1,167 @@
+From 48d5134f950ddeedea32655dbe09496506b72207 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 28 May 2009 16:24:15 +0300
+Subject: [PATCH] UBIFS: start using hrtimers
+
+UBIFS uses timers for write-buffer write-back. It is not
+crucial for us to write-back exactly on time. We are fine
+to write-back a little earlier or later. And this means
+we may optimize UBIFS timer so that it could be groped
+with a close timer event, so that the CPU would not be
+waken up just to do the write back. This is optimization
+to lessen power consumption, which is important in
+embedded devices UBIFS is used for.
+
+hrtimers have a nice feature: they are effectively range
+timers, and we may defind the soft and hard limits for
+it. Standard timers do not have these feature. They may
+only be made deferrable, but this means there is effectively
+no hard limit. So, we will better use hrtimers.
+
+[This patch was re-worked to make it apply to this ancient
+ kernel. There is no soft limit here, becasue hrtimers
+ do not support this yet]
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/io.c    |   23 +++++++++++------------
+ fs/ubifs/super.c |    6 +++---
+ fs/ubifs/ubifs.h |   10 +++++-----
+ 3 files changed, 19 insertions(+), 20 deletions(-)
+
+diff --git a/fs/ubifs/io.c b/fs/ubifs/io.c
+index e8e632a..80f676b 100644
+--- a/fs/ubifs/io.c
++++ b/fs/ubifs/io.c
+@@ -293,13 +293,14 @@ void ubifs_prep_grp_node(struct ubifs_info *c, void *node, int len, int last)
+  *
+  * This function is called when the write-buffer timer expires.
+  */
+-static void wbuf_timer_callback_nolock(unsigned long data)
++static enum hrtimer_restart wbuf_timer_callback_nolock(struct hrtimer *timer)
+ {
+-	struct ubifs_wbuf *wbuf = (struct ubifs_wbuf *)data;
++	struct ubifs_wbuf *wbuf = container_of(timer, struct ubifs_wbuf, timer);
+ 
+ 	wbuf->need_sync = 1;
+ 	wbuf->c->need_wbuf_sync = 1;
+ 	ubifs_wake_up_bgt(wbuf->c);
++	return HRTIMER_NORESTART;
+ }
+ 
+ /**
+@@ -308,13 +309,12 @@ static void wbuf_timer_callback_nolock(unsigned long data)
+  */
+ static void new_wbuf_timer_nolock(struct ubifs_wbuf *wbuf)
+ {
+-	ubifs_assert(!timer_pending(&wbuf->timer));
++	ubifs_assert(!hrtimer_active(&wbuf->timer));
+ 
+-	if (!wbuf->timeout)
++	if (!ktime_to_ns(wbuf->hardlimit))
+ 		return;
+ 
+-	wbuf->timer.expires = jiffies + wbuf->timeout;
+-	add_timer(&wbuf->timer);
++	hrtimer_start(&wbuf->timer, wbuf->hardlimit, HRTIMER_MODE_REL);
+ }
+ 
+ /**
+@@ -329,7 +329,7 @@ static void cancel_wbuf_timer_nolock(struct ubifs_wbuf *wbuf)
+ 	 * should be canceled.
+ 	 */
+ 	wbuf->need_sync = 0;
+-	del_timer(&wbuf->timer);
++	hrtimer_cancel(&wbuf->timer);
+ }
+ 
+ /**
+@@ -845,14 +845,13 @@ int ubifs_wbuf_init(struct ubifs_info *c, struct ubifs_wbuf *wbuf)
+ 	wbuf->sync_callback = NULL;
+ 	mutex_init(&wbuf->io_mutex);
+ 	spin_lock_init(&wbuf->lock);
+-
+ 	wbuf->c = c;
+-	init_timer(&wbuf->timer);
+-	wbuf->timer.function = wbuf_timer_callback_nolock;
+-	wbuf->timer.data = (unsigned long)wbuf;
+-	wbuf->timeout = DEFAULT_WBUF_TIMEOUT;
+ 	wbuf->next_ino = 0;
+ 
++	hrtimer_init(&wbuf->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++	wbuf->timer.function = wbuf_timer_callback_nolock;
++	wbuf->hardlimit = ktime_set(DEFAULT_WBUF_TIMEOUT_SECS, 0);
++	wbuf->timer.expires = wbuf->hardlimit;
+ 	return 0;
+ }
+ 
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 8ef66b7..538d9f6 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -797,7 +797,7 @@ static int alloc_wbufs(struct ubifs_info *c)
+ 	 * does not need to be synchronized by timer.
+ 	 */
+ 	c->jheads[GCHD].wbuf.dtype = UBI_LONGTERM;
+-	c->jheads[GCHD].wbuf.timeout = 0;
++	c->jheads[GCHD].wbuf.hardlimit = ktime_set(0, 0);
+ 
+ 	return 0;
+ }
+@@ -1693,7 +1693,7 @@ static void ubifs_remount_ro(struct ubifs_info *c)
+ 
+ 	for (i = 0; i < c->jhead_cnt; i++) {
+ 		ubifs_wbuf_sync(&c->jheads[i].wbuf);
+-		del_timer_sync(&c->jheads[i].wbuf.timer);
++		hrtimer_cancel(&c->jheads[i].wbuf.timer);
+ 	}
+ 
+ 	c->mst_node->flags &= ~cpu_to_le32(UBIFS_MST_DIRTY);
+@@ -1753,7 +1753,7 @@ static void ubifs_put_super(struct super_block *sb)
+ 		if (c->jheads)
+ 			for (i = 0; i < c->jhead_cnt; i++) {
+ 				ubifs_wbuf_sync(&c->jheads[i].wbuf);
+-				del_timer_sync(&c->jheads[i].wbuf.timer);
++				hrtimer_cancel(&c->jheads[i].wbuf.timer);
+ 			}
+ 
+ 		/*
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 56e057b..ac7ad61 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -95,8 +95,8 @@
+  */
+ #define BGT_NAME_PATTERN "ubifs_bgt%d_%d"
+ 
+-/* Default write-buffer synchronization timeout (5 secs) */
+-#define DEFAULT_WBUF_TIMEOUT (5 * HZ)
++/* Default write-buffer synchronization timeout in seconds */
++#define DEFAULT_WBUF_TIMEOUT_SECS 5
+ 
+ /* Maximum possible inode number (only 32-bit inodes are supported now) */
+ #define MAX_INUM 0xFFFFFFFF
+@@ -647,8 +647,8 @@ typedef int (*ubifs_lpt_scan_callback)(struct ubifs_info *c,
+  * @io_mutex: serializes write-buffer I/O
+  * @lock: serializes @buf, @lnum, @offs, @avail, @used, @next_ino and @inodes
+  *        fields
++ * @hardlimit: hard write-buffer timeout interval
+  * @timer: write-buffer timer
+- * @timeout: timer expire interval in jiffies
+  * @need_sync: it is set if its timer expired and needs sync
+  * @next_ino: points to the next position of the following inode number
+  * @inodes: stores the inode numbers of the nodes which are in wbuf
+@@ -675,8 +675,8 @@ struct ubifs_wbuf {
+ 	int (*sync_callback)(struct ubifs_info *c, int lnum, int free, int pad);
+ 	struct mutex io_mutex;
+ 	spinlock_t lock;
+-	struct timer_list timer;
+-	int timeout;
++	ktime_t hardlimit;
++	struct hrtimer timer;
+ 	int need_sync;
+ 	int next_ino;
+ 	ino_t *inodes;
+-- 
+1.5.4.3
+

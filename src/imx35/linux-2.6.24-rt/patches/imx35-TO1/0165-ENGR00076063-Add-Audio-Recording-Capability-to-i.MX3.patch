@@ -1,0 +1,449 @@
+From 7d022f1c64835b56264931d9fbd01421c7deb2f7 Mon Sep 17 00:00:00 2001
+From: Laura Lawrence <Laura.Lawrence@freescale.com>
+Date: Tue, 13 May 2008 20:30:46 -0500
+Subject: [PATCH] ENGR00076063 Add Audio Recording Capability to i.MX37
+
+Port MIC and LINE INPUTS to ASoC audio driver for imx37 stack
+Add record CB function to audio PCM driver
+Add complete audio record path to WM8350 codec driver
+Update to Wolfson's latest REC functionality
+http://opensource.wolfsonmicro.com Audioplus project IMX31 branch
+
+Signed-off-by: Laura Lawrence <Laura.Lawrence@freescale.com>
+---
+ sound/soc/codecs/wm8350.c         |   80 ++++++++++++++++++++++++++++++------
+ sound/soc/imx/imx-3stack-wm8350.c |   40 ++++++++++++++++---
+ sound/soc/imx/imx-pcm.c           |   43 +++++++++++++++++++-
+ sound/soc/imx/imx-ssi.c           |   54 +++++++++++++------------
+ 4 files changed, 169 insertions(+), 48 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8350.c b/sound/soc/codecs/wm8350.c
+index 81fcd98..f73f480 100644
+--- a/sound/soc/codecs/wm8350.c
++++ b/sound/soc/codecs/wm8350.c
+@@ -68,6 +68,13 @@ struct wm8350_out_ramp {
+ 	struct wm8350_output out2;
+ };
+ 
++static unsigned int wm8350_codec_cache_read(struct snd_soc_codec *codec,
++					    unsigned int reg)
++{
++	struct wm8350 *wm8350 = codec->control_data;
++	return wm8350->reg_cache[reg];
++}
++
+ static unsigned int wm8350_codec_read(struct snd_soc_codec *codec, 
+ 	unsigned int reg)
+ {
+@@ -532,8 +539,8 @@ SOC_DAPM_SINGLE_TLV("L2 Capture Volume",
+ 	WM8350_INPUT_MIXER_VOLUME_L, 1, 7, 0, out_mix_tlv),
+ SOC_DAPM_SINGLE_TLV("AUX Capture Volume", 
+ 	WM8350_INPUT_MIXER_VOLUME_L, 9, 7, 0, out_mix_tlv),
+-SOC_DAPM_SINGLE("PGA Capture Switch", 
+-	WM8350_LEFT_INPUT_VOLUME, 14, 1, 0),
++SOC_DAPM_SINGLE("PGA Capture Switch",
++	WM8350_LEFT_INPUT_VOLUME, 14, 1, 1),
+ };
+ 
+ /* Right Input Mixer */
+@@ -542,8 +549,8 @@ SOC_DAPM_SINGLE_TLV("L2 Capture Volume",
+ 	WM8350_INPUT_MIXER_VOLUME_R, 5, 7, 0, out_mix_tlv),
+ SOC_DAPM_SINGLE_TLV("AUX Capture Volume", 
+ 	WM8350_INPUT_MIXER_VOLUME_R, 13, 7, 0, out_mix_tlv),
+-SOC_DAPM_SINGLE("PGA Capture Switch", 
+-	WM8350_RIGHT_INPUT_VOLUME, 14, 1, 0),
++SOC_DAPM_SINGLE("PGA Capture Switch",
++	WM8350_RIGHT_INPUT_VOLUME, 14, 1, 1),
+ };
+ 
+ /* Left Mic Mixer */
+@@ -681,7 +688,7 @@ static const char *audio_map[][3] = {
+ 	/* out3 playback mixer */
+ 	{"Out3 Mixer", "Left Playback Switch", "Left DAC"},
+ 	{"Out3 Mixer", "Left Capture Switch", "Left Capture Mixer"},
+-	{"Out3 Mixer", "Left Mixer Switch", "Left Playback Mixer "},
++	{"Out3 Mixer", "Left Mixer Switch", "Left Playback Mixer"},
+ 	{"Out3 Mixer", "Out4 Playback Switch", "Out4 Mixer"},
+ 	{"OUT3", NULL, "Out3 Mixer"},
+ 
+@@ -690,7 +697,7 @@ static const char *audio_map[][3] = {
+ 	{"Left Out2 PGA", NULL, "Left Playback Mixer"},
+ 	{"OUT2L", NULL, "Left Out2 PGA"},
+ 	{"OUT2R", NULL, "Right Out2 PGA"},
+-	
++
+ 	/* out1 */
+ 	{"Right Out1 PGA", NULL, "Right Playback Mixer"},
+ 	{"Left Out1 PGA", NULL, "Left Playback Mixer"},
+@@ -705,17 +712,27 @@ static const char *audio_map[][3] = {
+ 	{"Left Capture Mixer", "L2 Capture Volume", "IN2L"},
+ 	{"Left Capture Mixer", "AUX Capture Volume", "Left Aux PGA"},
+ 	{"Left Capture Mixer", "PGA Capture Switch", "Left Mic Mixer"},
+-	{"Left Capture Mixer", "Left", "Out4 Capture Mux"},
+-	
++	{"Left Capture Mixer", NULL, "Out4 Capture Channel"},
++
+ 	/* Right capture mixer */
+ 	{"Right Capture Mixer", "L2 Capture Volume", "IN2R"},
+ 	{"Right Capture Mixer", "AUX Capture Volume", "Right Aux PGA"},
+ 	{"Right Capture Mixer", "PGA Capture Switch", "Right Mic Mixer"},
+-	{"Right Capture Mixer", "Right", "Out4 Capture Mux"},
+-	
++	{"Right Capture Mixer", NULL, "Out4 Capture Channel"},
++
+ 	/* AUX Inputs */
+-	{"Left AUX PGA", NULL, "IN3L"},
+-	{"Right AUX PGA", NULL, "IN3R"},
++	{"Left Aux PGA", NULL, "IN3L"},
++	{"Right Aux PGA", NULL, "IN3R"},
++
++	/* MIC Inputs */
++	{"Left Input PGA", NULL, "IN1LN"},
++	{"Left Input PGA", NULL, "IN1LP"},
++	{"Left Input PGA", NULL, "IN2L"},
++	{"Left Capture Mixer", NULL, "Left Input PGA"},
++	{"Right Input PGA", NULL, "IN1RN"},
++	{"Right Input PGA", NULL, "IN1RP"},
++	{"Right Input PGA", NULL, "IN2R"},
++	{"Right Capture Mixer", NULL, "Right Input PGA"},
+ 	
+ 	/* Left Mic mixer */
+ 	{"Left Mic Mixer", "INN Capture Switch", "IN1LN"},
+@@ -728,8 +745,8 @@ static const char *audio_map[][3] = {
+ 	{"Right Mic Mixer", "IN2 Capture Switch", "IN2R"},
+ 	
+ 	/* out 4 capture */
+-	{"Out4 Capture Mux", NULL, "Out4 Mixer"},
+-	
++	{"Out4 Capture Channel", NULL, "Out4 Mixer"},
++
+ 	/* Beep */
+ 	{"Beep", NULL, "Right Aux PGA"},
+ 	
+@@ -914,6 +931,40 @@ static int wm8350_set_dai_fmt(struct snd_soc_dai *codec_dai,
+ 	return 0;
+ }
+ 
++static int wm8350_pcm_trigger(struct snd_pcm_substream *substream,
++			      int cmd)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_codec *codec = pcm_link->codec;
++
++	int master = wm8350_codec_cache_read(codec, WM8350_AI_DAC_CONTROL) &
++	    WM8350_BCLK_MSTR;
++	int enabled = 0;
++
++	/* Check that the DACs or ADCs are enabled since they are
++	 * required for LRC in master mode. The DACs or ADCs need a
++	 * valid audio path i.e. pin -> ADC or DAC -> pin before
++	 * the LRC will be enabled in master mode. */
++	if (!master && cmd != SNDRV_PCM_TRIGGER_START)
++		return 0;
++
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
++		enabled = wm8350_codec_cache_read(codec, WM8350_POWER_MGMT_4) &
++		    (WM8350_ADCR_ENA | WM8350_ADCL_ENA);
++	} else {
++		enabled = wm8350_codec_cache_read(codec, WM8350_POWER_MGMT_4) &
++		    (WM8350_DACR_ENA | WM8350_DACL_ENA);
++	}
++
++	if (!enabled) {
++		printk(KERN_ERR
++		       "%s: invalid audio path - no clocks available\n",
++		       __func__);
++		return -EINVAL;
++	}
++	return 0;
++}
++
+ static int wm8350_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	struct snd_pcm_hw_params *params)
+ {
+@@ -1260,6 +1311,7 @@ static const struct snd_soc_dai_ops wm8350_hifi_dai_ops = {
+ /* audio ops, called by alsa */
+ static const struct snd_soc_ops wm8350_hifi_dai_audio_ops = {
+ 	.hw_params = wm8350_pcm_hw_params,
++	.trigger = wm8350_pcm_trigger,
+ };
+ 
+ static int wm8350_suspend(struct device *dev, pm_message_t state)
+diff --git a/sound/soc/imx/imx-3stack-wm8350.c b/sound/soc/imx/imx-3stack-wm8350.c
+index aae7d65..5a80973 100644
+--- a/sound/soc/imx/imx-3stack-wm8350.c
++++ b/sound/soc/imx/imx-3stack-wm8350.c
+@@ -45,13 +45,15 @@
+ #include "imx-ssi.h"
+ #include "imx-pcm.h"
+ 
+-extern void gpio_activate_audio_ports(void);
++void gpio_activate_audio_ports(void);
+ 
+ /* SSI BCLK and LRC master */
+ #define WM8350_SSI_MASTER	1
+ 
+ struct imx_3stack_pcm_state {
+ 	int lr_clk_active;
++	int playback_active;
++	int capture_active;
+ };
+ 
+ struct _wm8350_audio {
+@@ -122,6 +124,10 @@ static int imx_3stack_startup(struct snd_pcm_substream *substream)
+ 					WM8350_LRC_ADC_SEL);
+ 	}
+ 	state->lr_clk_active++;
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
++		state->capture_active = 1;
++	else
++		state->playback_active = 1;
+ 	return 0;
+ }
+ #else
+@@ -202,10 +208,13 @@ static int imx_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
+ 	codec_dai->ops->set_clkdiv(codec_dai, WM8350_BCLK_CLKDIV,
+ 				   wm8350_audio[i].bclkdiv);
+ 
+-	/* DAI is synchronous and clocked with DAC LRCLK */
++	/* DAI is synchronous and clocked with DAC LRCLK & ADC LRC */
+ 	codec_dai->ops->set_clkdiv(codec_dai,
+ 				   WM8350_DACLR_CLKDIV,
+ 				   wm8350_audio[i].lr_rate);
++	codec_dai->ops->set_clkdiv(codec_dai,
++				   WM8350_ADCLR_CLKDIV,
++				   wm8350_audio[i].lr_rate);
+ 
+ 	/* now configure DAC and ADC clocks */
+ 	codec_dai->ops->set_clkdiv(codec_dai,
+@@ -229,12 +238,31 @@ static void imx_3stack_shutdown(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_link *pcm_link = substream->private_data;
+ 	struct snd_soc_dai *codec_dai = pcm_link->codec_dai;
++	struct snd_soc_codec *codec = pcm_link->codec;
+ 	struct imx_3stack_pcm_state *state = pcm_link->private_data;
++	struct wm8350 *wm8350 = codec->control_data;
+ 
+ 	/* disable the PLL if there are no active Tx or Rx channels */
+ 	if (!codec_dai->active)
+ 		codec_dai->ops->set_pll(codec_dai, 0, 0, 0);
+ 	state->lr_clk_active--;
++
++	/*
++	 * We need to keep track of active streams in master mode and
++	 * switch LRC source if necessary.
++	 */
++
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
++		state->capture_active = 0;
++	else
++		state->playback_active = 0;
++
++	if (state->capture_active)
++		wm8350_set_bits(wm8350, WM8350_CLOCK_CONTROL_2,
++				WM8350_LRC_ADC_SEL);
++	else if (state->playback_active)
++		wm8350_clear_bits(wm8350, WM8350_CLOCK_CONTROL_2,
++				  WM8350_LRC_ADC_SEL);
+ }
+ 
+ /*
+@@ -357,7 +385,7 @@ static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
+ static const char *audio_map[][3] = {
+ 
+ 	/* SiMIC --> IN1LN (with automatic bias) via SP1 */
+-	{"IN1LN", NULL, "Mic Bias"},
++	{"IN1RP", NULL, "Mic Bias"},
+ 	{"Mic Bias", NULL, "SiMIC"},
+ 
+ 	/* Mic 1 Jack --> IN1LN and IN1LP (with automatic bias) */
+@@ -366,9 +394,9 @@ static const char *audio_map[][3] = {
+ 	{"Mic Bias", NULL, "Mic1 Jack"},
+ 
+ 	/* Mic 2 Jack --> IN1RN and IN1RP (with automatic bias) */
+-	{"IN1RN", NULL, "Mic Bias"},
+-	{"IN1RP", NULL, "Mic1 Jack"},
+-	{"Mic Bias", NULL, "Mic1 Jack"},
++	{"IN1RN", NULL, "Mic2 Jack"},
++	{"IN1RP", NULL, "Mic Bias"},
++	{"Mic Bias", NULL, "Mic2 Jack"},
+ 
+ 	/* Line in Jack --> AUX (L+R) */
+ 	{"IN3R", NULL, "Line In Jack"},
+diff --git a/sound/soc/imx/imx-pcm.c b/sound/soc/imx/imx-pcm.c
+index bd6c4e3..353796b 100644
+--- a/sound/soc/imx/imx-pcm.c
++++ b/sound/soc/imx/imx-pcm.c
+@@ -150,7 +150,7 @@ static int imx_get_sdma_transfer(int format, int dai_port, int stream_type)
+ {
+ 	int transfer = -1;
+ 
+-	if ((dai_port == IMX_DAI_SSI0) || (dai_port == IMX_DAI_SSI1)) {
++	if (dai_port == IMX_DAI_SSI0) {
+ 		if (stream_type == SNDRV_PCM_STREAM_PLAYBACK) {
+ 			if (format == SNDRV_PCM_FORMAT_S16_LE) {
+ 				transfer = MXC_DMA_SSI1_16BIT_TX0;
+@@ -168,7 +168,25 @@ static int imx_get_sdma_transfer(int format, int dai_port, int stream_type)
+ 				transfer = MXC_DMA_SSI1_24BIT_RX0;
+ 			}
+ 		}
+-	} else if ((dai_port == IMX_DAI_SSI2) || (dai_port == IMX_DAI_SSI3)) {
++	} else if (dai_port == IMX_DAI_SSI1) {
++		if (stream_type == SNDRV_PCM_STREAM_PLAYBACK) {
++			if (format == SNDRV_PCM_FORMAT_S16_LE) {
++				transfer = MXC_DMA_SSI1_16BIT_TX1;
++			} else if (format == SNDRV_PCM_FORMAT_S24_LE) {
++				transfer = MXC_DMA_SSI1_24BIT_TX1;
++			} else if (format == SNDRV_PCM_FORMAT_S20_3LE) {
++				transfer = MXC_DMA_SSI1_24BIT_TX1;
++			}
++		} else {
++			if (format == SNDRV_PCM_FORMAT_S16_LE) {
++				transfer = MXC_DMA_SSI1_16BIT_RX1;
++			} else if (format == SNDRV_PCM_FORMAT_S24_LE) {
++				transfer = MXC_DMA_SSI1_24BIT_RX1;
++			} else if (format == SNDRV_PCM_FORMAT_S20_3LE) {
++				transfer = MXC_DMA_SSI1_24BIT_RX1;
++			}
++		}
++	} else if (dai_port == IMX_DAI_SSI2) {
+ 		if (stream_type == SNDRV_PCM_STREAM_PLAYBACK) {
+ 			if (format == SNDRV_PCM_FORMAT_S16_LE) {
+ 				transfer = MXC_DMA_SSI2_16BIT_TX0;
+@@ -186,6 +204,24 @@ static int imx_get_sdma_transfer(int format, int dai_port, int stream_type)
+ 				transfer = MXC_DMA_SSI2_24BIT_RX0;
+ 			}
+ 		}
++	} else if (dai_port == IMX_DAI_SSI3) {
++		if (stream_type == SNDRV_PCM_STREAM_PLAYBACK) {
++			if (format == SNDRV_PCM_FORMAT_S16_LE) {
++				transfer = MXC_DMA_SSI2_16BIT_TX1;
++			} else if (format == SNDRV_PCM_FORMAT_S24_LE) {
++				transfer = MXC_DMA_SSI2_24BIT_TX1;
++			} else if (format == SNDRV_PCM_FORMAT_S20_3LE) {
++				transfer = MXC_DMA_SSI2_24BIT_TX1;
++			}
++		} else {
++			if (format == SNDRV_PCM_FORMAT_S16_LE) {
++				transfer = MXC_DMA_SSI2_16BIT_RX1;
++			} else if (format == SNDRV_PCM_FORMAT_S24_LE) {
++				transfer = MXC_DMA_SSI2_24BIT_RX1;
++			} else if (format == SNDRV_PCM_FORMAT_S20_3LE) {
++				transfer = MXC_DMA_SSI2_24BIT_RX1;
++			}
++		}
+ 	}
+ 
+ 	return transfer;
+@@ -319,6 +355,9 @@ static int imx_pcm_hw_params(struct snd_pcm_substream *substream,
+ 				       "imx-pcm: error requesting a read dma channel\n");
+ 				return channel;
+ 			}
++			ret = mxc_dma_callback_set(channel, (mxc_dma_callback_t)
++						   audio_dma_irq,
++						   (void *)substream);
+ 		}
+ 		prtd->dma_wchannel = channel;
+ 		prtd->dma_alloc = 1;
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index f00aa8f..5320844 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -317,7 +317,7 @@ static int imx_ssi_startup(struct snd_pcm_substream *substream)
+ 
+ 	/* we cant really change any SSI values after SSI is enabled
+ 	 * need to fix in software for max flexibility - lrg */
+-	if (cpu_dai->active)
++	if (cpu_dai->playback_active || cpu_dai->capture_active)
+ 		return 0;
+ 
+ 	/* reset the SSI port - Sect 45.4.4 */
+@@ -565,25 +565,25 @@ static void imx_ssi_shutdown(struct snd_pcm_substream *substream)
+ 	id = cpu_dai->id;
+ 
+ 	/* shutdown SSI if neither Tx or Rx is active */
+-	if (!cpu_dai->active) {
++	if (cpu_dai->playback_active || cpu_dai->capture_active)
++		return;
+ 
+-		if (id == IMX_DAI_SSI0 || id == IMX_DAI_SSI1) {
++	if (id == IMX_DAI_SSI0 || id == IMX_DAI_SSI1) {
+ 
+-			if (--ssi_active[SSI1_PORT] > 1)
+-				return;
++		if (--ssi_active[SSI1_PORT] > 1)
++			return;
+ 
+-			SSI1_SCR = 0;
++		SSI1_SCR = 0;
+ 
+-			clk_disable(ssi_clk);
+-			clk_put(ssi_clk);
++		clk_disable(ssi_clk);
++		clk_put(ssi_clk);
+ 
+-		} else {
+-			if (--ssi_active[SSI2_PORT])
+-				return;
+-			SSI2_SCR = 0;
+-			clk_disable(ssi_clk);
+-			clk_put(ssi_clk);
+-		}
++	} else {
++		if (--ssi_active[SSI2_PORT])
++			return;
++		SSI2_SCR = 0;
++		clk_disable(ssi_clk);
++		clk_put(ssi_clk);
+ 	}
+ }
+ 
+@@ -684,23 +684,23 @@ const char imx_ssi_4[SND_SOC_DAI_NAME_SIZE] = {
+ 
+ EXPORT_SYMBOL_GPL(imx_ssi_4);
+ 
+-static int underrun_counter;
++static int fifo_err_counter;
+ 
+ static irqreturn_t ssi1_irq(int irq, void *dev_id)
+ {
+-	if (underrun_counter++ % 1000 == 0)
+-		printk(KERN_ERR "ssi1_irq SISR %x SIER %x underruns=%d\n",
+-		       SSI1_SISR, SSI1_SIER, underrun_counter);
+-	SSI1_SISR = SSI_SIER_TUE0_EN;
++	if (fifo_err_counter++ % 1000 == 0)
++		printk(KERN_ERR "ssi1_irq SISR %x SIER %x fifo_errs=%d\n",
++		       SSI1_SISR, SSI1_SIER, fifo_err_counter);
++	SSI1_SISR = SSI_SIER_TUE0_EN | SSI_SIER_ROE0_EN;
+ 	return IRQ_HANDLED;
+ }
+ 
+ static irqreturn_t ssi2_irq(int irq, void *dev_id)
+ {
+-	if (underrun_counter++ % 1000 == 0)
+-		printk(KERN_ERR "ssi2_irq SISR %x SIER %x underruns=%d\n",
+-		       SSI2_SISR, SSI2_SIER, underrun_counter);
+-	SSI2_SISR = SSI_SIER_TUE0_EN;
++	if (fifo_err_counter++ % 1000 == 0)
++		printk(KERN_ERR "ssi2_irq SISR %x SIER %x fifo_errs=%d\n",
++		       SSI2_SISR, SSI2_SIER, fifo_err_counter);
++	SSI2_SISR = SSI_SIER_TUE0_EN | SSI_SIER_ROE0_EN;
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -740,8 +740,10 @@ static int imx_ssi_probe(struct device *dev)
+ 		return -EBUSY;
+ 	}
+ 
+-	SSI1_SIER = SSI_SIER_TIE | SSI_SIER_TUE0_EN;
+-	SSI2_SIER = SSI_SIER_TIE | SSI_SIER_TUE0_EN;
++	SSI1_SIER = SSI_SIER_TIE | SSI_SIER_TUE0_EN |
++	    SSI_SIER_RIE | SSI_SIER_ROE0_EN;
++	SSI2_SIER = SSI_SIER_TIE | SSI_SIER_TUE0_EN |
++	    SSI_SIER_RIE | SSI_SIER_ROE0_EN;
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

@@ -1,0 +1,1201 @@
+From 5933c1312e61b733c46bfe66d3b76a7072559455 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Mon, 25 Aug 2008 10:44:28 -0500
+Subject: [PATCH] ENGR00088303 Add DPTC GP and DPTC LP support for MX37
+
+Add DPTC GP and DPTC LP support for MX37
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx37/Makefile     |    6 +-
+ arch/arm/mach-mx37/devices.c    |   40 ++++-
+ arch/arm/mach-mx37/dptc_gp.c    |   43 ++++
+ arch/arm/mach-mx37/dptc_lp.c    |   46 ++++
+ arch/arm/plat-mxc/Makefile      |    2 +-
+ arch/arm/plat-mxc/dptc_gp.c     |  456 +++++++++++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/dptc_lp.c     |  456 +++++++++++++++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mx37.h |    6 +
+ include/asm-arm/arch-mxc/mxc.h  |    4 +-
+ 9 files changed, 1051 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/Makefile b/arch/arm/mach-mx37/Makefile
+index ace806f..f9feaba 100644
+--- a/arch/arm/mach-mx37/Makefile
++++ b/arch/arm/mach-mx37/Makefile
+@@ -4,7 +4,7 @@
+ 
+ # Object file lists.
+ 
+-obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o lpmodes.o
++obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o lpmodes.o dptc_gp.o dptc_lp.o
+ 
+ 
+ obj-$(CONFIG_MACH_MX37_3DS) += mx37_3stack.o mx37_3stack_gpio.o 
+@@ -12,8 +12,8 @@ obj-$(CONFIG_SPI_MXC) += mx37_3stack_cpld.o
+ obj-$(CONFIG_REGULATOR_WM8350) += mx37_3stack_pmic_wm8350.o
+ 
+ # power management
+-obj-$(CONFIG_PM) 		+= pm.o
++obj-$(CONFIG_PM)        += pm.o
+ 
+ ifneq ($(strip $(CONFIG_USB_GADGET_ARC) $(CONFIG_USB_EHCI_ARC_OTG)),)
+-	obj-y	+= usb_dr.o
++    obj-y   += usb_dr.o
+ endif
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index 8dcc70b..c876266 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -27,6 +27,8 @@
+ #include "sdma_script_code.h"
+ #include <asm/arch/mxc_scc2_driver.h>
+ 
++extern struct dptc_wp dptc_gp_wp_allfreq[DPTC_GP_WP_SUPPORTED];
++extern struct dptc_wp dptc_lp_wp_allfreq[DPTC_LP_WP_SUPPORTED];
+ extern void gpio_spdif_active(void);
+ 
+ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+@@ -268,7 +270,7 @@ static inline void mxc_init_scc(void)
+ 
+ 	}
+ 
+-	/*Freeing 2 partitions for SCC2*/
++	/*Freeing 2 partitions for SCC2 */
+ 	scc_partno = 9 - (SCC_IRAM_SIZE / SZ_8K);
+ 	for (partition_no = scc_partno; partition_no < 9; partition_no++) {
+ 		reg_value = ((partition_no << SCM_ZCMD_PART_SHIFT) &
+@@ -277,8 +279,8 @@ static inline void mxc_init_scc(void)
+ 						    & SCM_ZCMD_CCMD_MASK);
+ 		__raw_writel(reg_value, scc_base + SCM_ZCMD_REG);
+ 
+-			 while ((__raw_readl(scc_base + SCM_STATUS_REG) &
+-				 SCM_STATUS_SRS_READY) != SCM_STATUS_SRS_READY);
++		while ((__raw_readl(scc_base + SCM_STATUS_REG) &
++			SCM_STATUS_SRS_READY) != SCM_STATUS_SRS_READY) ;
+ 	}
+ 	iounmap(scm_ram_base);
+ 	iounmap(scc_base);
+@@ -597,6 +599,36 @@ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ 	 },
+ };
+ 
++/*! Device Definition for DPTC GP */
++static struct platform_device mxc_dptc_gp_device = {
++	.name = "mxc_dptc_gp",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &dptc_gp_wp_allfreq,
++		},
++};
++
++static inline void mxc_init_dptc_gp(void)
++{
++
++	(void)platform_device_register(&mxc_dptc_gp_device);
++}
++
++/*! Device Definition for DPTC LP */
++static struct platform_device mxc_dptc_lp_device = {
++	.name = "mxc_dptc_lp",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &dptc_lp_wp_allfreq,
++		},
++};
++
++static inline void mxc_init_dptc_lp(void)
++{
++
++	(void)platform_device_register(&mxc_dptc_lp_device);
++}
++
+ #if defined(CONFIG_MXC_VPU) || defined(CONFIG_MXC_VPU_MODULE)
+ static struct resource vpu_resources[] = {
+ 	{
+@@ -708,6 +740,8 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_spdif();
+ 	mxc_init_tve();
+ 	mx37_init_lpmode();
++	mxc_init_dptc_gp();
++	mxc_init_dptc_lp();
+ 	/* SPBA configuration for SSI2 - SDMA and MCU are set */
+ 	spba_take_ownership(SPBA_SSI2, SPBA_MASTER_C | SPBA_MASTER_A);
+ 	return 0;
+diff --git a/arch/arm/mach-mx37/dptc_gp.c b/arch/arm/mach-mx37/dptc_gp.c
+new file mode 100644
+index 0000000..a943e51
+--- /dev/null
++++ b/arch/arm/mach-mx37/dptc_gp.c
+@@ -0,0 +1,43 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file dptc_gp.c
++ *
++ * @brief DPTC table for the Freescale Semiconductor MXC DPTC module.
++ *
++ * @ingroup PM
++ */
++
++#include <asm/arch/hardware.h>
++#include <asm/arch/hardware.h>
++
++struct dptc_wp dptc_gp_wp_allfreq[DPTC_GP_WP_SUPPORTED] = {
++	/* 532MHz */
++	/* dcvr0          dcvr1             dcvr2           dcvr3      regulator  voltage */
++	/* wp0 */
++	{DCVR(107, 108, 112), DCVR(122, 123, 127), DCVR(133, 134, 139),
++	 DCVR(115, 116, 121), "DCDC1", 1000},
++	{DCVR(107, 108, 113), DCVR(122, 123, 127), DCVR(133, 134, 139),
++	 DCVR(115, 117, 122), "DCDC1", 975},
++	{DCVR(107, 109, 113), DCVR(122, 123, 127), DCVR(133, 134, 139),
++	 DCVR(115, 117, 122), "DCDC1", 950},
++	{DCVR(107, 109, 114), DCVR(122, 123, 127), DCVR(133, 135, 140),
++	 DCVR(115, 117, 122), "DCDC1", 925},
++	{DCVR(108, 109, 115), DCVR(122, 123, 127), DCVR(133, 136, 142),
++	 DCVR(115, 117, 123), "DCDC1", 900},
++	{DCVR(108, 110, 115), DCVR(122, 123, 127), DCVR(133, 136, 142),
++	 DCVR(115, 117, 123), "DCDC1", 875},
++	{DCVR(108, 110, 115), DCVR(122, 124, 128), DCVR(133, 136, 143),
++	 DCVR(115, 118, 124), "DCDC1", 850},
++};
+diff --git a/arch/arm/mach-mx37/dptc_lp.c b/arch/arm/mach-mx37/dptc_lp.c
+new file mode 100644
+index 0000000..ac7b3e5
+--- /dev/null
++++ b/arch/arm/mach-mx37/dptc_lp.c
+@@ -0,0 +1,46 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file dptc_lp.c
++ *
++ * @brief DPTC LP table for the Freescale Semiconductor MXC DPTC LP module.
++ *
++ * @ingroup PM
++ */
++
++#include <asm/arch/hardware.h>
++
++struct dptc_wp dptc_lp_wp_allfreq[DPTC_LP_WP_SUPPORTED] = {
++	/* 532MHz */
++	/* dcvr0          dcvr1             dcvr2           dcvr3      regulator  voltage */
++	/* wp0 */
++	{DCVR(141, 143, 149), DCVR(155, 157, 162), DCVR(106, 108, 112),
++	 DCVR(124, 126, 130), "DCDC4", 1200},
++	{DCVR(141, 143, 149), DCVR(155, 157, 162), DCVR(106, 108, 113),
++	 DCVR(124, 126, 131), "DCDC4", 1175},
++	{DCVR(141, 144, 150), DCVR(155, 157, 163), DCVR(106, 108, 113),
++	 DCVR(124, 126, 131), "DCDC4", 1150},
++	{DCVR(141, 144, 151), DCVR(155, 157, 163), DCVR(106, 108, 114),
++	 DCVR(124, 126, 131), "DCDC4", 1125},
++	{DCVR(142, 144, 152), DCVR(155, 157, 163), DCVR(107, 109, 114),
++	 DCVR(125, 127, 132), "DCDC4", 1100},
++	{DCVR(142, 145, 153), DCVR(155, 157, 164), DCVR(107, 109, 115),
++	 DCVR(125, 127, 133), "DCDC4", 1075},
++	{DCVR(142, 145, 153), DCVR(155, 158, 164), DCVR(107, 109, 116),
++	 DCVR(125, 127, 133), "DCDC4", 1050},
++	{DCVR(142, 145, 154), DCVR(155, 158, 165), DCVR(107, 110, 117),
++	 DCVR(125, 127, 134), "DCDC4", 1025},
++	{DCVR(142, 146, 156), DCVR(155, 158, 165), DCVR(107, 110, 117),
++	 DCVR(125, 128, 135), "DCDC4", 1000},
++};
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 85d9fd4..5b12038 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -19,7 +19,7 @@ obj-$(CONFIG_ARCH_MX21) += dma_mx2.o
+ obj-$(CONFIG_ARCH_MX27) += dma_mx2.o usb_common.o
+ obj-$(CONFIG_ARCH_MX3) += dptc.o usb_common.o
+ obj-$(CONFIG_ARCH_MX35) += usb_common.o serialxc.o
+-obj-$(CONFIG_ARCH_MX37)     += usb_common.o utmixc.o
++obj-$(CONFIG_ARCH_MX37)     += usb_common.o utmixc.o dptc_gp.o dptc_lp.o
+ obj-$(CONFIG_ARCH_MX51)	+= usb_common.o utmixc.o
+ 
+ # LEDs support
+diff --git a/arch/arm/plat-mxc/dptc_gp.c b/arch/arm/plat-mxc/dptc_gp.c
+new file mode 100644
+index 0000000..7768535
+--- /dev/null
++++ b/arch/arm/plat-mxc/dptc_gp.c
+@@ -0,0 +1,456 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file dptc_gp.c
++ *
++ * @brief Driver for the Freescale Semiconductor MXC DPTC GP module.
++ *
++ * The DPTC GP driver is designed to control the MXC DPTC ARM hardware.
++ * Upon initialization, the DPTC GP driver initializes the DPTC ARM hardware
++ * sets up driver nodes attaches to the DPTC ARM interrupt and initializes internal
++ * data structures. When the DPTC ARM interrupt occurs the driver checks the cause
++ * of the interrupt (lower frequency, increase frequency or emergency) and changes
++ * the CPU voltage according to translation table that is loaded into the driver.
++ * The driver read method is used to read the log buffer.
++ * Driver ioctls are used to change driver parameters and enable/disable the
++ * DVFS operation.
++ *
++ * @ingroup PM
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/fs.h>
++#include <linux/interrupt.h>
++#include <linux/jiffies.h>
++#include <linux/device.h>
++#include <linux/delay.h>
++#include <linux/clk.h>
++#include <linux/workqueue.h>
++#include <linux/platform_device.h>
++
++#include <asm/arch/clock.h>
++#include <asm/arch/gpio.h>
++#include <linux/i2c.h>
++#include <linux/regulator/regulator.h>
++#include <asm/arch/hardware.h>
++
++#include "../mach-mx37/crm_regs.h"
++
++#define MXC_DPTCCR		(MXC_DPTC_GP_BASE + 0x00)
++#define MXC_DPTCDBG		(MXC_DPTC_GP_BASE + 0x04)
++#define MXC_DCVR0		(MXC_DPTC_GP_BASE + 0x08)
++#define MXC_DCVR1		(MXC_DPTC_GP_BASE + 0x0C)
++#define MXC_DCVR2		(MXC_DPTC_GP_BASE + 0x10)
++#define MXC_DCVR3		(MXC_DPTC_GP_BASE + 0x14)
++
++#define MXC_DPTCCR_DRCE3                     0x00400000
++#define MXC_DPTCCR_DRCE2                     0x00200000
++#define MXC_DPTCCR_DRCE1                     0x00100000
++#define MXC_DPTCCR_DRCE0                     0x00080000
++#define MXC_DPTCCR_DCR_256                   0x00060000
++#define MXC_DPTCCR_DCR_128                   0x00040000
++#define MXC_DPTCCR_DCR_64                    0x00020000
++#define MXC_DPTCCR_DCR_32                    0x00000000
++#define MXC_DPTCCR_DSMM                      0x00000040
++#define MXC_DPTCCR_DPNVCR                    0x00000020
++#define MXC_DPTCCR_DPVV                      0x00000010
++#define MXC_DPTCCR_VAIM                      0x00000008
++#define MXC_DPTCCR_VAI_OFFSET                1
++#define MXC_DPTCCR_VAI_MASK                  0x00000006
++#define MXC_DPTCCR_DEN                       0x00000001
++
++#define MXC_GPCCNTR_GPCIRQ                   0x00100000
++#define MXC_GPCCNTR_DPTC0CR                  0x00040000
++#define MXC_GPCCNTR_ADU                      0x00008000
++
++static int dptc_is_active;
++
++static int curr_wp;
++static u32 ptvai;
++static struct delayed_work dptc_work;
++static struct dptc_wp *dptc_gp_wp_allfreq;
++static struct device *dptc_dev;
++static struct clk *cpu_clk;
++struct regulator *gp_core;
++
++DEFINE_SPINLOCK(mxc_dptc_lock);
++
++enum {
++	DPTC_PTVAI_NOCHANGE = 0x0,
++	DPTC_PTVAI_DECREASE,
++	DPTC_PTVAI_INCREASE,
++	DPTC_PTVAI_EMERG,
++};
++
++static void update_dptc_wp(u32 wp)
++{
++	int voltage_uV;
++	int ret = 0;
++
++	voltage_uV = (dptc_gp_wp_allfreq[wp].voltage) * 1000;
++
++	__raw_writel(dptc_gp_wp_allfreq[wp].dcvr0, MXC_DCVR0);
++	__raw_writel(dptc_gp_wp_allfreq[wp].dcvr1, MXC_DCVR1);
++	__raw_writel(dptc_gp_wp_allfreq[wp].dcvr2, MXC_DCVR2);
++	__raw_writel(dptc_gp_wp_allfreq[wp].dcvr3, MXC_DCVR3);
++
++	/* Set the voltage for the GP domain. */
++	if (gp_core != NULL) {
++		ret = regulator_set_voltage(gp_core, voltage_uV);
++		if (ret < 0)
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
++	}
++
++	pr_debug("dcvr0-3: 0x%x, 0x%x, 0x%x, 0x%x; vol: %d\n",
++		 dptc_gp_wp_allfreq[wp].dcvr0,
++		 dptc_gp_wp_allfreq[wp].dcvr1,
++		 dptc_gp_wp_allfreq[wp].dcvr2,
++		 dptc_gp_wp_allfreq[wp].dcvr3, dptc_gp_wp_allfreq[wp].voltage);
++}
++
++static irqreturn_t dptc_irq(int irq, void *dev_id)
++{
++	u32 dptccr = __raw_readl(MXC_DPTCCR);
++	u32 gpc_cntr = __raw_readl(MXC_GPC_CNTR);
++
++	gpc_cntr = (gpc_cntr & MXC_GPCCNTR_DPTC0CR);
++
++	if (gpc_cntr) {
++		ptvai = (dptccr & MXC_DPTCCR_VAI_MASK) >> MXC_DPTCCR_VAI_OFFSET;
++
++		/* disable DPTC and mask its interrupt */
++		dptccr = (dptccr & ~(MXC_DPTCCR_DEN)) | MXC_DPTCCR_VAIM;
++		dptccr = (dptccr & ~(MXC_DPTCCR_DPNVCR));
++		__raw_writel(dptccr, MXC_DPTCCR);
++
++		schedule_delayed_work(&dptc_work, 0);
++	}
++
++	return IRQ_RETVAL(1);
++}
++
++static void dptc_workqueue_handler(struct work_struct *work)
++{
++	u32 dptccr = __raw_readl(MXC_DPTCCR);
++
++	switch (ptvai) {
++	case DPTC_PTVAI_DECREASE:
++		curr_wp++;
++		break;
++	case DPTC_PTVAI_INCREASE:
++	case DPTC_PTVAI_EMERG:
++		curr_wp--;
++		if (curr_wp < 0) {
++			/* already max voltage */
++			curr_wp = 0;
++			printk(KERN_WARNING "dptc: already maximum voltage\n");
++		}
++		break;
++
++		/* Unknown interrupt cause */
++	default:
++		BUG();
++	}
++
++	if (curr_wp > DPTC_GP_WP_SUPPORTED || curr_wp < 0) {
++		panic("Can't support this working point: %d\n", curr_wp);
++	}
++	update_dptc_wp(curr_wp);
++
++	/* enable DPTC and unmask its interrupt */
++	dptccr =
++	    (dptccr & ~(MXC_DPTCCR_VAIM)) | MXC_DPTCCR_DPNVCR | MXC_DPTCCR_DEN;
++	__raw_writel(dptccr, MXC_DPTCCR);
++}
++
++/* Start DPTC unconditionally */
++static int start_dptc(void)
++{
++	u32 dptccr, flags;
++	unsigned long cpu_rate;
++
++	/* Set the voltage for the GP domain. */
++	gp_core = regulator_get(NULL, "DCDC1");
++
++	spin_lock_irqsave(&mxc_dptc_lock, flags);
++
++	cpu_rate = clk_get_rate(cpu_clk);
++
++	if (cpu_rate < 532000000) {
++		goto err;
++	}
++
++	/* Enable ARM domain frequency and/or voltage update needed and enable ARM IRQ */
++	__raw_writel(MXC_GPCCNTR_GPCIRQ | MXC_GPCCNTR_ADU, MXC_GPC_CNTR);
++
++	dptccr = __raw_readl(MXC_DPTCCR);
++
++	/* Enable DPTC and unmask its interrupt */
++	dptccr = ((dptccr & ~(MXC_DPTCCR_VAIM)) | MXC_DPTCCR_DEN) |
++	    (MXC_DPTCCR_DPNVCR | MXC_DPTCCR_DPVV | MXC_DPTCCR_DSMM);
++
++	__raw_writel(dptccr, MXC_DPTCCR);
++
++	spin_unlock_irqrestore(&mxc_dptc_lock, flags);
++
++	pr_info("DPTC has been started \n");
++
++	return 0;
++
++      err:
++	spin_unlock_irqrestore(&mxc_dptc_lock, flags);
++	pr_info("DPTC GP is not enabled\n");
++	return -1;
++}
++
++/* Stop DPTC unconditionally */
++static void stop_dptc(void)
++{
++	u32 dptccr;
++
++	dptccr = __raw_readl(MXC_DPTCCR);
++
++	/* disable DPTC and mask its interrupt */
++	dptccr = ((dptccr & ~(MXC_DPTCCR_DEN)) | MXC_DPTCCR_VAIM) &
++	    (~MXC_DPTCCR_DPNVCR);
++
++	__raw_writel(dptccr, MXC_DPTCCR);
++
++	/* Restore Turbo Mode voltage to highest wp */
++	update_dptc_wp(0);
++	curr_wp = 0;
++
++	regulator_put(gp_core, NULL);
++
++	pr_info("DPTC GP has been stopped\n");
++}
++
++/*
++  this function does not change the working point. It can be
++ called from an interrupt context.
++*/
++void dptc_suspend(void)
++{
++	u32 dptccr;
++
++	if (!dptc_is_active)
++		return;
++
++	dptccr = __raw_readl(MXC_DPTCCR);
++
++	/* disable DPTC and mask its interrupt */
++	dptccr = ((dptccr & ~(MXC_DPTCCR_DEN)) | MXC_DPTCCR_VAIM) &
++	    (~MXC_DPTCCR_DPNVCR);
++
++	__raw_writel(dptccr, MXC_DPTCCR);
++}
++
++/*!
++ * This function is called to put the DPTC in a low power state.
++ *
++ */
++void dptc_disable(void)
++{
++	if (!dptc_is_active)
++		return;
++
++	stop_dptc();
++	dptc_is_active = 0;
++}
++
++/*!
++ * This function is called to resume the DPTC from a low power state.
++ *
++ */
++void dptc_enable(void)
++{
++	if (dptc_is_active)
++		return;
++	start_dptc();
++	dptc_is_active = 1;
++}
++
++static ssize_t dptc_show(struct device *dev, struct device_attribute *attr,
++			 char *buf)
++{
++	if (dptc_is_active)
++		return sprintf(buf, "DPTC is enabled\n");
++	else
++		return sprintf(buf, "DPTC is disabled\n");
++}
++
++static ssize_t dptc_store(struct device *dev, struct device_attribute *attr,
++			  const char *buf, size_t size)
++{
++	if (strstr(buf, "0") != NULL) {
++		dptc_disable();
++	} else if (strstr(buf, "1") != NULL) {
++		dptc_enable();
++	}
++
++	return size;
++}
++
++static DEVICE_ATTR(enable, 0644, dptc_show, dptc_store);
++
++/*!
++ * This is the probe routine for the DPTC driver.
++ *
++ * @param   pdev   The platform device structure
++ *
++ * @return         The function returns 0 on success
++ *
++ */
++static int __devinit mxc_dptc_gp_probe(struct platform_device *pdev)
++{
++	int res = 0;
++	u32 dptccr;
++
++	printk(KERN_INFO "DPTC mxc_dptc_gp_probe()\n");
++	dptc_dev = &pdev->dev;
++	dptc_gp_wp_allfreq = pdev->dev.platform_data;
++	if (dptc_gp_wp_allfreq == NULL) {
++		printk(KERN_ERR "DPTC: Pointer to DPTC table is NULL\
++				not started\n");
++		return -1;
++	}
++
++	INIT_DELAYED_WORK(&dptc_work, dptc_workqueue_handler);
++
++	/* request the DPTC interrupt */
++	res =
++	    request_irq(MXC_INT_GPC1, dptc_irq, IRQF_SHARED, "mxc-dptc-gp",
++			pdev);
++	if (res) {
++		printk(KERN_ERR "DPTC: Unable to attach to DPTC interrupt 1\n");
++		return res;
++	}
++	/* Enable Reference Circuits */
++	dptccr =
++	    (MXC_DPTCCR_DRCE0 | MXC_DPTCCR_DRCE1 | MXC_DPTCCR_DRCE2 |
++	     MXC_DPTCCR_DRCE3) | (MXC_DPTCCR_DCR_128 | MXC_DPTCCR_DPNVCR |
++				  MXC_DPTCCR_DPVV);
++	__raw_writel(dptccr, MXC_DPTCCR);
++
++	res = sysfs_create_file(&dptc_dev->kobj, &dev_attr_enable.attr);
++	if (res) {
++		printk(KERN_ERR
++		       "DPTC: Unable to register sysdev entry for dptc");
++		return res;
++	}
++
++	if (res != 0) {
++		printk(KERN_ERR "DPTC: Unable to start");
++		return res;
++	}
++
++	curr_wp = 0;
++	update_dptc_wp(curr_wp);
++
++	cpu_clk = clk_get(NULL, "cpu_clk");
++
++	return 0;
++}
++
++/*!
++ * This function is called to put DPTC in a low power state.
++ *
++ * @param   pdev  the device structure
++ * @param   state the power state the device is entering
++ *
++ * @return  The function always returns 0.
++ */
++static int mxc_dptc_gp_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	if (dptc_is_active)
++		stop_dptc();
++
++	return 0;
++}
++
++/*!
++ * This function is called to resume the MU from a low power state.
++ *
++ * @param   dev   the device structure
++ * @param   level the stage in device suspension process that we want the
++ *                device to be put in
++ *
++ * @return  The function always returns 0.
++ */
++static int mxc_dptc_gp_resume(struct platform_device *pdev)
++{
++	if (dptc_is_active)
++		start_dptc();
++
++	return 0;
++}
++
++static struct platform_driver mxc_dptc_gp_driver = {
++	.driver = {
++		   .name = "mxc_dptc_gp",
++		   },
++	.probe = mxc_dptc_gp_probe,
++	.suspend = mxc_dptc_gp_suspend,
++	.resume = mxc_dptc_gp_resume,
++};
++
++/*!
++ * This function is called to resume the MU from a low power state.
++ *
++ * @param   dev   the device structure used to give information on which MU
++ *                device (0 through 3 channels) to suspend
++ * @param   level the stage in device suspension process that we want the
++ *                device to be put in
++ *
++ * @return  The function always returns 0.
++ */
++
++static int __init dptc_init(void)
++{
++	printk(KERN_INFO "DPTC dptc_init()\n");
++	if (platform_driver_register(&mxc_dptc_gp_driver) != 0) {
++		printk(KERN_ERR "mxc_dptc_gp_driver register failed\n");
++		return -ENODEV;
++	}
++
++	printk(KERN_INFO "DPTC driver module loaded\n");
++	return 0;
++}
++
++static void __exit dptc_cleanup(void)
++{
++	stop_dptc();
++
++	/* release the DPTC interrupt 1 */
++	free_irq(MXC_INT_GPC1, NULL);
++
++	sysfs_remove_file(&dptc_dev->kobj, &dev_attr_enable.attr);
++
++	/* Unregister the device structure */
++	platform_driver_unregister(&mxc_dptc_gp_driver);
++
++	printk("DPTC driver module unloaded\n");
++}
++
++module_init(dptc_init);
++module_exit(dptc_cleanup);
++
++EXPORT_SYMBOL(dptc_disable);
++EXPORT_SYMBOL(dptc_enable);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("DPTC driver");
++MODULE_LICENSE("GPL");
+diff --git a/arch/arm/plat-mxc/dptc_lp.c b/arch/arm/plat-mxc/dptc_lp.c
+new file mode 100644
+index 0000000..589d1eb
+--- /dev/null
++++ b/arch/arm/plat-mxc/dptc_lp.c
+@@ -0,0 +1,456 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file dptc_lp.c
++ *
++ * @brief Driver for the Freescale Semiconductor MXC DPTC LP module.
++ *
++ * The DPTC LP driver is designed to control the MXC DPTC hardware.
++ * Upon initialization, the DPTC LP driver initializes the DPTC Peripheral hardware
++ * sets up driver nodes attaches to the DPTC interrupt and initializes internal
++ * data structures. When the DPTC PER interrupt occurs the driver checks the cause
++ * of the interrupt (lower frequency, increase frequency or emergency) and changes
++ * the CPU voltage according to translation table that is loaded into the driver.
++ * The driver read method is used to read the log buffer.
++ * Driver ioctls are used to change driver parameters and enable/disable the
++ * DVFS operation.
++ *
++ * @ingroup PM
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/fs.h>
++#include <linux/interrupt.h>
++#include <linux/jiffies.h>
++#include <linux/device.h>
++#include <linux/delay.h>
++#include <linux/clk.h>
++#include <linux/workqueue.h>
++#include <linux/platform_device.h>
++
++#include <asm/arch/clock.h>
++#include <asm/arch/gpio.h>
++#include <linux/i2c.h>
++#include <linux/regulator/regulator.h>
++#include <asm/arch/hardware.h>
++
++#include "../mach-mx37/crm_regs.h"
++
++#define MXC_DPTCCR		(MXC_DPTC_LP_BASE + 0x00)
++#define MXC_DPTCDBG		(MXC_DPTC_LP_BASE + 0x04)
++#define MXC_DCVR0		(MXC_DPTC_LP_BASE + 0x08)
++#define MXC_DCVR1		(MXC_DPTC_LP_BASE + 0x0C)
++#define MXC_DCVR2		(MXC_DPTC_LP_BASE + 0x10)
++#define MXC_DCVR3		(MXC_DPTC_LP_BASE + 0x14)
++
++#define MXC_DPTCCR_DRCE3                     0x00400000
++#define MXC_DPTCCR_DRCE2                     0x00200000
++#define MXC_DPTCCR_DRCE1                     0x00100000
++#define MXC_DPTCCR_DRCE0                     0x00080000
++#define MXC_DPTCCR_DCR_256                   0x00060000
++#define MXC_DPTCCR_DCR_128                   0x00040000
++#define MXC_DPTCCR_DCR_64                    0x00020000
++#define MXC_DPTCCR_DCR_32                    0x00000000
++#define MXC_DPTCCR_DSMM                      0x00000040
++#define MXC_DPTCCR_DPNVCR                    0x00000020
++#define MXC_DPTCCR_DPVV                      0x00000010
++#define MXC_DPTCCR_VAIM                      0x00000008
++#define MXC_DPTCCR_VAI_OFFSET                1
++#define MXC_DPTCCR_VAI_MASK                  0x00000006
++#define MXC_DPTCCR_DEN                       0x00000001
++
++#define MXC_GPCCNTR_GPCIRQ                   0x00100000
++#define MXC_GPCCNTR_DPTC1CR                  0x00080000
++#define MXC_GPCCNTR_ADU                      0x00008000
++
++static int dptc_lp_is_active;
++
++static int curr_wp;
++static u32 ptvai;
++static struct delayed_work dptc_lp_work;
++static struct dptc_wp *dptc_lp_wp_allfreq;
++static struct device *dptc_lp_dev;
++static struct clk *ahb_clk;
++struct regulator *lp_per;
++
++DEFINE_SPINLOCK(mxc_dptc_lp_lock);
++
++enum {
++	DPTC_PTVAI_NOCHANGE = 0x0,
++	DPTC_PTVAI_DECREASE,
++	DPTC_PTVAI_INCREASE,
++	DPTC_PTVAI_EMERG,
++};
++
++static void update_dptc_wp(u32 wp)
++{
++	int voltage_uV;
++	int ret = 0;
++
++	voltage_uV = (dptc_lp_wp_allfreq[wp].voltage) * 1000;
++
++	__raw_writel(dptc_lp_wp_allfreq[wp].dcvr0, MXC_DCVR0);
++	__raw_writel(dptc_lp_wp_allfreq[wp].dcvr1, MXC_DCVR1);
++	__raw_writel(dptc_lp_wp_allfreq[wp].dcvr2, MXC_DCVR2);
++	__raw_writel(dptc_lp_wp_allfreq[wp].dcvr3, MXC_DCVR3);
++
++	/* Set the voltage for the LP domain. */
++	if (lp_per != NULL) {
++		ret = regulator_set_voltage(lp_per, voltage_uV);
++		if (ret < 0)
++			printk(KERN_DEBUG "COULD NOT SET LP VOLTAGE!!!!!\n");
++	}
++
++	pr_debug("dcvr0-3: 0x%x, 0x%x, 0x%x, 0x%x; vol: %d\n",
++		 dptc_lp_wp_allfreq[wp].dcvr0,
++		 dptc_lp_wp_allfreq[wp].dcvr1,
++		 dptc_lp_wp_allfreq[wp].dcvr2,
++		 dptc_lp_wp_allfreq[wp].dcvr3, dptc_lp_wp_allfreq[wp].voltage);
++}
++
++static irqreturn_t dptc_lp_irq(int irq, void *dev_id)
++{
++	u32 dptccr = __raw_readl(MXC_DPTCCR);
++	u32 gpc_cntr = __raw_readl(MXC_GPC_CNTR);
++
++	gpc_cntr = (gpc_cntr & MXC_GPCCNTR_DPTC1CR);
++
++	if (gpc_cntr) {
++		ptvai = (dptccr & MXC_DPTCCR_VAI_MASK) >> MXC_DPTCCR_VAI_OFFSET;
++
++		/* disable DPTC and mask its interrupt */
++		dptccr = (dptccr & ~(MXC_DPTCCR_DEN)) | MXC_DPTCCR_VAIM;
++		dptccr = (dptccr & ~(MXC_DPTCCR_DPNVCR));
++		__raw_writel(dptccr, MXC_DPTCCR);
++
++		schedule_delayed_work(&dptc_lp_work, 0);
++	}
++
++	return IRQ_RETVAL(1);
++}
++
++static void dptc_lp_workqueue_handler(struct work_struct *work)
++{
++	u32 dptccr = __raw_readl(MXC_DPTCCR);
++
++	switch (ptvai) {
++	case DPTC_PTVAI_DECREASE:
++		curr_wp++;
++		break;
++	case DPTC_PTVAI_INCREASE:
++	case DPTC_PTVAI_EMERG:
++		curr_wp--;
++		if (curr_wp < 0) {
++			/* already max voltage */
++			curr_wp = 0;
++			printk(KERN_WARNING "dptc: already maximum voltage\n");
++		}
++		break;
++
++		/* Unknown interrupt cause */
++	default:
++		BUG();
++	}
++
++	if (curr_wp > DPTC_LP_WP_SUPPORTED || curr_wp < 0) {
++		panic("Can't support this working point: %d\n", curr_wp);
++	}
++	update_dptc_wp(curr_wp);
++
++	/* enable DPTC and unmask its interrupt */
++	dptccr =
++	    (dptccr & ~(MXC_DPTCCR_VAIM)) | MXC_DPTCCR_DPNVCR | MXC_DPTCCR_DEN;
++	__raw_writel(dptccr, MXC_DPTCCR);
++}
++
++/* Start DPTC unconditionally */
++static int start_dptc(void)
++{
++	u32 dptccr, flags;
++	unsigned long ahb_rate;
++
++	/* Set the voltage for the LP domain. */
++	lp_per = regulator_get(NULL, "DCDC4");
++
++	spin_lock_irqsave(&mxc_dptc_lp_lock, flags);
++
++	ahb_rate = clk_get_rate(ahb_clk);
++
++	if (ahb_rate < 133000000) {
++		goto err;
++	}
++
++	/* Enable PER domain frequency and/or voltage update needed and enable ARM IRQ */
++	__raw_writel(MXC_GPCCNTR_GPCIRQ, MXC_GPC_CNTR);
++
++	dptccr = __raw_readl(MXC_DPTCCR);
++
++	/* Enable DPTC and unmask its interrupt */
++	dptccr = ((dptccr & ~(MXC_DPTCCR_VAIM)) | MXC_DPTCCR_DEN) |
++	    (MXC_DPTCCR_DPNVCR | MXC_DPTCCR_DPVV | MXC_DPTCCR_DSMM);
++
++	__raw_writel(dptccr, MXC_DPTCCR);
++
++	spin_unlock_irqrestore(&mxc_dptc_lp_lock, flags);
++
++	pr_info("DPTC LP has been started \n");
++
++	return 0;
++
++      err:
++	spin_unlock_irqrestore(&mxc_dptc_lp_lock, flags);
++	pr_info("DPTC LP is not enabled\n");
++	return -1;
++}
++
++/* Stop DPTC unconditionally */
++static void stop_dptc(void)
++{
++	u32 dptccr;
++
++	dptccr = __raw_readl(MXC_DPTCCR);
++
++	/* disable DPTC and mask its interrupt */
++	dptccr = ((dptccr & ~(MXC_DPTCCR_DEN)) | MXC_DPTCCR_VAIM) &
++	    (~MXC_DPTCCR_DPNVCR);
++
++	__raw_writel(dptccr, MXC_DPTCCR);
++
++	/* Restore Turbo Mode voltage to highest wp */
++	update_dptc_wp(0);
++	curr_wp = 0;
++
++	regulator_put(lp_per, NULL);
++
++	pr_info("DPTC LP has been stopped\n");
++}
++
++/*
++  this function does not change the working point. It can be
++ called from an interrupt context.
++*/
++void dptc_lp_suspend(void)
++{
++	u32 dptccr;
++
++	if (!dptc_lp_is_active)
++		return;
++
++	dptccr = __raw_readl(MXC_DPTCCR);
++
++	/* disable DPTC and mask its interrupt */
++	dptccr = ((dptccr & ~(MXC_DPTCCR_DEN)) | MXC_DPTCCR_VAIM) &
++	    (~MXC_DPTCCR_DPNVCR);
++
++	__raw_writel(dptccr, MXC_DPTCCR);
++}
++
++/*!
++ * This function is called to put the DPTC in a low power state.
++ *
++ */
++void dptc_lp_disable(void)
++{
++	if (!dptc_lp_is_active)
++		return;
++
++	stop_dptc();
++	dptc_lp_is_active = 0;
++}
++
++/*!
++ * This function is called to resume the DPTC from a low power state.
++ *
++ */
++void dptc_lp_enable(void)
++{
++	if (dptc_lp_is_active)
++		return;
++	start_dptc();
++	dptc_lp_is_active = 1;
++}
++
++static ssize_t dptc_lp_show(struct device *dev, struct device_attribute *attr,
++			    char *buf)
++{
++	if (dptc_lp_is_active)
++		return sprintf(buf, "DPTC LP is enabled\n");
++	else
++		return sprintf(buf, "DPTC LP is disabled\n");
++}
++
++static ssize_t dptc_lp_store(struct device *dev, struct device_attribute *attr,
++			     const char *buf, size_t size)
++{
++	if (strstr(buf, "0") != NULL) {
++		dptc_lp_disable();
++	} else if (strstr(buf, "1") != NULL) {
++		dptc_lp_enable();
++	}
++
++	return size;
++}
++
++static DEVICE_ATTR(enable, 0644, dptc_lp_show, dptc_lp_store);
++
++/*!
++ * This is the probe routine for the DPTC driver.
++ *
++ * @param   pdev   The platform device structure
++ *
++ * @return         The function returns 0 on success
++ *
++ */
++static int __devinit mxc_dptc_lp_probe(struct platform_device *pdev)
++{
++	int res = 0;
++	u32 dptccr;
++
++	printk(KERN_INFO "DPTC mxc_dptc_lp_probe()\n");
++	dptc_lp_dev = &pdev->dev;
++	dptc_lp_wp_allfreq = pdev->dev.platform_data;
++	if (dptc_lp_wp_allfreq == NULL) {
++		printk(KERN_ERR "DPTC: Pointer to DPTC table is NULL\
++				not started\n");
++		return -1;
++	}
++
++	INIT_DELAYED_WORK(&dptc_lp_work, dptc_lp_workqueue_handler);
++
++	/* request the DPTC interrupt */
++	res =
++	    request_irq(MXC_INT_GPC1, dptc_lp_irq, IRQF_SHARED, "mxc-dptc-lp",
++			pdev);
++	if (res) {
++		printk(KERN_ERR "DPTC: Unable to attach to DPTC interrupt");
++		return res;
++	}
++	/* Enable Reference Circuits */
++	dptccr =
++	    (MXC_DPTCCR_DRCE0 | MXC_DPTCCR_DRCE1 | MXC_DPTCCR_DRCE2 |
++	     MXC_DPTCCR_DRCE3) | (MXC_DPTCCR_DCR_128 | MXC_DPTCCR_DPNVCR |
++				  MXC_DPTCCR_DPVV);
++	__raw_writel(dptccr, MXC_DPTCCR);
++
++	res = sysfs_create_file(&dptc_lp_dev->kobj, &dev_attr_enable.attr);
++	if (res) {
++		printk(KERN_ERR
++		       "DPTC: Unable to register sysdev entry for dptc");
++		return res;
++	}
++
++	if (res != 0) {
++		printk(KERN_ERR "DPTC: Unable to start");
++		return res;
++	}
++
++	curr_wp = 0;
++	update_dptc_wp(curr_wp);
++
++	ahb_clk = clk_get(NULL, "ahb_clk");
++
++	return 0;
++}
++
++/*!
++ * This function is called to put DPTC in a low power state.
++ *
++ * @param   pdev  the device structure
++ * @param   state the power state the device is entering
++ *
++ * @return  The function always returns 0.
++ */
++static int mxc_dptc_lp_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	if (dptc_lp_is_active)
++		stop_dptc();
++
++	return 0;
++}
++
++/*!
++ * This function is called to resume the MU from a low power state.
++ *
++ * @param   dev   the device structure
++ * @param   level the stage in device suspension process that we want the
++ *                device to be put in
++ *
++ * @return  The function always returns 0.
++ */
++static int mxc_dptc_lp_resume(struct platform_device *pdev)
++{
++	if (dptc_lp_is_active)
++		start_dptc();
++
++	return 0;
++}
++
++static struct platform_driver mxc_dptc_lp_driver = {
++	.driver = {
++		   .name = "mxc_dptc_lp",
++		   },
++	.probe = mxc_dptc_lp_probe,
++	.suspend = mxc_dptc_lp_suspend,
++	.resume = mxc_dptc_lp_resume,
++};
++
++/*!
++ * This function is called to resume the MU from a low power state.
++ *
++ * @param   dev   the device structure used to give information on which MU
++ *                device (0 through 3 channels) to suspend
++ * @param   level the stage in device suspension process that we want the
++ *                device to be put in
++ *
++ * @return  The function always returns 0.
++ */
++
++static int __init dptc_lp_init(void)
++{
++	printk(KERN_INFO "DPTC dptc_lp_init()\n");
++	if (platform_driver_register(&mxc_dptc_lp_driver) != 0) {
++		printk(KERN_ERR "mxc_dptc_lp_driver register failed\n");
++		return -ENODEV;
++	}
++
++	printk(KERN_INFO "DPTC LP driver module loaded\n");
++	return 0;
++}
++
++static void __exit dptc_lp_cleanup(void)
++{
++	stop_dptc();
++
++	/* release the DPTC interrupt */
++	free_irq(MXC_INT_GPC1, NULL);
++
++	sysfs_remove_file(&dptc_lp_dev->kobj, &dev_attr_enable.attr);
++
++	/* Unregister the device structure */
++	platform_driver_unregister(&mxc_dptc_lp_driver);
++
++	printk("DPTC LP driver module unloaded\n");
++}
++
++module_init(dptc_lp_init);
++module_exit(dptc_lp_cleanup);
++
++EXPORT_SYMBOL(dptc_lp_disable);
++EXPORT_SYMBOL(dptc_lp_enable);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("DPTC LP driver");
++MODULE_LICENSE("GPL");
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index 389cce1..eb0870c 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -500,4 +500,10 @@
+ 
+ #define MXC_GPIO_SPLIT_IRQ_2
+ 
++/*!
++ * Macro to convert elv, llv, ulv to a data which is used to set DCVR0, DCVR1,
++ * DCVR2, or DCVR3.
++ */
++#define DCVR(elv, llv, ulv)     ((elv << 0) | (llv << 10) | (ulv << 21))
++
+ #endif				/*  __ASM_ARCH_MXC_MX37_H__ */
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 17f7688..7302221 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -283,6 +283,8 @@ struct mxc_unifi_platform_data *get_unifi_plat_data(void);
+ #define MXC_IDE_DMA_BD_NR	(512/3/4)	/* Number of BDs per channel */
+ 
+ #define DPTC_WP_SUPPORTED	17
++#define DPTC_GP_WP_SUPPORTED	7
++#define DPTC_LP_WP_SUPPORTED	9
+ 
+ #ifndef IS_MEM_DEVICE_NONSHARED
+ /* all peripherals on MXC so far are below 0x80000000 but leave L2CC alone */
+@@ -296,7 +298,7 @@ struct dptc_wp {
+ 	u32 dcvr1;
+ 	u32 dcvr2;
+ 	u32 dcvr3;
+-	u32 regulator;
++	char *regulator;
+ 	u32 voltage;
+ };
+ struct cpu_wp {
+-- 
+1.5.4.4
+

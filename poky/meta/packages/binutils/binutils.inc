@@ -1,7 +1,7 @@
 DESCRIPTION = "A GNU collection of binary utilities"
 HOMEPAGE = "http://www.gnu.org/software/binutils/"
 SECTION = "devel"
-LICENSE = "GPL"
+LICENSE = "GPLv2"
 
 inherit autotools gettext
 
@@ -33,7 +33,6 @@ FILES_${PN}-symlinks = " \
 	${bindir}/size \
 	${bindir}/strip"
 
-S = "${WORKDIR}/binutils-${PV}"
 B = "${S}/build.${HOST_SYS}.${TARGET_SYS}"
 
 EXTRA_OECONF = "--program-prefix=${TARGET_PREFIX} \

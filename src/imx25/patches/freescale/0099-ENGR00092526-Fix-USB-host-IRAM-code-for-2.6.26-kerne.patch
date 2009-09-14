@@ -1,0 +1,316 @@
+From da7de66d19288e15808fb97e9d3eafb4b9b79380 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Tue, 23 Sep 2008 11:18:21 -0500
+Subject: [PATCH] ENGR00092526 Fix USB host IRAM code for 2.6.26 kernel
+
+Fix the USB ehci driver with IRAM for the 2.6.26. The upgrade
+to the 2.6.26 kernel had changes to the EHCI driver which
+must be fixed in the IRAM version as well.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/host/ehci-q-iram.c |  127 +++++++++++++++++++++++++++------------
+ 1 files changed, 88 insertions(+), 39 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-q-iram.c b/drivers/usb/host/ehci-q-iram.c
+index c93ff6b..860357c 100644
+--- a/drivers/usb/host/ehci-q-iram.c
++++ b/drivers/usb/host/ehci-q-iram.c
+@@ -221,6 +221,9 @@ static int qtd_copy_status(struct ehci_hcd *ehci,
+ 				urb->dev->ttport, urb->dev->devnum,
+ 				usb_pipeendpoint(urb->pipe), token);
+ #endif /* DEBUG */
++			/* REVISIT ARC-derived cores don't clear the root
++			 * hub TT buffer in this way...
++			 */
+ 			usb_hub_tt_clear_buffer(urb->dev, urb->pipe);
+ 		}
+ 	}
+@@ -247,7 +250,8 @@ __releases(ehci->lock) __acquires(ehci->lock)
+ 	if (unlikely(urb->unlinked)) {
+ 		COUNT(ehci->stats.unlink);
+ 	} else {
+-		if (likely(status == -EINPROGRESS))
++		/* report non-error and short read status as zero */
++		if (status == -EINPROGRESS || status == -EREMOTEIO)
+ 			status = 0;
+ 		COUNT(ehci->stats.complete);
+ 	}
+@@ -286,9 +290,8 @@ static unsigned qh_completions(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 	int last_status = -EINPROGRESS;
+ 	int stopped;
+ 	unsigned count = 0;
+-	int do_status = 0;
+ 	u8 state;
+-	u32 halt = HALT_BIT(ehci);
++	__le32 halt = HALT_BIT(ehci);
+ 	__hc32 temp_hw_qtd_next = 0;
+ 
+ 	if (unlikely(list_empty(&qh->qtd_list)))
+@@ -316,7 +319,6 @@ static unsigned qh_completions(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 		struct urb *urb2;
+ 
+ 		u32 token = 0;
+-		int qtd_status;
+ 
+ 		qtd = list_entry(entry, struct ehci_qtd, qtd_list);
+ 		urb = qtd->urb;
+@@ -326,10 +328,10 @@ static unsigned qh_completions(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 			if (likely(last->urb != urb)) {
+ 				ehci_urb_done(ehci, last->urb, last_status);
+ 				count++;
++				last_status = -EINPROGRESS;
+ 			}
+ 			ehci_qtd_free(ehci, last);
+ 			last = NULL;
+-			last_status = -EINPROGRESS;
+ 		}
+ 
+ 		/* ignore urbs submitted during completions we reported */
+@@ -343,11 +345,20 @@ static unsigned qh_completions(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 		/* always clean up qtds the hc de-activated */
+ 		if ((token & QTD_STS_ACTIVE) == 0) {
+ 
++			/* on STALL, error, and short reads this urb must
++			 * complete and all its qtds must be recycled.
++			 */
+ 			if ((token & QTD_STS_HALT) != 0) {
+ 				stopped = 1;
+ 
+ 			/* magic dummy for some short reads; qh won't advance.
+ 			 * that silicon quirk can kick in with this dummy too.
++			 *
++			 * other short reads won't stop the queue, including
++			 * control transfers (status stage handles that) or
++			 * most other single-qtd reads ... the queue stops if
++			 * URB_SHORT_NOT_OK was set so the driver submitting
++			 * the urbs could clean it up.
+ 			 */
+ 			} else if (IS_SHORT_READ(token)
+ 				&& !(qtd->hw_alt_next & EHCI_LIST_END(ehci))) {
+@@ -502,28 +513,27 @@ static unsigned qh_completions(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 				  && HC_IS_RUNNING(ehci_to_hcd(ehci)->state))) {
+ 			break;
+ 
++		/* scan the whole queue for unlinks whenever it stops */
+ 		} else {
+ 			stopped = 1;
+ 
+-			if (unlikely(!HC_IS_RUNNING(ehci_to_hcd(ehci)->state)))
++			/* cancel everything if we halt, suspend, etc */
++			if (!HC_IS_RUNNING(ehci_to_hcd(ehci)->state))
+ 				last_status = -ESHUTDOWN;
+ 
+-			/* ignore active urbs unless some previous qtd
+-			 * for the urb faulted (including short read) or
+-			 * its urb was canceled.  we may patch qh or qtds.
++			/* this qtd is active; skip it unless a previous qtd
++			 * for its urb faulted, or its urb was canceled.
+ 			 */
+-			if (likely(last_status == -EINPROGRESS &&
+-				   !urb->unlinked))
++			else if (last_status == -EINPROGRESS && !urb->unlinked)
+ 				continue;
+ 
+-			/* issue status after short control reads */
+-			if (unlikely(do_status != 0)
+-			    && QTD_PID(token) == 0 /* OUT */) {
+-				do_status = 0;
+-				continue;
+-			}
++			/* qh unlinked; token in overlay may be most current */
++			if (state == QH_STATE_IDLE
++					&& cpu_to_hc32(ehci, qtd->qtd_dma)
++						== qh->hw_current)
++				token = hc32_to_cpu(ehci, qh->hw_token);
+ 
+-			/* token in overlay may be most current */
++			/* qh unlinked; token in overlay may be most current */
+ 			if (state == QH_STATE_IDLE
+ 			    && cpu_to_hc32(ehci, qtd->qtd_dma)
+ 			    == qh->hw_current)
+@@ -540,21 +550,33 @@ halt:
+ 			}
+ 		}
+ 
+-		/* remove it from the queue */
+-		qtd_status = qtd_copy_status(ehci, urb, qtd->length, token);
+-		if (unlikely(qtd_status == -EREMOTEIO)) {
+-			do_status = (!urb->unlinked &&
+-				     usb_pipecontrol(urb->pipe));
+-			qtd_status = 0;
++		/* unless we already know the urb's status, collect qtd status
++		 * and update count of bytes transferred.  in common short read
++		 * cases with only one data qtd (including control transfers),
++		 * queue processing won't halt.  but with two or more qtds (for
++		 * example, with a 32 KB transfer), when the first qtd gets a
++		 * short read the second must be removed by hand.
++		 */
++		if (last_status == -EINPROGRESS) {
++			last_status = qtd_copy_status(ehci, urb,
++					qtd->length, token);
++			if (last_status == -EREMOTEIO
++					&& (qtd->hw_alt_next
++						& EHCI_LIST_END(ehci)))
++				last_status = -EINPROGRESS;
+ 		}
+-		if (likely(last_status == -EINPROGRESS))
+-			last_status = qtd_status;
++
++		/* if we're removing something not at the queue head,
++		 * patch the hardware queue pointer.
++		 */
+ 
+ 		if (stopped && qtd->qtd_list.prev != &qh->qtd_list) {
+ 			last = list_entry(qtd->qtd_list.prev,
+ 					  struct ehci_qtd, qtd_list);
+ 			last->hw_next = qtd->hw_next;
+ 		}
++
++/* remove qtd; it's recycled after possible urb completion */
+ 		list_del(&qtd->qtd_list);
+ 		last = qtd;
+ 	}
+@@ -580,7 +602,15 @@ halt:
+ 			qh_refresh(ehci, qh);
+ 			break;
+ 		case QH_STATE_LINKED:
+-			/* should be rare for periodic transfers,
++			/* We won't refresh a QH that's linked (after the HC
++			 * stopped the queue).  That avoids a race:
++			 *  - HC reads first part of QH;
++			 *  - CPU updates that first part and the token;
++			 *  - HC reads rest of that QH, including token
++			 * Result:  HC gets an inconsistent image, and then
++			 * DMAs to/from the wrong memory (corrupting it).
++			 *
++			 * That should be rare for interrupt transfers,
+ 			 * except maybe high bandwidth ...
+ 			 */
+ 			if ((cpu_to_hc32(ehci, QH_SMASK)
+@@ -720,6 +750,12 @@ static struct list_head *qh_urb_transaction(struct ehci_hcd *ehci,
+ 		}
+ 		len -= this_qtd_len;
+ 		buf += this_qtd_len;
++
++		/*
++		 * short reads advance to a "magic" dummy instead of the next
++		 * qtd ... that forces the queue to stop, for manual cleanup.
++		 * (this will usually be overridden later.)
++		 */
+ 		if (is_input)
+ 			qtd->hw_alt_next = ehci->async->hw_alt_next;
+ 
+@@ -744,8 +780,10 @@ static struct list_head *qh_urb_transaction(struct ehci_hcd *ehci,
+ 		list_add_tail(&qtd->qtd_list, head);
+ 	}
+ 
+-	/* unless the bulk/interrupt caller wants a chance to clean
+-	 * up after short reads, hc should advance qh past this urb
++	/*
++	 * unless the caller requires manual cleanup after short reads,
++	 * have the alt_next mechanism keep the queue running after the
++	 * last data qtd (the only one, for control and most other cases).
+ 	 */
+ 	if (likely((urb->transfer_flags & URB_SHORT_NOT_OK) == 0
+ 		   || usb_pipecontrol(urb->pipe)))
+@@ -814,6 +852,7 @@ static struct ehci_qh *qh_make(struct ehci_hcd *ehci,
+ 	u32 info1 = 0, info2 = 0;
+ 	int is_input, type;
+ 	int maxp = 0;
++	struct usb_tt		*tt = urb->dev->tt;
+ 
+ 	if (!qh)
+ 		return qh;
+@@ -828,6 +867,14 @@ static struct ehci_qh *qh_make(struct ehci_hcd *ehci,
+ 	type = usb_pipetype(urb->pipe);
+ 	maxp = usb_maxpacket(urb->dev, urb->pipe, !is_input);
+ 
++	/* 1024 byte maxpacket is a hardware ceiling.  High bandwidth
++	 * acts like up to 3KB, but is built from smaller packets.
++	 */
++	if (max_packet(maxp) > 1024) {
++		ehci_dbg(ehci, "bogus qh maxpacket %d\n", max_packet(maxp));
++		goto done;
++	}
++
+ 	/* Compute interrupt scheduling parameters just once, and save.
+ 	 * - allowing for high bandwidth, how many nsec/uframe are used?
+ 	 * - split transactions need a second CSPLIT uframe; same question
+@@ -858,7 +905,6 @@ static struct ehci_qh *qh_make(struct ehci_hcd *ehci,
+ 				goto done;
+ 			}
+ 		} else {
+-			struct usb_tt *tt = urb->dev->tt;
+ 			int think_time;
+ 
+ 			/* gap is f(FS/LS transfer times) */
+@@ -918,9 +964,8 @@ static struct ehci_qh *qh_make(struct ehci_hcd *ehci,
+ 		/* set the address of the TT; for TDI's integrated
+ 		 * root hub tt, leave it zeroed.
+ 		 */
+-		if (!ehci_is_TDI(ehci)
+-		    || urb->dev->tt->hub != ehci_to_hcd(ehci)->self.root_hub)
+-			info2 |= urb->dev->tt->hub->devnum << 16;
++		if (tt && tt->hub != ehci_to_hcd(ehci)->self.root_hub)
++			info2 |= tt->hub->devnum << 16;
+ 
+ 		/* NOTE:  if (PIPE_INTERRUPT) { scheduler sets c-mask } */
+ 
+@@ -935,7 +980,13 @@ static struct ehci_qh *qh_make(struct ehci_hcd *ehci,
+ 			info2 |= (EHCI_TUNE_MULT_HS << 30);
+ 		} else if (type == PIPE_BULK) {
+ 			info1 |= (EHCI_TUNE_RL_HS << 28);
+-			info1 |= 512 << 16;	/* usb2 fixed maxpacket */
++			/* The USB spec says that high speed bulk endpoints
++			 * always use 512 byte maxpacket.  But some device
++			 * vendors decided to ignore that, and MSFT is happy
++			 * to help them do so.  So now people expect to use
++			 * such nonconformant devices with Linux too; sigh.
++			 */
++			info1 |= max_packet(maxp) << 16;
+ 			info2 |= (EHCI_TUNE_MULT_HS << 30);
+ 			use_buffer(ehci, usb_pipedevice(urb->pipe));
+ 		} else {	/* PIPE_INTERRUPT */
+@@ -1017,7 +1068,7 @@ static struct ehci_qh *qh_append_tds(struct ehci_hcd *ehci,
+ 				     int epnum, void **ptr)
+ {
+ 	struct ehci_qh *qh = NULL;
+-	u32 qh_addr_mask = cpu_to_hc32(ehci, 0x7f);
++	__hc32 qh_addr_mask = cpu_to_hc32(ehci, 0x7f);
+ 
+ 	qh = (struct ehci_qh *)*ptr;
+ 	if (unlikely(qh == NULL)) {
+@@ -1151,7 +1202,7 @@ static void end_unlink_async(struct ehci_hcd *ehci)
+ 	struct ehci_qh *qh = ehci->reclaim;
+ 	struct ehci_qh *next;
+ 
+-	timer_action_done(ehci, TIMER_IAA_WATCHDOG);
++	iaa_watchdog_done(ehci);
+ 
+ 	qh->qh_state = QH_STATE_IDLE;
+ 	qh->qh_next.qh = NULL;
+@@ -1160,7 +1211,6 @@ static void end_unlink_async(struct ehci_hcd *ehci)
+ 	/* other unlink(s) may be pending (in QH_STATE_UNLINK_WAIT) */
+ 	next = qh->reclaim;
+ 	ehci->reclaim = next;
+-	ehci->reclaim_ready = 0;
+ 	qh->reclaim = NULL;
+ 
+ 	qh_completions(ehci, qh);
+@@ -1235,11 +1285,10 @@ static void start_unlink_async(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 		return;
+ 	}
+ 
+-	ehci->reclaim_ready = 0;
+ 	cmd |= CMD_IAAD;
+ 	ehci_writel(ehci, cmd, &ehci->regs->command);
+ 	(void)ehci_readl(ehci, &ehci->regs->command);
+-	timer_action(ehci, TIMER_IAA_WATCHDOG);
++	iaa_watchdog_done(ehci);
+ }
+ 
+ /*-------------------------------------------------------------------------*/
+-- 
+1.5.4.4
+

@@ -1,0 +1,54 @@
+From 51e88b81c9ba9bcedc3823f68c9c6b9d918d1933 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 17 Feb 2009 18:17:49 +0800
+Subject: [PATCH] ENGR00107789 V4L2: Fix display issue for RGB input pixel format
+
+Check the input pixel format is either YUV or RGB.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |   21 ++++++++++++++++++++-
+ 1 files changed, 20 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index d17bef4..76900d5 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -221,6 +221,22 @@ static u32 fmt_to_bpp(u32 pixelformat)
+ 	return bpp;
+ }
+ 
++static bool format_is_yuv(u32 pixelformat)
++{
++	u32 bpp;
++
++	switch (pixelformat) {
++	case V4L2_PIX_FMT_YUV420:
++	case V4L2_PIX_FMT_UYVY:
++	case V4L2_PIX_FMT_YUV422P:
++	case V4L2_PIX_FMT_YVU420:
++	case V4L2_PIX_FMT_NV12:
++		return true;
++		break;
++	}
++	return false;
++}
++
+ static u32 bpp_to_fmt(struct fb_info *fbi)
+ {
+ 	if (fbi->var.nonstd)
+@@ -590,7 +606,10 @@ static int mxc_v4l2out_streamon(vout_data * vout)
+ 		if (vout->cur_disp_output == 3) {
+ 			vout->display_ch = MEM_FG_SYNC;
+ 			fbvar.bits_per_pixel = 16;
+-			fbvar.nonstd = IPU_PIX_FMT_UYVY;
++			if (format_is_yuv(vout->v2f.fmt.pix.pixelformat))
++				fbvar.nonstd = IPU_PIX_FMT_UYVY;
++			else
++				fbvar.nonstd = 0;
+ 
+ 			fbvar.xres = fbvar.xres_virtual = out_width;
+ 			fbvar.yres = out_height;
+-- 
+1.5.4.4
+

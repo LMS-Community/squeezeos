@@ -1,0 +1,159 @@
+Move SDMA driver to mutex API
+
+Currently the SDMA driver still makes use of the 'struct semaphore' as mutex
+However, the driver should make use of the mutex API instead.
+
+Singed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c |   19 ++++++++++++---
+ arch/arm/plat-mxc/sdma/sdma.c              |   35 +++++++++++++----------------
+ 2 files changed, 31 insertions(+), 23 deletions(-)
+
+Index: linux-2.6.26/arch/arm/plat-mxc/sdma/sdma.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/sdma/sdma.c	2009-05-04 00:17:47.000000000 +0200
++++ linux-2.6.26/arch/arm/plat-mxc/sdma/sdma.c	2009-05-04 00:17:52.000000000 +0200
+@@ -25,19 +25,17 @@
+ #include <linux/mm.h>
+ #include <linux/interrupt.h>
+ #include <linux/clk.h>
+-#include <asm/irq.h>
+-#include <asm/arch/dma.h>
+-#include <asm/arch/hardware.h>
+-
+-#include <asm/semaphore.h>
++#include <linux/mutex.h>
+ #include <linux/spinlock.h>
+-
+-#include <asm/uaccess.h>
+ #include <linux/device.h>
+ #include <linux/dma-mapping.h>
+-
+ #include <linux/proc_fs.h>
+ 
++#include <asm/irq.h>
++#include <asm/arch/dma.h>
++#include <asm/arch/hardware.h>
++#include <asm/uaccess.h>
++
+ #include "iapi.h"
+ 
+ #define M3_BASE_ADDRESS CSD0_BASE_ADDR
+@@ -46,7 +44,7 @@
+ /*!
+  * SDMA status mutex
+  */
+-static struct semaphore sdma_status_mutex;
++static struct mutex sdma_status_mutex;
+ 
+ /*!
+  * SDMA channel sleep queues
+@@ -57,7 +55,7 @@ static wait_queue_head_t sdma_sleep_queu
+ /*!
+  * SDMA channel synchronization
+  */
+-static struct semaphore sdma_synch_mutex[MAX_DMA_CHANNELS];
++static struct mutex sdma_synch_mutex[MAX_DMA_CHANNELS];
+ 
+ /*!
+  * SDMA buffers pool initialization function
+@@ -636,7 +634,7 @@ int mxc_request_dma(int *channel, const 
+ 
+ 	res = 0;
+ 
+-	down(&sdma_status_mutex);
++	mutex_lock(&sdma_status_mutex);
+ 
+ 	/* Dynamic allocation */
+ 	if (*channel == 0) {
+@@ -678,7 +676,7 @@ int mxc_request_dma(int *channel, const 
+ 		res = -EBUSY;
+ 	}
+ 
+-	up(&sdma_status_mutex);
++	mutex_unlock(&sdma_status_mutex);
+ 
+ 	return res;
+ }
+@@ -1053,11 +1051,11 @@ void mxc_dma_set_callback(int channel, d
+ static int getChannel(int channel)
+ {
+ 	if (irqs_disabled() || in_atomic()) {
+-		if (down_trylock(&sdma_synch_mutex[channel])) {
++		if (mutex_trylock(&sdma_synch_mutex[channel])) {
+ 			return -EBUSY;
+ 		}
+ 	} else {
+-		if (down_interruptible(&sdma_synch_mutex[channel])) {
++		if (mutex_lock_interruptible(&sdma_synch_mutex[channel])) {
+ 			return -EBUSY;
+ 		}
+ 	}
+@@ -1072,7 +1070,7 @@ static int getChannel(int channel)
+  */
+ static int releaseChannel(int channel)
+ {
+-	up(&sdma_synch_mutex[channel]);
++	mutex_unlock(&sdma_synch_mutex[channel]);
+ 	return 0;
+ }
+ 
+@@ -1141,11 +1139,10 @@ static void __init init_mutexes(void)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
+-		init_MUTEX(&sdma_synch_mutex[i]);
+-	}
++	for (i = 0; i < MAX_DMA_CHANNELS; i++)
++		mutex_init(&sdma_synch_mutex[i]);
+ 
+-	init_MUTEX(&sdma_status_mutex);
++	mutex_init(&sdma_status_mutex);
+ }
+ 
+ /*!
+Index: linux-2.6.26/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c	2009-05-04 00:18:25.000000000 +0200
++++ linux-2.6.26/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c	2009-05-04 00:28:30.000000000 +0200
+@@ -1098,7 +1098,7 @@ iapi_Write (channelDescriptor * cd_p, vo
+  *
+  *   Data Node Descriptor (Buffer Descriptor):
+  *------------------------------------------------------------------------------
+- *| 31	30	29	28	27	26	25	24	23	22	21	20	19	18	17	16	15	 …	  0|
++ *| 31	30	29	28	27	26	25	24	23	22	21	20	19	18	17	16	15	 ??	  0|
+  *------------------------------------------------------------------------------
+  *| L	E	D	R	R	R	R	R	|<---- Reserved          ---->  |<- Length-> |
+  *------------------------------------------------------------------------------
+@@ -1225,7 +1225,7 @@ int iapi_Read_ipcv2( channelDescriptor *
+  *
+  *   Data Node Descriptor (Buffer Descriptor):
+  *------------------------------------------------------------------------------
+- *| 31	30	29	28	27	26	25	24	23	22	21	20	19	18	17	16	15	 …	  0|
++ *| 31	30	29	28	27	26	25	24	23	22	21	20	19	18	17	16	15	 ??	  0|
+  *------------------------------------------------------------------------------
+  *| L	E	D	R	R	R	R	R	|<---- Reserved          ---->  |<- Length-> |
+  *------------------------------------------------------------------------------
+@@ -2626,8 +2626,19 @@ IRQ_Handler(void)
+       iapi_WakeUp(chNum);
+       if (callbackIsrTable[chNum] != NULL)
+       {
+-         /* release channel before callback, so IoCtl's are available*/
+-         iapi_ReleaseChannel(chNum);
++         /* release channel before callback, so IoCtl's are available */
++#warning "revisit, mutex misuse detected"
++        /* Disabled: iapi_ReleaseChannel(chNum);
++           We disabled ReleaseChannel here, because it wants to release
++           a Mutex not owned by this piece of code. Mutexes have owners!
++           Only the thread that claims the lock is allowed to release it
++	   It can never be a Interrupt handler that is going to release
++	   a mutex either, because that function might sleep....
++	   If this release is really needed, it is crappy code anyway and
++	   need some rework. Transforming to a counting semaphore also gives
++	   unexpected side effects, because the code seems to release the
++	   mutex more often than claiming it...
++	   Disabled by: Remy Bohmer <linux@bohmer.net> */
+          callbackIsrTable[chNum](iapi_CCBHead[chNum].channelDescriptor,
+                                  userArgTable[chNum]);
+       }

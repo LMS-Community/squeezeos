@@ -1,0 +1,279 @@
+From edb72d82fc9ebc27939378f840ba1e5d570b6121 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Thu, 25 Dec 2008 17:41:45 +0800
+Subject: [PATCH] ENGR00103615 The work around for DATA CRC and End bit error on i.MX35 TO1
+
+1. Workaround for DATA CRC error, Reset CMD&DATA from reading to writing.
+2. Workaournd for end bit error, ignore End bit error for writing operation.
+3. Fix software mismatch with IC designed, don't clear card interrupt when
+enable card interrupt for new toggled card interrupt.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ drivers/mmc/host/mx_sdhci.c |   89 ++++++++++++++++++++++++++----------------
+ drivers/mmc/host/mx_sdhci.h |    2 +
+ 2 files changed, 57 insertions(+), 34 deletions(-)
+
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index dac441e..d71e09c 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -54,6 +54,7 @@
+ 	pr_debug(DRIVER_NAME " [%s()]: " f, __func__, ## x)
+ 
+ static unsigned int debug_quirks;
++static int last_op_dir;
+ 
+ /*
+  * Different quirks to handle when the hardware deviates from a strict
+@@ -178,8 +179,9 @@ static void sdhci_dumpregs(struct sdhci_host *host)
+ 
+ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ {
+-	unsigned long timeout;
+-	unsigned long mask_u32 = mask;
++	unsigned long tmp;
++	unsigned long mask_u32;
++	unsigned long reg_save = 0;
+ 
+ 	if (host->chip->quirks & SDHCI_QUIRK_NO_CARD_NO_RESET) {
+ 		if (!(readl(host->ioaddr + SDHCI_PRESENT_STATE) &
+@@ -187,37 +189,35 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ 			return;
+ 	}
+ 
+-	mask_u32 = readl(host->ioaddr + SDHCI_CLOCK_CONTROL) | (mask_u32 << 24);
+-	writel(mask_u32, host->ioaddr + SDHCI_CLOCK_CONTROL);
+-
+ 	if (mask & SDHCI_RESET_ALL)
+ 		host->clock = 0;
++	else if (host->flags & SDHCI_CD_PRESENT)
++		reg_save = readl(host->ioaddr + SDHCI_HOST_CONTROL);
++
++	tmp = readl(host->ioaddr + SDHCI_CLOCK_CONTROL) | (mask << 24);
++	mask_u32 = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	writel(tmp, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	/* Wait max 100 ms */
+-	timeout = 100;
++	tmp = 5000;
+ 
+ 	/* hw clears the bit when it's done */
+ 	while ((readl(host->ioaddr + SDHCI_CLOCK_CONTROL) >> 24) & mask) {
+-		if (timeout == 0) {
++		if (tmp == 0) {
+ 			printk(KERN_ERR "%s: Reset 0x%x never completed.\n",
+ 			       mmc_hostname(host->mmc), (int)mask);
+ 			sdhci_dumpregs(host);
+ 			return;
+ 		}
+-		timeout--;
+-		mdelay(1);
++		tmp--;
++		udelay(20);
+ 	}
+ 	/*
+ 	 * The INT_EN SIG_EN regs have been modified after reset.
+ 	 * re-configure them ag.
+ 	 */
+-	mask_u32 = SDHCI_INT_ADMA_ERROR |
+-	    SDHCI_INT_DATA_END_BIT | SDHCI_INT_DATA_CRC |
+-	    SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_INDEX |
+-	    SDHCI_INT_END_BIT | SDHCI_INT_CRC | SDHCI_INT_TIMEOUT |
+-	    SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL |
+-	    SDHCI_INT_DMA_END | SDHCI_INT_DATA_END | SDHCI_INT_RESPONSE;
+-
++	if (!(mask & SDHCI_RESET_ALL) && (host->flags & SDHCI_CD_PRESENT))
++		writel(reg_save, host->ioaddr + SDHCI_HOST_CONTROL);
+ 	if (host->flags & SDHCI_USE_DMA)
+ 		mask_u32 &= ~(SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL);
+ 	if (mxc_wml_value == 512)
+@@ -226,6 +226,7 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ 		writel(SDHCI_WML_16_WORDS, host->ioaddr + SDHCI_WML);
+ 	writel(mask_u32 | SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(mask_u32, host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	last_op_dir = 0;
+ }
+ 
+ static void sdhci_init(struct sdhci_host *host)
+@@ -550,7 +551,7 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 		/* Write the physical address to ADMA address reg */
+ 		writel(virt_to_phys(adma_des_table),
+ 		       host->ioaddr + SDHCI_ADMA_ADDRESS);
+-Single_DMA:
++	      Single_DMA:
+ 		/* Rollback to the Single DMA mode */
+ 		i = readl(host->ioaddr + SDHCI_HOST_CONTROL);
+ 		i &= ~SDHCI_CTRL_ADMA;
+@@ -834,7 +835,7 @@ static void sdhci_set_clock(struct sdhci_host *host, unsigned int clock)
+ 		mdelay(1);
+ 	}
+ 
+-out:
++      out:
+ 	host->clock = clock;
+ }
+ 
+@@ -891,7 +892,18 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ 	WARN_ON(host->mrq != NULL);
+ 
+ 	sdhci_activate_led(host);
+-
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++		if (mrq->cmd && mrq->data) {
++			if (mrq->data->flags & MMC_DATA_READ)
++				last_op_dir = 1;
++			else {
++				if (last_op_dir)
++					sdhci_reset(host,
++						    SDHCI_RESET_CMD |
++						    SDHCI_RESET_DATA);
++			}
++		}
++	}
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ 	host->mrq = mrq;
+ 	if (!(host->flags & SDHCI_CD_PRESENT)) {
+@@ -1018,7 +1030,7 @@ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ {
+ 	struct sdhci_host *host;
+ 	unsigned long flags;
+-	u32 ier, prot, clk;
++	u32 ier, prot, clk, present;
+ 
+ 	host = mmc_priv(mmc);
+ 
+@@ -1044,19 +1056,22 @@ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ 		ier |= SDHCI_INT_CARD_INT;
+ 		prot |= SDHCI_CTRL_D3CD;
+ 		clk |= SDHCI_CLOCK_PER_EN | SDHCI_CLOCK_IPG_EN;
++		present = readl(host->ioaddr + SDHCI_PRESENT_STATE);
++		if ((present & SDHCI_CARD_INT_MASK) != SDHCI_CARD_INT_ID)
++			writel(SDHCI_INT_CARD_INT,
++			       host->ioaddr + SDHCI_INT_STATUS);
+ 	} else {
+ 		ier &= ~SDHCI_INT_CARD_INT;
+ 		prot &= ~SDHCI_CTRL_D3CD;
+ 		clk &= ~(SDHCI_CLOCK_PER_EN | SDHCI_CLOCK_IPG_EN);
+ 	}
+-	writel(SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_STATUS);
+ 
+ 	writel(prot, host->ioaddr + SDHCI_HOST_CONTROL);
+ 	writel(ier, host->ioaddr + SDHCI_SIGNAL_ENABLE);
+ 	writel(clk, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	mmiowb();
+-exit_unlock:
++      exit_unlock:
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ }
+ 
+@@ -1323,7 +1338,7 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
+ 			}
+ 		}
+ 	}
+-data_irq_out:
++      data_irq_out:
+ 	/* Enable the INT */
+ 	writel(intsave, host->ioaddr + SDHCI_INT_ENABLE);
+ }
+@@ -1466,6 +1481,12 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 	if (intmask & SDHCI_INT_DATA_MASK) {
+ 		writel(intmask & SDHCI_INT_DATA_MASK,
+ 		       host->ioaddr + SDHCI_INT_STATUS);
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++			if (!
++			    (readl(host->ioaddr + SDHCI_TRANSFER_MODE) &
++			     SDHCI_TRNS_READ))
++				intmask &= ~SDHCI_INT_DATA_END_BIT;
++		}
+ 		sdhci_data_irq(host, intmask & SDHCI_INT_DATA_MASK);
+ 	}
+ 
+@@ -1498,7 +1519,7 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 	result = IRQ_HANDLED;
+ 
+ 	mmiowb();
+-out:
++      out:
+ 	spin_unlock(&host->lock);
+ 
+ 	/*
+@@ -1698,7 +1719,7 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 		host->flags |= SDHCI_CD_PRESENT;
+ 
+ 	DBG("slot %d at 0x%x, irq %d\n", slot, host->res->start, host->irq);
+-no_detect_irq:
++      no_detect_irq:
+ 	if (!request_mem_region(host->res->start,
+ 				host->res->end -
+ 				host->res->start + 1, pdev->name)) {
+@@ -1891,31 +1912,31 @@ no_detect_irq:
+ 
+ 	return 0;
+ 
+-out6:
++      out6:
+ 	free_irq(host->irq, host);
+-out5:
++      out5:
+ 	if (host->detect_irq)
+ 		free_irq(host->detect_irq, host);
+ 	else {
+ 		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
+ 			mxc_fix_chips[pdev->id] = chip;
+ 	}
+-out4:
++      out4:
+ 	del_timer_sync(&host->timer);
+ 	tasklet_kill(&host->card_tasklet);
+ 	tasklet_kill(&host->finish_tasklet);
+-out3:
++      out3:
+ 	if (host->flags & SDHCI_USE_DMA)
+ 		kfree(adma_des_table);
+ 	release_mem_region(host->res->start,
+ 			   host->res->end - host->res->start + 1);
+-out2:
++      out2:
+ 	clk_disable(host->clk);
+ 	host->plat_data->clk_flg = 0;
+ 	clk_put(host->clk);
+-out1:
++      out1:
+ 	gpio_sdhc_inactive(pdev->id);
+-out0:
++      out0:
+ 	mmc_free_host(mmc);
+ 	return ret;
+ }
+@@ -2007,11 +2028,11 @@ static int sdhci_probe(struct platform_device *pdev)
+ 
+ 	return 0;
+ 
+-free:
++      free:
+ 	dev_set_drvdata(&pdev->dev, NULL);
+ 	kfree(chip);
+ 
+-err:
++      err:
+ 	return ret;
+ }
+ 
+diff --git a/drivers/mmc/host/mx_sdhci.h b/drivers/mmc/host/mx_sdhci.h
+index 9872931..1185459 100644
+--- a/drivers/mmc/host/mx_sdhci.h
++++ b/drivers/mmc/host/mx_sdhci.h
+@@ -61,6 +61,8 @@
+ #define  SDHCI_CARD_PRESENT	0x00010000
+ #define  SDHCI_WRITE_PROTECT	0x00080000
+ #define  SDHCI_DAT0_IDLE	0x01000000
++#define  SDHCI_CARD_INT_MASK	0x0E000000
++#define  SDHCI_CARD_INT_ID	0x0C000000
+ 
+ #define SDHCI_HOST_CONTROL 	0x28
+ #define  SDHCI_CTRL_LED		0x00000001
+-- 
+1.5.4.4
+

@@ -1,0 +1,68 @@
+From 3b341bcc8a8253944348f5bd0fc4178ce6b66a9c Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 9 Jul 2008 18:04:27 +0800
+Subject: [PATCH] ENGR00076215 Add NV12 Format support to V4L.
+
+Add NV12--partial interleave format(Y-CbCr) support.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |    2 ++
+ drivers/mxc/ipu3/ipu_param_mem.h                 |    7 +++++++
+ include/asm-arm/arch-mxc/ipu.h                   |    2 ++
+ 3 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index 7922c3d..c26e0df 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -859,6 +859,7 @@ static inline int valid_mode(u32 palette)
+ 		(palette == V4L2_PIX_FMT_RGB24) ||
+ 		(palette == V4L2_PIX_FMT_BGR32) ||
+ 		(palette == V4L2_PIX_FMT_RGB32) ||
++		(palette == V4L2_PIX_FMT_NV12) ||
+ 		(palette == V4L2_PIX_FMT_YUV422P) ||
+ 		(palette == V4L2_PIX_FMT_YUV420));
+ }
+@@ -921,6 +922,7 @@ static int mxc_v4l2out_s_fmt(vout_data * vout, struct v4l2_format *f)
+ 		size = bytesperline * f->fmt.pix.height * 2;
+ 		break;
+ 	case V4L2_PIX_FMT_YUV420:
++	case V4L2_PIX_FMT_NV12:
+ 		size = (bytesperline * f->fmt.pix.height * 3) / 2;
+ 		break;
+ 	default:
+diff --git a/drivers/mxc/ipu3/ipu_param_mem.h b/drivers/mxc/ipu3/ipu_param_mem.h
+index e416340..9e487db 100644
+--- a/drivers/mxc/ipu3/ipu_param_mem.h
++++ b/drivers/mxc/ipu3/ipu_param_mem.h
+@@ -250,6 +250,13 @@ static inline void _ipu_ch_param_init(int ch,
+ 		u_offset = (u == 0) ? stride * height : u;
+ 		v_offset = (v == 0) ? u_offset + u_offset / 2 : v;
+ 		break;
++	case IPU_PIX_FMT_NV12:
++		/* BPP & pixel format */
++		ipu_ch_param_set_field(&params, 1, 85, 4, 4);	/* pix format */
++		ipu_ch_param_set_field(&params, 1, 78, 7, 31);	/* burst size */
++		uv_stride = stride;
++		u_offset = (u == 0) ? stride * height : u;
++		break;
+ 	default:
+ 		dev_err(g_ipu_dev, "mxc ipu: unimplemented pixel format\n");
+ 		break;
+diff --git a/include/asm-arm/arch-mxc/ipu.h b/include/asm-arm/arch-mxc/ipu.h
+index 80286c5..9e4f68b 100644
+--- a/include/asm-arm/arch-mxc/ipu.h
++++ b/include/asm-arm/arch-mxc/ipu.h
+@@ -109,6 +109,8 @@ typedef enum {
+ #define IPU_PIX_FMT_UYVY    fourcc('U', 'Y', 'V', 'Y')	/*!< 16 YUV 4:2:2 */
+ #define IPU_PIX_FMT_Y41P    fourcc('Y', '4', '1', 'P')	/*!< 12 YUV 4:1:1 */
+ #define IPU_PIX_FMT_YUV444  fourcc('Y', '4', '4', '4')	/*!< 24 YUV 4:4:4 */
++/* two planes -- one Y, one Cb + Cr interleaved  */
++#define IPU_PIX_FMT_NV12    fourcc('N', 'V', '1', '2') /* 12  Y/CbCr 4:2:0  */
+ /*! @} */
+ /*! @name YUV Planar Formats */
+ /*! @{ */
+-- 
+1.5.4.4
+

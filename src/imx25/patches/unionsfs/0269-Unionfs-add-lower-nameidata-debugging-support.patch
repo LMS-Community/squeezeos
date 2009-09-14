@@ -1,0 +1,133 @@
+From 5fb79b4f26f03df31286926cd45e48cb85d5d68c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 00:44:44 -0400
+Subject: [PATCH] Unionfs: add lower nameidata debugging support
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c  |   20 ++++++++++++++++++++
+ fs/unionfs/dentry.c |    4 +++-
+ fs/unionfs/inode.c  |    8 +++++++-
+ fs/unionfs/union.h  |    4 ++++
+ 4 files changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 2d15fb0..9546a41 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -415,6 +415,26 @@ void __unionfs_check_file(const struct file *file,
+ 	__unionfs_check_dentry(dentry,fname,fxn,line);
+ }
+ 
++void __unionfs_check_nd(const struct nameidata *nd,
++			const char *fname, const char *fxn, int line)
++{
++	struct file *file;
++	int printed_caller = 0;
++
++	if (!nd)
++		return;
++	if (nd->flags & LOOKUP_OPEN) {
++		file = nd->intent.open.file;
++		if (file->f_path.dentry &&
++		    strcmp(file->f_dentry->d_sb->s_type->name, "unionfs")) {
++			PRINT_CALLER(fname, fxn, line);
++			printk(" CND1: lower_file of type %s\n",
++			       file->f_path.dentry->d_sb->s_type->name);
++			BUG();
++		}
++	}
++}
++
+ /* useful to track vfsmount leaks that could cause EBUSY on unmount */
+ void __show_branch_counts(const struct super_block *sb,
+ 			  const char *file, const char *fxn, int line)
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index d9bb199..b21f1e3 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -418,8 +418,10 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ 	unionfs_lock_dentry(dentry);
+ 	err = __unionfs_d_revalidate_chain(dentry, nd, false);
+ 	unionfs_unlock_dentry(dentry);
+-	if (err > 0) /* true==1: dentry is valid */
++	if (err > 0) { /* true==1: dentry is valid */
+ 		unionfs_check_dentry(dentry);
++		unionfs_check_nd(nd);
++	}
+ 
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index de78e26..f8b2c88 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -138,8 +138,10 @@ out:
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	unionfs_check_inode(parent);
+-	if (!err)
++	if (!err) {
+ 		unionfs_check_dentry(dentry->d_parent);
++		unionfs_check_nd(nd);
++	}
+ 	unionfs_check_dentry(dentry);
+ 	return err;
+ }
+@@ -186,6 +188,7 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 	unionfs_check_inode(parent);
+ 	unionfs_check_dentry(dentry);
+ 	unionfs_check_dentry(dentry->d_parent);
++	unionfs_check_nd(nd);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return ret;
+@@ -856,6 +859,7 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 
+ out:
+ 	unionfs_check_dentry(dentry);
++	unionfs_check_nd(nd);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return ERR_PTR(err);
+ }
+@@ -872,6 +876,7 @@ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 	unionfs_unlock_dentry(dentry);
+ 
+ 	unionfs_check_dentry(dentry);
++	unionfs_check_nd(nd);
+ 	kfree(nd_get_link(nd));
+ 	unionfs_read_unlock(dentry->d_sb);
+ }
+@@ -1002,6 +1007,7 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 
+ out:
+ 	unionfs_check_inode(inode);
++	unionfs_check_nd(nd);
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 178bdfc..870fe56 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -522,6 +522,8 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 	__FILE__,__FUNCTION__,__LINE__)
+ #define unionfs_check_file(f)	__unionfs_check_file((f),	\
+ 	__FILE__,__FUNCTION__,__LINE__)
++#define unionfs_check_nd(n)	__unionfs_check_nd((n),		\
++	__FILE__,__FUNCTION__,__LINE__)
+ #define show_branch_counts(sb)	__show_branch_counts((sb),	\
+ 	__FILE__,__FUNCTION__,__LINE__)
+ #define show_inode_times(i)	__show_inode_times((i),		\
+@@ -538,6 +540,8 @@ extern void __unionfs_check_dentry(const struct dentry *dentry,
+ 				   int line);
+ extern void __unionfs_check_file(const struct file *file,
+ 				 const char *fname, const char *fxn, int line);
++extern void __unionfs_check_nd(const struct nameidata *nd,
++			       const char *fname, const char *fxn, int line);
+ extern void __show_branch_counts(const struct super_block *sb,
+ 				 const char *file, const char *fxn, int line);
+ extern void __show_inode_times(const struct inode *inode,
+-- 
+1.5.4.3
+

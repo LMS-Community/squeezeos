@@ -1,0 +1,103 @@
+From a3ee48ba16aa2c9d64088b197f7f416342a6f0a1 Mon Sep 17 00:00:00 2001
+From: John Faith <jfaith@freescale.com>
+Date: Thu, 18 Sep 2008 18:51:33 -0700
+Subject: [PATCH] ENGR00096341 keypad: Add keypad mapping for imx25
+
+Add 4x4 keymapping array for keypad and initialize keypad in mxc_board_init.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    2 +-
+ arch/arm/mach-mx25/mx25_3stack.c        |   49 +++++++++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 3c5e455..2bf25cc 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -658,7 +658,7 @@ CONFIG_INPUT_KEYBOARD=y
+ # CONFIG_KEYBOARD_XTKBD is not set
+ # CONFIG_KEYBOARD_NEWTON is not set
+ # CONFIG_KEYBOARD_STOWAWAY is not set
+-# CONFIG_KEYBOARD_MXC is not set
++CONFIG_KEYBOARD_MXC=y
+ # CONFIG_INPUT_MOUSE is not set
+ # CONFIG_INPUT_JOYSTICK is not set
+ # CONFIG_INPUT_TABLET is not set
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index ef61b53..5e10c52 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -31,6 +31,7 @@
+ 
+ #include <asm/hardware.h>
+ #include <asm/irq.h>
++#include <asm/mach/keypad.h>
+ #include <asm/setup.h>
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+@@ -57,6 +58,53 @@ static void mxc_nop_release(struct device *dev)
+ 	/* Nothing */
+ }
+ 
++#if defined(CONFIG_KEYBOARD_MXC) || defined(CONFIG_KEYBOARD_MXC_MODULE)
++static u16 keymapping[16] = {
++	KEY_UP, KEY_DOWN, KEY_VOLUMEDOWN, KEY_HOME,
++	KEY_RIGHT, KEY_LEFT, KEY_ENTER, KEY_VOLUMEUP,
++	KEY_F6, KEY_F8, KEY_F9, KEY_F10,
++	KEY_F1, KEY_F2, KEY_F3, KEY_POWER,
++};
++
++static struct resource mxc_kpp_resources[] = {
++	[0] = {
++	       .start = MXC_INT_KPP,
++	       .end = MXC_INT_KPP,
++	       .flags = IORESOURCE_IRQ,
++	       }
++};
++
++static struct keypad_data keypad_plat_data = {
++	.rowmax = 4,
++	.colmax = 4,
++	.irq = MXC_INT_KPP,
++	.learning = 0,
++	.delay = 2,
++	.matrix = keymapping,
++};
++
++/* mxc keypad driver */
++static struct platform_device mxc_keypad_device = {
++	.name = "mxc_keypad",
++	.id = 0,
++	.num_resources = ARRAY_SIZE(mxc_kpp_resources),
++	.resource = mxc_kpp_resources,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &keypad_plat_data,
++		},
++};
++
++static void mxc_init_keypad(void)
++{
++	(void)platform_device_register(&mxc_keypad_device);
++}
++#else
++static inline void mxc_init_keypad(void)
++{
++}
++#endif
++
+ /* MTD NAND flash */
+ 
+ #if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)
+@@ -208,6 +256,7 @@ static void __init mxc_board_init(void)
+ 	mxc_gpio_init();
+ 	mx25_3stack_gpio_init();
+ 	early_console_setup(saved_command_line);
++	mxc_init_keypad();
+ #ifdef CONFIG_I2C
+ 	i2c_register_board_info(0, mxc_i2c_board_info,
+ 				ARRAY_SIZE(mxc_i2c_board_info));
+-- 
+1.5.4.4
+

@@ -1,0 +1,113 @@
+From 37e0b379db4c69b22dd60208276c4b745cc15908 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 22 Jul 2008 12:06:13 +0300
+Subject: [PATCH] UBIFS: remove unneeded function parameter
+
+Simplify 'ubifs_jnl_write_inode()' by removing the 'deletion'
+parameter which is not really needed because we may test
+inode->i_nlink and check whether this is a deletion or not.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/journal.c |   19 +++++++------------
+ fs/ubifs/super.c   |    4 ++--
+ fs/ubifs/ubifs.h   |    3 +--
+ 3 files changed, 10 insertions(+), 16 deletions(-)
+
+diff --git a/fs/ubifs/journal.c b/fs/ubifs/journal.c
+index 283155a..666ad82 100644
+--- a/fs/ubifs/journal.c
++++ b/fs/ubifs/journal.c
+@@ -750,30 +750,25 @@ out_free:
+  * ubifs_jnl_write_inode - flush inode to the journal.
+  * @c: UBIFS file-system description object
+  * @inode: inode to flush
+- * @deletion: inode has been deleted
+  *
+  * This function writes inode @inode to the journal. If the inode is
+  * synchronous, it also synchronizes the write-buffer. Returns zero in case of
+  * success and a negative error code in case of failure.
+  */
+-int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode,
+-			  int deletion)
++int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode)
+ {
+-	int err, len, lnum, offs, sync = 0;
++	int err, lnum, offs;
+ 	struct ubifs_ino_node *ino;
+ 	struct ubifs_inode *ui = ubifs_inode(inode);
++	int sync = 0, len = UBIFS_INO_NODE_SZ, last_reference = !inode->i_nlink;
+ 
+-	dbg_jnl("ino %lu%s", inode->i_ino,
+-		deletion ? " (last reference)" : "");
+-	if (deletion)
+-		ubifs_assert(inode->i_nlink == 0);
++	dbg_jnl("ino %lu, nlink %u", inode->i_ino, inode->i_nlink);
+ 
+-	len = UBIFS_INO_NODE_SZ;
+ 	/*
+ 	 * If the inode is being deleted, do not write the attached data. No
+ 	 * need to synchronize the write-buffer either.
+ 	 */
+-	if (!deletion) {
++	if (!last_reference) {
+ 		len += ui->data_len;
+ 		sync = IS_SYNC(inode);
+ 	}
+@@ -786,7 +781,7 @@ int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode,
+ 	if (err)
+ 		goto out_free;
+ 
+-	pack_inode(c, ino, inode, 1, deletion);
++	pack_inode(c, ino, inode, 1, last_reference);
+ 	err = write_head(c, BASEHD, ino, len, &lnum, &offs, sync);
+ 	if (err)
+ 		goto out_release;
+@@ -795,7 +790,7 @@ int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode,
+ 					  inode->i_ino);
+ 	release_head(c, BASEHD);
+ 
+-	if (deletion) {
++	if (last_reference) {
+ 		err = ubifs_tnc_remove_ino(c, inode->i_ino);
+ 		if (err)
+ 			goto out_ro;
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 82cb927..d5d64ae 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -315,7 +315,7 @@ static int ubifs_write_inode(struct inode *inode, int wait)
+ 	dbg_gen("inode %lu, mode %#x, nlink %u",
+ 		inode->i_ino, (int)inode->i_mode, inode->i_nlink);
+ 	if (inode->i_nlink) {
+-		err = ubifs_jnl_write_inode(c, inode, 0);
++		err = ubifs_jnl_write_inode(c, inode);
+ 		if (err)
+ 			ubifs_err("can't write inode %lu, error %d",
+ 				  inode->i_ino, err);
+@@ -350,7 +350,7 @@ static void ubifs_delete_inode(struct inode *inode)
+ 		goto out;
+ 
+ 	ui->ui_size = inode->i_size = 0;
+-	err = ubifs_jnl_write_inode(c, inode, 1);
++	err = ubifs_jnl_write_inode(c, inode);
+ 	if (err)
+ 		/*
+ 		 * Worst case we have a lost orphan inode wasting space, so a
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 82ac6d4..de83471 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1405,8 +1405,7 @@ int ubifs_jnl_update(struct ubifs_info *c, const struct inode *dir,
+ 		     int deletion, int xent);
+ int ubifs_jnl_write_data(struct ubifs_info *c, const struct inode *inode,
+ 			 const union ubifs_key *key, const void *buf, int len);
+-int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode,
+-			  int last_reference);
++int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode);
+ int ubifs_jnl_rename(struct ubifs_info *c, const struct inode *old_dir,
+ 		     const struct dentry *old_dentry,
+ 		     const struct inode *new_dir,
+-- 
+1.5.6.3
+

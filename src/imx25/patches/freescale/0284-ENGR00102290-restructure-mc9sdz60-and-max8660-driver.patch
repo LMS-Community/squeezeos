@@ -1,0 +1,3620 @@
+From 933ef5564665d276f10d3afada2d26396d7fdccc Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Mon, 22 Dec 2008 17:44:49 +0800
+Subject: [PATCH] ENGR00102290 restructure mc9sdz60 and max8660 driver
+
+restructure mc9sdz60 and max8660 pmic code to support one image for MX35
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig    |   14 +-
+ arch/arm/mach-mx35/Kconfig                 |    2 +-
+ arch/arm/mach-mx35/mx35_3stack.c           |    4 +-
+ arch/arm/mach-mx35/mx35_3stack_gpio.c      |    2 +-
+ arch/arm/mach-mx35/mx35_3stack_irq.c       |   25 +-
+ drivers/input/touchscreen/tsc2007.c        |    4 +-
+ drivers/media/video/mxc/capture/adv7180.c  |    4 +-
+ drivers/mmc/card/unifi_fs/fs_lx.c          |    1 -
+ drivers/mxc/Kconfig                        |    1 +
+ drivers/mxc/Makefile                       |    1 +
+ drivers/mxc/mcu_pmic/Kconfig               |   19 +
+ drivers/mxc/mcu_pmic/Makefile              |    8 +
+ drivers/mxc/mcu_pmic/max8660.c             |  154 +++++++
+ drivers/mxc/mcu_pmic/max8660.h             |   49 +++
+ drivers/mxc/mcu_pmic/mc9sdz60.c            |  102 +++++
+ drivers/mxc/mcu_pmic/mc9sdz60.h            |   71 +++
+ drivers/mxc/mcu_pmic/mcu_pmic_core.c       |  216 ++++++++++
+ drivers/mxc/mcu_pmic/mcu_pmic_gpio.c       |  132 ++++++
+ drivers/mxc/pmic/Kconfig                   |    8 -
+ drivers/mxc/pmic/Makefile                  |    1 -
+ drivers/mxc/pmic/core/Makefile             |    3 -
+ drivers/mxc/pmic/core/max8660.c            |  140 ------
+ drivers/mxc/pmic/core/max8660.h            |   45 --
+ drivers/mxc/pmic/core/mc9sdz60.c           |  105 -----
+ drivers/mxc/pmic/core/mc9sdz60.h           |   70 ---
+ drivers/mxc/pmic/core/mcu_pmic_core.c      |  425 ------------------
+ drivers/mxc/pmic/mc9sdz60/Kconfig          |   29 --
+ drivers/mxc/pmic/mc9sdz60/Makefile         |   10 -
+ drivers/mxc/pmic/mc9sdz60/mcu_pmic_event.c |  220 ----------
+ drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c  |  132 ------
+ drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c   |  644 ----------------------------
+ drivers/regulator/max8660/reg-max8660.c    |   68 ++--
+ drivers/video/mxc/mxcfb_claa_wvga.c        |    5 +-
+ include/asm-arm/arch-mxc/pmic_external.h   |  103 -----
+ include/linux/regulator/mcu_max8660-bus.h  |  102 +++++
+ sound/soc/codecs/ak4647.c                  |   34 +-
+ sound/soc/imx/imx-3stack-ak4647.c          |    2 +-
+ sound/soc/imx/imx-3stack-wm8580.c          |    2 +-
+ 38 files changed, 954 insertions(+), 2003 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index bcb1a7f..13d1eac 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Tue Sep 16 10:19:22 2008
++# Fri Dec 12 09:43:44 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -176,13 +176,15 @@ CONFIG_ARCH_MX35=y
+ # CONFIG_ARCH_MX51 is not set
+ # CONFIG_ARCH_MX3 is not set
+ # CONFIG_ARCH_MX27 is not set
++# CONFIG_ARCH_MX25 is not set
+ # CONFIG_ARCH_MX21 is not set
+ CONFIG_I2C_MXC_SELECT1=y
+ # CONFIG_I2C_MXC_SELECT2 is not set
+ CONFIG_MXC_SDMA_API=y
+-# CONFIG_SDMA_IRAM is not set
+ CONFIG_ARCH_MXC_HAS_NFC_V2=y
++CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ # CONFIG_I2C_MXC_SELECT3 is not set
++# CONFIG_SDMA_IRAM is not set
+ 
+ #
+ # MX35 Options
+@@ -195,7 +197,6 @@ CONFIG_MACH_MX35_3DS=y
+ #
+ # SDMA options
+ #
+-CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ 
+ #
+ # Device options
+@@ -940,6 +941,7 @@ CONFIG_VIDEO_MXC_IPU_CAMERA=y
+ # CONFIG_MXC_CAMERA_MC521DA is not set
+ # CONFIG_MXC_CAMERA_MICRON111 is not set
+ CONFIG_MXC_CAMERA_OV2640=m
++# CONFIG_MXC_CAMERA_OV3640 is not set
+ CONFIG_MXC_TVIN_ADV7180=m
+ CONFIG_MXC_IPU_PRP_VF_SDC=m
+ CONFIG_MXC_IPU_PRP_ENC=m
+@@ -1105,6 +1107,7 @@ CONFIG_SND_MXC_SOC_IRAM=y
+ CONFIG_SND_SOC_IMX_3STACK_AK4647=y
+ CONFIG_SND_SOC_IMX_3STACK_WM8580=y
+ # CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
++# CONFIG_SND_SOC_IMX_3STACK_SGTL5000 is not set
+ 
+ #
+ # ALSA SoC audio for Freescale SOCs
+@@ -1382,14 +1385,15 @@ CONFIG_MXC_IPU_PF=y
+ CONFIG_MXC_PMIC=y
+ # CONFIG_MXC_PMIC_MC13783 is not set
+ # CONFIG_MXC_PMIC_MC13892 is not set
++# CONFIG_MXC_PMIC_MC34704 is not set
+ CONFIG_MXC_PMIC_MC9SDZ60=y
+-CONFIG_MXC_PMIC_CHARDEV=y
++# CONFIG_MXC_PMIC_CHARDEV is not set
+ 
+ #
+ # MXC PMIC Client Drivers
+ #
+ # CONFIG_MXC_MC9SDZ60_ADC is not set
+-CONFIG_MXC_MC9SDZ60_RTC=y
++# CONFIG_MXC_MC9SDZ60_RTC is not set
+ CONFIG_MXC_MC9SDZ60_POWER=y
+ 
+ #
+diff --git a/arch/arm/mach-mx35/Kconfig b/arch/arm/mach-mx35/Kconfig
+index 31ddb26..628b86b 100644
+--- a/arch/arm/mach-mx35/Kconfig
++++ b/arch/arm/mach-mx35/Kconfig
+@@ -13,7 +13,7 @@ config MX35_OPTIONS
+ config MACH_MX35_3DS
+ 	bool "Support MX35 3STACK platforms"
+ 	default y
+-	select MXC_PSEUDO_IRQS if MXC_PMIC
++	select MXC_PSEUDO_IRQS if MXC_PMIC_MC9SDZ60
+ 	help
+ 	  Include support for MX35 3STACK platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 1822f52..53ce9c4 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -28,6 +28,7 @@
+ #include <linux/mtd/map.h>
+ #include <linux/mtd/partitions.h>
+ #include <linux/delay.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ 
+ #include <asm/mach/flash.h>
+ #endif
+@@ -41,7 +42,6 @@
+ #include <asm/arch/memory.h>
+ #include <asm/arch/gpio.h>
+ #include <asm/arch/mmc.h>
+-#include <asm/arch/pmic_external.h>
+ 
+ #include "board-mx35_3stack.h"
+ #include "crm_regs.h"
+@@ -718,7 +718,7 @@ static void __init mxc_init_gps(void)
+ static void pmic_power_off(void)
+ {
+ #ifdef CONFIG_MXC_PMIC_MC9SDZ60
+-	pmic_write_reg(REG_MCU_POWER_CTL, 0x10, 0x10);
++	mcu_pmic_write_reg(REG_MCU_POWER_CTL, 0x10, 0x10);
+ #endif
+ }
+ 
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index ce8a9e0..51cd5d9 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -15,10 +15,10 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/delay.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ #include <asm/io.h>
+ #include <asm/hardware.h>
+ #include <asm/arch/gpio.h>
+-#include <asm/arch/pmic_external.h>
+ #include "board-mx35_3stack.h"
+ #include "iomux.h"
+ 
+diff --git a/arch/arm/mach-mx35/mx35_3stack_irq.c b/arch/arm/mach-mx35/mx35_3stack_irq.c
+index 7ace232..0130b9b 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_irq.c
++++ b/arch/arm/mach-mx35/mx35_3stack_irq.c
+@@ -17,6 +17,7 @@
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
+ #include <linux/clk.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ 
+ #include <asm/hardware.h>
+ #include <asm/irq.h>
+@@ -27,7 +28,6 @@
+ #include <asm/mach/irq.h>
+ 
+ #include <asm/arch/gpio.h>
+-#include <asm/arch/pmic_external.h>
+ 
+ #include "board-mx35_3stack.h"
+ #include "iomux.h"
+@@ -242,11 +242,12 @@ static void mcu_event_handler(struct work_struct *work)
+ 
+ 	/* read int flags and ack int */
+ 	for (i = 0; i < 3; i++) {
+-		err = pmic_read_reg(REG_MCU_INT_FLAG_1, &flag1, 0xFFFFFFFF);
+-		err |= pmic_read_reg(REG_MCU_INT_FLAG_2, &flag2, 0xFFFFFFFF);
+-		err |= pmic_write_reg(REG_MCU_INT_FLAG_1, 0, 0xFFFFFFFF);
+-		err |= pmic_write_reg(REG_MCU_INT_FLAG_2, 0, 0xFFFFFFFF);
+-		if (err == PMIC_SUCCESS)
++		err = mcu_pmic_read_reg(REG_MCU_INT_FLAG_1, &flag1, 0xFFFFFFFF);
++		err |= mcu_pmic_read_reg(REG_MCU_INT_FLAG_2,
++			&flag2, 0xFFFFFFFF);
++		err |= mcu_pmic_write_reg(REG_MCU_INT_FLAG_1, 0, 0xFFFFFFFF);
++		err |= mcu_pmic_write_reg(REG_MCU_INT_FLAG_2, 0, 0xFFFFFFFF);
++		if (err == 0)
+ 			break;
+ 	}
+ 
+@@ -276,9 +277,9 @@ static void mcu_state_handler(struct work_struct *work)
+ 	event2 = pseudo_irq_enable >> MCU_INT_RTC;
+ 
+ 	for (i = 0; i < 3; i++) {
+-		err = pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
+-		err |= pmic_write_reg(REG_MCU_INT_ENABLE_2, event2, 0xFF);
+-		if (err == PMIC_SUCCESS)
++		err = mcu_pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
++		err |= mcu_pmic_write_reg(REG_MCU_INT_ENABLE_2, event2, 0xFF);
++		if (err == 0)
+ 			break;
+ 	}
+ 	if (i >= 3)
+@@ -334,9 +335,9 @@ static int mxc_pseudo_irq_suspend(struct platform_device *dev,
+ 	event2 = pseudo_irq_wakeup >> MCU_INT_RTC;
+ 
+ 	for (i = 0; i < 3; i++) {
+-		err = pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
+-		err |= pmic_write_reg(REG_MCU_INT_ENABLE_2, event2, 0xFF);
+-		if (err == PMIC_SUCCESS)
++		err = mcu_pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
++		err |= mcu_pmic_write_reg(REG_MCU_INT_ENABLE_2, event2, 0xFF);
++		if (err == 0)
+ 			break;
+ 	}
+ 	pseudo_suspend = 1;
+diff --git a/drivers/input/touchscreen/tsc2007.c b/drivers/input/touchscreen/tsc2007.c
+index c089e8a..d47b4ec 100644
+--- a/drivers/input/touchscreen/tsc2007.c
++++ b/drivers/input/touchscreen/tsc2007.c
+@@ -337,8 +337,10 @@ static int tsc2007_i2c_probe(struct i2c_client *client, const struct i2c_device_
+ 			data->penup_threshold = 10;
+ 
+ 		data->vdd_reg = regulator_get(&client->dev, tsc_data->vdd_reg);
+-		if (data->vdd_reg)
++		if (!IS_ERR(data->vdd_reg))
+ 			regulator_enable(data->vdd_reg);
++		else
++			data->vdd_reg = NULL;
+ 		if (tsc_data->active)
+ 			tsc_data->active();
+ 	} else {
+diff --git a/drivers/media/video/mxc/capture/adv7180.c b/drivers/media/video/mxc/capture/adv7180.c
+index 478482b..29e723f 100644
+--- a/drivers/media/video/mxc/capture/adv7180.c
++++ b/drivers/media/video/mxc/capture/adv7180.c
+@@ -30,14 +30,12 @@
+ #include <linux/wait.h>
+ #include <linux/videodev2.h>
+ #include <linux/workqueue.h>
+-#include "asm-arm/arch-mxc/pmic_external.h"
+ #include <media/v4l2-int-device.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ #include "mxc_v4l2_capture.h"
+ 
+ extern void gpio_sensor_active(void);
+ extern void gpio_sensor_inactive(void);
+-extern PMIC_STATUS pmic_gpio_set_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+-					 unsigned int val);
+ 
+ static int adv7180_probe(struct i2c_client *adapter,
+ 			 const struct i2c_device_id *id);
+diff --git a/drivers/mmc/card/unifi_fs/fs_lx.c b/drivers/mmc/card/unifi_fs/fs_lx.c
+index 4534e87..c2e1d68 100644
+--- a/drivers/mmc/card/unifi_fs/fs_lx.c
++++ b/drivers/mmc/card/unifi_fs/fs_lx.c
+@@ -36,7 +36,6 @@
+ #include <linux/clk.h>
+ #include <linux/err.h>
+ 
+-#include <asm/arch/pmic_power.h>
+ #include <asm/arch/mmc.h>
+ #include <asm/arch/gpio.h>
+ 
+diff --git a/drivers/mxc/Kconfig b/drivers/mxc/Kconfig
+index 61a80fd..60bbfb2 100644
+--- a/drivers/mxc/Kconfig
++++ b/drivers/mxc/Kconfig
+@@ -21,6 +21,7 @@ source "drivers/mxc/ipu3/Kconfig"
+ source "drivers/mxc/ssi/Kconfig"
+ source "drivers/mxc/dam/Kconfig"
+ source "drivers/mxc/pmic/Kconfig"
++source "drivers/mxc/mcu_pmic/Kconfig"
+ source "drivers/mxc/pm/Kconfig"
+ source "drivers/mxc/security/Kconfig"
+ source "drivers/mxc/hmp4e/Kconfig"
+diff --git a/drivers/mxc/Makefile b/drivers/mxc/Makefile
+index e372626..e0d0706 100644
+--- a/drivers/mxc/Makefile
++++ b/drivers/mxc/Makefile
+@@ -3,6 +3,7 @@ obj-$(CONFIG_MXC_IPU_V3)			+= ipu3/
+ obj-$(CONFIG_MXC_SSI)               	+= ssi/
+ obj-$(CONFIG_MXC_DAM)               	+= dam/
+ 
++obj-$(CONFIG_MXC_PMIC_MC9SDZ60)		+= mcu_pmic/
+ obj-$(CONFIG_MXC_PMIC)			+= pmic/
+ 
+ obj-$(CONFIG_MXC_DPTC)			+= pm/
+diff --git a/drivers/mxc/mcu_pmic/Kconfig b/drivers/mxc/mcu_pmic/Kconfig
+new file mode 100644
+index 0000000..c9d68fe
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/Kconfig
+@@ -0,0 +1,19 @@
++#
++# PMIC Modules configuration
++#
++
++config MXC_PMIC_MC9SDZ60
++	tristate "MC9sDZ60 PMIC"
++	depends on ARCH_MXC && I2C
++	  ---help---
++	  This is the MXC MC9sDZ60(MCU) PMIC support.
++
++config MXC_MC9SDZ60_RTC
++	tristate "MC9SDZ60 Real Time Clock (RTC) support"
++	depends on MXC_PMIC_MC9SDZ60
++	---help---
++	This is the MC9SDZ60 RTC module driver. This module provides kernel API
++	for RTC part of MC9SDZ60.
++	If you want MC9SDZ60 RTC support, you should say Y here
++	
++
+diff --git a/drivers/mxc/mcu_pmic/Makefile b/drivers/mxc/mcu_pmic/Makefile
+new file mode 100644
+index 0000000..328ec4a
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/Makefile
+@@ -0,0 +1,8 @@
++#
++# Makefile for the mc9sdz60 pmic drivers.
++#
++
++obj-$(CONFIG_MXC_PMIC_MC9SDZ60) += pmic_mc9sdz60_mod.o
++pmic_mc9sdz60_mod-objs := mcu_pmic_core.o max8660.o mc9sdz60.o mcu_pmic_gpio.o
++
++
+diff --git a/drivers/mxc/mcu_pmic/max8660.c b/drivers/mxc/mcu_pmic/max8660.c
+new file mode 100644
+index 0000000..99ed4f1
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/max8660.c
+@@ -0,0 +1,154 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file max8660.c
++ * @brief Driver for max8660
++ *
++ * @ingroup pmic
++ */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/spinlock.h>
++#include <linux/proc_fs.h>
++#include <linux/i2c.h>
++#include <linux/regulator/mcu_max8660-bus.h>
++#include <asm/arch/clock.h>
++#include <asm/uaccess.h>
++#include "max8660.h"
++
++/* I2C bus id and device address of mcu */
++#define I2C1_BUS	0
++#define MAX8660_I2C_ADDR				0x68
++
++static struct i2c_client *max8660_i2c_client;
++
++    /* reg names for max8660
++       REG_MAX8660_OUTPUT_ENABLE_1,
++       REG_MAX8660_OUTPUT_ENABLE_2,
++       REG_MAX8660_VOLT__CHANGE_1,
++       REG_MAX8660_V3_TARGET_VOLT_1,
++       REG_MAX8660_V3_TARGET_VOLT_2,
++       REG_MAX8660_V4_TARGET_VOLT_1,
++       REG_MAX8660_V4_TARGET_VOLT_2,
++       REG_MAX8660_V5_TARGET_VOLT_1,
++       REG_MAX8660_V5_TARGET_VOLT_2,
++       REG_MAX8660_V6V7_TARGET_VOLT,
++       REG_MAX8660_FORCE_PWM
++     */
++
++    /* save down the reg values for the device is write only */
++static u8 max8660_reg_value_table[] =
++    { 0x0, 0x0, 0x0, 0x17, 0x17, 0x1F, 0x1F, 0x04, 0x04, 0x0, 0x0
++};
++static int max8660_dev_present;
++
++int is_max8660_present(void)
++{
++	return max8660_dev_present;
++}
++
++int max8660_get_buffered_reg_val(int reg_name, u8 *value)
++{
++	if (!max8660_dev_present)
++		return -1;
++	/* outof range */
++	if (reg_name < REG_MAX8660_OUTPUT_ENABLE_1
++	    || reg_name > REG_MAX8660_FORCE_PWM)
++		return -1;
++	*value =
++	    max8660_reg_value_table[reg_name - REG_MAX8660_OUTPUT_ENABLE_1];
++	return 0;
++}
++int max8660_save_buffered_reg_val(int reg_name, u8 value)
++{
++
++	/* outof range */
++	if (reg_name < REG_MAX8660_OUTPUT_ENABLE_1
++	    || reg_name > REG_MAX8660_FORCE_PWM)
++		return -1;
++	max8660_reg_value_table[reg_name - REG_MAX8660_OUTPUT_ENABLE_1] = value;
++	return 0;
++}
++
++int max8660_write_reg(u8 reg, u8 value)
++{
++	if (max8660_dev_present && (i2c_smbus_write_byte_data(
++		max8660_i2c_client, reg, value) >= 0))
++		return 0;
++	return -1;
++}
++
++/*!
++ * max8660 I2C attach function
++ *
++ * @param adapter            struct i2c_client *
++ * @return  0 for max8660 successfully detected
++ */
++static int max8660_probe(struct i2c_client *client,
++			const struct i2c_device_id *id)
++{
++	int retval;
++	max8660_i2c_client = client;
++	retval = i2c_smbus_write_byte_data(max8660_i2c_client,
++				MAX8660_OUTPUT_ENABLE_1, 0);
++	if (retval == 0) {
++		max8660_dev_present = 1;
++		pr_info("max8660 probed !\n");
++	} else {
++		max8660_dev_present = 0;
++		pr_info("max8660 not detected!\n");
++	}
++	return retval;
++}
++
++/*!
++ * max8660 I2C detach function
++ *
++ * @param client            struct i2c_client *
++ * @return  0
++ */
++static int max8660_remove(struct i2c_client *client)
++{
++	return 0;
++}
++
++static const struct i2c_device_id max8660_id[] = {
++	{ "max8660", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, max8660_id);
++
++static struct i2c_driver max8660_i2c_driver = {
++	.driver = {
++		   .owner = THIS_MODULE,
++		   .name = "max8660",},
++	.probe = max8660_probe,
++	.remove = max8660_remove,
++	.id_table = max8660_id,
++};
++
++/* called by pmic core when init*/
++int max8660_init(void)
++{
++	int err;
++	err = i2c_add_driver(&max8660_i2c_driver);
++	return err;
++}
++void max8660_exit(void)
++{
++	i2c_del_driver(&max8660_i2c_driver);
++}
+diff --git a/drivers/mxc/mcu_pmic/max8660.h b/drivers/mxc/mcu_pmic/max8660.h
+new file mode 100644
+index 0000000..5677846
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/max8660.h
+@@ -0,0 +1,49 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file max8660.h
++ * @brief Driver for max8660
++ *
++ * @ingroup pmic
++ */
++#ifndef _MAX8660_H_
++#define _MAX8660_H_
++
++#ifdef __KERNEL__
++
++#define MAX8660_OUTPUT_ENABLE_1	0x10
++#define MAX8660_OUTPUT_ENABLE_2	0x12
++#define MAX8660_VOLT_CHANGE_CONTROL		0x20
++#define MAX8660_V3_TARGET_VOLT_1	0x23
++#define MAX8660_V3_TARGET_VOLT_2	0x24
++#define MAX8660_V4_TARGET_VOLT_1	0x29
++#define MAX8660_V4_TARGET_VOLT_2	0x2A
++#define MAX8660_V5_TARGET_VOLT_1	0x32
++#define MAX8660_V5_TARGET_VOLT_2	0x33
++#define MAX8660_V6V7_TARGET_VOLT	0x39
++#define MAX8660_FORCE_PWM			0x80
++
++int is_max8660_present(void);
++int max8660_write_reg(u8 reg, u8 value);
++int max8660_save_buffered_reg_val(int reg_name, u8 value);
++int max8660_get_buffered_reg_val(int reg_name, u8 *value);
++int max8660_init(void);
++void max8660_exit(void);
++
++extern int reg_max8660_probe(void);
++extern int reg_max8660_remove(void);
++
++#endif				/* __KERNEL__ */
++
++#endif				/* _MAX8660_H_ */
+diff --git a/drivers/mxc/mcu_pmic/mc9sdz60.c b/drivers/mxc/mcu_pmic/mc9sdz60.c
+new file mode 100644
+index 0000000..7d8c1a2
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/mc9sdz60.c
+@@ -0,0 +1,102 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++    /*!
++     * @file mc9sdz60.c
++     * @brief Driver for MC9sdz60
++     *
++     * @ingroup pmic
++     */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/spinlock.h>
++#include <linux/proc_fs.h>
++#include <linux/i2c.h>
++
++#include <asm/arch/clock.h>
++#include <asm/uaccess.h>
++#include "mc9sdz60.h"
++
++/* I2C bus id and device address of mcu */
++#define I2C1_BUS	0
++#define MC9SDZ60_I2C_ADDR	0xD2	/* 7bits I2C address */
++static struct i2c_client *mc9sdz60_i2c_client;
++
++int mc9sdz60_read_reg(u8 reg, u8 *value)
++{
++	*value = (u8) i2c_smbus_read_byte_data(mc9sdz60_i2c_client, reg);
++	return 0;
++}
++
++int mc9sdz60_write_reg(u8 reg, u8 value)
++{
++	if (i2c_smbus_write_byte_data(mc9sdz60_i2c_client, reg, value) < 0)
++		return -1;
++	return 0;
++}
++
++/*!
++ * mc9sdz60 I2C attach function
++ *
++ * @param adapter            struct i2c_adapter *
++ * @return  0
++ */
++static int mc9sdz60_probe(struct i2c_client *client,
++			const struct i2c_device_id *id)
++{
++	mc9sdz60_i2c_client = client;
++	return 0;
++}
++
++/*!
++ * mc9sdz60 I2C detach function
++ *
++ * @param client            struct i2c_client *
++ * @return  0
++ */
++static int mc9sdz60_remove(struct i2c_client *client)
++{
++	return 0;
++}
++
++static const struct i2c_device_id mc9sdz60_id[] = {
++	{ "mc9sdz60", 0 },
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, mc9sdz60_id);
++
++static struct i2c_driver mc9sdz60_i2c_driver = {
++	.driver = {.owner = THIS_MODULE,
++		   .name = "mc9sdz60",
++		   },
++	.probe = mc9sdz60_probe,
++	.remove = mc9sdz60_remove,
++	.id_table = mc9sdz60_id,
++};
++
++#define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
++#define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
++
++int mc9sdz60_init(void)
++{
++	int err;
++	err = i2c_add_driver(&mc9sdz60_i2c_driver);
++	return err;
++}
++void mc9sdz60_exit(void)
++{
++	i2c_del_driver(&mc9sdz60_i2c_driver);
++}
+diff --git a/drivers/mxc/mcu_pmic/mc9sdz60.h b/drivers/mxc/mcu_pmic/mc9sdz60.h
+new file mode 100644
+index 0000000..0dca5df
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/mc9sdz60.h
+@@ -0,0 +1,71 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file mc9sdz60.h
++ * @brief Driver for mc9sdz60
++ *
++ * @ingroup pmic
++ */
++#ifndef _MC9SDZ60_H_
++#define _MC9SDZ60_H_
++
++#define MCU_VERSION	0x00
++/*#define Reserved	0x01*/
++#define MCU_SECS		0x02
++#define MCU_MINS		0x03
++#define MCU_HRS			0x04
++#define MCU_DAY			0x05
++#define MCU_DATE		0x06
++#define MCU_MONTH		0x07
++#define MCU_YEAR		0x08
++
++#define MCU_ALARM_SECS	0x09
++#define MCU_ALARM_MINS	0x0A
++#define MCU_ALARM_HRS	0x0B
++/* #define Reserved	0x0C*/
++/* #define Reserved	0x0D*/
++#define MCU_TS_CONTROL	0x0E
++#define MCU_X_LOW	0x0F
++#define MCU_Y_LOW	0x10
++#define MCU_XY_HIGH	0x11
++#define MCU_X_LEFT_LOW	0x12
++#define MCU_X_LEFT_HIGH	0x13
++#define MCU_X_RIGHT	0x14
++#define MCU_Y_TOP_LOW	0x15
++#define MCU_Y_TOP_HIGH	0x16
++#define MCU_Y_BOTTOM	0x17
++/* #define Reserved	0x18*/
++/* #define Reserved	0x19*/
++#define MCU_RESET_1	0x1A
++#define MCU_RESET_2	0x1B
++#define MCU_POWER_CTL	0x1C
++#define MCU_DELAY_CONFIG	0x1D
++/* #define Reserved	0x1E */
++/* #define Reserved	0x1F */
++#define MCU_GPIO_1	0x20
++#define MCU_GPIO_2	0x21
++#define MCU_KPD_1	0x22
++#define MCU_KPD_2	0x23
++#define MCU_KPD_CONTROL	0x24
++#define MCU_INT_ENABLE_1	0x25
++#define MCU_INT_ENABLE_2	0x26
++#define MCU_INT_FLAG_1	0x27
++#define MCU_INT_FLAG_2	0x28
++#define MCU_DES_FLAG		0x29
++int mc9sdz60_read_reg(u8 reg, u8 *value);
++int mc9sdz60_write_reg(u8 reg, u8 value);
++int mc9sdz60_init(void);
++void mc9sdz60_exit(void);
++
++#endif	/* _MC9SDZ60_H_ */
++
+diff --git a/drivers/mxc/mcu_pmic/mcu_pmic_core.c b/drivers/mxc/mcu_pmic/mcu_pmic_core.c
+new file mode 100644
+index 0000000..01bb0f3
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/mcu_pmic_core.c
+@@ -0,0 +1,216 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file mc9sdz60/mcu_pmic_core.c
++ * @brief This is the main file of mc9sdz60 Power Control driver.
++ *
++ * @ingroup PMIC_POWER
++ */
++
++/*
++ * Includes
++ */
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/platform_device.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/regulator/mcu_max8660-bus.h>
++#include <asm/ioctl.h>
++#include <asm/uaccess.h>
++#include <asm/arch/gpio.h>
++
++#include "mc9sdz60.h"
++#include "max8660.h"
++
++/* bitfield macros for mcu pmic*/
++#define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
++#define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
++
++
++/* map reg names (enum pmic_reg in pmic_external.h) to real addr*/
++const static u8 mcu_pmic_reg_addr_table[] = {
++	MCU_VERSION,
++	MCU_SECS,
++	MCU_MINS,
++	MCU_HRS,
++	MCU_DAY,
++	MCU_DATE,
++	MCU_MONTH,
++	MCU_YEAR,
++	MCU_ALARM_SECS,
++	MCU_ALARM_MINS,
++	MCU_ALARM_HRS,
++	MCU_TS_CONTROL,
++	MCU_X_LOW,
++	MCU_Y_LOW,
++	MCU_XY_HIGH,
++	MCU_X_LEFT_LOW,
++	MCU_X_LEFT_HIGH,
++	MCU_X_RIGHT,
++	MCU_Y_TOP_LOW,
++	MCU_Y_TOP_HIGH,
++	MCU_Y_BOTTOM,
++	MCU_RESET_1,
++	MCU_RESET_2,
++	MCU_POWER_CTL,
++	MCU_DELAY_CONFIG,
++	MCU_GPIO_1,
++	MCU_GPIO_2,
++	MCU_KPD_1,
++	MCU_KPD_2,
++	MCU_KPD_CONTROL,
++	MCU_INT_ENABLE_1,
++	MCU_INT_ENABLE_2,
++	MCU_INT_FLAG_1,
++	MCU_INT_FLAG_2,
++	MCU_DES_FLAG,
++	MAX8660_OUTPUT_ENABLE_1,
++	MAX8660_OUTPUT_ENABLE_2,
++	MAX8660_VOLT_CHANGE_CONTROL,
++	MAX8660_V3_TARGET_VOLT_1,
++	MAX8660_V3_TARGET_VOLT_2,
++	MAX8660_V4_TARGET_VOLT_1,
++	MAX8660_V4_TARGET_VOLT_2,
++	MAX8660_V5_TARGET_VOLT_1,
++	MAX8660_V5_TARGET_VOLT_2,
++	MAX8660_V6V7_TARGET_VOLT,
++	MAX8660_FORCE_PWM
++};
++
++static int mcu_pmic_read(int reg_num, unsigned int *reg_val)
++{
++	int ret;
++	u8 value = 0;
++	/* mcu ops */
++	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_DES_FLAG)
++		ret = mc9sdz60_read_reg(mcu_pmic_reg_addr_table[reg_num],
++					&value);
++	else if (reg_num >= REG_MAX8660_OUTPUT_ENABLE_1
++		   && reg_num <= REG_MAX8660_FORCE_PWM)
++		ret = max8660_get_buffered_reg_val(reg_num, &value);
++	else
++		return -1;
++
++	if (ret < 0)
++		return -1;
++	*reg_val = value;
++
++	return 0;
++}
++
++static int mcu_pmic_write(int reg_num, const unsigned int reg_val)
++{
++	int ret;
++	u8 value = reg_val;
++	/* mcu ops */
++	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_DES_FLAG) {
++
++		ret =
++		    mc9sdz60_write_reg(mcu_pmic_reg_addr_table[reg_num], value);
++		if (ret < 0)
++			return -1;
++	} else if (reg_num >= REG_MAX8660_OUTPUT_ENABLE_1
++		   && reg_num <= REG_MAX8660_FORCE_PWM) {
++		ret =
++		    max8660_write_reg(mcu_pmic_reg_addr_table[reg_num], value);
++
++		if (ret < 0)
++			return -1;
++
++		ret = max8660_save_buffered_reg_val(reg_num, value);
++	} else
++		return -1;
++
++	return 0;
++}
++
++int mcu_pmic_read_reg(int reg, unsigned int *reg_value,
++			  unsigned int reg_mask)
++{
++	int ret = 0;
++	unsigned int temp = 0;
++
++	ret = mcu_pmic_read(reg, &temp);
++	if (ret != 0)
++		return -1;
++	*reg_value = (temp & reg_mask);
++
++	pr_debug("Read REG[ %d ] = 0x%x\n", reg, *reg_value);
++
++	return ret;
++}
++
++
++int mcu_pmic_write_reg(int reg, unsigned int reg_value,
++			   unsigned int reg_mask)
++{
++	int ret = 0;
++	unsigned int temp = 0;
++
++	ret = mcu_pmic_read(reg, &temp);
++	if (ret != 0)
++		return -1;
++	temp = (temp & (~reg_mask)) | reg_value;
++
++	ret = mcu_pmic_write(reg, temp);
++	if (ret != 0)
++		return -1;
++
++	pr_debug("Write REG[ %d ] = 0x%x\n", reg, reg_value);
++
++	return ret;
++}
++
++static int __init mcu_pmic_init(void)
++{
++	int err;
++
++	/* init chips */
++	err = max8660_init();
++	if (err)
++		goto fail1;
++
++	err = mc9sdz60_init();
++	if (err)
++		goto fail1;
++
++	if (is_max8660_present()) {
++		pr_info("max8660 is present, reg_max8660_probe\n");
++		reg_max8660_probe();
++	} else
++		pr_debug("max8660 is not present\n");
++	pr_info("mcu_pmic_init completed!\n");
++	return 0;
++
++fail1:
++	pr_err("mcu_pmic_init failed!\n");
++	return err;
++}
++
++static void __exit mcu_pmic_exit(void)
++{
++	reg_max8660_remove();
++	mc9sdz60_exit();
++	max8660_exit();
++}
++
++subsys_initcall_sync(mcu_pmic_init);
++module_exit(mcu_pmic_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("mcu pmic driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mxc/mcu_pmic/mcu_pmic_gpio.c b/drivers/mxc/mcu_pmic/mcu_pmic_gpio.c
+new file mode 100644
+index 0000000..69718ac
+--- /dev/null
++++ b/drivers/mxc/mcu_pmic/mcu_pmic_gpio.c
+@@ -0,0 +1,132 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file mc9sdz60/mcu_pmic_gpio.c
++ * @brief This is the main file of mc9sdz60 Power Control driver.
++ *
++ * @ingroup PMIC_POWER
++ */
++
++/*
++ * Includes
++ */
++#include <linux/platform_device.h>
++#include <linux/regulator/mcu_max8660-bus.h>
++#include <asm/arch-mxc/pmic_status.h>
++#include <asm/ioctl.h>
++
++#define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
++#define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
++
++int pmic_gpio_set_bit_val(int reg, unsigned int bit,
++				  unsigned int val)
++{
++	int reg_name;
++	u8 reg_mask = 0;
++
++	if (bit > 7)
++		return -1;
++
++	switch (reg) {
++	case MCU_GPIO_REG_RESET_1:
++		reg_name = REG_MCU_RESET_1;
++		break;
++	case MCU_GPIO_REG_RESET_2:
++		reg_name = REG_MCU_RESET_2;
++		break;
++	case MCU_GPIO_REG_POWER_CONTROL:
++		reg_name = REG_MCU_POWER_CTL;
++		break;
++	case MCU_GPIO_REG_GPIO_CONTROL_1:
++		reg_name = REG_MCU_GPIO_1;
++		break;
++	case MCU_GPIO_REG_GPIO_CONTROL_2:
++		reg_name = REG_MCU_GPIO_2;
++		break;
++	default:
++		return -1;
++	}
++
++	SET_BIT_IN_BYTE(reg_mask, bit);
++	if (0 == val)
++		CHECK_ERROR(mcu_pmic_write_reg(reg_name, 0, reg_mask));
++	else
++		CHECK_ERROR(mcu_pmic_write_reg(reg_name, reg_mask, reg_mask));
++
++	return 0;
++}
++EXPORT_SYMBOL(pmic_gpio_set_bit_val);
++
++int pmic_gpio_get_bit_val(int reg, unsigned int bit,
++				  unsigned int *val)
++{
++	int reg_name;
++	unsigned int reg_read_val;
++	u8 reg_mask = 0;
++
++	if (bit > 7)
++		return -1;
++
++	switch (reg) {
++	case MCU_GPIO_REG_RESET_1:
++		reg_name = REG_MCU_RESET_1;
++		break;
++	case MCU_GPIO_REG_RESET_2:
++		reg_name = REG_MCU_RESET_2;
++		break;
++	case MCU_GPIO_REG_POWER_CONTROL:
++		reg_name = REG_MCU_POWER_CTL;
++		break;
++	case MCU_GPIO_REG_GPIO_CONTROL_1:
++		reg_name = REG_MCU_GPIO_1;
++		break;
++	case MCU_GPIO_REG_GPIO_CONTROL_2:
++		reg_name = REG_MCU_GPIO_2;
++		break;
++	default:
++		return -1;
++	}
++
++	SET_BIT_IN_BYTE(reg_mask, bit);
++	CHECK_ERROR(mcu_pmic_read_reg(reg_name, &reg_read_val, reg_mask));
++	if (0 == reg_read_val)
++		*val = 0;
++	else
++		*val = 1;
++
++	return 0;
++}
++EXPORT_SYMBOL(pmic_gpio_get_bit_val);
++
++int pmic_gpio_get_designation_bit_val(unsigned int bit,
++					unsigned int *val)
++{
++	unsigned int reg_read_val;
++	u8 reg_mask = 0;
++
++	if (bit > 7)
++		return -1;
++
++	SET_BIT_IN_BYTE(reg_mask, bit);
++	CHECK_ERROR(
++		mcu_pmic_read_reg(REG_MCU_DES_FLAG, &reg_read_val, reg_mask));
++	if (0 == reg_read_val)
++		*val = 0;
++	else
++		*val = 1;
++
++	return 0;
++}
++EXPORT_SYMBOL(pmic_gpio_get_designation_bit_val);
++
+diff --git a/drivers/mxc/pmic/Kconfig b/drivers/mxc/pmic/Kconfig
+index a0e853c..d56b344 100644
+--- a/drivers/mxc/pmic/Kconfig
++++ b/drivers/mxc/pmic/Kconfig
+@@ -30,13 +30,6 @@ config MXC_PMIC_MC34704
+ 	  ---help---
+ 	  This is the MXC MC34704 PMIC support.
+ 
+-config MXC_PMIC_MC9SDZ60
+-	tristate "MC9sDZ60 PMIC"
+-	depends on ARCH_MXC && I2C
+-	select MXC_PMIC
+-	  ---help---
+-	  This is the MXC MC9sDZ60(MCU) PMIC support.
+-
+ config MXC_PMIC_CHARDEV
+ 	tristate "MXC PMIC device interface"
+ 	depends on MXC_PMIC
+@@ -52,6 +45,5 @@ comment "MXC PMIC Client Drivers"
+ source "drivers/mxc/pmic/mc13783/Kconfig"
+ 
+ source "drivers/mxc/pmic/mc13892/Kconfig"
+-source "drivers/mxc/pmic/mc9sdz60/Kconfig"
+ 
+ endmenu
+diff --git a/drivers/mxc/pmic/Makefile b/drivers/mxc/pmic/Makefile
+index 8908576..ef58a58 100644
+--- a/drivers/mxc/pmic/Makefile
++++ b/drivers/mxc/pmic/Makefile
+@@ -5,5 +5,4 @@
+ obj-y				+= core/
+ obj-$(CONFIG_MXC_PMIC_MC13783)	+= mc13783/
+ obj-$(CONFIG_MXC_PMIC_MC13892)	+= mc13892/
+-obj-$(CONFIG_MXC_PMIC_MC9SDZ60) += mc9sdz60/
+ 
+diff --git a/drivers/mxc/pmic/core/Makefile b/drivers/mxc/pmic/core/Makefile
+index d196f80..a6c47ff 100644
+--- a/drivers/mxc/pmic/core/Makefile
++++ b/drivers/mxc/pmic/core/Makefile
+@@ -4,9 +4,6 @@
+ obj-$(CONFIG_MXC_PMIC_MC13783) += pmic_mc13783_mod.o
+ pmic_mc13783_mod-objs := pmic_external.o pmic_event.o pmic_core_spi.o mc13783.o
+ 
+-obj-$(CONFIG_MXC_PMIC_MC9SDZ60) += pmic_mc9sdz60_mod.o
+-pmic_mc9sdz60_mod-objs := pmic_external.o pmic_event.o mcu_pmic_core.o max8660.o mc9sdz60.o
+-
+ obj-$(CONFIG_MXC_PMIC_MC13892) += pmic_mc13892_mod.o
+ pmic_mc13892_mod-objs := pmic_external.o pmic_event.o pmic_core_i2c.o mc13892.o
+ 
+diff --git a/drivers/mxc/pmic/core/max8660.c b/drivers/mxc/pmic/core/max8660.c
+deleted file mode 100644
+index bdffd66..0000000
+--- a/drivers/mxc/pmic/core/max8660.c
++++ /dev/null
+@@ -1,140 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file max8660.c
+- * @brief Driver for max8660
+- *
+- * @ingroup pmic
+- */
+-
+-#include <linux/kernel.h>
+-#include <linux/module.h>
+-#include <linux/init.h>
+-#include <linux/delay.h>
+-#include <linux/spinlock.h>
+-#include <linux/proc_fs.h>
+-#include <linux/i2c.h>
+-#include <asm/arch/clock.h>
+-#include <asm/uaccess.h>
+-#include <asm/arch/pmic_external.h>
+-#include "max8660.h"
+-
+-/* I2C bus id and device address of mcu */
+-#define I2C1_BUS	0
+-#define MAX8660_I2C_ADDR				0x68
+-
+-static struct i2c_client *max8660_i2c_client;
+-
+-    /* reg names for max8660
+-       REG_MAX8660_OUTPUT_ENABLE_1,
+-       REG_MAX8660_OUTPUT_ENABLE_2,
+-       REG_MAX8660_VOLT__CHANGE_1,
+-       REG_MAX8660_V3_TARGET_VOLT_1,
+-       REG_MAX8660_V3_TARGET_VOLT_2,
+-       REG_MAX8660_V4_TARGET_VOLT_1,
+-       REG_MAX8660_V4_TARGET_VOLT_2,
+-       REG_MAX8660_V5_TARGET_VOLT_1,
+-       REG_MAX8660_V5_TARGET_VOLT_2,
+-       REG_MAX8660_V6V7_TARGET_VOLT,
+-       REG_MAX8660_FORCE_PWM
+-     */
+-
+-    /* save down the reg values for the device is write only */
+-static u8 max8660_reg_value_table[] =
+-    { 0x0, 0x0, 0x0, 0x17, 0x17, 0x1F, 0x1F, 0x04, 0x04, 0x0, 0x0
+-};
+-int max8660_get_buffered_reg_val(int reg_name, u8 *value)
+-{
+-
+-	/* outof range */
+-	if (reg_name < REG_MAX8660_OUTPUT_ENABLE_1
+-	    || reg_name > REG_MAX8660_FORCE_PWM) {
+-		return -1;
+-	}
+-	*value =
+-	    max8660_reg_value_table[reg_name - REG_MAX8660_OUTPUT_ENABLE_1];
+-	return 0;
+-}
+-int max8660_save_buffered_reg_val(int reg_name, u8 value)
+-{
+-
+-	/* outof range */
+-	if (reg_name < REG_MAX8660_OUTPUT_ENABLE_1
+-	    || reg_name > REG_MAX8660_FORCE_PWM) {
+-		return -1;
+-	}
+-	max8660_reg_value_table[reg_name - REG_MAX8660_OUTPUT_ENABLE_1] = value;
+-	return 0;
+-}
+-
+-int max8660_write_reg(u8 reg, u8 value)
+-{
+-	if (i2c_smbus_write_byte_data(max8660_i2c_client, reg, value) < 0) {
+-		return -1;
+-	}
+-	return 0;
+-}
+-
+-/*!
+- * max8660 I2C attach function
+- *
+- * @param adapter            struct i2c_client *
+- * @return  Always 0 because max8660 is write-only and can not be detected
+- */
+-static int max8660_probe(struct i2c_client *client, const struct i2c_device_id *id)
+-{
+-	max8660_i2c_client = client;
+-	return 0;
+-}
+-
+-/*!
+- * max8660 I2C detach function
+- *
+- * @param client            struct i2c_client *
+- * @return  0
+- */
+-static int max8660_remove(struct i2c_client *client)
+-{
+-	return 0;
+-}
+-
+-static const struct i2c_device_id max8660_id[] = {
+-	{ "max8660", 0 },
+-	{},
+-};
+-MODULE_DEVICE_TABLE(i2c, max8660_id);
+-
+-static struct i2c_driver max8660_i2c_driver = {
+-	.driver = {
+-		   .owner = THIS_MODULE,
+-		   .name = "max8660",},
+-	.probe = max8660_probe,
+-	.remove = max8660_remove,
+-	.id_table = max8660_id,
+-};
+-
+-/* called by pmic core when init*/
+-int max8660_init(void)
+-{
+-	int err;
+-	err = i2c_add_driver(&max8660_i2c_driver);
+-	if (err) {
+-		return err;
+-	}
+-	return 0;
+-}
+-void max8660_exit(void)
+-{
+-	i2c_del_driver(&max8660_i2c_driver);
+-}
+diff --git a/drivers/mxc/pmic/core/max8660.h b/drivers/mxc/pmic/core/max8660.h
+deleted file mode 100644
+index 54638a4..0000000
+--- a/drivers/mxc/pmic/core/max8660.h
++++ /dev/null
+@@ -1,45 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file max8660.h
+- * @brief Driver for max8660
+- *
+- * @ingroup pmic
+- */
+-#ifndef _MAX8660_H_
+-#define _MAX8660_H_
+-
+-#ifdef __KERNEL__
+-
+-#define MAX8660_OUTPUT_ENABLE_1	0x10
+-#define MAX8660_OUTPUT_ENABLE_2	0x12
+-#define MAX8660_VOLT_CHANGE_CONTROL		0x20
+-#define MAX8660_V3_TARGET_VOLT_1	0x23
+-#define MAX8660_V3_TARGET_VOLT_2	0x24
+-#define MAX8660_V4_TARGET_VOLT_1	0x29
+-#define MAX8660_V4_TARGET_VOLT_2	0x2A
+-#define MAX8660_V5_TARGET_VOLT_1	0x32
+-#define MAX8660_V5_TARGET_VOLT_2	0x33
+-#define MAX8660_V6V7_TARGET_VOLT	0x39
+-#define MAX8660_FORCE_PWM			0x80
+-int max8660_write_reg(u8 reg, u8 value);
+-int max8660_save_buffered_reg_val(int reg_name, u8 value);
+-int max8660_get_buffered_reg_val(int reg_name, u8 *value);
+-int max8660_init(void);
+-
+-extern int reg_max8660_probe(void);
+-
+-#endif				/* __KERNEL__ */
+-
+-#endif				/* _MAX8660_H_ */
+diff --git a/drivers/mxc/pmic/core/mc9sdz60.c b/drivers/mxc/pmic/core/mc9sdz60.c
+deleted file mode 100644
+index 132369f..0000000
+--- a/drivers/mxc/pmic/core/mc9sdz60.c
++++ /dev/null
+@@ -1,105 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-    /*!
+-     * @file mc9sdz60.c
+-     * @brief Driver for MC9sdz60
+-     *
+-     * @ingroup pmic
+-     */
+-
+-#include <linux/kernel.h>
+-#include <linux/module.h>
+-#include <linux/init.h>
+-#include <linux/delay.h>
+-#include <linux/spinlock.h>
+-#include <linux/proc_fs.h>
+-#include <linux/i2c.h>
+-
+-#include <asm/arch/clock.h>
+-#include <asm/uaccess.h>
+-#include "mc9sdz60.h"
+-
+-/* I2C bus id and device address of mcu */
+-#define I2C1_BUS	0
+-#define MC9SDZ60_I2C_ADDR	0xD2	/* 7bits I2C address */
+-static struct i2c_client *mc9sdz60_i2c_client;
+-
+-int mc9sdz60_read_reg(u8 reg, u8 *value)
+-{
+-	*value = (u8) i2c_smbus_read_byte_data(mc9sdz60_i2c_client, reg);
+-	return 0;
+-}
+-
+-int mc9sdz60_write_reg(u8 reg, u8 value)
+-{
+-	if (i2c_smbus_write_byte_data(mc9sdz60_i2c_client, reg, value) < 0) {
+-		return -1;
+-	}
+-	return 0;
+-}
+-
+-/*!
+- * mc9sdz60 I2C attach function
+- *
+- * @param adapter            struct i2c_adapter *
+- * @return  0
+- */
+-static int mc9sdz60_probe(struct i2c_client *client, const struct i2c_device_id *id)
+-{
+-	mc9sdz60_i2c_client = client;
+-	return 0;
+-}
+-
+-/*!
+- * mc9sdz60 I2C detach function
+- *
+- * @param client            struct i2c_client *
+- * @return  0
+- */
+-static int mc9sdz60_remove(struct i2c_client *client)
+-{
+-	return 0;
+-}
+-
+-static const struct i2c_device_id mc9sdz60_id[] = {
+-	{ "mc9sdz60", 0 },
+-	{},
+-};
+-MODULE_DEVICE_TABLE(i2c, mc9sdz60_id);
+-
+-static struct i2c_driver mc9sdz60_i2c_driver = {
+-	.driver = {.owner = THIS_MODULE,
+-		   .name = "mc9sdz60",
+-		   },
+-	.probe = mc9sdz60_probe,
+-	.remove = mc9sdz60_remove,
+-	.id_table = mc9sdz60_id,
+-};
+-
+-#define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
+-#define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
+-
+-int mc9sdz60_init(void)
+-{
+-	int err;
+-	err = i2c_add_driver(&mc9sdz60_i2c_driver);
+-	if (err) {
+-		return err;
+-	}
+-	return 0;
+-}
+-void mc9sdz60_exit(void)
+-{
+-	i2c_del_driver(&mc9sdz60_i2c_driver);
+-}
+diff --git a/drivers/mxc/pmic/core/mc9sdz60.h b/drivers/mxc/pmic/core/mc9sdz60.h
+deleted file mode 100644
+index 3e88839..0000000
+--- a/drivers/mxc/pmic/core/mc9sdz60.h
++++ /dev/null
+@@ -1,70 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file mc9sdz60.h
+- * @brief Driver for mc9sdz60
+- *
+- * @ingroup pmic
+- */
+-#ifndef _MC9SDZ60_H_
+-#define _MC9SDZ60_H_
+-
+-#define MCU_VERSION	0x00
+-/*#define Reserved	0x01*/
+-#define MCU_SECS		0x02
+-#define MCU_MINS		0x03
+-#define MCU_HRS			0x04
+-#define MCU_DAY			0x05
+-#define MCU_DATE		0x06
+-#define MCU_MONTH		0x07
+-#define MCU_YEAR		0x08
+-
+-#define MCU_ALARM_SECS	0x09
+-#define MCU_ALARM_MINS	0x0A
+-#define MCU_ALARM_HRS	0x0B
+-/* #define Reserved	0x0C*/
+-/* #define Reserved	0x0D*/
+-#define MCU_TS_CONTROL	0x0E
+-#define MCU_X_LOW	0x0F
+-#define MCU_Y_LOW	0x10
+-#define MCU_XY_HIGH	0x11
+-#define MCU_X_LEFT_LOW	0x12
+-#define MCU_X_LEFT_HIGH	0x13
+-#define MCU_X_RIGHT	0x14
+-#define MCU_Y_TOP_LOW	0x15
+-#define MCU_Y_TOP_HIGH	0x16
+-#define MCU_Y_BOTTOM	0x17
+-/* #define Reserved	0x18*/
+-/* #define Reserved	0x19*/
+-#define MCU_RESET_1	0x1A
+-#define MCU_RESET_2	0x1B
+-#define MCU_POWER_CTL	0x1C
+-#define MCU_DELAY_CONFIG	0x1D
+-/* #define Reserved	0x1E */
+-/* #define Reserved	0x1F */
+-#define MCU_GPIO_1	0x20
+-#define MCU_GPIO_2	0x21
+-#define MCU_KPD_1	0x22
+-#define MCU_KPD_2	0x23
+-#define MCU_KPD_CONTROL	0x24
+-#define MCU_INT_ENABLE_1	0x25
+-#define MCU_INT_ENABLE_2	0x26
+-#define MCU_INT_FLAG_1	0x27
+-#define MCU_INT_FLAG_2	0x28
+-#define MCU_DES_FLAG		0x29
+-int mc9sdz60_read_reg(u8 reg, u8 *value);
+-int mc9sdz60_write_reg(u8 reg, u8 value);
+-int mc9sdz60_init(void);
+-
+-#endif	/* _MC9SDZ60_H_ */
+-
+diff --git a/drivers/mxc/pmic/core/mcu_pmic_core.c b/drivers/mxc/pmic/core/mcu_pmic_core.c
+deleted file mode 100644
+index 3ac177a..0000000
+--- a/drivers/mxc/pmic/core/mcu_pmic_core.c
++++ /dev/null
+@@ -1,425 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file mc9sdz60/mcu_pmic_core.c
+- * @brief This is the main file of mc9sdz60 Power Control driver.
+- *
+- * @ingroup PMIC_POWER
+- */
+-
+-/*
+- * Includes
+- */
+-#include <linux/kernel.h>
+-#include <linux/module.h>
+-#include <linux/init.h>
+-#include <linux/slab.h>
+-#include <linux/platform_device.h>
+-#include <linux/interrupt.h>
+-#include <linux/irq.h>
+-#include <asm/ioctl.h>
+-#include <asm/uaccess.h>
+-#include <asm/arch/gpio.h>
+-
+-#include <asm/arch/pmic_status.h>
+-#include <asm/arch/pmic_external.h>
+-#include "pmic.h"
+-#include "mc9sdz60.h"
+-#include "max8660.h"
+-
+-/* bitfield macros for mcu pmic*/
+-#define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
+-#define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
+-
+-/*
+- * Global variables
+- */
+-static pmic_version_t mxc_pmic_version;
+-unsigned int active_events[11];
+-
+-/* default event-enable-value after reset*/
+-static u8 events_enabled1 = 0x40;
+-static u8 events_enabled2;
+-
+-/*
+- * Platform device structure for PMIC client drivers
+- */
+-static struct platform_device power_ldm = {
+-	.name = "pmic_power",
+-	.id = 1,
+-};
+-
+-/* map reg names (enum pmic_reg in pmic_external.h) to real addr*/
+-const static u8 mcu_pmic_reg_addr_table[] = {
+-	MCU_VERSION,
+-	MCU_SECS,
+-	MCU_MINS,
+-	MCU_HRS,
+-	MCU_DAY,
+-	MCU_DATE,
+-	MCU_MONTH,
+-	MCU_YEAR,
+-	MCU_ALARM_SECS,
+-	MCU_ALARM_MINS,
+-	MCU_ALARM_HRS,
+-	MCU_TS_CONTROL,
+-	MCU_X_LOW,
+-	MCU_Y_LOW,
+-	MCU_XY_HIGH,
+-	MCU_X_LEFT_LOW,
+-	MCU_X_LEFT_HIGH,
+-	MCU_X_RIGHT,
+-	MCU_Y_TOP_LOW,
+-	MCU_Y_TOP_HIGH,
+-	MCU_Y_BOTTOM,
+-	MCU_RESET_1,
+-	MCU_RESET_2,
+-	MCU_POWER_CTL,
+-	MCU_DELAY_CONFIG,
+-	MCU_GPIO_1,
+-	MCU_GPIO_2,
+-	MCU_KPD_1,
+-	MCU_KPD_2,
+-	MCU_KPD_CONTROL,
+-	MCU_INT_ENABLE_1,
+-	MCU_INT_ENABLE_2,
+-	MCU_INT_FLAG_1,
+-	MCU_INT_FLAG_2,
+-	MCU_DES_FLAG,
+-	MAX8660_OUTPUT_ENABLE_1,
+-	MAX8660_OUTPUT_ENABLE_2,
+-	MAX8660_VOLT_CHANGE_CONTROL,
+-	MAX8660_V3_TARGET_VOLT_1,
+-	MAX8660_V3_TARGET_VOLT_2,
+-	MAX8660_V4_TARGET_VOLT_1,
+-	MAX8660_V4_TARGET_VOLT_2,
+-	MAX8660_V5_TARGET_VOLT_1,
+-	MAX8660_V5_TARGET_VOLT_2,
+-	MAX8660_V6V7_TARGET_VOLT,
+-	MAX8660_FORCE_PWM
+-};
+-
+-int pmic_read(int reg_num, unsigned int *reg_val)
+-{
+-	int ret;
+-	u8 value = 0;
+-	/* mcu ops */
+-	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_DES_FLAG) {
+-
+-		ret =
+-		    mc9sdz60_read_reg(mcu_pmic_reg_addr_table[reg_num], &value);
+-		if (ret < 0)
+-			goto error1;
+-		*reg_val = value;
+-	} else if (reg_num >= REG_MAX8660_OUTPUT_ENABLE_1
+-		   && reg_num <= REG_MAX8660_FORCE_PWM) {
+-		ret = max8660_get_buffered_reg_val(reg_num, &value);
+-		if (ret < 0)
+-			goto error1;
+-		*reg_val = value;
+-	} else {
+-		goto error1;
+-	}
+-
+-	return 0;
+-
+-      error1:
+-	return -1;
+-}
+-
+-int pmic_write(int reg_num, const unsigned int reg_val)
+-{
+-	int ret;
+-	u8 value = reg_val;
+-	/* mcu ops */
+-	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_DES_FLAG) {
+-
+-		ret =
+-		    mc9sdz60_write_reg(mcu_pmic_reg_addr_table[reg_num], value);
+-		if (ret < 0)
+-			goto error1;
+-	} else if (reg_num >= REG_MAX8660_OUTPUT_ENABLE_1
+-		   && reg_num <= REG_MAX8660_FORCE_PWM) {
+-		ret =
+-		    max8660_write_reg(mcu_pmic_reg_addr_table[reg_num], value);
+-
+-		if (ret < 0)
+-			goto error1;
+-
+-		ret = max8660_save_buffered_reg_val(reg_num, value);
+-	} else {
+-		goto error1;
+-	}
+-
+-	return 0;
+-
+-      error1:
+-	return -1;
+-
+-}
+-
+-/*!
+- * This function unsets a bit in mask register of pmic to unmask an event IT.
+- *
+- * @param	event 	the event to be unmasked
+- *
+- * @return    This function returns PMIC_SUCCESS on SUCCESS, error on FAILURE.
+- */
+-int pmic_event_unmask(type_event event)
+-{
+-	int reg_name;
+-	u8 reg_mask = 0;
+-	unsigned int event_bit = 0;
+-	int ret = -1;
+-
+-	switch (event) {
+-	case EVENT_HEADPHONE_DET:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 0;
+-		break;
+-	case EVENT_SD1_DET:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 2;
+-		break;
+-	case EVENT_SD1_WP:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 3;
+-		break;
+-	case EVENT_SD2_DET:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 4;
+-		break;
+-	case EVENT_SD2_WP:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 5;
+-		break;
+-	case EVENT_GPS_INT:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 1;
+-		break;
+-	case EVENT_POWER_KEY:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 6;
+-		break;
+-	case EVENT_KEYPAD:
+-		reg_name = REG_MCU_INT_ENABLE_2;
+-		event_bit = 2;
+-		break;
+-	case EVENT_RTC:
+-		reg_name = REG_MCU_INT_ENABLE_2;
+-		event_bit = 0;
+-		break;
+-	case EVENT_TS_ADC:
+-		reg_name = REG_MCU_INT_ENABLE_2;
+-		event_bit = 1;
+-		break;
+-	default:
+-		return PMIC_ERROR;
+-	}
+-	SET_BIT_IN_BYTE(reg_mask, event_bit);
+-	ret = pmic_write_reg(reg_name, reg_mask, reg_mask);
+-	if (PMIC_SUCCESS == ret) {
+-
+-		if (REG_MCU_INT_ENABLE_2 == reg_name)
+-			events_enabled2 |= reg_mask;
+-		else if (REG_MCU_INT_ENABLE_1 == reg_name)
+-			events_enabled1 |= reg_mask;
+-		pr_debug("Enable Event : %d\n", event);
+-	}
+-
+-	return ret;
+-}
+-
+-/*!
+- * This function sets a bit in mask register of pmic to disable an event IT.
+- *
+- * @param	event 	the event to be masked
+- *
+- * @return     This function returns PMIC_SUCCESS on SUCCESS, error on FAILURE.
+- */
+-int pmic_event_mask(type_event event)
+-{
+-	int reg_name;
+-	u8 reg_mask = 0;
+-	unsigned int event_bit = 0;
+-	int ret = -1;
+-
+-	switch (event) {
+-	case EVENT_HEADPHONE_DET:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 0;
+-		break;
+-	case EVENT_SD1_DET:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 2;
+-		break;
+-	case EVENT_SD1_WP:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 3;
+-		break;
+-	case EVENT_SD2_DET:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 4;
+-		break;
+-	case EVENT_SD2_WP:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 5;
+-		break;
+-	case EVENT_GPS_INT:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 1;
+-		break;
+-	case EVENT_POWER_KEY:
+-		reg_name = REG_MCU_INT_ENABLE_1;
+-		event_bit = 6;
+-		break;
+-	case EVENT_KEYPAD:
+-		reg_name = REG_MCU_INT_ENABLE_2;
+-		event_bit = 2;
+-		break;
+-	case EVENT_RTC:
+-		reg_name = REG_MCU_INT_ENABLE_2;
+-		event_bit = 0;
+-		break;
+-	case EVENT_TS_ADC:
+-		reg_name = REG_MCU_INT_ENABLE_2;
+-		event_bit = 1;
+-		break;
+-	default:
+-		return PMIC_ERROR;
+-	}
+-	SET_BIT_IN_BYTE(reg_mask, event_bit);
+-
+-	ret = pmic_write_reg(reg_name, 0, reg_mask);
+-	if (PMIC_SUCCESS == ret) {
+-
+-		if (REG_MCU_INT_ENABLE_2 == reg_name)
+-			events_enabled2 &= ~reg_mask;
+-		else if (REG_MCU_INT_ENABLE_1 == reg_name)
+-			events_enabled1 &= ~reg_mask;
+-		pr_debug("Disable Event : %d\n", event);
+-	}
+-
+-	return ret;
+-}
+-
+-/*!
+- * This function reads the interrupt status registers of PMIC
+- * and determine the current active events.
+- *
+- * @param 	active_events array pointer to be used to return active
+- *		event numbers.
+- *
+- * @return       This function returns PMIC version.
+- */
+-unsigned int pmic_get_active_events(unsigned int *active_events)
+-{
+-	unsigned int count = 0;
+-	unsigned int flag1, flag2;
+-	int bit_set;
+-
+-	/* read int flags and ack int */
+-	pmic_read(REG_MCU_INT_FLAG_1, &flag1);
+-	pmic_read(REG_MCU_INT_FLAG_2, &flag2);
+-	pmic_write(REG_MCU_INT_FLAG_1, 0);
+-	pmic_write(REG_MCU_INT_FLAG_2, 0);
+-
+-	flag1 &= events_enabled1;
+-	flag2 &= events_enabled2;
+-
+-	while (flag1) {
+-		bit_set = ffs(flag1) - 1;
+-		*(active_events + count) = bit_set;
+-		count++;
+-		flag1 ^= (1 << bit_set);
+-	}
+-	while (flag2) {
+-		bit_set = ffs(flag2) - 1;
+-		*(active_events + count) = bit_set + 7;
+-		count++;
+-		flag2 ^= (1 << bit_set);
+-	}
+-
+-	return count;
+-}
+-
+-/*
+- * External functions
+- */
+-extern void pmic_event_list_init(void);
+-extern void pmic_event_callback(type_event event);
+-extern void gpio_pmic_active(void);
+-
+-/*!
+- * This function registers platform device structures for
+- * PMIC client drivers.
+- */
+-static void pmic_pdev_register(void)
+-{
+-	platform_device_register(&power_ldm);
+-	reg_max8660_probe();
+-}
+-
+-/*!
+- * This function unregisters platform device structures for
+- * PMIC client drivers.
+- */
+-static void pmic_pdev_unregister(void)
+-{
+-}
+-
+-/*!
+- * This function is used to determine the PMIC type and its revision.
+- *
+- * @return      Returns the PMIC type and its revision.
+- */
+-
+-pmic_version_t pmic_get_version(void)
+-{
+-	return mxc_pmic_version;
+-}
+-EXPORT_SYMBOL(pmic_get_version);
+-
+-static int __init mcu_pmic_init(void)
+-{
+-	int err;
+-
+-	/* init chips */
+-	err = max8660_init();
+-	if (err)
+-		goto fail1;
+-
+-	err = mc9sdz60_init();
+-	if (err)
+-		goto fail1;
+-
+-	pmic_pdev_register();
+-
+-	return 0;
+-
+-      fail1:
+-	return err;
+-}
+-
+-static void __exit mcu_pmic_exit(void)
+-{
+-	pmic_pdev_unregister();
+-}
+-
+-subsys_initcall_sync(mcu_pmic_init);
+-module_exit(mcu_pmic_exit);
+-
+-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-MODULE_DESCRIPTION("mcu pmic driver");
+-MODULE_LICENSE("GPL");
+diff --git a/drivers/mxc/pmic/mc9sdz60/Kconfig b/drivers/mxc/pmic/mc9sdz60/Kconfig
+deleted file mode 100644
+index b0e8765..0000000
+--- a/drivers/mxc/pmic/mc9sdz60/Kconfig
++++ /dev/null
+@@ -1,29 +0,0 @@
+-#
+-# PMIC Modules configuration
+-#
+-
+-config MXC_MC9SDZ60_ADC
+-	tristate "MC9SDZ60 ADC support"
+-	depends on MXC_PMIC_MC9SDZ60
+-	default n
+-	---help---
+-	This is the MC9SDZ60 ADC module driver. This module provides kernel API
+-	for the ADC system of MC9SDZ60.
+-	It controls also the touch screen interface.
+-	If you want MC9SDZ60 ADC support, you should say Y here
+-
+-config MXC_MC9SDZ60_RTC
+-	tristate "MC9SDZ60 Real Time Clock (RTC) support"
+-	depends on MXC_PMIC_MC9SDZ60
+-	---help---
+-	This is the MC9SDZ60 RTC module driver. This module provides kernel API
+-	for RTC part of MC9SDZ60.
+-	If you want MC9SDZ60 RTC support, you should say Y here
+-	
+-config MXC_MC9SDZ60_POWER
+-	tristate "MC9SDZ60 Power API support"
+-	depends on MXC_PMIC_MC9SDZ60
+-	---help---
+-	This is the MC9SDZ60 power and supplies module driver. This module provides kernel API
+-	for power and regulator control part of MC9SDZ60.
+-	If you want MC9SDZ60 power support, you should say Y here
+diff --git a/drivers/mxc/pmic/mc9sdz60/Makefile b/drivers/mxc/pmic/mc9sdz60/Makefile
+deleted file mode 100644
+index 1b5c5b9..0000000
+--- a/drivers/mxc/pmic/mc9sdz60/Makefile
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#
+-# Makefile for the mc9sdz60 pmic drivers.
+-#
+-
+-obj-y += mcu_pmic_gpio.o
+-obj-$(CONFIG_MXC_MC9SDZ60_ADC) += pmic_adc-mod.o
+-obj-$(CONFIG_MXC_MC9SDZ60_RTC) += pmic_rtc-mod.o
+-pmic_adc-mod-objs := mcu_pmic_adc.o
+-pmic_rtc-mod-objs := mcu_pmic_rtc.o
+-
+diff --git a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_event.c b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_event.c
+deleted file mode 100644
+index 42be565..0000000
+--- a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_event.c
++++ /dev/null
+@@ -1,220 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file mc9sdz60/mcu_pmic_event.c
+- * @brief This is the main file of mc9sdz60 Power Control driver.
+- *
+- * @ingroup PMIC_POWER
+- */
+-
+-/*
+- * Includes
+- */
+-#include <linux/platform_device.h>
+-#include <asm/ioctl.h>
+-#include <asm/arch/pmic_status.h>
+-#include <asm/arch/pmic_external.h>
+-#include <asm/arch/pmic_power.h>
+-#include "../core/pmic_config.h"
+-#include "mc9sdz60.h"
+-#include "max8660.h"
+-
+-/*!
+- * This structure is used to keep a list of subscribed
+- * callbacks for an event.
+- */
+-typedef struct {
+-	/*!
+-	 * Keeps a list of subscribed clients to an event.
+-	 */
+-	struct list_head list;
+-
+-	/*!
+-	 * Callback function with parameter, called when event occurs
+-	 */
+-	pmic_event_callback_t callback;
+-} pmic_event_callback_list_t;
+-
+-/* Create a mutex to be used to prevent concurrent access to the event list */
+-static DECLARE_MUTEX(event_mutex);
+-
+-/* This is a pointer to the event handler array. It defines the currently
+- * active set of events and user-defined callback functions.
+- */
+-static struct list_head pmic_events[PMIC_MAX_EVENTS];
+-
+-/*!
+- * This function initializes event list for PMIC event handling.
+- *
+- */
+-void pmic_event_list_init(void)
+-{
+-	int i;
+-
+-	for (i = 0; i < PMIC_MAX_EVENTS; i++)
+-		INIT_LIST_HEAD(&pmic_events[i]);
+-
+-	sema_init(&event_mutex, 1);
+-}
+-
+-/*!
+- * This function is used to subscribe on an event.
+- *
+- * @param	event   the event number to be subscribed
+- * @param	callback the callback funtion to be subscribed
+- *
+- * @return       This function returns 0 on SUCCESS, error on FAILURE.
+- */
+-PMIC_STATUS pmic_event_subscribe(type_event event,
+-				 pmic_event_callback_t callback)
+-{
+-	pmic_event_callback_list_t *new = NULL;
+-
+-	pr_debug("Event:%d Subscribe\n", event);
+-
+-	/* Check whether the event & callback are valid? */
+-	if (event >= PMIC_MAX_EVENTS) {
+-		pr_debug("Invalid Event:%d\n", event);
+-		return -EINVAL;
+-	}
+-	if (NULL == callback.func) {
+-		pr_debug("Null or Invalid Callback\n");
+-		return -EINVAL;
+-	}
+-
+-	/* Create a new linked list entry */
+-	new = kmalloc(sizeof(pmic_event_callback_list_t), GFP_KERNEL);
+-	if (NULL == new)
+-		return -ENOMEM;
+-
+-	/* Initialize the list node fields */
+-	new->callback.func = callback.func;
+-	new->callback.param = callback.param;
+-	INIT_LIST_HEAD(&new->list);
+-
+-	/* Obtain the lock to access the list */
+-	if (down_interruptible(&event_mutex)) {
+-		kfree(new);
+-		return PMIC_SYSTEM_ERROR_EINTR;
+-	}
+-
+-	/* Unmask the requested event */
+-	if (list_empty(&pmic_events[event])) {
+-		if (pmic_event_unmask(event) != PMIC_SUCCESS) {
+-			kfree(new);
+-			up(&event_mutex);
+-			return PMIC_ERROR;
+-		}
+-	}
+-
+-	/* Add this entry to the event list */
+-	list_add_tail(&new->list, &pmic_events[event]);
+-
+-	/* Release the lock */
+-	up(&event_mutex);
+-
+-	return PMIC_SUCCESS;
+-}
+-EXPORT_SYMBOL(pmic_event_subscribe);
+-
+-/*!
+- * This function is used to unsubscribe on an event.
+- *
+- * @param	event   the event number to be unsubscribed
+- * @param	callback the callback funtion to be unsubscribed
+- *
+- * @return       This function returns 0 on SUCCESS, error on FAILURE.
+- */
+-PMIC_STATUS pmic_event_unsubscribe(type_event event,
+-				   pmic_event_callback_t callback)
+-{
+-	struct list_head *p;
+-	struct list_head *n;
+-	pmic_event_callback_list_t *temp = NULL;
+-	int ret = PMIC_EVENT_NOT_SUBSCRIBED;
+-
+-	pr_debug("Event:%d Unsubscribe\n", event);
+-
+-	/* Check whether the event & callback are valid? */
+-	if (event >= PMIC_MAX_EVENTS) {
+-		pr_debug("Invalid Event:%d\n", event);
+-		return -EINVAL;
+-	}
+-
+-	if (NULL == callback.func) {
+-		pr_debug("Null or Invalid Callback\n");
+-		return -EINVAL;
+-	}
+-
+-	/* Obtain the lock to access the list */
+-	if (down_interruptible(&event_mutex))
+-		return PMIC_SYSTEM_ERROR_EINTR;
+-
+-	/* Find the entry in the list */
+-	list_for_each_safe(p, n, &pmic_events[event]) {
+-		temp = list_entry(p, pmic_event_callback_list_t, list);
+-		if (temp->callback.func == callback.func
+-		    && temp->callback.param == callback.param) {
+-			/* Remove the entry from the list */
+-			list_del(p);
+-			kfree(temp);
+-			ret = PMIC_SUCCESS;
+-			break;
+-		}
+-	}
+-
+-	/* Unmask the requested event */
+-	if (list_empty(&pmic_events[event])) {
+-		if (pmic_event_mask(event) != PMIC_SUCCESS)
+-			ret = PMIC_UNSUBSCRIBE_ERROR;
+-	}
+-
+-	/* Release the lock */
+-	up(&event_mutex);
+-
+-	return ret;
+-}
+-EXPORT_SYMBOL(pmic_event_unsubscribe);
+-
+-/*!
+- * This function calls all callback of a specific event.
+- *
+- * @param	event   the active event number
+- *
+- * @return 	None
+- */
+-void pmic_event_callback(type_event event)
+-{
+-	struct list_head *p;
+-	pmic_event_callback_list_t *temp = NULL;
+-
+-	/* Obtain the lock to access the list */
+-	if (down_interruptible(&event_mutex))
+-		return;
+-	if (list_empty(&pmic_events[event])) {
+-		pr_debug("PMIC Event:%d detected. No callback subscribed\n",
+-			 event);
+-		up(&event_mutex);
+-		return;
+-	}
+-
+-	list_for_each(p, &pmic_events[event]) {
+-		temp = list_entry(p, pmic_event_callback_list_t, list);
+-		temp->callback.func(temp->callback.param);
+-	}
+-
+-	/* Release the lock */
+-	up(&event_mutex);
+-}
+-
+diff --git a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c
+deleted file mode 100644
+index a759f47..0000000
+--- a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c
++++ /dev/null
+@@ -1,132 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file mc9sdz60/mcu_pmic_gpio.c
+- * @brief This is the main file of mc9sdz60 Power Control driver.
+- *
+- * @ingroup PMIC_POWER
+- */
+-
+-/*
+- * Includes
+- */
+-#include <linux/platform_device.h>
+-#include <asm/ioctl.h>
+-#include <asm/arch/pmic_status.h>
+-#include <asm/arch/pmic_external.h>
+-#include <asm/arch/pmic_power.h>
+-
+-#define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
+-#define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
+-
+-PMIC_STATUS pmic_gpio_set_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+-				  unsigned int val)
+-{
+-	int reg_name;
+-	u8 reg_mask = 0;
+-
+-	if (bit > 7)
+-		return PMIC_PARAMETER_ERROR;
+-
+-	switch (reg) {
+-	case MCU_GPIO_REG_RESET_1:
+-		reg_name = REG_MCU_RESET_1;
+-		break;
+-	case MCU_GPIO_REG_RESET_2:
+-		reg_name = REG_MCU_RESET_2;
+-		break;
+-	case MCU_GPIO_REG_POWER_CONTROL:
+-		reg_name = REG_MCU_POWER_CTL;
+-		break;
+-	case MCU_GPIO_REG_GPIO_CONTROL_1:
+-		reg_name = REG_MCU_GPIO_1;
+-		break;
+-	case MCU_GPIO_REG_GPIO_CONTROL_2:
+-		reg_name = REG_MCU_GPIO_2;
+-		break;
+-	default:
+-		return PMIC_PARAMETER_ERROR;
+-	}
+-
+-	SET_BIT_IN_BYTE(reg_mask, bit);
+-	if (0 == val)
+-		CHECK_ERROR(pmic_write_reg(reg_name, 0, reg_mask));
+-	else
+-		CHECK_ERROR(pmic_write_reg(reg_name, reg_mask, reg_mask));
+-
+-	return PMIC_SUCCESS;
+-}
+-EXPORT_SYMBOL(pmic_gpio_set_bit_val);
+-
+-PMIC_STATUS pmic_gpio_get_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+-				  unsigned int *val)
+-{
+-	int reg_name;
+-	unsigned int reg_read_val;
+-	u8 reg_mask = 0;
+-
+-	if (bit > 7)
+-		return PMIC_PARAMETER_ERROR;
+-
+-	switch (reg) {
+-	case MCU_GPIO_REG_RESET_1:
+-		reg_name = REG_MCU_RESET_1;
+-		break;
+-	case MCU_GPIO_REG_RESET_2:
+-		reg_name = REG_MCU_RESET_2;
+-		break;
+-	case MCU_GPIO_REG_POWER_CONTROL:
+-		reg_name = REG_MCU_POWER_CTL;
+-		break;
+-	case MCU_GPIO_REG_GPIO_CONTROL_1:
+-		reg_name = REG_MCU_GPIO_1;
+-		break;
+-	case MCU_GPIO_REG_GPIO_CONTROL_2:
+-		reg_name = REG_MCU_GPIO_2;
+-		break;
+-	default:
+-		return PMIC_PARAMETER_ERROR;
+-	}
+-
+-	SET_BIT_IN_BYTE(reg_mask, bit);
+-	CHECK_ERROR(pmic_read_reg(reg_name, &reg_read_val, reg_mask));
+-	if (0 == reg_read_val)
+-		*val = 0;
+-	else
+-		*val = 1;
+-
+-	return PMIC_SUCCESS;
+-}
+-EXPORT_SYMBOL(pmic_gpio_get_bit_val);
+-
+-PMIC_STATUS pmic_gpio_get_designation_bit_val(unsigned int bit,
+-					unsigned int *val)
+-{
+-	unsigned int reg_read_val;
+-	u8 reg_mask = 0;
+-
+-	if (bit > 7)
+-		return PMIC_PARAMETER_ERROR;
+-
+-	SET_BIT_IN_BYTE(reg_mask, bit);
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_DES_FLAG, &reg_read_val, reg_mask));
+-	if (0 == reg_read_val)
+-		*val = 0;
+-	else
+-		*val = 1;
+-
+-	return PMIC_SUCCESS;
+-}
+-EXPORT_SYMBOL(pmic_gpio_get_designation_bit_val);
+-
+diff --git a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c
+deleted file mode 100644
+index 5c85dd6..0000000
+--- a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_rtc.c
++++ /dev/null
+@@ -1,644 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file mc9sdz60/mcu_pmic_rtc.c
+- * @brief This is the main file of mc9sdz60 RTC driver.
+- *
+- * @ingroup PMIC_POWER
+- */
+-
+-/*
+- * Includes
+- */
+-#include <linux/platform_device.h>
+-#include <asm/ioctl.h>
+-#include <linux/rtc.h>
+-#include <linux/bcd.h>
+-
+-#include <asm/arch/pmic_status.h>
+-#include <asm/arch/pmic_rtc.h>
+-#include <asm/arch/pmic_external.h>
+-#include <asm/arch/pmic_power.h>
+-
+-#define MCU_PMIC_RTC_NAME "pmic_rtc"
+-/*
+- * Global variables
+- */
+-static int pmic_rtc_major;
+-static void rtc_alarm_handler(struct work_struct *work);
+-static DECLARE_WORK(rtc_alarm_event, rtc_alarm_handler);
+-static void callback_alarm_asynchronous(void *);
+-static void callback_alarm_synchronous(void *);
+-static unsigned int pmic_rtc_poll(struct file *file, poll_table *wait);
+-static DECLARE_WAIT_QUEUE_HEAD(queue_alarm);
+-static DECLARE_WAIT_QUEUE_HEAD(pmic_rtc_wait);
+-static pmic_event_callback_t rtc_event_callback;
+-static pmic_event_callback_t alarm_callback;
+-static pmic_event_callback_t rtc_callback;
+-static int pmic_rtc_detected;
+-static bool pmic_rtc_done;
+-static struct class *pmic_rtc_class;
+-struct rtc_time alarm_greg_time;
+-static DECLARE_MUTEX(mutex);
+-
+-static DECLARE_MUTEX(event_mutex);
+-struct pmic_rtc_data {
+-	int irq;
+-	int rtc_event_subscribed;
+-};
+-static struct pmic_rtc_data mcu_pmic_rtc_data;
+-
+-/*
+- * Real Time Clock Pmic API
+- */
+-
+-static int mcu_pmic_rtc_event_subscribe(int event,
+-					pmic_event_callback_t callback)
+-{
+-	rtc_event_callback.func = callback.func;
+-	return 0;
+-}
+-
+-static int mcu_pmic_rtc_event_unsubscribe(int event,
+-					  pmic_event_callback_t callback)
+-{
+-	rtc_event_callback.func = NULL;
+-	return 0;
+-}
+-
+-static void rtc_alarm_handler(struct work_struct *work)
+-{
+-	if (down_interruptible(&event_mutex) < 0)
+-		return;
+-	if (NULL != rtc_event_callback.func)
+-		rtc_event_callback.func(rtc_event_callback.param);
+-	up(&event_mutex);
+-}
+-
+-/*!
+- * This is the callback function called on TSI Pmic event, used in asynchronous
+- * call.
+- */
+-static void callback_alarm_asynchronous(void *unused)
+-{
+-	pmic_rtc_done = true;
+-}
+-
+-/*!
+- * This is the callback function is used in test code for (un)sub.
+- */
+-static void callback_test_sub(void)
+-{
+-	pr_info(KERN_INFO "*****************************************\n");
+-	pr_info(KERN_INFO "***** PMIC RTC 'Alarm IT CallBack' ******\n");
+-	pr_info(KERN_INFO "*****************************************\n");
+-}
+-
+-/*!
+- * This is the callback function called on TSI Pmic event, used in synchronous
+- * call.
+- */
+-static void callback_alarm_synchronous(void *unused)
+-{
+-	pr_info(KERN_INFO "*** Alarm IT Pmic ***\n");
+-	wake_up(&queue_alarm);
+-}
+-
+-/*!
+- * This function wait the Alarm event
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_wait_alarm(void)
+-{
+-	DEFINE_WAIT(wait);
+-	alarm_callback.func = callback_alarm_synchronous;
+-	alarm_callback.param = NULL;
+-	CHECK_ERROR(mcu_pmic_rtc_event_subscribe(EVENT_RTC, alarm_callback));
+-	prepare_to_wait(&queue_alarm, &wait, TASK_UNINTERRUPTIBLE);
+-	schedule();
+-	finish_wait(&queue_alarm, &wait);
+-	CHECK_ERROR(mcu_pmic_rtc_event_unsubscribe(EVENT_RTC, alarm_callback));
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_wait_alarm);
+-
+-/*!
+- * This function set the real time clock of PMIC
+- *
+- * @param        pmic_time  	value of date and time
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_set_time(struct timeval *pmic_time)
+-{
+-	u8 reg_val;
+-	struct rtc_time greg_time;
+-
+-	rtc_time_to_tm(pmic_time->tv_sec, &greg_time);
+-
+-	reg_val = greg_time.tm_sec % 10;
+-	reg_val |= ((greg_time.tm_sec / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_SECS, reg_val, 0x7f));
+-
+-	reg_val = greg_time.tm_min % 10;
+-	reg_val |= ((greg_time.tm_min / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_MINS, reg_val, 0x7f));
+-
+-	reg_val = greg_time.tm_hour % 10;
+-	reg_val |= ((greg_time.tm_hour / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_HRS, reg_val, 0x3f));
+-
+-	reg_val = greg_time.tm_wday;
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_DAY, reg_val, 0x3));
+-
+-	reg_val = greg_time.tm_mday % 10;
+-	reg_val |= ((greg_time.tm_mday / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_DATE, reg_val, 0x3f));
+-
+-	reg_val = (greg_time.tm_mon + 1) % 10;
+-	reg_val |= (((greg_time.tm_mon + 1) / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_MONTH, reg_val, 0x1f));
+-
+-	reg_val = greg_time.tm_year % 10;
+-	reg_val |= ((greg_time.tm_year / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_YEAR, reg_val, 0xff));
+-
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_set_time);
+-
+-/*!
+- * This function get the real time clock of PMIC
+- *
+- * @param        pmic_time  	return value of date and time
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_get_time(struct timeval *pmic_time)
+-{
+-	unsigned int reg_val;
+-	struct rtc_time greg_time;
+-	unsigned long time = 0;
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_SECS, &reg_val, 0x7f));
+-	greg_time.tm_sec = BCD2BIN(reg_val);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_MINS, &reg_val, 0x7f));
+-	greg_time.tm_min = BCD2BIN(reg_val);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_HRS, &reg_val, 0x3f));
+-	greg_time.tm_hour = BCD2BIN(reg_val);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_DAY, &reg_val, 0x3));
+-	greg_time.tm_wday = reg_val;
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_DATE, &reg_val, 0x3f));
+-	greg_time.tm_mday = BCD2BIN(reg_val);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_MONTH, &reg_val, 0x1f));
+-	greg_time.tm_mon =
+-		(0 == reg_val) ? (BCD2BIN(reg_val)) : (BCD2BIN(reg_val) - 1);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_YEAR, &reg_val, 0xff));
+-	greg_time.tm_year = BCD2BIN(reg_val);
+-
+-	rtc_tm_to_time(&greg_time, &time);
+-	pmic_time->tv_sec = time;
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_get_time);
+-
+-/*!
+- * This function set the real time clock alarm of PMIC
+- *
+- * @param        pmic_time  	value of date and time
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_set_time_alarm(struct timeval *pmic_time)
+-{
+-	int ret;
+-	u8 reg_val;
+-	struct rtc_time greg_time;
+-
+-	ret = down_interruptible(&mutex);
+-	if (ret < 0)
+-		return ret;
+-
+-	rtc_time_to_tm(pmic_time->tv_sec, &greg_time);
+-	rtc_time_to_tm(pmic_time->tv_sec, &alarm_greg_time);
+-
+-	reg_val = greg_time.tm_sec % 10;
+-	reg_val |= ((greg_time.tm_sec / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_ALARM_SECS, reg_val, 0x7f));
+-
+-	reg_val = greg_time.tm_min % 10;
+-	reg_val |= ((greg_time.tm_min / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_ALARM_MINS, reg_val, 0x7f));
+-
+-	reg_val = greg_time.tm_hour % 10;
+-	reg_val |= ((greg_time.tm_hour / 10) << 4);
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_ALARM_HRS, reg_val, 0x3f));
+-
+-	/* enable alarm */
+-	CHECK_ERROR(pmic_write_reg(REG_MCU_ALARM_SECS, 0x80, 0x80));
+-	up(&mutex);
+-
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_set_time_alarm);
+-
+-/*!
+- * This function get the real time clock alarm of PMIC
+- *
+- * @param        pmic_time  	return value of date and time
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_get_time_alarm(struct timeval *pmic_time)
+-{
+-	unsigned int reg_val;
+-	struct rtc_time greg_time;
+-	unsigned long time = 0;
+-
+-	memzero(&greg_time, sizeof(struct rtc_time));
+-	greg_time = alarm_greg_time;
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_ALARM_SECS, &reg_val, 0x7f));
+-	greg_time.tm_sec = BCD2BIN(reg_val);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_ALARM_MINS, &reg_val, 0x7f));
+-	greg_time.tm_min = BCD2BIN(reg_val);
+-
+-	CHECK_ERROR(pmic_read_reg(REG_MCU_ALARM_HRS, &reg_val, 0x3f));
+-	greg_time.tm_hour = BCD2BIN(reg_val);
+-
+-	rtc_tm_to_time(&greg_time, &time);
+-	pmic_time->tv_sec = time;
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_get_time_alarm);
+-
+-/*!
+- * This function is used to un/subscribe on RTC event IT.
+- *
+- * @param        event  	type of event.
+- * @param        callback  	event callback function.
+- * @param        sub      	define if Un/subscribe event.
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_event(t_rtc_int event, void *callback, bool sub)
+-{
+-	type_event rtc_event;
+-	if (callback == NULL) {
+-		return PMIC_ERROR;
+-	} else {
+-		rtc_callback.func = callback;
+-		rtc_callback.param = NULL;
+-	}
+-	switch (event) {
+-	case RTC_IT_ALARM:
+-		rtc_event = EVENT_RTC;
+-		break;
+-	default:
+-		return PMIC_PARAMETER_ERROR;
+-	}
+-	if (sub)
+-		CHECK_ERROR(mcu_pmic_rtc_event_subscribe
+-			    (rtc_event, rtc_callback));
+-	else
+-		CHECK_ERROR(mcu_pmic_rtc_event_unsubscribe
+-			    (rtc_event, rtc_callback));
+-
+-	return PMIC_SUCCESS;
+-}
+-
+-/*!
+- * This function is used to subscribe on RTC event IT.
+- *
+- * @param        event  	type of event.
+- * @param        callback  	event callback function.
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_event_sub(t_rtc_int event, void *callback)
+-{
+-	CHECK_ERROR(pmic_rtc_event(event, callback, true));
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_event_sub);
+-
+-/*!
+- * This function is used to un subscribe on RTC event IT.
+- *
+- * @param        event  	type of event.
+- * @param        callback  	event callback function.
+- *
+- * @return       This function returns PMIC_SUCCESS if successful.
+- */
+-PMIC_STATUS pmic_rtc_event_unsub(t_rtc_int event, void *callback)
+-{
+-	CHECK_ERROR(pmic_rtc_event(event, callback, false));
+-	return PMIC_SUCCESS;
+-}
+-
+-EXPORT_SYMBOL(pmic_rtc_event_unsub);
+-
+-/* Called without the kernel lock - fine */
+-static unsigned int pmic_rtc_poll(struct file *file, poll_table *wait)
+-{
+-	if (pmic_rtc_done)
+-		return POLLIN | POLLRDNORM;
+-	return 0;
+-}
+-
+-/*!
+- * This function implements IOCTL controls on a PMIC RTC device.
+- *
+- * @param        inode       pointer on the node
+- * @param        file        pointer on the file
+- * @param        cmd         the command
+- * @param        arg         the parameter
+- * @return       This function returns 0 if successful.
+- */
+-static int pmic_rtc_ioctl(struct inode *inode, struct file *file,
+-			  unsigned int cmd, unsigned long arg)
+-{
+-	struct timeval *pmic_time = NULL;
+-
+-	if (_IOC_TYPE(cmd) != 'p')
+-		return -ENOTTY;
+-
+-	if (arg) {
+-		pmic_time = kmalloc(sizeof(struct timeval), GFP_KERNEL);
+-		if (pmic_time == NULL)
+-			return -ENOMEM;
+-
+-		/*      if (copy_from_user(pmic_time, (struct timeval *)arg,
+-		   sizeof(struct timeval))) {
+-		   return -EFAULT;
+-		   } */
+-	}
+-
+-	switch (cmd) {
+-	case PMIC_RTC_SET_TIME:
+-		if (copy_from_user(pmic_time, (struct timeval *)arg,
+-				   sizeof(struct timeval)))
+-			return -EFAULT;
+-
+-		pr_debug("SET RTC\n");
+-		CHECK_ERROR(pmic_rtc_set_time(pmic_time));
+-		break;
+-	case PMIC_RTC_GET_TIME:
+-		if (copy_to_user((struct timeval *)arg, pmic_time,
+-				 sizeof(struct timeval)))
+-			return -EFAULT;
+-
+-		pr_debug("GET RTC\n");
+-		CHECK_ERROR(pmic_rtc_get_time(pmic_time));
+-		break;
+-	case PMIC_RTC_SET_ALARM:
+-		if (copy_from_user(pmic_time, (struct timeval *)arg,
+-				   sizeof(struct timeval)))
+-			return -EFAULT;
+-
+-		pr_debug("SET RTC ALARM\n");
+-		CHECK_ERROR(pmic_rtc_set_time_alarm(pmic_time));
+-		break;
+-	case PMIC_RTC_GET_ALARM:
+-		if (copy_to_user((struct timeval *)arg, pmic_time,
+-				 sizeof(struct timeval)))
+-			return -EFAULT;
+-
+-		pr_debug("GET RTC ALARM\n");
+-		CHECK_ERROR(pmic_rtc_get_time_alarm(pmic_time));
+-		break;
+-	case PMIC_RTC_WAIT_ALARM:
+-		CHECK_ERROR(pmic_rtc_event_sub(RTC_IT_ALARM,
+-					       callback_test_sub));
+-		CHECK_ERROR(pmic_rtc_wait_alarm());
+-		CHECK_ERROR(pmic_rtc_event_unsub(RTC_IT_ALARM,
+-						 callback_test_sub));
+-		break;
+-	case PMIC_RTC_ALARM_REGISTER:
+-		alarm_callback.func = callback_alarm_asynchronous;
+-		alarm_callback.param = NULL;
+-		CHECK_ERROR(mcu_pmic_rtc_event_subscribe
+-			    (EVENT_RTC, alarm_callback));
+-		break;
+-	case PMIC_RTC_ALARM_UNREGISTER:
+-		alarm_callback.func = callback_alarm_asynchronous;
+-		alarm_callback.param = NULL;
+-		CHECK_ERROR(mcu_pmic_rtc_event_unsubscribe
+-			    (EVENT_RTC, alarm_callback));
+-		pmic_rtc_done = false;
+-		break;
+-	default:
+-		pr_debug("%d unsupported ioctl command\n", (int)cmd);
+-		return -EINVAL;
+-	}
+-
+-	if (arg) {
+-		if (copy_to_user((struct timeval *)arg, pmic_time,
+-				 sizeof(struct timeval)))
+-			return -EFAULT;
+-
+-		kfree(pmic_time);
+-	}
+-
+-	return 0;
+-}
+-
+-/*!
+- * This function implements the open method on a PMIC RTC device.
+- *
+- * @param        inode       pointer on the node
+- * @param        file        pointer on the file
+- * @return       This function returns 0.
+- */
+-static int pmic_rtc_open(struct inode *inode, struct file *file)
+-{
+-	return 0;
+-}
+-
+-/*!
+- * This function implements the release method on a PMIC RTC device.
+- *
+- * @param        inode       pointer on the node
+- * @param        file        pointer on the file
+- * @return       This function returns 0.
+- */
+-static int pmic_rtc_release(struct inode *inode, struct file *file)
+-{
+-	return 0;
+-}
+-
+-/*!
+- * This function is called to put the RTC in a low power state.
+- * There is no need for power handlers for the RTC device.
+- * The RTC cannot be suspended.
+- *
+- * @param   pdev  the device structure used to give information on which RTC
+- *                device (0 through 3 channels) to suspend
+- * @param   state the power state the device is entering
+- *
+- * @return  The function always returns 0.
+- */
+-static int pmic_rtc_suspend(struct platform_device *pdev, pm_message_t state)
+-{
+-	return 0;
+-}
+-
+-/*!
+- * This function is called to resume the RTC from a low power state.
+- *
+- * @param   pdev  the device structure used to give information on which RTC
+- *                device (0 through 3 channels) to suspend
+- *
+- * @return  The function always returns 0.
+- */
+-static int pmic_rtc_resume(struct platform_device *pdev)
+-{
+-	return 0;
+-}
+-
+-/*!
+- * This structure contains pointers to the power management callback functions.
+- */
+-
+-static struct file_operations pmic_rtc_fops = {
+-	.owner = THIS_MODULE,
+-	.ioctl = pmic_rtc_ioctl,
+-	.poll = pmic_rtc_poll,
+-	.open = pmic_rtc_open,
+-	.release = pmic_rtc_release,
+-};
+-
+-int pmic_rtc_loaded(void)
+-{
+-	return pmic_rtc_detected;
+-}
+-EXPORT_SYMBOL(pmic_rtc_loaded);
+-
+-static int pmic_rtc_remove(struct platform_device *pdev)
+-{
+-	device_destroy(pmic_rtc_class, MKDEV(pmic_rtc_major, 0));
+-	class_destroy(pmic_rtc_class);
+-	unregister_chrdev(pmic_rtc_major, MCU_PMIC_RTC_NAME);
+-	free_irq(mcu_pmic_rtc_data.irq, pdev);
+-	return 0;
+-}
+-
+-static irqreturn_t mcu_pmic_rtc_alarm_handler(int irq, void *dev_id)
+-{
+-	schedule_work(&rtc_alarm_event);
+-	return IRQ_HANDLED;
+-
+-}
+-
+-static int pmic_rtc_probe(struct platform_device *pdev)
+-{
+-	int val;
+-	int ret = 0;
+-	struct device *temp_class;
+-
+-	pmic_rtc_major = register_chrdev(0, MCU_PMIC_RTC_NAME, &pmic_rtc_fops);
+-	if (pmic_rtc_major < 0) {
+-		return pmic_rtc_major;
+-	}
+-
+-	pmic_rtc_class = class_create(THIS_MODULE, MCU_PMIC_RTC_NAME);
+-	if (IS_ERR(pmic_rtc_class)) {
+-		ret = PTR_ERR(pmic_rtc_class);
+-		goto err_out1;
+-	}
+-
+-	temp_class = device_create(pmic_rtc_class, NULL,
+-				   MKDEV(pmic_rtc_major, 0),
+-				   MCU_PMIC_RTC_NAME);
+-	if (IS_ERR(temp_class)) {
+-		ret = PTR_ERR(temp_class);
+-		goto err_out2;
+-	}
+-	mcu_pmic_rtc_data.irq = platform_get_irq(pdev, 0);
+-	if (mcu_pmic_rtc_data.irq >= 0) {
+-		if (request_irq(mcu_pmic_rtc_data.irq,
+-				mcu_pmic_rtc_alarm_handler, IRQF_SHARED,
+-				pdev->name, pdev) < 0) {
+-			dev_warn(&pdev->dev, "interrupt not available.\n");
+-			mcu_pmic_rtc_data.irq = -1;
+-		}
+-	}
+-
+-	pmic_rtc_detected = 1;
+-
+-	/* check  if need to init year/mon/day */
+-	pmic_read_reg(REG_MCU_MONTH, &val, 0x1F);
+-	if (0 == val) {
+-		pmic_write_reg(REG_MCU_YEAR, 0x70, 0xFF);
+-		pmic_write_reg(REG_MCU_MONTH, 0x01, 0xFF);
+-		pmic_write_reg(REG_MCU_DATE, 0x1, 0xFF);
+-	}
+-
+-	/* start RTC */
+-	pmic_write_reg(REG_MCU_SECS, 0x80, 0x80);
+-
+-	return ret;
+-
+-err_out2:
+-	class_destroy(pmic_rtc_class);
+-err_out1:
+-	unregister_chrdev(pmic_rtc_major, MCU_PMIC_RTC_NAME);
+-	return ret;
+-}
+-
+-static struct platform_driver pmic_rtc_driver_ldm = {
+-	.driver = {
+-		   .name = MCU_PMIC_RTC_NAME,
+-		   .owner = THIS_MODULE,
+-		   },
+-	.suspend = pmic_rtc_suspend,
+-	.resume = pmic_rtc_resume,
+-	.probe = pmic_rtc_probe,
+-	.remove = pmic_rtc_remove,
+-};
+-
+-static int __init pmic_rtc_init(void)
+-{
+-	return platform_driver_register(&pmic_rtc_driver_ldm);
+-}
+-static void __exit pmic_rtc_exit(void)
+-{
+-	platform_driver_unregister(&pmic_rtc_driver_ldm);
+-	pr_debug("PMIC RTC driver successfully unloaded\n");
+-}
+-
+-/*
+- * Module entry points
+- */
+-
+-module_init(pmic_rtc_init);
+-module_exit(pmic_rtc_exit);
+-
+-MODULE_DESCRIPTION("Pmic_rtc driver");
+-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-MODULE_LICENSE("GPL");
+diff --git a/drivers/regulator/max8660/reg-max8660.c b/drivers/regulator/max8660/reg-max8660.c
+index 8da2494..54fe758 100644
+--- a/drivers/regulator/max8660/reg-max8660.c
++++ b/drivers/regulator/max8660/reg-max8660.c
+@@ -21,9 +21,9 @@
+ #include <linux/regulator/regulator-platform.h>
+ #include <linux/regulator/regulator-drv.h>
+ #include <asm/ioctl.h>
++#include <asm/arch-mxc/pmic_status.h>
+ #include <linux/platform_device.h>
+-#include <asm/arch/pmic_status.h>
+-#include <asm/arch/pmic_external.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ 
+ /*!
+  * brief PMIC regulators.
+@@ -179,7 +179,7 @@ static int max8660_regulator_on(int regulator)
+ 		return PMIC_PARAMETER_ERROR;
+ 	}
+ 
+-	CHECK_ERROR(pmic_write_reg(reg_num, reg_mask, reg_mask));
++	CHECK_ERROR(mcu_pmic_write_reg(reg_num, reg_mask, reg_mask));
+ 
+ 	return 0;
+ }
+@@ -227,14 +227,14 @@ static int max8660_regulator_off(int regulator)
+ 		return PMIC_PARAMETER_ERROR;
+ 	}
+ 
+-	CHECK_ERROR(pmic_write_reg(reg_num, 0, reg_mask));
++	CHECK_ERROR(mcu_pmic_write_reg(reg_num, 0, reg_mask));
+ 
+ 	/* handle sw3,4 */
+ 	switch (regulator) {
+ 	case MCU_SW3:
+ 		reg_mask = 0;
+ 		SET_BIT_IN_BYTE(reg_mask, 2);
+-		CHECK_ERROR(pmic_read_reg
++		CHECK_ERROR(mcu_pmic_read_reg
+ 			    (REG_MCU_POWER_CTL, &reg_read, reg_mask));
+ 
+ 		/* check if hw pin enable sw34 */
+@@ -243,21 +243,21 @@ static int max8660_regulator_off(int regulator)
+ 			/* keep sw4 on */
+ 			reg_mask = 0;
+ 			SET_BIT_IN_BYTE(reg_mask, 2);
+-			CHECK_ERROR(pmic_write_reg
++			CHECK_ERROR(mcu_pmic_write_reg
+ 				    (REG_MAX8660_OUTPUT_ENABLE_1, reg_mask,
+ 				     reg_mask));
+ 
+ 			/* disable hw pin to actually turn off sw3 */
+ 			reg_mask = 0;
+ 			SET_BIT_IN_BYTE(reg_mask, 2);
+-			CHECK_ERROR(pmic_write_reg
++			CHECK_ERROR(mcu_pmic_write_reg
+ 				    (REG_MCU_POWER_CTL, 0, reg_mask));
+ 		}
+ 		break;
+ 	case MCU_SW4:
+ 		reg_mask = 0;
+ 		SET_BIT_IN_BYTE(reg_mask, 2);
+-		CHECK_ERROR(pmic_read_reg
++		CHECK_ERROR(mcu_pmic_read_reg
+ 			    (REG_MCU_POWER_CTL, &reg_read, reg_mask));
+ 
+ 		/* check if hw pin enable sw34 */
+@@ -266,14 +266,14 @@ static int max8660_regulator_off(int regulator)
+ 			/* keep sw3 on */
+ 			reg_mask = 0;
+ 			SET_BIT_IN_BYTE(reg_mask, 0);
+-			CHECK_ERROR(pmic_write_reg
++			CHECK_ERROR(mcu_pmic_write_reg
+ 				    (REG_MAX8660_OUTPUT_ENABLE_1, reg_mask,
+ 				     reg_mask));
+ 
+ 			/* disable hw pin to actually turn off sw4 */
+ 			reg_mask = 0;
+ 			SET_BIT_IN_BYTE(reg_mask, 2);
+-			CHECK_ERROR(pmic_write_reg
++			CHECK_ERROR(mcu_pmic_write_reg
+ 				    (REG_MCU_POWER_CTL, 0, reg_mask));
+ 		}
+ 		break;
+@@ -327,15 +327,16 @@ static int max8660_sw3_set_voltage(struct regulator *reg, int uV)
+ 
+ 	/* hold on */
+ 	SET_BIT_IN_BYTE(reg_mask, 0);
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_VOLT_CHANGE_CONTROL_1, 0, reg_mask));
+ 
+ 	/* set volt */
+-	CHECK_ERROR(pmic_write_reg(REG_MAX8660_V3_TARGET_VOLT_1, volt, 0xff));
++	CHECK_ERROR(
++		mcu_pmic_write_reg(REG_MAX8660_V3_TARGET_VOLT_1, volt, 0xff));
+ 
+ 	/* start ramp */
+ 	SET_BIT_IN_BYTE(reg_mask, 0);
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_VOLT_CHANGE_CONTROL_1, reg_mask, reg_mask));
+ 
+ 	return 0;
+@@ -346,7 +347,7 @@ static int max8660_sw3_get_voltage(struct regulator *reg)
+ 	int uV;
+ 	unsigned int reg_val = 0;
+ 
+-	CHECK_ERROR(pmic_read_reg
++	CHECK_ERROR(mcu_pmic_read_reg
+ 		    (REG_MAX8660_V3_TARGET_VOLT_1, &reg_val, 0xff));
+ 
+ 	uV = 1000 * (reg_val * 25 + 725);
+@@ -378,15 +379,16 @@ static int max8660_sw4_set_voltage(struct regulator *reg, int uV)
+ 
+ 	/* hold on */
+ 	SET_BIT_IN_BYTE(reg_mask, 4);
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_VOLT_CHANGE_CONTROL_1, 0, reg_mask));
+ 
+ 	/* set volt */
+-	CHECK_ERROR(pmic_write_reg(REG_MAX8660_V4_TARGET_VOLT_1, volt, 0xff));
++	CHECK_ERROR(
++		mcu_pmic_write_reg(REG_MAX8660_V4_TARGET_VOLT_1, volt, 0xff));
+ 
+ 	/* start ramp */
+ 	SET_BIT_IN_BYTE(reg_mask, 4);
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_VOLT_CHANGE_CONTROL_1, reg_mask, reg_mask));
+ 
+ 	return 0;
+@@ -397,7 +399,7 @@ static int max8660_sw4_get_voltage(struct regulator *reg)
+ 	int uV;
+ 	unsigned int reg_val = 0;
+ 
+-	CHECK_ERROR(pmic_read_reg
++	CHECK_ERROR(mcu_pmic_read_reg
+ 		    (REG_MAX8660_V4_TARGET_VOLT_1, &reg_val, 0xff));
+ 
+ 	uV = 1000 * (reg_val * 25 + 725);
+@@ -429,15 +431,16 @@ static int max8660_ldo5_set_voltage(struct regulator *reg, int uV)
+ 
+ 	/* hold on */
+ 	SET_BIT_IN_BYTE(reg_mask, 6);
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_VOLT_CHANGE_CONTROL_1, 0, reg_mask));
+ 
+ 	/* set volt */
+-	CHECK_ERROR(pmic_write_reg(REG_MAX8660_V5_TARGET_VOLT_1, volt, 0xff));
++	CHECK_ERROR(
++		mcu_pmic_write_reg(REG_MAX8660_V5_TARGET_VOLT_1, volt, 0xff));
+ 
+ 	/* start ramp */
+ 	SET_BIT_IN_BYTE(reg_mask, 6);
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_VOLT_CHANGE_CONTROL_1, reg_mask, reg_mask));
+ 
+ 	return 0;
+@@ -448,7 +451,7 @@ static int max8660_ldo5_get_voltage(struct regulator *reg)
+ 	int uV;
+ 	unsigned int reg_val = 0;
+ 
+-	CHECK_ERROR(pmic_read_reg
++	CHECK_ERROR(mcu_pmic_read_reg
+ 		    (REG_MAX8660_V5_TARGET_VOLT_1, &reg_val, 0xff));
+ 
+ 	uV = 1000 * (reg_val * 25 + 1700);
+@@ -479,7 +482,8 @@ static int max8660_ldo6_set_voltage(struct regulator *reg, int uV)
+ 	volt = (mV - 1800) / 100;
+ 
+ 	/* set volt */
+-	CHECK_ERROR(pmic_write_reg(REG_MAX8660_V6V7_TARGET_VOLT, volt, 0x0f));
++	CHECK_ERROR(
++		mcu_pmic_write_reg(REG_MAX8660_V6V7_TARGET_VOLT, volt, 0x0f));
+ 
+ 	return 0;
+ }
+@@ -489,7 +493,7 @@ static int max8660_ldo6_get_voltage(struct regulator *reg)
+ 	int uV;
+ 	unsigned int reg_val = 0;
+ 
+-	CHECK_ERROR(pmic_read_reg
++	CHECK_ERROR(mcu_pmic_read_reg
+ 		    (REG_MAX8660_V6V7_TARGET_VOLT, &reg_val, 0x0f));
+ 
+ 	uV = 1000 * (reg_val * 100 + 1800);
+@@ -519,7 +523,7 @@ static int max8660_ldo7_set_voltage(struct regulator *reg, int uV)
+ 	volt = (mV - 1800) / 100;
+ 
+ 	/* set volt */
+-	CHECK_ERROR(pmic_write_reg
++	CHECK_ERROR(mcu_pmic_write_reg
+ 		    (REG_MAX8660_V6V7_TARGET_VOLT, (volt << 4), 0xf0));
+ 
+ 	return 0;
+@@ -530,7 +534,7 @@ static int max8660_ldo7_get_voltage(struct regulator *reg)
+ 	int uV;
+ 	unsigned int reg_val = 0;
+ 
+-	CHECK_ERROR(pmic_read_reg
++	CHECK_ERROR(mcu_pmic_read_reg
+ 		    (REG_MAX8660_V6V7_TARGET_VOLT, &reg_val, 0x0f));
+ 	reg_val = (reg_val >> 4) & 0xf;
+ 
+@@ -877,6 +881,18 @@ int reg_max8660_probe(void)
+ }
+ EXPORT_SYMBOL(reg_max8660_probe);
+ 
++int reg_max8660_remove(void)
++{
++	int i;
++	for (i = 0; i < ARRAY_SIZE(reg_max8660_children); i++)
++		regulator_unregister(&reg_max8660_children[i].regulator);
++
++	for (i = 0; i < ARRAY_SIZE(reg_max8660); i++)
++		regulator_unregister(&reg_max8660[i].regulator);
++	return 0;
++}
++EXPORT_SYMBOL(reg_max8660_remove);
++
+ /* Module information */
+ MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+ MODULE_DESCRIPTION("MAX8660 Regulator driver");
+diff --git a/drivers/video/mxc/mxcfb_claa_wvga.c b/drivers/video/mxc/mxcfb_claa_wvga.c
+index a9e18c4..b4543b7 100644
+--- a/drivers/video/mxc/mxcfb_claa_wvga.c
++++ b/drivers/video/mxc/mxcfb_claa_wvga.c
+@@ -121,6 +121,8 @@ static int __devinit lcd_probe(struct platform_device *pdev)
+ 			plat->reset();
+ 
+ 		io_reg = regulator_get(&pdev->dev, plat->io_reg);
++		if (IS_ERR(io_reg))
++			io_reg = NULL;
+ 		core_reg = regulator_get(&pdev->dev, plat->core_reg);
+ 		if (!IS_ERR(core_reg)) {
+ 			regulator_set_voltage(io_reg, 1800000);
+@@ -196,7 +198,8 @@ static void lcd_poweron(void)
+ 	dev_dbg(&plcd_dev->dev, "turning on LCD\n");
+ 	if (core_reg)
+ 		regulator_enable(core_reg);
+-	regulator_enable(io_reg);
++	if (io_reg)
++		regulator_enable(io_reg);
+ 	lcd_on = 1;
+ }
+ 
+diff --git a/include/asm-arm/arch-mxc/pmic_external.h b/include/asm-arm/arch-mxc/pmic_external.h
+index 1c1e5ec..8861193 100644
+--- a/include/asm-arm/arch-mxc/pmic_external.h
++++ b/include/asm-arm/arch-mxc/pmic_external.h
+@@ -963,97 +963,6 @@ void mc13892_power_off(void);
+ 
+ #endif
+ 
+-#ifdef CONFIG_MXC_PMIC_MC9SDZ60
+-
+-typedef enum {
+-
+-	/*reg names for mcu */
+-	REG_MCU_VERSION = 0,
+-	REG_MCU_SECS,
+-	REG_MCU_MINS,
+-	REG_MCU_HRS,
+-	REG_MCU_DAY,
+-	REG_MCU_DATE,
+-	REG_MCU_MONTH,
+-	REG_MCU_YEAR,
+-	REG_MCU_ALARM_SECS,
+-	REG_MCU_ALARM_MINS,
+-	REG_MCU_ALARM_HRS,
+-	REG_MCU_TS_CONTROL,
+-	REG_MCU_X_LOW,
+-	REG_MCU_Y_LOW,
+-	REG_MCU_XY_HIGH,
+-	REG_MCU_X_LEFT_LOW,
+-	REG_MCU_X_LEFT_HIGH,
+-	REG_MCU_X_RIGHT,
+-	REG_MCU_Y_TOP_LOW,
+-	REG_MCU_Y_TOP_HIGH,
+-	REG_MCU_Y_BOTTOM,
+-	REG_MCU_RESET_1,
+-	REG_MCU_RESET_2,
+-	REG_MCU_POWER_CTL,
+-	REG_MCU_DELAY_CONFIG,
+-	REG_MCU_GPIO_1,
+-	REG_MCU_GPIO_2,
+-	REG_MCU_KPD_1,
+-	REG_MCU_KPD_2,
+-	REG_MCU_KPD_CONTROL,
+-	REG_MCU_INT_ENABLE_1,
+-	REG_MCU_INT_ENABLE_2,
+-	REG_MCU_INT_FLAG_1,
+-	REG_MCU_INT_FLAG_2,
+-	REG_MCU_DES_FLAG,
+-
+-	/* reg names for max8660 */
+-	REG_MAX8660_OUTPUT_ENABLE_1,
+-	REG_MAX8660_OUTPUT_ENABLE_2,
+-	REG_MAX8660_VOLT_CHANGE_CONTROL_1,
+-	REG_MAX8660_V3_TARGET_VOLT_1,
+-	REG_MAX8660_V3_TARGET_VOLT_2,
+-	REG_MAX8660_V4_TARGET_VOLT_1,
+-	REG_MAX8660_V4_TARGET_VOLT_2,
+-	REG_MAX8660_V5_TARGET_VOLT_1,
+-	REG_MAX8660_V5_TARGET_VOLT_2,
+-	REG_MAX8660_V6V7_TARGET_VOLT,
+-	REG_MAX8660_FORCE_PWM
+-} pmic_reg;
+-
+-typedef enum {
+-	EVENT_HEADPHONE_DET = 0,
+-	EVENT_GPS_INT = 1,
+-	EVENT_SD1_DET = 2,
+-	EVENT_SD1_WP = 3,
+-	EVENT_SD2_DET = 4,
+-	EVENT_SD2_WP = 5,
+-	EVENT_POWER_KEY = 6,
+-
+-	/* part 2 */
+-	EVENT_RTC = 7,
+-	EVENT_TS_ADC = 8,
+-	EVENT_KEYPAD = 9
+-} type_event;
+-
+-typedef enum {
+-
+-	MCU_GPIO_REG_RESET_1,
+-	MCU_GPIO_REG_RESET_2,
+-	MCU_GPIO_REG_POWER_CONTROL,
+-	MCU_GPIO_REG_GPIO_CONTROL_1,
+-	MCU_GPIO_REG_GPIO_CONTROL_2,
+-} t_mcu_gpio_reg;
+-
+-typedef enum {
+-
+-	MCU_SENSOR_NOT_SUPPORT
+-} t_sensor;
+-
+-typedef enum {
+-
+-	MCU_SENSOR_BIT_NOT_SUPPORT
+-} t_sensor_bits;
+-
+-#endif				/* MXC_PMIC_MC9SDZ60 */
+-
+ #if defined(CONFIG_MXC_PMIC_MC34704_MODULE) || defined(CONFIG_MXC_PMIC_MC34704)
+ 
+ typedef enum {
+@@ -1189,18 +1098,6 @@ PMIC_STATUS pmic_get_sensors(t_sensor_bits * sensor_bits);
+ void pmic_event_callback(type_event event);
+ void pmic_event_list_init(void);
+ 
+-#ifdef CONFIG_MXC_PMIC_MC9SDZ60
+-PMIC_STATUS pmic_gpio_set_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+-				  unsigned int val);
+-
+-PMIC_STATUS pmic_gpio_get_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+-				  unsigned int *val);
+-
+-PMIC_STATUS pmic_gpio_get_designation_bit_val(unsigned int bit,
+-					      unsigned int *val);
+-
+-#endif
+-
+ #ifdef CONFIG_REGULATOR_MC13783
+ /*!
+  * This function is used to initialize the regulator for MC13783.
+diff --git a/include/linux/regulator/mcu_max8660-bus.h b/include/linux/regulator/mcu_max8660-bus.h
+new file mode 100644
+index 0000000..24eb174
+--- /dev/null
++++ b/include/linux/regulator/mcu_max8660-bus.h
+@@ -0,0 +1,102 @@
++/*
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++
++#ifndef __LINUX_REGULATOR_MCU_MAX8660_BUS_H_
++#define __LINUX_REGULATOR_MCU_MAX8660_BUS_H_
++
++#ifdef CONFIG_MXC_PMIC_MC9SDZ60
++
++enum {
++
++	/*reg names for mcu */
++	REG_MCU_VERSION = 0,
++	REG_MCU_SECS,
++	REG_MCU_MINS,
++	REG_MCU_HRS,
++	REG_MCU_DAY,
++	REG_MCU_DATE,
++	REG_MCU_MONTH,
++	REG_MCU_YEAR,
++	REG_MCU_ALARM_SECS,
++	REG_MCU_ALARM_MINS,
++	REG_MCU_ALARM_HRS,
++	REG_MCU_TS_CONTROL,
++	REG_MCU_X_LOW,
++	REG_MCU_Y_LOW,
++	REG_MCU_XY_HIGH,
++	REG_MCU_X_LEFT_LOW,
++	REG_MCU_X_LEFT_HIGH,
++	REG_MCU_X_RIGHT,
++	REG_MCU_Y_TOP_LOW,
++	REG_MCU_Y_TOP_HIGH,
++	REG_MCU_Y_BOTTOM,
++	REG_MCU_RESET_1,
++	REG_MCU_RESET_2,
++	REG_MCU_POWER_CTL,
++	REG_MCU_DELAY_CONFIG,
++	REG_MCU_GPIO_1,
++	REG_MCU_GPIO_2,
++	REG_MCU_KPD_1,
++	REG_MCU_KPD_2,
++	REG_MCU_KPD_CONTROL,
++	REG_MCU_INT_ENABLE_1,
++	REG_MCU_INT_ENABLE_2,
++	REG_MCU_INT_FLAG_1,
++	REG_MCU_INT_FLAG_2,
++	REG_MCU_DES_FLAG,
++
++	/* reg names for max8660 */
++	REG_MAX8660_OUTPUT_ENABLE_1,
++	REG_MAX8660_OUTPUT_ENABLE_2,
++	REG_MAX8660_VOLT_CHANGE_CONTROL_1,
++	REG_MAX8660_V3_TARGET_VOLT_1,
++	REG_MAX8660_V3_TARGET_VOLT_2,
++	REG_MAX8660_V4_TARGET_VOLT_1,
++	REG_MAX8660_V4_TARGET_VOLT_2,
++	REG_MAX8660_V5_TARGET_VOLT_1,
++	REG_MAX8660_V5_TARGET_VOLT_2,
++	REG_MAX8660_V6V7_TARGET_VOLT,
++	REG_MAX8660_FORCE_PWM
++};
++
++enum {
++
++	MCU_GPIO_REG_RESET_1,
++	MCU_GPIO_REG_RESET_2,
++	MCU_GPIO_REG_POWER_CONTROL,
++	MCU_GPIO_REG_GPIO_CONTROL_1,
++	MCU_GPIO_REG_GPIO_CONTROL_2,
++};
++
++#endif				/* MXC_PMIC_MC9SDZ60 */
++
++#ifdef CONFIG_MXC_PMIC_MC9SDZ60
++int pmic_gpio_set_bit_val(int reg, unsigned int bit,
++				  unsigned int val);
++
++int pmic_gpio_get_bit_val(int reg, unsigned int bit,
++				  unsigned int *val);
++
++int pmic_gpio_get_designation_bit_val(unsigned int bit,
++					      unsigned int *val);
++
++#endif
++
++
++int mcu_pmic_read_reg(int reg, unsigned int *reg_value,
++			  unsigned int reg_mask);
++
++int mcu_pmic_write_reg(int reg, unsigned int reg_value,
++			   unsigned int reg_mask);
++#endif
+diff --git a/sound/soc/codecs/ak4647.c b/sound/soc/codecs/ak4647.c
+index 84a9e18..db5eb07 100644
+--- a/sound/soc/codecs/ak4647.c
++++ b/sound/soc/codecs/ak4647.c
+@@ -637,12 +637,32 @@ static struct snd_soc_device_driver ak4647_hifi_dai_driver = {
+ static int ak4647_i2c_probe(struct i2c_client *client,
+ 			    const struct i2c_device_id *id)
+ {
++	int ret;
++	u8 value;
+ 	ak4647_i2c_client = client;
+-	return 0;
++	ret = ak4647_read_reg(AK4647_REG_START, &value);
++	if (0 == ret) {
++		pr_info("ak4647 codec detected\n");
++		ret = driver_register(&ak4647_codec_driver.driver);
++		if (ret < 0)
++			return ret;
++		ret = driver_register(&ak4647_hifi_dai_driver.driver);
++		if (ret < 0) {
++			driver_unregister(&ak4647_codec_driver.driver);
++			return ret;
++		}
++
++		return 0;
++	} else {
++		pr_info("ak4647 codec not detected\n");
++		return -1;
++	}
+ }
+ 
+ static int ak4647_i2c_remove(struct i2c_client *client)
+ {
++	driver_unregister(&ak4647_hifi_dai_driver.driver);
++	driver_unregister(&ak4647_codec_driver.driver);
+ 	return 0;
+ }
+ 
+@@ -670,23 +690,11 @@ static __init int ak4647_init(void)
+ 		pr_err("ak4647 i2c driver register failed");
+ 		return ret;
+ 	}
+-
+-	ret = driver_register(&ak4647_codec_driver.driver);
+-	if (ret < 0)
+-		return ret;
+-	ret = driver_register(&ak4647_hifi_dai_driver.driver);
+-	if (ret < 0) {
+-		driver_unregister(&ak4647_codec_driver.driver);
+-		return ret;
+-	}
+-
+ 	return ret;
+ }
+ 
+ static __exit void ak4647_exit(void)
+ {
+-	driver_unregister(&ak4647_hifi_dai_driver.driver);
+-	driver_unregister(&ak4647_codec_driver.driver);
+ 	i2c_del_driver(&ak4647_i2c_driver);
+ }
+ 
+diff --git a/sound/soc/imx/imx-3stack-ak4647.c b/sound/soc/imx/imx-3stack-ak4647.c
+index b2d9b0b..845beba 100644
+--- a/sound/soc/imx/imx-3stack-ak4647.c
++++ b/sound/soc/imx/imx-3stack-ak4647.c
+@@ -28,7 +28,7 @@
+ #include <asm/hardware.h>
+ #include <asm/arch/clock.h>
+ #include <asm/arch/mxc.h>
+-#include <asm/arch/pmic_external.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ 
+ #include "imx-pcm.h"
+ #include "imx-ssi.h"
+diff --git a/sound/soc/imx/imx-3stack-wm8580.c b/sound/soc/imx/imx-3stack-wm8580.c
+index 685aaf7..47832a0 100644
+--- a/sound/soc/imx/imx-3stack-wm8580.c
++++ b/sound/soc/imx/imx-3stack-wm8580.c
+@@ -19,6 +19,7 @@
+ #include <linux/i2c.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
++#include <linux/regulator/mcu_max8660-bus.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/soc.h>
+@@ -28,7 +29,6 @@
+ #include <asm/hardware.h>
+ #include <asm/arch/clock.h>
+ #include <asm/arch/mxc.h>
+-#include <asm/arch/pmic_external.h>
+ 
+ #include "imx-pcm.h"
+ #include "imx-esai.h"
+-- 
+1.5.4.4
+

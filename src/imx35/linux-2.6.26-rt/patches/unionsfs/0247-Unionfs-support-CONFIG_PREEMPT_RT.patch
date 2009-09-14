@@ -1,0 +1,31 @@
+From 25fb8dc08752c541ffc9a1d476648b2d0d5698af Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 24 Aug 2007 10:42:56 -0400
+Subject: [PATCH] Unionfs: support CONFIG_PREEMPT_RT
+
+Use compat_rw_semaphore when using the real-time preemption patches.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/union.h |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 3b555bc..f03143e 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -143,7 +143,11 @@ struct unionfs_sb_info {
+ 	 *   2) any new operations do not execute until the currently
+ 	 *      running branch management operation completes
+ 	 */
++#ifdef CONFIG_PREEMPT_RT
++	struct compat_rw_semaphore rwsem;
++#else /* not CONFIG_PREEMPT_RT */
+ 	struct rw_semaphore rwsem;
++#endif /* not CONFIG_PREEMPT_RT */
+ 	int high_branch_id;	/* last unique branch ID given */
+ 	struct unionfs_data *data;
+ };
+-- 
+1.5.4.3
+

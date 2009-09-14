@@ -1,0 +1,172 @@
+From 729f29220e401d602c7b9aa48e6d027eeac40f75 Mon Sep 17 00:00:00 2001
+From: Xie xiaobo <X.Xie@freescale.com>
+Date: Thu, 30 Apr 2009 19:51:02 +0800
+Subject: [PATCH] ENGR00111693-1 MX25: Add camera support
+
+Add camera support for i.MX25 3-stack.
+
+Signed-off-by: Guoqing Jiang <b22156@freescale.com>
+---
+ arch/arm/mach-mx25/clock.c            |    6 +++-
+ arch/arm/mach-mx25/mx25_3stack.c      |   13 +++++++++
+ arch/arm/mach-mx25/mx25_3stack_gpio.c |   47 +++++---------------------------
+ 3 files changed, 26 insertions(+), 40 deletions(-)
+
+diff --git a/arch/arm/mach-mx25/clock.c b/arch/arm/mach-mx25/clock.c
+index 7ff85ee..555218a 100644
+--- a/arch/arm/mach-mx25/clock.c
++++ b/arch/arm/mach-mx25/clock.c
+@@ -455,7 +455,7 @@ static struct clk per_clk[] = {
+ 	{
+ 	 .name = "per_csi_clk",
+ 	 .id = 0,
+-	 .parent = &ahb_clk,	/* can be AHB or UPLL */
++	 .parent = &upll_clk,	/* can be AHB or UPLL */
+ 	 .round_rate = _clk_perclkx_round_rate,
+ 	 .set_rate = _clk_perclkx_set_rate,
+ 	 .set_parent = _clk_perclkx_set_parent,
+@@ -1690,6 +1690,10 @@ int __init mxc_clocks_init(void)
+ 	clk_set_parent(&per_clk[8], &ahb_clk);
+ 	clk_set_rate(&per_clk[8], ahb_clk.rate / 6);
+ 
++	/* the csi clock must be derived from UPLL clock */
++	clk_set_parent(&per_clk[0], &upll_clk);
++	clk_set_rate(&per_clk[0], upll_clk.rate / 5);
++
+ 	pr_info("Clock input source is %ld\n", osc24m_clk.rate);
+ 
+ 	clk_enable(&emi_clk);
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index 33e3c76..bab78f8 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -251,6 +251,14 @@ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	 },
+ };
+ 
++static struct mxc_camera_platform_data camera_data = {
++	.core_regulator = NULL,
++	.io_regulator = NULL,
++	.analog_regulator = NULL,
++	.gpo_regulator = NULL,
++	.mclk = 24000000,
++};
++
+ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	{
+ 	 .type = "mc34704",
+@@ -260,6 +268,11 @@ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	 .type = "sgtl5000-i2c",
+ 	 .addr = 0x0a,
+ 	 },
++	{
++	 .type = "ov2640",
++	 .addr = 0x30,
++	 .platform_data = (void *)&camera_data,
++	 },
+ };
+ 
+ #if defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) \
+diff --git a/arch/arm/mach-mx25/mx25_3stack_gpio.c b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+index aed627a..12d9753 100644
+--- a/arch/arm/mach-mx25/mx25_3stack_gpio.c
++++ b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+@@ -979,8 +979,6 @@ EXPORT_SYMBOL(gpio_usbotg_utmi_inactive);
+  */
+ void gpio_sensor_active(void)
+ {
+-	mxc_request_iomux(MX25_PIN_KPP_ROW2, MUX_CONFIG_ALT3); /*CSI D0*/
+-	mxc_request_iomux(MX25_PIN_KPP_ROW3, MUX_CONFIG_ALT3); /*CSI D1*/
+ 	mxc_request_iomux(MX25_PIN_CSI_D2, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_CSI_D3, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_CSI_D4, MUX_CONFIG_FUNC);
+@@ -993,25 +991,20 @@ void gpio_sensor_active(void)
+ 	mxc_request_iomux(MX25_PIN_CSI_MCLK, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_CSI_PIXCLK, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_CSI_VSYNC, MUX_CONFIG_FUNC);
+-	mxc_request_iomux(MX25_PIN_LD7, MUX_CONFIG_ALT2); /*CSI D10*/
+-	mxc_request_iomux(MX25_PIN_LD6, MUX_CONFIG_ALT2); /*CSI D11*/
+-	mxc_request_iomux(MX25_PIN_LD5, MUX_CONFIG_ALT2); /*CSI D12*/
+-	mxc_request_iomux(MX25_PIN_LD4, MUX_CONFIG_ALT2); /*CSI D13*/
+-	mxc_request_iomux(MX25_PIN_LD3, MUX_CONFIG_ALT2); /*CSI D14*/
+-	mxc_request_iomux(MX25_PIN_LD2, MUX_CONFIG_ALT2); /*CSI D15*/
+ 	mxc_request_iomux(MX25_PIN_A19, MUX_CONFIG_ALT5); /*CSI_PWDN*/
+-#if 0
+-	/* Or if uart1 is not used */
+-	mxc_request_iomux(MX25_PIN_UART1_RTS, MUX_CONFIG_ALT1); /*CSI D0*/
+-	mxc_request_iomux(MX25_PIN_UART1_CTS, MUX_CONFIG_ALT1); /*CSI D1*/
+-#endif
++	mxc_request_iomux(MX25_PIN_A20, MUX_CONFIG_ALT5);
++
++	mxc_set_gpio_direction(MX25_PIN_A19, 0); /*CSI_PWDN*/
++	mxc_set_gpio_dataout(MX25_PIN_A19, 0);
++	mxc_set_gpio_direction(MX25_PIN_A20, 0); /*CMOS_RST*/
++	mxc_set_gpio_dataout(MX25_PIN_A20, 0);
++	mdelay(20);
++	mxc_set_gpio_dataout(MX25_PIN_A20, 1);
+ 
+ #define CSI_PAD_CTL1 (PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PU)
+ #define CSI_PAD_CTL2 (PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE | \
+ 		      PAD_CTL_100K_PU)
+ 
+-	mxc_iomux_set_pad(MX25_PIN_KPP_ROW2, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_KPP_ROW3, CSI_PAD_CTL1);
+ 	mxc_iomux_set_pad(MX25_PIN_CSI_D2, CSI_PAD_CTL1);
+ 	mxc_iomux_set_pad(MX25_PIN_CSI_D3, CSI_PAD_CTL1);
+ 	mxc_iomux_set_pad(MX25_PIN_CSI_D4, CSI_PAD_CTL2);
+@@ -1025,12 +1018,6 @@ void gpio_sensor_active(void)
+ 			  PAD_CTL_PUE_PUD | PAD_CTL_100K_PU | PAD_CTL_SRE_FAST);
+ 	mxc_iomux_set_pad(MX25_PIN_CSI_PIXCLK, CSI_PAD_CTL2);
+ 	mxc_iomux_set_pad(MX25_PIN_CSI_VSYNC, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_LD7, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_LD6, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_LD5, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_LD4, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_LD3, CSI_PAD_CTL1);
+-	mxc_iomux_set_pad(MX25_PIN_LD2, CSI_PAD_CTL1);
+ }
+ EXPORT_SYMBOL(gpio_sensor_active);
+ 
+@@ -1039,8 +1026,6 @@ EXPORT_SYMBOL(gpio_sensor_active);
+  */
+ void gpio_sensor_inactive(void)
+ {
+-	mxc_request_gpio(MX25_PIN_KPP_ROW2);
+-	mxc_request_gpio(MX25_PIN_KPP_ROW3);
+ 	mxc_request_gpio(MX25_PIN_CSI_D2);
+ 	mxc_request_gpio(MX25_PIN_CSI_D3);
+ 	mxc_request_gpio(MX25_PIN_CSI_D4);
+@@ -1053,16 +1038,7 @@ void gpio_sensor_inactive(void)
+ 	mxc_request_gpio(MX25_PIN_CSI_MCLK);
+ 	mxc_request_gpio(MX25_PIN_CSI_PIXCLK);
+ 	mxc_request_gpio(MX25_PIN_CSI_VSYNC);
+-	mxc_request_gpio(MX25_PIN_LD7);
+-	mxc_request_gpio(MX25_PIN_LD6);
+-	mxc_request_gpio(MX25_PIN_LD5);
+-	mxc_request_gpio(MX25_PIN_LD4);
+-	mxc_request_gpio(MX25_PIN_LD3);
+-	mxc_request_gpio(MX25_PIN_LD2);
+-	mxc_request_gpio(MX25_PIN_A19); /*CSI_PWDN*/
+ 
+-	mxc_free_iomux(MX25_PIN_KPP_ROW2, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_KPP_ROW3, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_CSI_D2, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_CSI_D3, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_CSI_D4, MUX_CONFIG_GPIO);
+@@ -1075,13 +1051,6 @@ void gpio_sensor_inactive(void)
+ 	mxc_free_iomux(MX25_PIN_CSI_MCLK, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_CSI_PIXCLK, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_CSI_VSYNC, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD7, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD6, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD5, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD4, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD3, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD2, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_A19, MUX_CONFIG_GPIO);
+ }
+ EXPORT_SYMBOL(gpio_sensor_inactive);
+ 
+-- 
+1.5.4.4
+

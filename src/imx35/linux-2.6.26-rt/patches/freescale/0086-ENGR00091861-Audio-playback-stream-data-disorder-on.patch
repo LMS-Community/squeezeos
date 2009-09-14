@@ -1,0 +1,41 @@
+From 45fe5df622e6d925ea7afc22f097977d52743756 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Wed, 17 Sep 2008 18:55:03 +0800
+Subject: [PATCH] ENGR00091861 Audio playback stream data disorder on kernel 2.6.26
+
+1. The audio stream position returns incorrect value.
+2. The stream data disorder due to the error position return value.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/soc/imx/imx-pcm.c |   14 +++-----------
+ 1 files changed, 3 insertions(+), 11 deletions(-)
+
+diff --git a/sound/soc/imx/imx-pcm.c b/sound/soc/imx/imx-pcm.c
+index 427b2b8..2d27cdc 100644
+--- a/sound/soc/imx/imx-pcm.c
++++ b/sound/soc/imx/imx-pcm.c
+@@ -418,17 +418,9 @@ static snd_pcm_uframes_t imx_pcm_pointer(struct snd_pcm_substream *substream)
+ 	struct mxc_runtime_data *prtd = runtime->private_data;
+ 	unsigned int offset = 0;
+ 
+-	/* is a transfer active ? */
+-	if (prtd->dma_active) {
+-		offset = (runtime->period_size * (prtd->periods)) +
+-		    (runtime->period_size >> 1);
+-		if (offset >= runtime->buffer_size)
+-			offset = runtime->period_size >> 1;
+-	} else {
+-		offset = (runtime->period_size * (prtd->periods));
+-		if (offset >= runtime->buffer_size)
+-			offset = 0;
+-	}
++	offset = (runtime->period_size * (prtd->periods));
++	if (offset >= runtime->buffer_size)
++		offset = 0;
+ 	dbg("pointer offset %x\n", offset);
+ 
+ 	return offset;
+-- 
+1.5.4.4
+

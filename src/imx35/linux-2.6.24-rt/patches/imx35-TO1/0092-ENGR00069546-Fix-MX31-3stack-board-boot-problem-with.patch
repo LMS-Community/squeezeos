@@ -1,0 +1,98 @@
+From aae3e610cae50cb1f5ff7dc61eb41fdf03f1ac1f Mon Sep 17 00:00:00 2001
+From: Kevin Zhang <k.zhang@freescale.com>
+Date: Thu, 20 Mar 2008 15:03:03 -0500
+Subject: [PATCH] ENGR00069546 Fix MX31 3stack board boot problem with jffs2
+
+MX31 3stack board boot problem with jffs2. It was caused by recent
+community JFFS2 patch to support MLC nand by NOT writing to oob
+area. Even though this is not needed for the NFC on MX31, we have
+to set the flag:
+     mtd->flags &= ~MTD_OOB_WRITEABLE
+in the mxc_nd.c driver.
+
+Signed-off-by: Kevin Zhang <k.zhang@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |    4 ++--
+ drivers/mtd/nand/mxc_nd.c               |   21 +++++++++------------
+ 2 files changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index 428e43f..11e27d3 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Wed Mar 19 10:46:39 2008
++# Thu Mar 20 14:44:17 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -252,7 +252,7 @@ CONFIG_ALIGNMENT_TRAP=y
+ #
+ CONFIG_ZBOOT_ROM_TEXT=0x0
+ CONFIG_ZBOOT_ROM_BSS=0x0
+-CONFIG_CMDLINE="noinitrd console=ttymxc0 root=/dev/mtdblock2 rw ip=off"
++CONFIG_CMDLINE="noinitrd console=ttymxc0,115200 root=/dev/mtdblock2 rw rootfstype=jffs2 ip=off"
+ # CONFIG_XIP_KERNEL is not set
+ # CONFIG_KEXEC is not set
+ 
+diff --git a/drivers/mtd/nand/mxc_nd.c b/drivers/mtd/nand/mxc_nd.c
+index 507b346..e858a5b 100644
+--- a/drivers/mtd/nand/mxc_nd.c
++++ b/drivers/mtd/nand/mxc_nd.c
+@@ -15,26 +15,20 @@
+ #include <linux/slab.h>
+ #include <linux/init.h>
+ #include <linux/module.h>
+-#include <linux/mtd/mtd.h>
+-#include <linux/mtd/nand.h>
+-#include <linux/mtd/partitions.h>
+ #include <linux/interrupt.h>
+ #include <linux/device.h>
+ #include <linux/platform_device.h>
+ #include <linux/clk.h>
+ #include <linux/err.h>
+-
+-#include <asm/mach/flash.h>
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/nand.h>
++#include <linux/mtd/partitions.h>
+ #include <asm/io.h>
++#include <asm/mach/flash.h>
+ 
+ #include "mxc_nd.h"
+ 
+-/*!
+- * Number of static partitions on NAND Flash.
+- */
+-#define NUM_PARTITIONS    (sizeof(partition_info)/sizeof(struct mtd_partition))
+-
+-#define DVR_VER "2.0"
++#define DVR_VER "2.1"
+ 
+ struct mxc_mtd_s {
+ 	struct mtd_info mtd;
+@@ -43,7 +37,7 @@ struct mxc_mtd_s {
+ 	struct device *dev;
+ };
+ 
+-static struct mxc_mtd_s *mxc_nand_data = NULL;
++static struct mxc_mtd_s *mxc_nand_data;
+ 
+ /*
+  * Define delays in microsec for NAND device operations
+@@ -1113,6 +1107,9 @@ static int mxc_nand_scan_bbt(struct mtd_info *mtd)
+ 	if (is2k_Pagesize)
+ 		this->ecc.layout = &nand_hw_eccoob_2k;
+ 
++	/* jffs2 not write oob */
++	mtd->flags &= ~MTD_OOB_WRITEABLE;
++
+ 	/* use flash based bbt */
+ 	this->bbt_td = &bbt_main_descr;
+ 	this->bbt_md = &bbt_mirror_descr;
+-- 
+1.5.4.4
+

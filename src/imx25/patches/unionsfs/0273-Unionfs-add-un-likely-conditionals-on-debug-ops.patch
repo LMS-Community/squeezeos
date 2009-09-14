@@ -1,0 +1,340 @@
+From 741ee319a73cfa3c41fb2dec0b7b1dec0aecd924 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 24 Sep 2007 01:09:14 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on debug ops
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |  108 +++++++++++++++++++++++++++------------------------
+ 1 files changed, 57 insertions(+), 51 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 9546a41..09b52ce 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -56,19 +56,19 @@ void __unionfs_check_inode(const struct inode *inode,
+ 	sb = inode->i_sb;
+ 	istart = ibstart(inode);
+ 	iend = ibend(inode);
+-	if (istart > iend) {
++	if (unlikely(istart > iend)) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" Ci0: inode=%p istart/end=%d:%d\n",
+ 		       inode, istart, iend);
+ 	}
+-	if ((istart == -1 && iend != -1) ||
+-	    (istart != -1 && iend == -1)) {
++	if (unlikely((istart == -1 && iend != -1) ||
++		     (istart != -1 && iend == -1))) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" Ci1: inode=%p istart/end=%d:%d\n",
+ 		       inode, istart, iend);
+ 	}
+ 	if (!S_ISDIR(inode->i_mode)) {
+-		if (iend != istart) {
++		if (unlikely(iend != istart)) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" Ci2: inode=%p istart=%d iend=%d\n",
+ 			       inode, istart, iend);
+@@ -76,24 +76,24 @@ void __unionfs_check_inode(const struct inode *inode,
+ 	}
+ 
+ 	for (bindex = sbstart(sb); bindex < sbmax(sb); bindex++) {
+-		if (!UNIONFS_I(inode)) {
++		if (unlikely(!UNIONFS_I(inode))) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" Ci3: no inode_info %p\n", inode);
+ 			return;
+ 		}
+-		if (!UNIONFS_I(inode)->lower_inodes) {
++		if (unlikely(!UNIONFS_I(inode)->lower_inodes)) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" Ci4: no lower_inodes %p\n", inode);
+ 			return;
+ 		}
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (lower_inode) {
+-			if (bindex < istart || bindex > iend) {
++			if (unlikely(bindex < istart || bindex > iend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" Ci5: inode/linode=%p:%p bindex=%d "
+ 				       "istart/end=%d:%d\n", inode,
+ 				       lower_inode, bindex, istart, iend);
+-			} else if (lower_inode == POISONED_PTR) {
++			} else if (unlikely(lower_inode == POISONED_PTR)) {
+ 				/* freed inode! */
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" Ci6: inode/linode=%p:%p bindex=%d "
+@@ -107,8 +107,9 @@ void __unionfs_check_inode(const struct inode *inode,
+ 				 * b/t start/end, but NOT if at the
+ 				 * start/end range.
+ 				 */
+-				if (!(S_ISDIR(inode->i_mode) &&
+-				      bindex > istart && bindex < iend)) {
++				if (unlikely(!(S_ISDIR(inode->i_mode) &&
++					       bindex > istart &&
++					       bindex < iend))) {
+ 					PRINT_CALLER(fname, fxn, line);
+ 					printk(" Ci7: inode/linode=%p:%p "
+ 					       "bindex=%d istart/end=%d:%d\n",
+@@ -138,8 +139,8 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	dend = dbend(dentry);
+ 	BUG_ON(dstart > dend);
+ 
+-	if ((dstart == -1 && dend != -1) ||
+-	    (dstart != -1 && dend == -1)) {
++	if (unlikely((dstart == -1 && dend != -1) ||
++		     (dstart != -1 && dend == -1))) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CD0: dentry=%p dstart/end=%d:%d\n",
+ 		       dentry, dstart, dend);
+@@ -151,7 +152,7 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	for (bindex = sbstart(sb); bindex < sbmax(sb); bindex++) {
+ 		lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 		if (lower_dentry) {
+-			if (bindex < dstart || bindex > dend) {
++			if (unlikely(bindex < dstart || bindex > dend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CD1: dentry/lower=%p:%p(%p) "
+ 				       "bindex=%d dstart/end=%d:%d\n",
+@@ -169,10 +170,10 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 				 * however, if this is a NULL dentry or a
+ 				 * deleted dentry.
+ 				 */
+-				if (!d_deleted((struct dentry *) dentry) &&
+-				    inode &&
+-				    !(inode && S_ISDIR(inode->i_mode) &&
+-				      bindex > dstart && bindex < dend)) {
++				if (unlikely(!d_deleted((struct dentry *) dentry) &&
++					     inode &&
++					     !(inode && S_ISDIR(inode->i_mode) &&
++					       bindex > dstart && bindex < dend))) {
+ 					PRINT_CALLER(fname, fxn, line);
+ 					printk(" CD2: dentry/lower=%p:%p(%p) "
+ 					       "bindex=%d dstart/end=%d:%d\n",
+@@ -190,7 +191,7 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	for (bindex = sbstart(sb); bindex < sbmax(sb); bindex++) {
+ 		lower_mnt = unionfs_lower_mnt_idx(dentry, bindex);
+ 		if (lower_mnt) {
+-			if (bindex < dstart || bindex > dend) {
++			if (unlikely(bindex < dstart || bindex > dend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CM0: dentry/lmnt=%p:%p bindex=%d "
+ 				       "dstart/end=%d:%d\n", dentry,
+@@ -204,9 +205,9 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 				 * start/end range.  Ignore this rule,
+ 				 * however, if this is a NULL dentry.
+ 				 */
+-				if (inode &&
+-				    !(inode && S_ISDIR(inode->i_mode) &&
+-				      bindex > dstart && bindex < dend)) {
++				if (unlikely(inode &&
++					     !(inode && S_ISDIR(inode->i_mode) &&
++					       bindex > dstart && bindex < dend))) {
+ 					PRINT_CALLER(fname, fxn, line);
+ 					printk(" CM1: dentry/lmnt=%p:%p "
+ 					       "bindex=%d dstart/end=%d:%d\n",
+@@ -223,30 +224,30 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	istart = ibstart(inode);
+ 	iend = ibend(inode);
+ 	BUG_ON(istart > iend);
+-	if ((istart == -1 && iend != -1) ||
+-	    (istart != -1 && iend == -1)) {
++	if (unlikely((istart == -1 && iend != -1) ||
++		     (istart != -1 && iend == -1))) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CI0: dentry/inode=%p:%p istart/end=%d:%d\n",
+ 		       dentry, inode, istart, iend);
+ 	}
+-	if (istart != dstart) {
++	if (unlikely(istart != dstart)) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CI1: dentry/inode=%p:%p istart=%d dstart=%d\n",
+ 		       dentry, inode, istart, dstart);
+ 	}
+-	if (iend != dend) {
++	if (unlikely(iend != dend)) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CI2: dentry/inode=%p:%p iend=%d dend=%d\n",
+ 		       dentry, inode, iend, dend);
+ 	}
+ 
+ 	if (!S_ISDIR(inode->i_mode)) {
+-		if (dend != dstart) {
++		if (unlikely(dend != dstart)) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" CI3: dentry/inode=%p:%p dstart=%d dend=%d\n",
+ 			       dentry, inode, dstart, dend);
+ 		}
+-		if (iend != istart) {
++		if (unlikely(iend != istart)) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" CI4: dentry/inode=%p:%p istart=%d iend=%d\n",
+ 			       dentry, inode, istart, iend);
+@@ -256,12 +257,12 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	for (bindex = sbstart(sb); bindex < sbmax(sb); bindex++) {
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (lower_inode) {
+-			if (bindex < istart || bindex > iend) {
++			if (unlikely(bindex < istart || bindex > iend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CI5: dentry/linode=%p:%p bindex=%d "
+ 				       "istart/end=%d:%d\n", dentry,
+ 				       lower_inode, bindex, istart, iend);
+-			} else if (lower_inode == POISONED_PTR) {
++			} else if (unlikely(lower_inode == POISONED_PTR)) {
+ 				/* freed inode! */
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CI6: dentry/linode=%p:%p bindex=%d "
+@@ -275,8 +276,9 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 				 * b/t start/end, but NOT if at the
+ 				 * start/end range.
+ 				 */
+-				if (!(S_ISDIR(inode->i_mode) &&
+-				      bindex > istart && bindex < iend)) {
++				if (unlikely(!(S_ISDIR(inode->i_mode) &&
++					       bindex > istart &&
++					       bindex < iend))) {
+ 					PRINT_CALLER(fname, fxn, line);
+ 					printk(" CI7: dentry/linode=%p:%p "
+ 					       "bindex=%d istart/end=%d:%d\n",
+@@ -298,8 +300,10 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 			lower_dentry = unionfs_lower_dentry_idx(dentry,
+ 								bindex);
+ 			lower_mnt = unionfs_lower_mnt_idx(dentry, bindex);
+-			if (!((lower_inode && lower_dentry && lower_mnt) ||
+-			      (!lower_inode && !lower_dentry && !lower_mnt))) {
++			if (unlikely(!((lower_inode && lower_dentry &&
++					lower_mnt) ||
++				       (!lower_inode &&
++					!lower_dentry && !lower_mnt)))) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" Cx: lmnt/ldentry/linode=%p:%p:%p "
+ 				       "bindex=%d dstart/end=%d:%d\n",
+@@ -308,11 +312,11 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 			}
+ 		}
+ 	/* check if lower inode is newer than upper one (it shouldn't) */
+-	if (is_newer_lower(dentry)) {
++	if (unlikely(is_newer_lower(dentry))) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		for (bindex=ibstart(inode); bindex <= ibend(inode); bindex++) {
+ 			lower_inode = unionfs_lower_inode_idx(inode, bindex);
+-			if (!lower_inode)
++			if (unlikely(!lower_inode))
+ 				continue;
+ 			printk(" CI8: bindex=%d mtime/lmtime=%lu.%lu/%lu.%lu "
+ 			       "ctime/lctime=%lu.%lu/%lu.%lu\n",
+@@ -350,30 +354,30 @@ void __unionfs_check_file(const struct file *file,
+ 	fend = fbend(file);
+ 	BUG_ON(fstart > fend);
+ 
+-	if ((fstart == -1 && fend != -1) ||
+-	    (fstart != -1 && fend == -1)) {
++	if (unlikely((fstart == -1 && fend != -1) ||
++		     (fstart != -1 && fend == -1))) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CF0: file/dentry=%p:%p fstart/end=%d:%d\n",
+ 		       file, dentry, fstart, fend);
+ 	}
+-	if (fstart != dstart) {
++	if (unlikely(fstart != dstart)) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CF1: file/dentry=%p:%p fstart=%d dstart=%d\n",
+ 		       file, dentry, fstart, dstart);
+ 	}
+-	if (fend != dend) {
++	if (unlikely(fend != dend)) {
+ 		PRINT_CALLER(fname, fxn, line);
+ 		printk(" CF2: file/dentry=%p:%p fend=%d dend=%d\n",
+ 		       file, dentry, fend, dend);
+ 	}
+ 	inode = dentry->d_inode;
+ 	if (!S_ISDIR(inode->i_mode)) {
+-		if (fend != fstart) {
++		if (unlikely(fend != fstart)) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" CF3: file/inode=%p:%p fstart=%d fend=%d\n",
+ 			       file, inode, fstart, fend);
+ 		}
+-		if (dend != dstart) {
++		if (unlikely(dend != dstart)) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" CF4: file/dentry=%p:%p dstart=%d dend=%d\n",
+ 			       file, dentry, dstart, dend);
+@@ -387,7 +391,7 @@ void __unionfs_check_file(const struct file *file,
+ 	for (bindex = sbstart(sb); bindex < sbmax(sb); bindex++) {
+ 		lower_file = unionfs_lower_file_idx(file, bindex);
+ 		if (lower_file) {
+-			if (bindex < fstart || bindex > fend) {
++			if (unlikely(bindex < fstart || bindex > fend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CF5: file/lower=%p:%p bindex=%d "
+ 				       "fstart/end=%d:%d\n",
+@@ -400,8 +404,9 @@ void __unionfs_check_file(const struct file *file,
+ 				 * b/t start/end, but NOT if at the
+ 				 * start/end range.
+ 				 */
+-				if (!(S_ISDIR(inode->i_mode) &&
+-				      bindex > fstart && bindex < fend)) {
++				if (unlikely(!(S_ISDIR(inode->i_mode) &&
++					       bindex > fstart &&
++					       bindex < fend))) {
+ 					PRINT_CALLER(fname, fxn, line);
+ 					printk(" CF6: file/lower=%p:%p "
+ 					       "bindex=%d fstart/end=%d:%d\n",
+@@ -421,12 +426,13 @@ void __unionfs_check_nd(const struct nameidata *nd,
+ 	struct file *file;
+ 	int printed_caller = 0;
+ 
+-	if (!nd)
++	if (unlikely(!nd))
+ 		return;
+ 	if (nd->flags & LOOKUP_OPEN) {
+ 		file = nd->intent.open.file;
+-		if (file->f_path.dentry &&
+-		    strcmp(file->f_dentry->d_sb->s_type->name, "unionfs")) {
++		if (unlikely(file->f_path.dentry &&
++			     strcmp(file->f_dentry->d_sb->s_type->name,
++				    "unionfs"))) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			printk(" CND1: lower_file of type %s\n",
+ 			       file->f_path.dentry->d_sb->s_type->name);
+@@ -444,7 +450,7 @@ void __show_branch_counts(const struct super_block *sb,
+ 
+ 	printk("BC:");
+ 	for (i=0; i<sbmax(sb); i++) {
+-		if (sb->s_root)
++		if (likely(sb->s_root))
+ 			mnt = UNIONFS_D(sb->s_root)->lower_paths[i].mnt;
+ 		else
+ 			mnt = NULL;
+@@ -461,7 +467,7 @@ void __show_inode_times(const struct inode *inode,
+ 
+ 	for (bindex=ibstart(inode); bindex <= ibend(inode); bindex++) {
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+-		if (!lower_inode)
++		if (unlikely(!lower_inode))
+ 			continue;
+ 		printk("IT(%lu:%d): ", inode->i_ino, bindex);
+ 		printk("%s:%s:%d ",file,fxn,line);
+@@ -507,14 +513,14 @@ void __show_inode_counts(const struct inode *inode,
+ 	struct inode *lower_inode;
+ 	int bindex;
+ 
+-	if (!inode) {
++	if (unlikely(!inode)) {
+ 		printk("SiC: Null inode\n");
+ 		return;
+ 	}
+ 	for (bindex=sbstart(inode->i_sb); bindex <= sbend(inode->i_sb);
+ 	     bindex++) {
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+-		if (!lower_inode)
++		if (unlikely(!lower_inode))
+ 			continue;
+ 		printk("SIC(%lu:%d:%d): ", inode->i_ino, bindex,
+ 		       atomic_read(&(inode)->i_count));
+-- 
+1.5.4.3
+

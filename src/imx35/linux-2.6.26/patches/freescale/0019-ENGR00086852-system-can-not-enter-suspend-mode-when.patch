@@ -1,0 +1,72 @@
+From eb7e7d13587cbb13bf16f27f660101b16c574915 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Mon, 18 Aug 2008 21:46:37 +0800
+Subject: [PATCH] ENGR00086852 system can not enter suspend mode when flexcan loaded
+
+Add status checking when enter suspend or resume functon.
+And unregister net device when module removed.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ drivers/net/can/flexcan/dev.c |    1 +
+ drivers/net/can/flexcan/drv.c |    8 +++++---
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/can/flexcan/dev.c b/drivers/net/can/flexcan/dev.c
+index 79be30f..fc7b6a8 100644
+--- a/drivers/net/can/flexcan/dev.c
++++ b/drivers/net/can/flexcan/dev.c
+@@ -605,6 +605,7 @@ void flexcan_device_free(struct platform_device *pdev)
+ 	int i, num;
+ 	net = (struct net_device *)dev_get_drvdata(&pdev->dev);
+ 
++	unregister_netdev(net);
+ 	flexcan = netdev_priv(net);
+ 	del_timer(&flexcan->timer);
+ 
+diff --git a/drivers/net/can/flexcan/drv.c b/drivers/net/can/flexcan/drv.c
+index a65b626..293dc05 100644
+--- a/drivers/net/can/flexcan/drv.c
++++ b/drivers/net/can/flexcan/drv.c
+@@ -527,12 +527,13 @@ static int flexcan_suspend(struct platform_device *pdev, pm_message_t state)
+ 	struct net_device *net;
+ 	struct flexcan_device *flexcan;
+ 	struct flexcan_platform_data *plat_data;
+-
+ 	net = (struct net_device *)dev_get_drvdata(&pdev->dev);
+ 	flexcan = netdev_priv(net);
+ 
+ 	BUG_ON(!flexcan);
+ 
++	if (!(net->flags & IFF_UP))
++		return 0;
+ 	if (flexcan->wakeup)
+ 		set_irq_wake(flexcan->irq, 1);
+ 	else {
+@@ -550,7 +551,6 @@ static int flexcan_suspend(struct platform_device *pdev, pm_message_t state)
+ 		if (plat_data && plat_data->inactive)
+ 			plat_data->inactive(pdev->id);
+ 	}
+-
+ 	return 0;
+ }
+ 
+@@ -559,12 +559,14 @@ static int flexcan_resume(struct platform_device *pdev)
+ 	struct net_device *net;
+ 	struct flexcan_device *flexcan;
+ 	struct flexcan_platform_data *plat_data;
+-
+ 	net = (struct net_device *)dev_get_drvdata(&pdev->dev);
+ 	flexcan = netdev_priv(net);
+ 
+ 	BUG_ON(!flexcan);
+ 
++	if (!(net->flags & IFF_UP))
++		return 0;
++
+ 	if (flexcan->wakeup)
+ 		set_irq_wake(flexcan->irq, 0);
+ 	else {
+-- 
+1.5.4.4
+

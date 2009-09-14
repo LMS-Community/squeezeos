@@ -1,0 +1,61 @@
+From e0766a9143df9c55fe7c829a945becea61328a39 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 23 May 2007 21:27:58 -0400
+Subject: [PATCH] bugfix: prevent a NULL ptr deref if branch is nfs and using mmap writes
+
+By some strange condition, the VFS can pass our unionfs_writepage a
+writeback_control structure which, if passed as is to the lower ->writepage
+-- here nfs_writepage, triggers a NULL ptr deref in NFS.  This fix works
+around this issue, and results in a successfully written mmaped file.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   17 +++++++++++++++--
+ 1 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index ccad33f..105cc20 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -26,6 +26,7 @@ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	struct inode *lower_inode;
+ 	struct page *lower_page;
+ 	char *kaddr, *lower_kaddr;
++	struct writeback_control lower_wbc;
+ 
+ 	inode = page->mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+@@ -44,8 +45,21 @@ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	kunmap(page);
+ 	kunmap(lower_page);
+ 
++	BUG_ON(!lower_inode->i_mapping->a_ops->writepage);
++	memcpy(&lower_wbc, wbc, sizeof(struct writeback_control));
++	/*
++	 * This condition should never occur, but if it does, it causes NFS
++	 * (if used a s lower branch) to deference wbc->fs_private,
++	 * resulting in a NULL deref oops.
++	 * XXX: Maybe it's an NFS/VFS bug?
++	 */
++	if (lower_wbc.for_writepages && !lower_wbc.fs_private) {
++		printk("unionfs: setting wbc.for_writepages to 0\n");
++		lower_wbc.for_writepages = 0;
++	}
++
+ 	/* call lower writepage (expects locked page) */
+-	err = lower_inode->i_mapping->a_ops->writepage(lower_page, wbc);
++	err = lower_inode->i_mapping->a_ops->writepage(lower_page, &lower_wbc);
+ 
+ 	/*
+ 	 * update mtime and ctime of lower level file system
+@@ -298,7 +312,6 @@ void unionfs_sync_page(struct page *page)
+ 	page_cache_release(lower_page);	/* b/c grab_cache_page increased refcnt */
+ 
+ out:
+-
+ 	return;
+ }
+ 
+-- 
+1.5.4.3
+

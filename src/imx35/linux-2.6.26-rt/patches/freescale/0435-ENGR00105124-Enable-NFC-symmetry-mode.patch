@@ -1,0 +1,64 @@
+From 8c128850fdb5be72958d636f77b1ea3540f34b24 Mon Sep 17 00:00:00 2001
+From: Jason <r64343@freescale.com>
+Date: Mon, 23 Feb 2009 11:16:35 +0800
+Subject: [PATCH] ENGR00105124 Enable NFC symmetry mode
+
+Enable NFC symmetry mode by default setting
+on the following platform
+MX32/MX35TO1/MX35TO2
+MX37TO1.1.1/MX51TO1/MX51TO2
+
+Signed-off-by:Jason Liu <r64343@freescale.com>
+---
+ drivers/mtd/nand/mxc_nd2.c |    5 +++++
+ drivers/mtd/nand/mxc_nd2.h |    4 ++++
+ 2 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mtd/nand/mxc_nd2.c b/drivers/mtd/nand/mxc_nd2.c
+index c47af62..1b7c910 100644
+--- a/drivers/mtd/nand/mxc_nd2.c
++++ b/drivers/mtd/nand/mxc_nd2.c
+@@ -1130,6 +1130,11 @@ static void mxc_nfc_init(void)
+ 	/* Unlock Block Command for given address range */
+ 	raw_write(NFC_SET_WPC(NFC_WPC_UNLOCK), REG_NFC_WPC);
+ 
++	/* Enable symetric mode by default except mx37TO1.0 */
++	if (!(cpu_is_mx37_rev(CHIP_REV_1_0) == 1))
++		raw_write(raw_read(REG_NFC_ONE_CYCLE) |
++			  NFC_ONE_CYCLE, REG_NFC_ONE_CYCLE);
++
+ }
+ 
+ static int mxc_alloc_buf(void)
+diff --git a/drivers/mtd/nand/mxc_nd2.h b/drivers/mtd/nand/mxc_nd2.h
+index b1435e5..e495635 100644
+--- a/drivers/mtd/nand/mxc_nd2.h
++++ b/drivers/mtd/nand/mxc_nd2.h
+@@ -196,6 +196,8 @@ do { \
+ #define NFC_RB				(1 << 29)
+ #endif
+ 
++#define NFC_ONE_CYCLE			(1 << 2)
++
+ #ifdef CONFIG_ARCH_MXC_HAS_NFC_V3_2	/* mx51 */
+ #define NFC_INT_MSK			(1 << 15)
+ #define NFC_AUTO_PROG_DONE_MSK 		(1 << 14)
+@@ -316,6 +318,7 @@ do { \
+ #define REG_UNLOCK_BLK_ADD2		NFC_WRPROT_UNLOCK_BLK_ADD2
+ #define REG_UNLOCK_BLK_ADD3		NFC_WRPROT_UNLOCK_BLK_ADD3
+ #define REG_NFC_WPC			NFC_WRPROT
++#define REG_NFC_ONE_CYCLE		NFC_CONFIG2
+ 
+ /* NFC V3 Specific MACRO functions definitions */
+ #define raw_write(v,a)		__raw_writel(v,a)
+@@ -622,6 +625,7 @@ do {	\
+ #define REG_START_BLKADDR      		NFC_UNLOCKSTART_BLKADDR
+ #define REG_END_BLKADDR        		NFC_UNLOCKEND_BLKADDR
+ #define REG_NFC_RST			NFC_CONFIG1
++#define REG_NFC_ONE_CYCLE		NFC_CONFIG1
+ 
+ /* NFC V1/V2 Specific MACRO functions definitions */
+ 
+-- 
+1.5.4.4
+

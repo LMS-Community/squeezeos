@@ -1,0 +1,429 @@
+From e475c2319be48aea5f01d61e561941717aef2b95 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Wed, 8 Oct 2008 21:56:13 -0500
+Subject: [PATCH] ENGR00070689-1 ipu3: rework external di clock from tve
+
+Rework the ipu external di clock. The clock source varies by chip, so pass in
+the clock as platform_data.
+Update the ipu display code to use unique display id's for the DC.
+Update TVE to use 2 regulators.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ arch/arm/mach-mx37/clock.c     |   38 +++++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx37/devices.c   |    7 ++++++
+ drivers/mxc/ipu3/ipu_common.c  |   44 +++++++++++++--------------------------
+ drivers/mxc/ipu3/ipu_disp.c    |   34 ++++++++++++++++++++++++------
+ drivers/mxc/ipu3/ipu_regs.h    |    2 +
+ drivers/video/mxc/tve.c        |   22 +++++++++++++++++--
+ include/asm-arm/arch-mxc/mxc.h |    6 +++++
+ 7 files changed, 113 insertions(+), 40 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/clock.c b/arch/arm/mach-mx37/clock.c
+index 97c3ced..33c46ad 100644
+--- a/arch/arm/mach-mx37/clock.c
++++ b/arch/arm/mach-mx37/clock.c
+@@ -24,6 +24,7 @@
+ #include <asm/arch/mxc_uart.h>
+ 
+ #include "crm_regs.h"
++#include "iomux.h"
+ 
+ extern int mxc_jtag_enabled;
+ 
+@@ -1081,6 +1082,7 @@ static struct clk tve_clk = {
+ 	.set_rate = _clk_tve_set_rate,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
++	 .flags = RATE_PROPAGATES,
+ };
+ 
+ static struct clk spba_clk = {
+@@ -2252,11 +2254,45 @@ static struct clk ipu_clk[] = {
+ 	 }
+ };
+ 
++static int _clk_ipu_di_set_parent(struct clk *clk, struct clk *parent)
++{
++	u32 reg;
++
++	if (parent == &tve_clk) {
++		mxc_iomux_set_gpr(MUX_IPUv3D_CAMP, false, 0);
++	} else if (parent == &ckih_clk) {
++		mxc_iomux_set_gpr(MUX_IPUv3D_CAMP, true, 0);
++		reg = __raw_readl(MXC_CCM_CSCMR1);
++		reg |= MXC_CCM_CSCMR1_DI_CLK_SEL;
++		__raw_writel(reg, MXC_CCM_CSCMR1);
++	} else if (parent == &osc_clk) {
++		mxc_iomux_set_gpr(MUX_IPUv3D_CAMP, true, 0);
++		reg = __raw_readl(MXC_CCM_CSCMR1);
++		reg &= ~MXC_CCM_CSCMR1_DI_CLK_SEL;
++		__raw_writel(reg, MXC_CCM_CSCMR1);
++	} else {
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static void _clk_ipu_di_recalc(struct clk *clk)
++{
++	if (clk->parent == &tve_clk) {
++		clk->rate = clk->parent->rate / 8;
++	} else {
++		clk->rate = clk->parent->rate;
++	}
++}
++
+ static struct clk ipu_di_clk = {
+ 	.name = "ipu_di_clk",
+-	.parent = &osc_clk,
++	.parent = &tve_clk,
+ 	.enable_reg = MXC_CCM_CCGR4,
+ 	.enable_shift = MXC_CCM_CCGR4_CG14_OFFSET,
++	.recalc = _clk_ipu_di_recalc,
++	.set_parent = _clk_ipu_di_set_parent,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ };
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index c876266..2205f87 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -194,6 +194,10 @@ static struct platform_device mxc_ipu_device = {
+ 
+ static void mxc_init_ipu(void)
+ {
++	struct clk *clk;
++
++	mxc_ipu_data.di_clk[1] = clk_get(NULL, "ipu_di_clk");
++
+ 	platform_device_register(&mxc_ipu_device);
+ }
+ #else
+@@ -549,6 +553,8 @@ static inline void mxc_init_i2c(void)
+ }
+ #endif
+ 
++static struct tve_platform_data tve_data;
++
+ static struct resource tve_resources[] = {
+ 	{
+ 	 .start = TVE_BASE_ADDR,
+@@ -565,6 +571,7 @@ static struct platform_device mxc_tve_device = {
+ 	.name = "tve",
+ 	.dev = {
+ 		.release = mxc_nop_release,
++		.platform_data = &tve_data,
+ 		},
+ 	.num_resources = ARRAY_SIZE(tve_resources),
+ 	.resource = tve_resources,
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index dfe4912..c78e93b 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -87,25 +87,6 @@ static inline uint32_t channel_2_dma(ipu_channel_t ch, ipu_buffer_t type)
+ #define idma_mask(ch)		(idma_is_valid(ch) ? (1UL << (ch & 0x1F)) : 0)
+ #define idma_is_set(reg, dma)	(__raw_readl(reg(dma)) & idma_mask(dma))
+ 
+-static int _di_clk_set_parent(struct clk *clk, struct clk *parent)
+-{
+-	if (parent != g_ipu_clk)
+-		return -EINVAL;
+-
+-	return 0;
+-}
+-
+-static struct clk di_clk[] = {
+-	{
+-	 .name = "di_clk",
+-	 .id = 0,
+-	 .set_parent = _di_clk_set_parent},
+-	{
+-	 .name = "di_clk",
+-	 .id = 1,
+-	 .rate = 27000000,},
+-};
+-
+ /*!
+  * This function is called by the driver framework to initialize the IPU
+  * hardware.
+@@ -118,6 +99,7 @@ static struct clk di_clk[] = {
+ static int ipu_probe(struct platform_device *pdev)
+ {
+ 	struct resource *res;
++	struct mxc_ipu_config *plat_data = pdev->dev.platform_data;
+ 	unsigned long ipu_base;
+ 
+ 	spin_lock_init(&ipu_lock);
+@@ -182,12 +164,8 @@ static int ipu_probe(struct platform_device *pdev)
+ 
+ 	clk_enable(g_ipu_clk);
+ 
+-	clk_register(&di_clk[0]);
+-	g_di_clk[0] = &di_clk[0];
+-	clk_set_parent(g_di_clk[0], g_ipu_clk);
+-
+-	clk_register(&di_clk[1]);
+-	g_di_clk[1] = &di_clk[1];
++	g_di_clk[0] = plat_data->di_clk[0];
++	g_di_clk[1] = plat_data->di_clk[1];
+ 
+ 	__raw_writel(0x807FFFFF, IPU_MEM_RST);
+ 	while (__raw_readl(IPU_MEM_RST) & 0x80000000) ;
+@@ -428,10 +406,14 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 		ipu_conf |= IPU_CONF_DP_EN;
+ 	if (ipu_dmfc_use_count == 1)
+ 		ipu_conf |= IPU_CONF_DMFC_EN;
+-	if (ipu_di_use_count[0] == 1)
++	if (ipu_di_use_count[0] == 1) {
+ 		ipu_conf |= IPU_CONF_DI0_EN;
+-	if (ipu_di_use_count[1] == 1)
++		clk_enable(g_di_clk[0]);
++	}
++	if (ipu_di_use_count[1] == 1) {
+ 		ipu_conf |= IPU_CONF_DI1_EN;
++		clk_enable(g_di_clk[1]);
++	}
+ 
+ 	__raw_writel(ipu_conf, IPU_CONF);
+ 
+@@ -562,10 +544,14 @@ void ipu_uninit_channel(ipu_channel_t channel)
+ 		ipu_conf &= ~IPU_CONF_DP_EN;
+ 	if (ipu_dmfc_use_count == 0)
+ 		ipu_conf &= ~IPU_CONF_DMFC_EN;
+-	if (ipu_di_use_count[0] == 0)
++	if (ipu_di_use_count[0] == 0) {
+ 		ipu_conf &= ~IPU_CONF_DI0_EN;
+-	if (ipu_di_use_count[1] == 0)
++		clk_disable(g_di_clk[0]);
++	}
++	if (ipu_di_use_count[1] == 0) {
+ 		ipu_conf &= ~IPU_CONF_DI1_EN;
++		clk_disable(g_di_clk[1]);
++	}
+ 
+ 	__raw_writel(ipu_conf, IPU_CONF);
+ 
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 84a493a..39a0f6b 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -32,6 +32,12 @@
+ #define SYNC_WAVE 0
+ #define ASYNC_SER_WAVE 6
+ 
++/* DC display ID assignments */
++#define DC_DISP_ID_SYNC(di)	(di)
++#define DC_DISP_ID_SERIAL	2
++#define DC_DISP_ID_ASYNC	3
++
++
+ /* all value below is determined by fix reg setting in _ipu_dmfc_init*/
+ #define DMFC_FIFO_SIZE_28	(128*4)
+ #define DMFC_FIFO_SIZE_29	(64*4)
+@@ -345,17 +351,20 @@ void _ipu_dc_init(int dc_chan, int di, bool interlaced)
+ 			__raw_writel(reg, DC_WR_CH_CONF(6 - dc_chan));
+ 		}
+ 
+-		reg = 0x1A;
++		reg = 0x2;
++		reg |= DC_DISP_ID_SYNC(di) << DC_WR_CH_CONF_PROG_DISP_ID_OFFSET;
+ 		reg |= di << 2;
+ 		if (interlaced)
+ 			reg |= DC_WR_CH_CONF_FIELD_MODE;
+-		__raw_writel(reg, DC_WR_CH_CONF(dc_chan));
+ 	} else if ((dc_chan == 8) || (dc_chan == 9)) {
+ 		/* async channels */
+ 		_ipu_dc_link_event(dc_chan, DC_EVT_NEW_DATA_W_0, 0x64, 1);
+ 		_ipu_dc_link_event(dc_chan, DC_EVT_NEW_DATA_W_1, 0x64, 1);
+-		__raw_writel(0xB, DC_WR_CH_CONF(dc_chan));
++
++		reg = 0x3;
++		reg |= DC_DISP_ID_SERIAL << DC_WR_CH_CONF_PROG_DISP_ID_OFFSET;
+ 	}
++	__raw_writel(reg, DC_WR_CH_CONF(dc_chan));
+ 
+ 	__raw_writel(0x00000000, DC_WR_CH_ADDR(dc_chan));
+ 
+@@ -466,6 +475,10 @@ static irqreturn_t dc_irq_handler(int irq, void *dev_id)
+ 	reg &= ~DC_WR_CH_CONF_PROG_TYPE_MASK;
+ 	__raw_writel(reg, DC_WR_CH_CONF(dc_chan));
+ 
++	if (__raw_readl(IPUIRQ_2_STATREG(IPU_IRQ_VSYNC_PRE_0 + g_dc_di_assignment[dc_chan])) &
++		IPUIRQ_2_MASK(IPU_IRQ_VSYNC_PRE_0 + g_dc_di_assignment[dc_chan]))
++		dev_err(g_ipu_dev, "VSyncPre occurred before DI%d disable\n", g_dc_di_assignment[dc_chan]);
++
+ 	complete(comp);
+ 	return IRQ_HANDLED;
+ }
+@@ -519,6 +532,8 @@ void _ipu_dp_dc_disable(ipu_channel_t channel)
+ 		return;
+ 	}
+ 
++	__raw_writel(IPUIRQ_2_MASK(IPU_IRQ_VSYNC_PRE_0 + g_dc_di_assignment[dc_chan]),
++		     IPUIRQ_2_STATREG(IPU_IRQ_VSYNC_PRE_0 + g_dc_di_assignment[dc_chan]));
+ 	ipu_clear_irq(irq);
+ 	ret = ipu_request_irq(irq, dc_irq_handler, 0, NULL, &dc_comp);
+ 	if (ret < 0) {
+@@ -663,6 +678,7 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
+ 	uint32_t div, up;
+ 	uint32_t h_total, v_total;
+ 	int map;
++	struct clk *di_clk;
+ 
+ 	dev_dbg(g_ipu_dev, "panel size = %d x %d\n", width, height);
+ 
+@@ -674,7 +690,11 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
+ 
+ 	/* Init clocking */
+ 	dev_dbg(g_ipu_dev, "pixel clk = %d\n", pixel_clk);
+-	div = (clk_get_rate(g_di_clk[disp]) * 16) / pixel_clk;
++	if (sig.ext_clk)
++		di_clk = g_di_clk[disp];
++	else
++		di_clk = g_ipu_clk;
++	div = (clk_get_rate(di_clk) * 16) / pixel_clk;
+ 	reg = __raw_readl(DI_GENERAL(disp));
+ 	if (sig.ext_clk) {
+ 		__raw_writel(reg | DI_GEN_DI_CLK_EXT, DI_GENERAL(disp));
+@@ -846,7 +866,7 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
+ 		reg |= DI_POL_DRDY_DATA_POLARITY;
+ 	__raw_writel(reg, DI_POL(disp));
+ 
+-	__raw_writel(width, DC_DISP_CONF2(3));
++	__raw_writel(width, DC_DISP_CONF2(DC_DISP_ID_SYNC(disp)));
+ 
+ 	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+ 
+@@ -862,7 +882,7 @@ int ipu_init_async_panel(int disp, int type, uint32_t cycle_time,
+ 	int map;
+ 	u32 ser_conf = 0;
+ 	u32 div;
+-	u32 di_clk = clk_get_rate(g_di_clk[disp]);
++	u32 di_clk = clk_get_rate(g_ipu_clk);
+ 
+ 	/* round up cycle_time, then calcalate the divider using scaled math */
+ 	cycle_time += (1000000000UL / di_clk) - 1;
+@@ -888,7 +908,7 @@ int ipu_init_async_panel(int disp, int type, uint32_t cycle_time,
+ 		_ipu_dc_write_tmpl(0x64, WROD(0), 0, map, ASYNC_SER_WAVE, 0, 0);
+ 
+ 		/* Configure DC for serial panel */
+-		__raw_writel(0x14, DC_DISP_CONF1(1));
++		__raw_writel(0x14, DC_DISP_CONF1(DC_DISP_ID_SERIAL));
+ 
+ 		if (sig.clk_pol)
+ 			ser_conf |= DI_SER_CONF_SERIAL_CLK_POL;
+diff --git a/drivers/mxc/ipu3/ipu_regs.h b/drivers/mxc/ipu3/ipu_regs.h
+index 97da482..6ddceb8 100644
+--- a/drivers/mxc/ipu3/ipu_regs.h
++++ b/drivers/mxc/ipu3/ipu_regs.h
+@@ -394,6 +394,8 @@ enum {
+ 	DC_WR_CH_CONF_PROG_TYPE_OFFSET = 5,
+ 	DC_WR_CH_CONF_PROG_TYPE_MASK = 0x000000E0,
+ 	DC_WR_CH_CONF_PROG_DI_ID = 0x00000004,
++	DC_WR_CH_CONF_PROG_DISP_ID_OFFSET = 3,
++	DC_WR_CH_CONF_PROG_DISP_ID_MASK = 0x00000018,
+ 
+ 	DC_UGDE_0_ODD_EN = 0x02000000,
+ 	DC_UGDE_0_ID_CODED_MASK = 0x00000007,
+diff --git a/drivers/video/mxc/tve.c b/drivers/video/mxc/tve.c
+index 96f06c1..d8c6314 100644
+--- a/drivers/video/mxc/tve.c
++++ b/drivers/video/mxc/tve.c
+@@ -29,6 +29,7 @@
+ #include <linux/irq.h>
+ #include <linux/sysfs.h>
+ #include <linux/platform_device.h>
++#include <linux/regulator/regulator.h>
+ #include <asm/uaccess.h>
+ #include <asm/atomic.h>
+ #include <asm/arch/gpio.h>
+@@ -63,6 +64,8 @@ struct tve_data {
+ 	void *base;
+ 	int irq;
+ 	struct clk *clk;
++	struct regulator *dac_reg;
++	struct regulator *dig_reg;
+ } tve;
+ 
+ static struct fb_videomode video_modes[] = {
+@@ -141,7 +144,7 @@ static void tve_enable(void)
+ 		enabled = 1;
+ 		clk_enable(tve.clk);
+ 		reg = __raw_readl(tve.base + TVE_COM_CONF_REG);
+-		__raw_writel(reg | 0x01, tve.base + TVE_COM_CONF_REG);
++		__raw_writel(reg | 0x09, tve.base + TVE_COM_CONF_REG);
+ 		pr_debug("TVE power on.\n");
+ 	}
+ }
+@@ -157,7 +160,7 @@ static void tve_disable(void)
+ 	if (enabled) {
+ 		enabled = 0;
+ 		reg = __raw_readl(tve.base + TVE_COM_CONF_REG);
+-		__raw_writel(reg & ~0x01, tve.base + TVE_COM_CONF_REG);
++		__raw_writel(reg & ~0x09, tve.base + TVE_COM_CONF_REG);
+ 		clk_disable(tve.clk);
+ 		pr_debug("TVE power off.\n");
+ 	}
+@@ -315,12 +318,13 @@ static ssize_t show_headphone(struct device_driver *dev, char *buf)
+ 	return strlen(buf);
+ }
+ 
+-DRIVER_ATTR(headphone, 0644, show_headphone, NULL);
++static DRIVER_ATTR(headphone, 0644, show_headphone, NULL);
+ 
+ static int tve_probe(struct platform_device *pdev)
+ {
+ 	int ret, i;
+ 	struct resource *res;
++	struct tve_platform_data *plat_data = pdev->dev.platform_data;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (res == NULL)
+@@ -354,6 +358,18 @@ static int tve_probe(struct platform_device *pdev)
+ 		fb_add_videomode(&video_modes[1], &tve_fbi->modelist);
+ 	}
+ 
++	tve.dac_reg = regulator_get(&pdev->dev, plat_data->dac_reg);
++	if (!IS_ERR(tve.dac_reg)) {
++		regulator_set_voltage(tve.dac_reg, 2500000);
++		regulator_enable(tve.dac_reg);
++	}
++
++	tve.dig_reg = regulator_get(&pdev->dev, plat_data->dig_reg);
++	if (!IS_ERR(tve.dig_reg)) {
++		regulator_set_voltage(tve.dig_reg, 1250000);
++		regulator_enable(tve.dig_reg);
++	}
++
+ 	tve.clk = clk_get(&pdev->dev, "tve_clk");
+ 	clk_set_rate(tve.clk, 216000000);
+ 	clk_enable(tve.clk);
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 11ba022..bcc75cb 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -64,6 +64,7 @@ struct mxc_spi_master {
+ 
+ struct mxc_ipu_config {
+ 	int rev;
++	struct clk *di_clk[2];
+ };
+ 
+ struct mxc_ir_platform_data {
+@@ -217,6 +218,11 @@ struct mxc_srtc_platform_data {
+ 	u32 srtc_sec_mode_addr;
+ };
+ 
++struct tve_platform_data {
++	char *dac_reg;
++	char *dig_reg;
++};
++
+ extern void mxc_wd_reset(void);
+ unsigned long board_get_ckih_rate(void);
+ 
+-- 
+1.5.4.4
+

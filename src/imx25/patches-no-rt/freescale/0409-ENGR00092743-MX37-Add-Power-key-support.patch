@@ -1,0 +1,207 @@
+From c705f785a487be1cd28d1f83074261e0c163f03f Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 17 Feb 2009 14:09:31 +0800
+Subject: [PATCH] ENGR00092743 MX37: Add Power-key support
+
+Add power-key support for wm8350, it set
+PMIC_RDY signal to 1.8v and also is a
+wakeup source.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx37/board-mx37_3stack.h       |    4 +++
+ arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c |   37 +++++++++++++++++++-------
+ drivers/regulator/wm8350/reg-wm8350-bus.c    |   20 ++++++++++++++
+ 3 files changed, 51 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index b090fa5..857085d 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -103,9 +103,13 @@
+ /* CPLD code version */
+ #define CPLD_CODE_VER_REG	BOARD_IO_ADDR + 0x50
+ 
++#define MXC_PMIC_INT_LINE       IOMUX_TO_IRQ(MX37_PIN_GPIO1_4)
++
+ extern unsigned int sdhc_get_card_det_status(struct device *dev);
+ extern int sdhc_write_protect(struct device *dev);
+ extern int sdhc_init_card_det(int id);
++extern irqreturn_t wm8350_irq_handler(int irq, void *v);
++extern void wm8350_irq_work(struct work_struct *work);
+ extern struct tve_platform_data tve_data;
+ extern struct mxc_dptc_data dptc_lp_data;
+ extern struct mxc_dptc_data dptc_gp_data;
+diff --git a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+index 423341f..bec7e13 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
++++ b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+@@ -2,7 +2,7 @@
+  * mx37-3stack-pmic-wm8350.c  --  i.MX37 3STACK Driver for Wolfson WM8350 PMIC
+  *
+  * Copyright 2007 Wolfson Microelectronics PLC.
+- * Copyright 2008 Freescale Semiconductor Inc.
++ * Copyright 2008-2009 Freescale Semiconductor Inc.
+  *
+  * Author: Liam Girdwood
+  *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
+@@ -38,6 +38,7 @@
+ #include <asm/arch/spba.h>
+ #include <asm/arch/clock.h>
+ #include <asm/arch/mxc.h>
++#include "iomux.h"
+ #include "board-mx37_3stack.h"
+ 
+ static void wm8350_regulator_init(void)
+@@ -78,13 +79,11 @@ struct mxc_audio_platform_data imx_3stack_audio_platform_data = {
+ 	.regulator2 = "DCDC3"
+ };
+ 
+-#ifdef NOT_PORTED_TO_IMX37_3STACK_YET
+-
+ static void imx37_3stack_switch_handler(struct wm8350 *wm8350, int irq)
+ {
+ 	printk("switch pressed %d\n", irq);
+ }
+-#endif
++
+ static struct platform_device *imx_snd_device;
+ 
+ void wm8350_free(struct wm8350 *wm8350)
+@@ -298,6 +297,13 @@ static inline void mxc_init_wm8350(void)
+ 			dev_err(&mxc_wm8350_devices[i].dev,
+ 				"Unable to register WM8350 device\n");
+ 	}
++
++	/*set INT pin*/
++	mxc_request_iomux(MX37_PIN_GPIO1_4, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX37_PIN_GPIO1_4, PAD_CTL_SRE_FAST |
++		PAD_CTL_DRV_HIGH | PAD_CTL_22K_PU |
++		PAD_CTL_ODE_OPENDRAIN_ENABLE | PAD_CTL_HYS_NONE |
++		PAD_CTL_DDR_INPUT_CMOS | PAD_CTL_DRV_VOT_LOW);
+ }
+ 
+ int wm8350_init(struct wm8350 *wm8350)
+@@ -332,6 +338,14 @@ int wm8350_init(struct wm8350 *wm8350)
+ 	if (ret)
+ 		printk(KERN_ERR "Error in setting USB VBUS enable pin\n");
+ 
++	/*PMIC RDY*/
++	if (wm8350_gpio_config(wm8350, 9, WM8350_GPIO_DIR_OUT, WM8350_GPIO9_GPIO_OUT,
++			   WM8350_GPIO_ACTIVE_LOW, WM8350_GPIO_PULL_NONE,
++			   WM8350_GPIO_INVERT_OFF, WM8350_GPIO_DEBOUNCE_OFF) == 0)
++		wm8350_gpio_set_status(wm8350, 9, 1);
++	else
++		printk(KERN_ERR "Error in setting Wolfson GPIO pin 9 \n");
++
+ 	/* register sound */
+ 	printk("Registering imx37_snd_device");
+ 	imx_snd_device = platform_device_alloc("wm8350-imx-3stack-audio", -1);
+@@ -346,7 +360,6 @@ int wm8350_init(struct wm8350 *wm8350)
+ 		goto snd_err;
+ 
+ 	/* set up PMIC IRQ (active high) to i.MX32ADS */
+-#ifdef NOT_PORTED_TO_IMX37
+ 	printk("Registering PMIC INT");
+ 	INIT_WORK(&wm8350->work, wm8350_irq_work);
+ 	wm8350_reg_unlock(wm8350);
+@@ -361,21 +374,25 @@ int wm8350_init(struct wm8350 *wm8350)
+ 		goto err;
+ 	}
+ 	wm8350->nirq = MXC_PMIC_INT_LINE;
++
++	set_irq_wake(MXC_PMIC_INT_LINE, 1);
++
++#ifdef NOT_PORTED_TO_IMX37
+ 	printk("Configuring WM8350 GPIOS");
+ 	config_gpios(wm8350);
+ 	config_hibernate(wm8350);
++#endif
+ 
+ 	/* Sw1 --> PWR_ON */
+-	printk("Registering and unmasking the WM8350 wakeup key");
++	printk("Registering and unmasking the WM8350 wakeup key\n");
+ 	wm8350_register_irq(wm8350, WM8350_IRQ_WKUP_ONKEY,
+-			    imx37_3stack_switch_handler);
++			    imx37_3stack_switch_handler, NULL);
+ 	wm8350_unmask_irq(wm8350, WM8350_IRQ_WKUP_ONKEY);
+ 
+ 	/* unmask all & clear sticky */
+-	printk("Unmasking WM8350 local interrupts");
+-	wm8350_reg_write(wm8350, WM8350_SYSTEM_INTERRUPTS_MASK, 0x0);
++	printk("Unmasking WM8350 local interrupts\n");
++	wm8350_reg_write(wm8350, WM8350_SYSTEM_INTERRUPTS_MASK, 0x3ffe);
+ 	schedule_work(&wm8350->work);
+-#endif
+ 
+ #if BATTERY
+ 	/* not much use without a battery atm */
+diff --git a/drivers/regulator/wm8350/reg-wm8350-bus.c b/drivers/regulator/wm8350/reg-wm8350-bus.c
+index 82fe12d..fafdbb7 100644
+--- a/drivers/regulator/wm8350/reg-wm8350-bus.c
++++ b/drivers/regulator/wm8350/reg-wm8350-bus.c
+@@ -2,6 +2,7 @@
+  * wm8350_bus.c  --  Power Management Driver for Wolfson WM8350 PMIC
+  *
+  * Copyright 2007 Wolfson Microelectronics PLC.
++ * Copyright 2009 Freescale Semiconductor Inc.
+  *
+  * Author: Liam Girdwood
+  *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
+@@ -79,6 +80,8 @@ static const u16 wm8350_reg_map[] = WM8350_REGISTER_DEFAULTS_3;
+ #error Invalid WM8350 configuration
+ #endif
+ 
++static int wm8350_in_suspend;
++
+ /*
+  * WM8350 Register IO access map
+  */
+@@ -549,6 +552,11 @@ void wm8350_irq_worker(struct work_struct *work)
+ 	struct wm8350 *wm8350 =
+ 		container_of(work, struct wm8350, work);
+ 
++	if (wm8350_in_suspend) {
++		wm8350_in_suspend = 0;
++		return;
++	}
++
+ 	/* read this in 1 block read */
+ 	/* read 1st level irq sources and then read required 2nd sources */
+ 	level_one = wm8350_reg_read(wm8350, WM8350_SYSTEM_INTERRUPTS)
+@@ -1400,6 +1408,8 @@ int wm8350_device_register_pmic(struct wm8350 *wm8350)
+ 	wm8350->pmic.dev.parent = &wm8350->i2c_client->dev;
+ 	wm8350->pmic.dev.release = wm8350_pmic_dev_release;
+ 
++	wm8350_in_suspend = 0;
++
+ 	ret = device_register(&wm8350->pmic.dev);
+ 	if (ret < 0)
+ 		printk(KERN_ERR "failed to register WM8350 PMIC device\n");
+@@ -1476,6 +1486,8 @@ static int wm8350_bus_suspend(struct device *dev, pm_message_t state)
+ {
+ 	int ret = 0;
+ 
++	wm8350_in_suspend = 1;
++
+ 	if (dev->driver && dev->driver->suspend)
+ 		ret = dev->driver->suspend(dev, state);
+ 
+@@ -1486,6 +1498,14 @@ static int wm8350_bus_resume(struct device *dev)
+ {
+ 	int ret = 0;
+ 
++	if (wm8350_in_suspend)
++		wm8350_in_suspend = 0;
++	else {
++		struct wm8350_pmic *wm8350_pmic = to_wm8350_pmic_device(dev);
++		struct wm8350 *wm8350 = to_wm8350_from_pmic(wm8350_pmic);
++		schedule_work(&wm8350->work);
++	}
++
+ 	if (dev->driver && dev->driver->resume)
+ 		ret = dev->driver->resume(dev);
+ 
+-- 
+1.5.4.4
+

@@ -1,0 +1,110 @@
+Index: linux-2.6.26/drivers/input/keyboard/mxc_keyb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/input/keyboard/mxc_keyb.c	2009-07-03 11:45:50.000000000 +0100
++++ linux-2.6.26/drivers/input/keyboard/mxc_keyb.c	2009-07-03 14:39:55.000000000 +0100
+@@ -774,20 +774,6 @@
+ 	kpp_dev.kpp_rows = keypad->rowmax;
+ 	key_pad_enabled = 0;
+ 
+-	/*
+-	 * Request for IRQ number for keypad port. The Interrupt handler
+-	 * function (mxc_kpp_interrupt) is called when ever interrupt occurs on
+-	 * keypad port.
+-	 */
+-	irq = platform_get_irq(pdev, 0);
+-	keypad->irq = irq;
+-	retval = request_irq(irq, mxc_kpp_interrupt, 0, MOD_NAME, MOD_NAME);
+-	if (retval) {
+-		pr_debug("KPP: request_irq(%d) returned error %d\n",
+-			 MXC_INT_KPP, retval);
+-		return retval;
+-	}
+-
+ 	/* Enable keypad clock */
+ 	kpp_clk = clk_get(&pdev->dev, "kpp_clk");
+ 	clk_enable(kpp_clk);
+@@ -855,13 +841,6 @@
+ 	mxckbd_dev->open = mxc_kpp_open;
+ 	mxckbd_dev->close = mxc_kpp_close;
+ 
+-	retval = input_register_device(mxckbd_dev);
+-	if (retval < 0) {
+-		printk(KERN_ERR
+-		       "mxckbd_dev: failed to register input device\n");
+-		goto err2;
+-	}
+-
+ 	/* allocate required memory */
+ 	press_scancode = kmalloc(kpp_dev.kpp_rows * sizeof(press_scancode[0]),
+ 				 GFP_KERNEL);
+@@ -870,7 +849,7 @@
+ 
+ 	if (!press_scancode || !release_scancode) {
+ 		retval = -ENOMEM;
+-		goto err3;
++		goto err2;
+ 	}
+ 
+ 	for (i = 0; i < kpp_dev.kpp_rows; i++) {
+@@ -883,7 +862,7 @@
+ 
+ 		if (!press_scancode[i] || !release_scancode[i]) {
+ 			retval = -ENOMEM;
+-			goto err3;
++			goto err2;
+ 		}
+ 	}
+ 
+@@ -894,7 +873,7 @@
+ 
+ 	if (!cur_rcmap || !prev_rcmap) {
+ 		retval = -ENOMEM;
+-		goto err3;
++		goto err2;
+ 	}
+ 
+ 	__set_bit(EV_KEY, mxckbd_dev->evbit);
+@@ -911,10 +890,31 @@
+ 	memset(cur_rcmap, 0, kpp_dev.kpp_rows * sizeof(cur_rcmap[0]));
+ 	memset(prev_rcmap, 0, kpp_dev.kpp_rows * sizeof(prev_rcmap[0]));
+ 
++	retval = input_register_device(mxckbd_dev);
++	if (retval < 0) {
++		printk(KERN_ERR
++		       "mxckbd_dev: failed to register input device\n");
++		goto err3;
++	}
++
+ 	key_pad_enabled = 1;
+ 	/* Initialize the polling timer */
+ 	init_timer(&kpp_dev.poll_timer);
+ 
++	/*
++	 * Request for IRQ number for keypad port. The Interrupt handler
++	 * function (mxc_kpp_interrupt) is called when ever interrupt occurs on
++	 * keypad port.
++	 */
++	irq = platform_get_irq(pdev, 0);
++	keypad->irq = irq;
++	retval = request_irq(irq, mxc_kpp_interrupt, 0, MOD_NAME, MOD_NAME);
++	if (retval) {
++		pr_debug("KPP: request_irq(%d) returned error %d\n",
++			 MXC_INT_KPP, retval);
++		return retval;
++	}
++
+ 	/* By default, devices should wakeup if they can */
+ 	/* So keypad is set as "should wakeup" as it can */
+ 	device_init_wakeup(&pdev->dev, 1);
+@@ -922,9 +922,9 @@
+ 	return 0;
+ 
+       err3:
+-	mxc_kpp_free_allocated();
+-      err2:
+ 	input_free_device(mxckbd_dev);
++      err2:
++	mxc_kpp_free_allocated();
+       err1:
+ 	free_irq(irq, MOD_NAME);
+ 	clk_disable(kpp_clk);

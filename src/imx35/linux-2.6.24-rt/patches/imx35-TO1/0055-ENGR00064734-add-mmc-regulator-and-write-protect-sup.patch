@@ -1,0 +1,892 @@
+From e7169cd4e98b03a910257b7474746237eb2e700c Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 13 Mar 2008 14:30:11 +0800
+Subject: [PATCH] ENGR00064734 add mmc regulator and write protect support
+
+add mmc regulator and write protect support in 3DS board
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |    2 +-
+ arch/arm/mach-mx3/devices.c             |  110 ------------------
+ arch/arm/mach-mx3/mx31ads.c             |  119 +++++++++++++++++++
+ arch/arm/mach-mx3/mx3_3stack.c          |   72 ++++++++++++
+ arch/arm/mach-mx3/mx3_3stack_gpio.c     |   37 ++++--
+ drivers/mmc/host/mxc_mmc.c              |  191 +++++++++++++++++--------------
+ include/asm-arm/arch-mxc/mmc.h          |    4 +-
+ 7 files changed, 324 insertions(+), 211 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index b4d957c..4889e2c 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -1236,7 +1236,7 @@ CONFIG_MMC_BLOCK_BOUNCE=y
+ # MMC/SD Host Controller Drivers
+ #
+ # CONFIG_MMC_SPI is not set
+-# CONFIG_MMC_MXC is not set
++CONFIG_MMC_MXC=y
+ # CONFIG_NEW_LEDS is not set
+ CONFIG_RTC_LIB=y
+ CONFIG_RTC_CLASS=y
+diff --git a/arch/arm/mach-mx3/devices.c b/arch/arm/mach-mx3/devices.c
+index 559c797..f5eea32 100644
+--- a/arch/arm/mach-mx3/devices.c
++++ b/arch/arm/mach-mx3/devices.c
+@@ -23,7 +23,6 @@
+ #include <asm/mach-types.h>
+ #include <asm/arch/pmic_external.h>
+ #include <asm/arch/pmic_power.h>
+-#include <asm/arch/mmc.h>
+ 
+ #include <asm/arch/spba.h>
+ #include "iomux.h"
+@@ -362,114 +361,6 @@ static inline void mxc_init_scc(void)
+ {
+ }
+ #endif
+-/* MMC device data */
+-
+-#if defined(CONFIG_MMC_MXC) || defined(CONFIG_MMC_MXC_MODULE)
+-
+-extern unsigned int sdhc_get_card_det_status(struct device *dev);
+-extern int sdhc_init_card_det(int id);
+-
+-static struct mxc_mmc_platform_data mmc_data = {
+-	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30,
+-	.min_clk = 150000,
+-	.max_clk = 25000000,
+-	.card_inserted_state = 1,
+-	.status = sdhc_get_card_det_status,
+-};
+-
+-/*!
+- * Resource definition for the SDHC1
+- */
+-static struct resource mxcsdhc1_resources[] = {
+-	[0] = {
+-	       .start = MMC_SDHC1_BASE_ADDR,
+-	       .end = MMC_SDHC1_BASE_ADDR + SZ_16K - 1,
+-	       .flags = IORESOURCE_MEM,
+-	       },
+-	[1] = {
+-	       .start = MXC_INT_MMC_SDHC1,
+-	       .end = MXC_INT_MMC_SDHC1,
+-	       .flags = IORESOURCE_IRQ,
+-	       },
+-	[2] = {
+-	       .start = 0,
+-	       .end = 0,
+-	       .flags = IORESOURCE_IRQ,
+-	       },
+-};
+-
+-/*!
+- * Resource definition for the SDHC2
+- */
+-static struct resource mxcsdhc2_resources[] = {
+-	[0] = {
+-	       .start = MMC_SDHC2_BASE_ADDR,
+-	       .end = MMC_SDHC2_BASE_ADDR + SZ_16K - 1,
+-	       .flags = IORESOURCE_MEM,
+-	       },
+-	[1] = {
+-	       .start = MXC_INT_MMC_SDHC2,
+-	       .end = MXC_INT_MMC_SDHC2,
+-	       .flags = IORESOURCE_IRQ,
+-	       },
+-	[2] = {
+-	       .start = 0,
+-	       .end = 0,
+-	       .flags = IORESOURCE_IRQ,
+-	       },
+-};
+-
+-/*! Device Definition for MXC SDHC1 */
+-static struct platform_device mxcsdhc1_device = {
+-	.name = "mxcmci",
+-	.id = 0,
+-	.dev = {
+-		.release = mxc_nop_release,
+-		.platform_data = &mmc_data,
+-		},
+-	.num_resources = ARRAY_SIZE(mxcsdhc1_resources),
+-	.resource = mxcsdhc1_resources,
+-};
+-
+-/*! Device Definition for MXC SDHC2 */
+-static struct platform_device mxcsdhc2_device = {
+-	.name = "mxcmci",
+-	.id = 1,
+-	.dev = {
+-		.release = mxc_nop_release,
+-		.platform_data = &mmc_data,
+-		},
+-	.num_resources = ARRAY_SIZE(mxcsdhc2_resources),
+-	.resource = mxcsdhc2_resources,
+-};
+-
+-static inline void mxc_init_mmc(void)
+-{
+-	int cd_irq;
+-
+-	cd_irq = sdhc_init_card_det(0);
+-	if (cd_irq) {
+-		mxcsdhc1_device.resource[2].start = cd_irq;
+-		mxcsdhc1_device.resource[2].end = cd_irq;
+-	}
+-	cd_irq = 0;
+-	/* set cd_irq = 0 here to disable sdhc2 */
+-	/* cd_irq = sdhc_init_card_det(1); */
+-	if (cd_irq) {
+-		mxcsdhc2_device.resource[2].start = cd_irq;
+-		mxcsdhc2_device.resource[2].end = cd_irq;
+-	}
+-
+-	spba_take_ownership(SPBA_SDHC1, SPBA_MASTER_A | SPBA_MASTER_C);
+-	(void)platform_device_register(&mxcsdhc1_device);
+-	spba_take_ownership(SPBA_SDHC2, SPBA_MASTER_A | SPBA_MASTER_C);
+-	(void)platform_device_register(&mxcsdhc2_device);
+-}
+-#else
+-static inline void mxc_init_mmc(void)
+-{
+-}
+-#endif
+ 
+ /* SPI controller and device data */
+ #if defined(CONFIG_SPI_MXC) || defined(CONFIG_SPI_MXC_MODULE)
+@@ -878,7 +769,6 @@ static int __init mxc_init_devices(void)
+ {
+ 	mxc_init_wdt();
+ 	mxc_init_ipu();
+-	mxc_init_mmc();
+ 	mxc_init_spi();
+ 	mxc_init_i2c();
+ 	mxc_init_rtc();
+diff --git a/arch/arm/mach-mx3/mx31ads.c b/arch/arm/mach-mx3/mx31ads.c
+index 8c61c7d..9566cdc 100644
+--- a/arch/arm/mach-mx3/mx31ads.c
++++ b/arch/arm/mach-mx3/mx31ads.c
+@@ -45,6 +45,8 @@
+ #include <asm/arch/common.h>
+ #include <asm/arch/memory.h>
+ #include <asm/arch/gpio.h>
++#include <asm/arch/mmc.h>
++#include <asm/arch/spba.h>
+ 
+ #include "board-mx31ads.h"
+ #include "crm_regs.h"
+@@ -597,6 +599,122 @@ int mxc_expio_init(void)
+ 		return 0;
+ }
+ 
++/* MMC device data */
++
++#if defined(CONFIG_MMC_MXC) || defined(CONFIG_MMC_MXC_MODULE)
++extern unsigned int sdhc_get_card_det_status(struct device *dev);
++extern int sdhc_init_card_det(int id);
++
++static struct mxc_mmc_platform_data mmc0_data = {
++	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30,
++	.min_clk = 150000,
++	.max_clk = 25000000,
++	.card_inserted_state = 1,
++	.status = sdhc_get_card_det_status,
++	.power_mmc = "VMMC1",
++};
++static struct mxc_mmc_platform_data mmc1_data = {
++	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30,
++	.min_clk = 150000,
++	.max_clk = 25000000,
++	.card_inserted_state = 1,
++	.status = sdhc_get_card_det_status,
++	.power_mmc = "VMMC2",
++};
++
++/*!
++ * Resource definition for the SDHC1
++ */
++static struct resource mxcsdhc1_resources[] = {
++	[0] = {
++	       .start = MMC_SDHC1_BASE_ADDR,
++	       .end = MMC_SDHC1_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_MMC_SDHC1,
++	       .end = MXC_INT_MMC_SDHC1,
++	       .flags = IORESOURCE_IRQ,
++	       },
++	[2] = {
++	       .start = 0,
++	       .end = 0,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*!
++ * Resource definition for the SDHC2
++ */
++static struct resource mxcsdhc2_resources[] = {
++	[0] = {
++	       .start = MMC_SDHC2_BASE_ADDR,
++	       .end = MMC_SDHC2_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_MMC_SDHC2,
++	       .end = MXC_INT_MMC_SDHC2,
++	       .flags = IORESOURCE_IRQ,
++	       },
++	[2] = {
++	       .start = 0,
++	       .end = 0,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Device Definition for MXC SDHC1 */
++static struct platform_device mxcsdhc1_device = {
++	.name = "mxcmci",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mmc0_data,
++		},
++	.num_resources = ARRAY_SIZE(mxcsdhc1_resources),
++	.resource = mxcsdhc1_resources,
++};
++
++/*! Device Definition for MXC SDHC2 */
++static struct platform_device mxcsdhc2_device = {
++	.name = "mxcmci",
++	.id = 1,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mmc1_data,
++		},
++	.num_resources = ARRAY_SIZE(mxcsdhc2_resources),
++	.resource = mxcsdhc2_resources,
++};
++
++static inline void mxc_init_mmc(void)
++{
++	int cd_irq;
++
++	cd_irq = sdhc_init_card_det(0);
++	if (cd_irq) {
++		mxcsdhc1_device.resource[2].start = cd_irq;
++		mxcsdhc1_device.resource[2].end = cd_irq;
++	}
++
++	cd_irq = sdhc_init_card_det(1);
++	if (cd_irq) {
++		mxcsdhc2_device.resource[2].start = cd_irq;
++		mxcsdhc2_device.resource[2].end = cd_irq;
++	}
++
++	spba_take_ownership(SPBA_SDHC1, SPBA_MASTER_A | SPBA_MASTER_C);
++	(void)platform_device_register(&mxcsdhc1_device);
++	spba_take_ownership(SPBA_SDHC2, SPBA_MASTER_A | SPBA_MASTER_C);
++	(void)platform_device_register(&mxcsdhc2_device);
++}
++#else
++static inline void mxc_init_mmc(void)
++{
++}
++#endif
++
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -695,6 +813,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_fb();
+ 	mxc_init_bl();
+ 	mxc_init_ir();
++	mxc_init_mmc();
+ 	mxc_init_ide();
+ }
+ 
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index f8b1a54..eceab15 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -47,6 +47,8 @@
+ #include <asm/mach/keypad.h>
+ #include <asm/arch/memory.h>
+ #include <asm/arch/gpio.h>
++#include <asm/arch/mmc.h>
++#include <asm/arch/spba.h>
+ 
+ #include "board-mx3_3stack.h"
+ #include "crm_regs.h"
+@@ -522,6 +524,75 @@ static void __inline mxc_init_pmic_audio(void)
+ }
+ #endif
+ 
++/* MMC device data */
++
++#if defined(CONFIG_MMC_MXC) || defined(CONFIG_MMC_MXC_MODULE)
++extern unsigned int sdhc_get_card_det_status(struct device *dev);
++extern int sdhc_init_card_det(int id);
++extern int sdhc_write_protect(void);
++
++static struct mxc_mmc_platform_data mmc0_data = {
++	.ocr_mask = MMC_VDD_32_33,
++	.min_clk = 150000,
++	.max_clk = 25000000,
++	.card_inserted_state = 1,
++	.status = sdhc_get_card_det_status,
++	.wp_status = sdhc_write_protect,
++	.power_mmc = "GPO1",
++};
++
++/*!
++ * Resource definition for the SDHC1
++ */
++static struct resource mxcsdhc1_resources[] = {
++	[0] = {
++	       .start = MMC_SDHC1_BASE_ADDR,
++	       .end = MMC_SDHC1_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_MMC_SDHC1,
++	       .end = MXC_INT_MMC_SDHC1,
++	       .flags = IORESOURCE_IRQ,
++	       },
++	[2] = {
++	       .start = 0,
++	       .end = 0,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Device Definition for MXC SDHC1 */
++static struct platform_device mxcsdhc1_device = {
++	.name = "mxcmci",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mmc0_data,
++		},
++	.num_resources = ARRAY_SIZE(mxcsdhc1_resources),
++	.resource = mxcsdhc1_resources,
++};
++
++static inline void mxc_init_mmc(void)
++{
++	int cd_irq;
++
++	cd_irq = sdhc_init_card_det(0);
++	if (cd_irq) {
++		mxcsdhc1_device.resource[2].start = cd_irq;
++		mxcsdhc1_device.resource[2].end = cd_irq;
++	}
++
++	spba_take_ownership(SPBA_SDHC1, SPBA_MASTER_A | SPBA_MASTER_C);
++	(void)platform_device_register(&mxcsdhc1_device);
++}
++#else
++static inline void mxc_init_mmc(void)
++{
++}
++#endif
++
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -618,6 +689,7 @@ static void __init mxc_board_init(void)
+ 
+ 	mxc_init_fb();
+ 	mxc_init_bl();
++	mxc_init_mmc();
+ 	mxc_init_ide();
+ }
+ 
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index b3a390e..d99c6ac 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -18,6 +18,7 @@
+ #include <asm/io.h>
+ #include <asm/hardware.h>
+ #include <asm/arch/gpio.h>
++#include <asm/arch/pmic_adc.h>
+ #include "board-mx3_3stack.h"
+ #include "iomux.h"
+ 
+@@ -437,13 +438,6 @@ void gpio_sdhc_active(int module)
+ 				  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
+ 		mxc_iomux_set_pad(MX31_PIN_SD1_DATA3,
+ 				  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
+-
+-		/* Buffer Enable Pin, Active HI */
+-		mxc_request_iomux(MX31_PIN_GPIO3_0, OUTPUTCONFIG_GPIO,
+-				  INPUTCONFIG_NONE);
+-		mxc_set_gpio_direction(MX31_PIN_GPIO3_0, 0);
+-		mdelay(10);
+-		mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 1);
+ 		break;
+ 	case 1:
+ 		mxc_request_iomux(MX31_PIN_PC_CD2_B, OUTPUTCONFIG_ALT1,
+@@ -503,8 +497,6 @@ void gpio_sdhc_inactive(int module)
+ 
+ 		/* Buffer Enable Pin of SD, Active HI */
+ 		mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 0);
+-		mxc_free_iomux(MX31_PIN_GPIO3_0, OUTPUTCONFIG_GPIO,
+-			       INPUTCONFIG_NONE);
+ 		break;
+ 	case 1:
+ 		/* TODO:what are the pins for SDHC2? */
+@@ -533,11 +525,23 @@ EXPORT_SYMBOL(gpio_sdhc_inactive);
+  */
+ int sdhc_get_card_det_status(struct device *dev)
+ {
++	int ret;
++
+ 	if (to_platform_device(dev)->id == 0) {
+-		return mxc_get_gpio_datain(MX31_PIN_GPIO3_1);
+-	} else {
++		ret = mxc_get_gpio_datain(MX31_PIN_GPIO3_1);
++		/*
++		 * Active the Buffer Enable Pin only if there is
++		 * a card in slot.
++		 * To fix the card voltage issue caused by
++		 * bi-directional chip TXB0108 on 3Stack
++		 */
++		if (ret)
++			mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 0);
++		else
++			mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 1);
++		return ret;
++	} else
+ 		return mxc_get_gpio_datain(MX31_PIN_GPIO1_2);
+-	}
+ }
+ 
+ EXPORT_SYMBOL(sdhc_get_card_det_status);
+@@ -548,6 +552,13 @@ EXPORT_SYMBOL(sdhc_get_card_det_status);
+ int sdhc_init_card_det(int id)
+ {
+ 	if (id == 0) {
++		/* Buffer Enable Pin, Active HI */
++		mxc_request_iomux(MX31_PIN_GPIO3_0, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_NONE);
++		mxc_set_gpio_direction(MX31_PIN_GPIO3_0, 0);
++		mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 0);
++
++		/* CD Pin */
+ 		mxc_request_iomux(MX31_PIN_GPIO3_1, OUTPUTCONFIG_GPIO,
+ 				  INPUTCONFIG_GPIO);
+ 		mxc_iomux_set_pad(MX31_PIN_GPIO3_1, PAD_CTL_PKE_NONE);
+@@ -570,7 +581,7 @@ int sdhc_write_protect(void)
+ {
+ 	unsigned short rc = 0;
+ 
+-//      pmic_adc_convert(GEN_PURPOSE_AD7, &rc);
++	pmic_adc_convert(GEN_PURPOSE_AD7, &rc);
+ 	if (rc > 0)
+ 		return 1;
+ 	else
+diff --git a/drivers/mmc/host/mxc_mmc.c b/drivers/mmc/host/mxc_mmc.c
+index 9a17be5..2796030 100644
+--- a/drivers/mmc/host/mxc_mmc.c
++++ b/drivers/mmc/host/mxc_mmc.c
+@@ -13,7 +13,7 @@
+  */
+ 
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -54,6 +54,7 @@
+ #include <linux/delay.h>
+ #include <linux/timer.h>
+ #include <linux/clk.h>
++#include <linux/regulator/regulator.h>
+ 
+ #include <asm/dma.h>
+ #include <asm/io.h>
+@@ -65,30 +66,8 @@
+ 
+ #include "mxc_mmc.h"
+ 
+-#if defined(CONFIG_MXC_MC13783_POWER)
+-#include <asm/arch/pmic_power.h>
+-#endif
+-
+ #define RSP_TYPE(x)	((x) & ~(MMC_RSP_BUSY|MMC_RSP_OPCODE))
+ 
+-static const int vdd_mapping[] = {
+-	0, 0,
+-	0,			/* MMC_VDD_160 */
+-	0, 0,
+-	1,			/* MMC_VDD_180 */
+-	0,
+-	2,			/* MMC_VDD_200 */
+-	0, 0, 0, 0, 0,
+-	3,			/* MMC_VDD_260 */
+-	4,			/* MMC_VDD_270 */
+-	5,			/* MMC_VDD_280 */
+-	6,			/* MMC_VDD_290 */
+-	7,			/* MMC_VDD_300 */
+-	7,			/* MMC_VDD_310 - HACK for LP1070, actually 3.0V */
+-	7,			/* MMC_VDD_320 - HACK for LP1070, actually 3.0V */
+-	0, 0, 0, 0
+-};
+-
+ /*
+  * This define is used to test the driver without using DMA
+  */
+@@ -271,6 +250,16 @@ struct mxcmci_host {
+ 	unsigned int cmdat;
+ 
+ 	/*!
++	 * Regulator
++	 */
++	struct regulator *regulator_mmc;
++
++	/*!
++	 * Current vdd settting
++	 */
++	int current_vdd;
++
++	/*!
+ 	 * Power mode - currently unused
+ 	 */
+ 	unsigned int power_mode;
+@@ -896,13 +885,11 @@ static void mxcmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	/*This variable holds the value of clock prescaler */
+ 	int prescaler;
+ 	int clk_rate = clk_get_rate(host->clk);
++	int voltage = 0;
+ #ifdef MXC_MMC_DMA_ENABLE
+ 	mxc_dma_device_t dev_id = 0;
+ #endif
+ 
+-#if defined(CONFIG_MXC_MC13783_POWER)
+-	t_regulator_voltage voltage;
+-#endif
+ 	pr_debug("%s: clock %u, bus %lu, power %u, vdd %u\n", DRIVER_NAME,
+ 		 ios->clock, 1UL << ios->bus_width, ios->power_mode, ios->vdd);
+ 
+@@ -933,44 +920,27 @@ static void mxcmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	}
+ #endif
+ 
+-#if defined(CONFIG_MXC_MC13783_POWER)
+-	switch (ios->power_mode) {
+-	case MMC_POWER_UP:
+-		if (host->id == 0) {
+-			voltage.vmmc1 = vdd_mapping[ios->vdd];
+-			pmic_power_regulator_set_voltage(REGU_VMMC1, voltage);
+-			pmic_power_regulator_set_lp_mode(REGU_VMMC1,
+-							 LOW_POWER_DISABLED);
+-			pmic_power_regulator_on(REGU_VMMC1);
+-		}
+-		if (host->id == 1) {
+-			voltage.vmmc2 = vdd_mapping[ios->vdd];
+-			pmic_power_regulator_set_voltage(REGU_VMMC2, voltage);
+-			pmic_power_regulator_set_lp_mode(REGU_VMMC2,
+-							 LOW_POWER_DISABLED);
+-			pmic_power_regulator_on(REGU_VMMC2);
+-		}
+-		pr_debug("mmc power on\n");
+-		msleep(300);
+-		break;
+-	case MMC_POWER_OFF:
+-		if (host->id == 0) {
+-			pmic_power_regulator_set_lp_mode(REGU_VMMC1,
+-							 LOW_POWER_EN);
+-			pmic_power_regulator_off(REGU_VMMC1);
+-		}
++	if ((ios->vdd != host->current_vdd) && host->regulator_mmc) {
++		if (ios->vdd == 7)
++			voltage = 1800000;
++		else if (ios->vdd >= 8)
++			voltage = 2000000 + (ios->vdd - 8) * 100000;
++		regulator_set_voltage(host->regulator_mmc, voltage);
++	}
++	host->current_vdd = ios->vdd;
+ 
+-		if (host->id == 1) {
+-			pmic_power_regulator_set_lp_mode(REGU_VMMC2,
+-							 LOW_POWER_EN);
+-			pmic_power_regulator_off(REGU_VMMC2);
++	if (ios->power_mode != host->power_mode && host->regulator_mmc) {
++		if (ios->power_mode == MMC_POWER_UP) {
++			if (regulator_enable(host->regulator_mmc) == 0) {
++				pr_debug("mmc power on\n");
++				msleep(300);
++			}
++		} else if (ios->power_mode == MMC_POWER_OFF) {
++			regulator_disable(host->regulator_mmc);
++			pr_debug("mmc power off\n");
+ 		}
+-		pr_debug("mmc power off\n");
+-		break;
+-	default:
+-		break;
+ 	}
+-#endif
++	host->power_mode = ios->power_mode;
+ 
+ 	/*
+ 	 *  Vary divider first, then prescaler.
+@@ -1041,6 +1011,16 @@ static void mxcmci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ }
+ 
++static int mxcmci_get_ro(struct mmc_host *mmc)
++{
++	struct mxcmci_host *host = mmc_priv(mmc);
++
++	if (host->plat_data->wp_status)
++		return host->plat_data->wp_status();
++	else
++		return 0;
++}
++
+ /*!
+  * MMC/SD host operations structure.
+  * These functions are registered with MMC/SD Bus protocol driver.
+@@ -1048,6 +1028,7 @@ static void mxcmci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ static struct mmc_host_ops mxcmci_ops = {
+ 	.request = mxcmci_request,
+ 	.set_ios = mxcmci_set_ios,
++	.get_ro = mxcmci_get_ro,
+ 	.enable_sdio_irq = mxcmci_enable_sdio_irq,
+ };
+ 
+@@ -1164,18 +1145,23 @@ static int mxcmci_probe(struct platform_device *pdev)
+ 	if (!mmc) {
+ 		return -ENOMEM;
+ 	}
++	host = mmc_priv(mmc);
+ 	platform_set_drvdata(pdev, mmc);
+ 
+ 	mmc->ops = &mxcmci_ops;
+ 	mmc->ocr_avail = mmc_plat->ocr_mask;
+ 
+ 	/* Hack to work with LP1070 */
+-	mmc->ocr_avail |= MMC_VDD_31_32;
++	if (mmc->ocr_avail && ~(MMC_VDD_31_32 - 1) == 0)
++		mmc->ocr_avail |= MMC_VDD_31_32;
+ 
+ 	mmc->max_phys_segs = NR_SG;
+ 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SDIO_IRQ;
+ 
+-	host = mmc_priv(mmc);
++	mmc->f_min = mmc_plat->min_clk;
++	mmc->f_max = mmc_plat->max_clk;
++
++	spin_lock_init(&host->lock);
+ 	host->mmc = mmc;
+ 	host->dma = -1;
+ 	host->dma_dir = DMA_NONE;
+@@ -1185,21 +1171,29 @@ static int mxcmci_probe(struct platform_device *pdev)
+ 	host->plat_data = mmc_plat;
+ 	if (!host->plat_data) {
+ 		ret = -EINVAL;
+-		goto out;
++		goto out0;
+ 	}
+ 
+-	host->clk = clk_get(&pdev->dev, "sdhc_clk");
+-	clk_enable(host->clk);
++	gpio_sdhc_active(pdev->id);
+ 
+-	mmc->f_min = mmc_plat->min_clk;
+-	mmc->f_max = mmc_plat->max_clk;
++	/* Get pwr supply for SDHC */
++	if (NULL != mmc_plat->power_mmc) {
++		host->regulator_mmc =
++		    regulator_get(&pdev->dev, mmc_plat->power_mmc);
++		if (IS_ERR(host->regulator_mmc)) {
++			ret = PTR_ERR(host->regulator_mmc);
++			goto out1;
++		}
++	}
++
++	host->clk = clk_get(&pdev->dev, "sdhc_clk");
+ 	pr_debug("SDHC:%d clock:%lu\n", pdev->id, clk_get_rate(host->clk));
++	clk_enable(host->clk);
+ 
+-	spin_lock_init(&host->lock);
+ 	host->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!host->res) {
+ 		ret = -ENOMEM;
+-		goto out;
++		goto out2;
+ 	}
+ 
+ 	if (!request_mem_region(host->res->start,
+@@ -1207,23 +1201,23 @@ static int mxcmci_probe(struct platform_device *pdev)
+ 				host->res->start + 1, pdev->name)) {
+ 		printk(KERN_ERR "request_mem_region failed\n");
+ 		ret = -ENOMEM;
+-		goto out;
++		goto out2;
+ 	}
+ 	host->base = (void *)IO_ADDRESS(host->res->start);
+ 	if (!host->base) {
+ 		ret = -ENOMEM;
+-		goto out1;
++		goto out3;
+ 	}
+ 
+ 	host->irq = platform_get_irq(pdev, 0);
+ 	if (!host->irq) {
+ 		ret = -ENOMEM;
+-		goto out1;
++		goto out3;
+ 	}
+ 
+ 	host->detect_irq = platform_get_irq(pdev, 1);
+ 	if (!host->detect_irq) {
+-		goto out1;
++		goto out3;
+ 	}
+ 
+ 	do {
+@@ -1239,7 +1233,7 @@ static int mxcmci_probe(struct platform_device *pdev)
+ 	ret =
+ 	    request_irq(host->detect_irq, mxcmci_gpio_irq, 0, pdev->name, host);
+ 	if (ret) {
+-		goto out1;
++		goto out3;
+ 	}
+ 
+ 	mxcmci_softreset(host);
+@@ -1255,30 +1249,30 @@ static int mxcmci_probe(struct platform_device *pdev)
+ 
+ 	ret = request_irq(host->irq, mxcmci_irq, 0, pdev->name, host);
+ 	if (ret) {
+-		goto out3;
++		goto out4;
+ 	}
+ 
+-	gpio_sdhc_active(pdev->id);
+-
+ 	if ((ret = mmc_add_host(mmc)) < 0) {
+-		goto out4;
++		goto out5;
+ 	}
+ 
+ 	printk(KERN_INFO "%s-%d found\n", pdev->name, pdev->id);
+ 
+ 	return 0;
+ 
+-      out4:
+-	gpio_sdhc_inactive(pdev->id);
++      out5:
+ 	free_irq(host->irq, host);
+-      out3:
++      out4:
+ 	free_irq(host->detect_irq, host);
+-	pr_debug("%s: Error in initializing....", pdev->name);
+-      out1:
++      out3:
+ 	release_mem_region(pdev->resource[0].start,
+ 			   pdev->resource[0].end - pdev->resource[0].start + 1);
+-      out:
++      out2:
+ 	clk_disable(host->clk);
++	regulator_put(host->regulator_mmc, &pdev->dev);
++      out1:
++	gpio_sdhc_inactive(pdev->id);
++      out0:
+ 	mmc_free_host(mmc);
+ 	platform_set_drvdata(pdev, NULL);
+ 	return ret;
+@@ -1296,7 +1290,6 @@ static int mxcmci_probe(struct platform_device *pdev)
+ static int mxcmci_remove(struct platform_device *pdev)
+ {
+ 	struct mmc_host *mmc = platform_get_drvdata(pdev);
+-	platform_set_drvdata(pdev, NULL);
+ 
+ 	if (mmc) {
+ 		struct mxcmci_host *host = mmc_priv(mmc);
+@@ -1310,8 +1303,11 @@ static int mxcmci_remove(struct platform_device *pdev)
+ 		release_mem_region(host->res->start,
+ 				   host->res->end - host->res->start + 1);
+ 		mmc_free_host(mmc);
++		if (NULL != host->regulator_mmc)
++			regulator_put(host->regulator_mmc, &pdev->dev);
+ 		gpio_sdhc_inactive(pdev->id);
+ 	}
++	platform_set_drvdata(pdev, NULL);
+ 	return 0;
+ }
+ 
+@@ -1338,7 +1334,20 @@ static int mxcmci_suspend(struct platform_device *pdev, pm_message_t state)
+ 		host->mxc_mmc_suspend_flag = 1;
+ 		ret = mmc_suspend_host(mmc, state);
+ 	}
++
+ 	clk_disable(host->clk);
++	/*
++	 * The CD INT should be disabled in the suspend
++	 * and enabled in resumed.
++	 * Otherwise, the system would be halt when wake
++	 * up with the situation that there is a card
++	 * insertion during the system is in suspend mode.
++	 */
++	disable_irq(host->detect_irq);
++
++	if (host->regulator_mmc)
++		regulator_disable(host->regulator_mmc);
++	gpio_sdhc_inactive(pdev->id);
+ 
+ 	return ret;
+ }
+@@ -1367,12 +1376,22 @@ static int mxcmci_resume(struct platform_device *pdev)
+ 	if (!host->mxc_mmc_suspend_flag) {
+ 		return 0;
+ 	}
++
++	gpio_sdhc_active(pdev->id);
++
++	/* enable pwr supply for SDHC */
++	if (host->regulator_mmc)
++		regulator_enable(host->regulator_mmc);
++
+ 	clk_enable(host->clk);
+ 
+ 	if (mmc) {
+ 		ret = mmc_resume_host(mmc);
+ 		host->mxc_mmc_suspend_flag = 0;
+ 	}
++
++	enable_irq(host->detect_irq);
++
+ 	return ret;
+ }
+ #else
+diff --git a/include/asm-arm/arch-mxc/mmc.h b/include/asm-arm/arch-mxc/mmc.h
+index 890abf1..06e95a5 100644
+--- a/include/asm-arm/arch-mxc/mmc.h
++++ b/include/asm-arm/arch-mxc/mmc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -22,6 +22,8 @@ struct mxc_mmc_platform_data {
+ 	unsigned int card_inserted_state;
+ //      u32 (*translate_vdd)(struct device *, unsigned int);
+ 	unsigned int (*status) (struct device *);
++	int (*wp_status) (void);
++	char *power_mmc;
+ };
+ 
+ #endif
+-- 
+1.5.4.4
+

@@ -1,0 +1,68 @@
+From 82cc8ff5402a0fcf21db0f36f9063ebc7390fc27 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 17 Jun 2007 22:34:47 -0400
+Subject: [PATCH] fs_stack: simplify generic attribute-copying function
+
+Remove special get_nlinks callback from fsstack_copy_attr_all, because the
+callback was only used by Unionfs (and always used by Unionfs).  Unionfs now
+needs a more complex version of fsstack_copy_attr_all, with two callbacks:
+therefore it's easier to simplify this method for simple linear-stacking
+stackable file system, and introduce a more complex fan-out version of it
+for Unionfs.
+
+This is an API change which requires that every stackable file system in the
+kernel be updated to reflect that (currently only eCryptfs).
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/stack.c               |   13 ++-----------
+ include/linux/fs_stack.h |    3 +--
+ 2 files changed, 3 insertions(+), 13 deletions(-)
+
+diff --git a/fs/stack.c b/fs/stack.c
+index 0b3e93b..56fd0df 100644
+--- a/fs/stack.c
++++ b/fs/stack.c
+@@ -30,8 +30,7 @@ EXPORT_SYMBOL_GPL(fsstack_copy_inode_size);
+  * copy all attributes; get_nlinks is optional way to override the i_nlink
+  * copying
+  */
+-void fsstack_copy_attr_all(struct inode *dest, const struct inode *src,
+-			   int (*get_nlinks)(struct inode *))
++void fsstack_copy_attr_all(struct inode *dest, const struct inode *src)
+ {
+ 	dest->i_mode = src->i_mode;
+ 	dest->i_uid = src->i_uid;
+@@ -42,14 +41,6 @@ void fsstack_copy_attr_all(struct inode *dest, const struct inode *src,
+ 	dest->i_ctime = src->i_ctime;
+ 	dest->i_blkbits = src->i_blkbits;
+ 	dest->i_flags = src->i_flags;
+-
+-	/*
+-	 * Update the nlinks AFTER updating the above fields, because the
+-	 * get_links callback may depend on them.
+-	 */
+-	if (!get_nlinks)
+-		dest->i_nlink = src->i_nlink;
+-	else
+-		dest->i_nlink = (*get_nlinks)(dest);
++	dest->i_nlink = src->i_nlink;
+ }
+ EXPORT_SYMBOL_GPL(fsstack_copy_attr_all);
+diff --git a/include/linux/fs_stack.h b/include/linux/fs_stack.h
+index 5bbdca4..2599c5b 100644
+--- a/include/linux/fs_stack.h
++++ b/include/linux/fs_stack.h
+@@ -20,8 +20,7 @@
+ #include <linux/fs.h>
+ 
+ /* externs for fs/stack.c */
+-extern void fsstack_copy_attr_all(struct inode *dest, const struct inode *src,
+-				  int (*get_nlinks)(struct inode *));
++extern void fsstack_copy_attr_all(struct inode *dest, const struct inode *src);
+ extern void fsstack_copy_inode_size(struct inode *dst,
+ 				    const struct inode *src);
+ 
+-- 
+1.5.4.3
+

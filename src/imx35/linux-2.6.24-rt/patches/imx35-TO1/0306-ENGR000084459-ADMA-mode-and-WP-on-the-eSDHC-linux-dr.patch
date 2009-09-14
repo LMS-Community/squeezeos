@@ -1,0 +1,992 @@
+From 3958c7bd58f329a1ea69b736db4fc30546adaed4 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Fri, 1 Aug 2008 11:27:15 +0800
+Subject: [PATCH] ENGR000084459 ADMA mode and WP on the eSDHC linux driver
+
+Enable the ADMA mode on the eSDHC linux driver, and write
+protect feature.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |    4 +-
+ arch/arm/mach-mx35/board-mx35_3stack.h  |    1 +
+ arch/arm/mach-mx35/mx35_3stack.c        |    1 +
+ arch/arm/mach-mx35/mx35_3stack_gpio.c   |   15 ++-
+ arch/arm/mach-mx37/mx37_3stack.c        |    2 +
+ arch/arm/mach-mx37/mx37_3stack_gpio.c   |   39 +++--
+ arch/arm/plat-mxc/gpio.c                |   12 ++-
+ drivers/mmc/host/mx_sdhci.c             |  293 ++++++++++++++++++------------
+ drivers/mmc/host/mx_sdhci.h             |   55 +++++--
+ 9 files changed, 278 insertions(+), 144 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 7e00a94..373b9aa 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -1191,14 +1191,14 @@ CONFIG_USB_STORAGE=y
+ #
+ # 
+ #
+-CONFIG_MMC=m
++CONFIG_MMC=y
+ # CONFIG_MMC_DEBUG is not set
+ # CONFIG_MMC_UNSAFE_RESUME is not set
+ 
+ #
+ # MMC/SD Card Drivers
+ #
+-CONFIG_MMC_BLOCK=m
++CONFIG_MMC_BLOCK=y
+ CONFIG_MMC_BLOCK_BOUNCE=y
+ # CONFIG_SDIO_UART is not set
+ 
+diff --git a/arch/arm/mach-mx35/board-mx35_3stack.h b/arch/arm/mach-mx35/board-mx35_3stack.h
+index 4395fa6..61d84db 100644
+--- a/arch/arm/mach-mx35/board-mx35_3stack.h
++++ b/arch/arm/mach-mx35/board-mx35_3stack.h
+@@ -197,6 +197,7 @@ extern void __init early_console_setup(char *);
+ extern void gpio_tsc_active(void);
+ extern void gpio_tsc_inactive(void);
+ extern unsigned int sdhc_get_card_det_status(struct device *dev);
++extern int sdhc_write_protect(void);
+ extern void gpio_can_active(int id);
+ extern void gpio_can_inactive(int id);
+ extern struct flexcan_platform_data flexcan_data[];
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index d21f24d..74ac988 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -441,6 +441,7 @@ static struct mxc_mmc_platform_data mmc_data = {
+ 	.max_clk = 52000000,
+ 	.card_inserted_state = 1,
+ 	.status = sdhc_get_card_det_status,
++	.wp_status = sdhc_write_protect,
+ 	.clock_mmc = "sdhc_clk",
+ };
+ 
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 66f259e..6c2e5b6 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -613,11 +613,24 @@ unsigned int sdhc_get_card_det_status(struct device *dev)
+ 	} else {		/* config the det pin for SDHC2 */
+ 		return 0;
+ 	}
+-	return 0;
+ }
+ 
+ EXPORT_SYMBOL(sdhc_get_card_det_status);
+ 
++/*!
++ * Get pin value to detect write protection
++ */
++int sdhc_write_protect(void)
++{
++	unsigned int rc = 0;
++
++	if (0 != pmic_gpio_get_designation_bit_val(3, &rc))
++		printk(KERN_ERR "Get wp status error.");
++	return rc;
++}
++
++EXPORT_SYMBOL(sdhc_write_protect);
++
+ /*
+  *  USB Host2
+  */
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index beeda64..41e6f81 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -403,6 +403,7 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ #if defined(CONFIG_MMC_IMX_ESDHCI) || defined(CONFIG_MMC_IMX_ESDHCI_MODULE)
+ extern unsigned int sdhc_get_card_det_status(struct device *dev);
+ extern int sdhc_init_card_det(int id);
++extern int sdhc_write_protect(void);
+ 
+ static struct mxc_mmc_platform_data mmc_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
+@@ -410,6 +411,7 @@ static struct mxc_mmc_platform_data mmc_data = {
+ 	.max_clk = 52000000,
+ 	.card_inserted_state = 1,
+ 	.status = sdhc_get_card_det_status,
++	.wp_status = sdhc_write_protect,
+ 	.clock_mmc = "esdhc_clk",
+ };
+ 
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index e277d0b..db1fbf8 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -290,16 +290,18 @@ void gpio_sdhc_active(int module)
+ 		mxc_iomux_set_pad(MX37_PIN_SD1_DATA2, pad_val);
+ 		mxc_iomux_set_pad(MX37_PIN_SD1_DATA3, pad_val);
+ 
+-#if 0
+ 		/* Write Protected Pin */
+-		mxc_request_iomux(MX37_PIN_CSPI1_SS0, IOMUX_CONFIG_ALT4);
++		mxc_request_iomux(MX37_PIN_CSPI1_SS0,
++				  IOMUX_CONFIG_SION | IOMUX_CONFIG_ALT4);
+ 		mxc_iomux_set_pad(MX37_PIN_CSPI1_SS0,
+ 				  PAD_CTL_DRV_HIGH | PAD_CTL_HYS_NONE |
+-				  PAD_CTL_PUE_KEEPER
+-				  || PAD_CTL_ODE_OPENDRAIN_NONE |
+-				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
+-		mxc_set_gpio_direction(MX37_PIN_CSPI1_SS0, 1);
+-#endif
++				  PAD_CTL_SRE_FAST);
++		/*
++		 * SW workaround for the eSDHC1 Write Protected feature
++		 * The PSR of CSPI1_SS0 (GPIO3_2) should be read.
++		 */
++		mxc_set_gpio_direction(MX37_PIN_CSPI1_SS0, 0);
++		mxc_set_gpio_dataout(MX37_PIN_CSPI1_SS0, 1);
+ 		break;
+ 	case 1:
+ 		break;
+@@ -341,12 +343,11 @@ void gpio_sdhc_inactive(int module)
+ 		mxc_iomux_set_pad(MX37_PIN_SD1_DATA3,
+ 				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
+ 
+-#if 0
+ 		/* Free Write Protected Pin */
+-		mxc_free_iomux(MX37_PIN_CSPI1_SS0, IOMUX_CONFIG_ALT4);
++		mxc_free_iomux(MX37_PIN_CSPI1_SS0,
++			       IOMUX_CONFIG_SION | IOMUX_CONFIG_ALT4);
+ 		mxc_iomux_set_pad(MX37_PIN_CSPI1_SS0,
+ 				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
+-#endif
+ 		break;
+ 	case 1:
+ 		/* TODO:what are the pins for SDHC2? */
+@@ -371,7 +372,6 @@ int sdhc_get_card_det_status(struct device *dev)
+ 	} else {		/* config the det pin for SDHC2 */
+ 		return 0;
+ 	}
+-	return 0;
+ }
+ 
+ EXPORT_SYMBOL(sdhc_get_card_det_status);
+@@ -392,12 +392,27 @@ int sdhc_init_card_det(int id)
+ 		return 0;
+ 
+ 	}
+-	return 0;
+ }
+ 
+ EXPORT_SYMBOL(sdhc_init_card_det);
+ 
+ /*!
++ * Get CSPI1_SS0 pin value to detect write protection
++ */
++int sdhc_write_protect(void)
++{
++	unsigned short rc = 0;
++
++	rc = mxc_get_gpio_datain(MX37_PIN_CSPI1_SS0);
++	if (rc > 0)
++		return 1;
++	else
++		return 0;
++}
++
++EXPORT_SYMBOL(sdhc_write_protect);
++
++/*!
+  * Setup GPIO for LCD to be active
+  *
+  */
+diff --git a/arch/arm/plat-mxc/gpio.c b/arch/arm/plat-mxc/gpio.c
+index 30ece54..da22803 100644
+--- a/arch/arm/plat-mxc/gpio.c
++++ b/arch/arm/plat-mxc/gpio.c
+@@ -27,6 +27,7 @@
+ #include <asm/mach/irq.h>
+ #include <asm/io.h>
+ #include <asm/arch/gpio.h>
++#include <asm/mach-types.h>
+ 
+ /*!
+  * @file plat-mxc/gpio.c
+@@ -190,7 +191,16 @@ int mxc_get_gpio_datain(iomux_pin_name_t pin)
+ 
+ 	port = get_gpio_port(gpio);
+ 
+-	return (__raw_readl(port->base + GPIO_DR) >> GPIO_TO_INDEX(gpio)) & 1;
++	/*
++	 * SW workaround for the eSDHC1 Write Protected feature
++	 * The PSR of CSPI1_SS0 (GPIO3_2) should be read.
++	 */
++	if (machine_is_mx37_3ds() && (gpio == ((32 * 2) + 2)))
++		return (__raw_readl(port->base + GPIO_PSR) >>
++			GPIO_TO_INDEX(gpio)) & 1;
++	else
++		return (__raw_readl(port->base + GPIO_DR) >>
++			GPIO_TO_INDEX(gpio)) & 1;
+ }
+ 
+ /*
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index 234e3ad..263dc9d 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -30,6 +30,8 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/scatterlist.h>
+ 
++#include <linux/leds.h>
++
+ #include <linux/mmc/host.h>
+ #include <linux/mmc/mmc.h>
+ #include <linux/mmc/card.h>
+@@ -51,6 +53,8 @@
+ #define DBG(f, x...) \
+ 	pr_debug(DRIVER_NAME " [%s()]: " f, __func__, ## x)
+ 
++static unsigned int debug_quirks;
++
+ /*
+  * Different quirks to handle when the hardware deviates from a strict
+  * interpretation of the SDHCI specification.
+@@ -60,7 +64,7 @@
+ #define SDHCI_QUIRK_CLOCK_BEFORE_RESET			(1<<0)
+ /* Controller has bad caps bits, but really supports DMA */
+ #define SDHCI_QUIRK_FORCE_DMA				(1<<1)
+-/* Controller doesn't like some resets when there is no card inserted. */
++/* Controller doesn't like to be reset when there is no card inserted. */
+ #define SDHCI_QUIRK_NO_CARD_NO_RESET			(1<<2)
+ /* Controller doesn't like clearing the power reg before a change */
+ #define SDHCI_QUIRK_SINGLE_POWER_WRITE			(1<<3)
+@@ -74,14 +78,18 @@
+ #define SDHCI_QUIRK_32BIT_DMA_SIZE			(1<<7)
+ /* Controller needs to be reset after each request to stay stable */
+ #define SDHCI_QUIRK_RESET_AFTER_REQUEST			(1<<8)
++/* Controller needs voltage and power writes to happen separately */
++#define SDHCI_QUIRK_NO_SIMULT_VDD_AND_POWER		(1<<9)
++/* Controller has an off-by-one issue with timeout value */
++#define SDHCI_QUIRK_INCR_TIMEOUT_CONTROL		(1<<10)
+ /* Controller only support the PIO */
+-#define SDHCI_QUIRK_ONLY_PIO 				(1<<9)
++#define SDHCI_QUIRK_ONLY_PIO 				(1<<16)
+ /* Controller support the External DMA */
+-#define SDHCI_QUIRK_EXTERNAL_DMA_MODE			(1<<10)
++#define SDHCI_QUIRK_EXTERNAL_DMA_MODE			(1<<17)
+ /* Controller support the Internal Simple DMA */
+-#define SDHCI_QUIRK_INTERNAL_SIMPLE_DMA			(1<<11)
++#define SDHCI_QUIRK_INTERNAL_SIMPLE_DMA			(1<<18)
+ /* Controller support the Internal Advanced DMA */
+-#define SDHCI_QUIRK_INTERNAL_ADVANCED_DMA 		(1<<12)
++#define SDHCI_QUIRK_INTERNAL_ADVANCED_DMA 		(1<<19)
+ 
+ /*
+  * defines the mxc flags refer to the special hw pre-conditons and behavior
+@@ -93,6 +101,7 @@ static unsigned int debug_quirks = SDHCI_QUIRK_ONLY_PIO;
+ static unsigned int debug_quirks;
+ #endif
+ static unsigned int mxc_wml_value = 512;
++static unsigned int *adma_des_table;
+ 
+ static void sdhci_prepare_data(struct sdhci_host *, struct mmc_data *);
+ static void sdhci_finish_data(struct sdhci_host *);
+@@ -177,7 +186,7 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ 	 * The INT_EN SIG_EN regs have been modified after reset.
+ 	 * re-configure them ag.
+ 	 */
+-	mask_u32 = SDHCI_INT_DMAERR |
++	mask_u32 = SDHCI_INT_ADMA_ERROR |
+ 	    SDHCI_INT_DATA_END_BIT | SDHCI_INT_DATA_CRC |
+ 	    SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_INDEX |
+ 	    SDHCI_INT_END_BIT | SDHCI_INT_CRC | SDHCI_INT_TIMEOUT |
+@@ -200,7 +209,7 @@ static void sdhci_init(struct sdhci_host *host)
+ 
+ 	sdhci_reset(host, SDHCI_RESET_ALL);
+ 
+-	intmask = SDHCI_INT_DMAERR |
++	intmask = SDHCI_INT_ADMA_ERROR |
+ 	    SDHCI_INT_DATA_END_BIT | SDHCI_INT_DATA_CRC |
+ 	    SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_INDEX |
+ 	    SDHCI_INT_END_BIT | SDHCI_INT_CRC | SDHCI_INT_TIMEOUT |
+@@ -236,6 +245,24 @@ static void sdhci_deactivate_led(struct sdhci_host *host)
+ 	writel(ctrl, host->ioaddr + SDHCI_HOST_CONTROL);
+ }
+ 
++#ifdef CONFIG_LEDS_CLASS
++static void sdhci_led_control(struct led_classdev *led,
++			      enum led_brightness brightness)
++{
++	struct sdhci_host *host = container_of(led, struct sdhci_host, led);
++	unsigned long flags;
++
++	spin_lock_irqsave(&host->lock, flags);
++
++	if (brightness == LED_OFF)
++		sdhci_deactivate_led(host);
++	else
++		sdhci_activate_led(host);
++
++	spin_unlock_irqrestore(&host->lock, flags);
++}
++#endif
++
+ /*****************************************************************************\
+  *                                                                           *
+  * Core functions                                                            *
+@@ -384,31 +411,6 @@ static void sdhci_transfer_pio(struct sdhci_host *host)
+ 	DBG("PIO transfer complete.\n");
+ }
+ 
+-static void sdhci_prepare_dma(struct sdhci_host *host, struct mmc_data *data)
+-{
+-	/*
+-	 * Skip to next SG entry.
+-	 */
+-	host->cur_sg++;
+-	host->num_sg--;
+-
+-	/*
+-	 * Any entries left?
+-	 */
+-	if (host->num_sg > 0) {
+-		DBG("Another entry configure the sg DMA, %s\n",
+-		    (data->flags & MMC_DATA_READ)
+-		    ? "DMA_FROM_DEIVCE" : "DMA_TO_DEVICE");
+-		host->offset = 0;
+-		host->remain = host->cur_sg->length;
+-
+-		/* COnfig the DMA address */
+-		writel(sg_dma_address(host->cur_sg),
+-		       host->ioaddr + SDHCI_DMA_ADDRESS);
+-	}
+-
+-}
+-
+ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ {
+ 	u32 count;
+@@ -450,8 +452,19 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 			break;
+ 	}
+ 
+-	if (count >= 0xF)
++	/*
++	 * Compensate for an off-by-one error in the CaFe hardware; otherwise,
++	 * a too-small count gives us interrupt timeouts.
++	 */
++	if ((host->chip->quirks & SDHCI_QUIRK_INCR_TIMEOUT_CONTROL))
++		count++;
++
++	if (count >= 0xF) {
++		DBG(KERN_WARNING "%s: Too large timeout requested!\n",
++		    mmc_hostname(host->mmc));
+ 		count = 0xE;
++	}
++
+ 	/* Set the max time-out value to level up the compatibility */
+ 	count = 0xE;
+ 
+@@ -483,7 +496,8 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 	}
+ 
+ 	if (host->flags & SDHCI_REQ_USE_DMA) {
+-		int count;
++		int i;
++		struct scatterlist *tsg;
+ 
+ 		DBG("Configure the sg DMA, %s, len is 0x%x\n",
+ 		    (data->flags & MMC_DATA_READ)
+@@ -493,8 +507,43 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 			       (data->
+ 				flags & MMC_DATA_READ) ? DMA_FROM_DEVICE :
+ 			       DMA_TO_DEVICE);
+-		BUG_ON(count != 1);
++		BUG_ON(count != data->sg_len);
++
++		/* Make sure the ADMA mode is selected. */
++		i = readl(host->ioaddr + SDHCI_HOST_CONTROL);
++		i |= SDHCI_CTRL_ADMA;
++		writel(i, host->ioaddr + SDHCI_HOST_CONTROL);
++
++		tsg = data->sg;
++		/* ADMA mode is used, create the descriptor table */
++		for (i = 0; i < count; i++) {
++			if (tsg->dma_address & 0xFFF) {
++				DBG(KERN_ERR "ADMA addr isn't 4K aligned.\n");
++				DBG(KERN_ERR "0x%x\n", tsg->dma_address);
++				DBG(KERN_ERR "Changed to Single DMA mode.\n");
++				goto Single_DMA;
++			}
++			adma_des_table[2 * i] = tsg->length << 12;
++			adma_des_table[2 * i] |= FSL_ADMA_DES_ATTR_SET;
++			adma_des_table[2 * i] |= FSL_ADMA_DES_ATTR_VALID;
++			adma_des_table[2 * i + 1] = tsg->dma_address;
++			adma_des_table[2 * i + 1] |= FSL_ADMA_DES_ATTR_TRAN;
++			adma_des_table[2 * i + 1] |= FSL_ADMA_DES_ATTR_VALID;
++			if (count == (i + 1))
++				adma_des_table[2 * i + 1] |=
++				    FSL_ADMA_DES_ATTR_END;
++			tsg++;
++		}
+ 
++		/* Write the physical address to ADMA address reg */
++		writel(virt_to_phys(adma_des_table),
++		       host->ioaddr + SDHCI_ADMA_ADDRESS);
++Single_DMA:
++		/* Rollback to the Single DMA mode */
++		i = readl(host->ioaddr + SDHCI_HOST_CONTROL);
++		i &= ~SDHCI_CTRL_ADMA;
++		writel(i, host->ioaddr + SDHCI_HOST_CONTROL);
++		/* Single DMA mode is used */
+ 		writel(sg_dma_address(data->sg),
+ 		       host->ioaddr + SDHCI_DMA_ADDRESS);
+ 	} else if ((host->flags & SDHCI_USE_EXTERNAL_DMA) &&
+@@ -549,8 +598,7 @@ static void sdhci_finish_data(struct sdhci_host *host)
+ 
+ 	if (host->flags & SDHCI_REQ_USE_DMA) {
+ 		dma_unmap_sg(&(host->chip->pdev)->dev, data->sg, data->sg_len,
+-			     (data->
+-			      flags & MMC_DATA_READ) ? DMA_FROM_DEVICE :
++			     (data->flags & MMC_DATA_READ) ? DMA_FROM_DEVICE :
+ 			     DMA_TO_DEVICE);
+ 	}
+ 	if ((host->flags & SDHCI_USE_EXTERNAL_DMA) &&
+@@ -571,8 +619,8 @@ static void sdhci_finish_data(struct sdhci_host *host)
+ 
+ 	if (!data->error && blocks) {
+ 		printk(KERN_ERR "%s: Controller signalled completion even "
+-		       "though there were 0x%x blocks left.\n",
+-		       mmc_hostname(host->mmc), blocks);
++		       "though there were blocks left.\n",
++		       mmc_hostname(host->mmc));
+ 		data->error = -EIO;
+ 	}
+ 
+@@ -820,7 +868,9 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ 
+ 	WARN_ON(host->mrq != NULL);
+ 
++#ifndef CONFIG_LEDS_CLASS
+ 	sdhci_activate_led(host);
++#endif
+ 
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ 	host->mrq = mrq;
+@@ -846,7 +896,7 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	host = mmc_priv(mmc);
+ 
+ 	/* Configure the External DMA mode */
+-	if (host->chip->quirks & SDHCI_QUIRK_EXTERNAL_DMA_MODE) {
++	if (host->flags & SDHCI_USE_EXTERNAL_DMA) {
+ 		host->dma_dir = DMA_NONE;
+ 		if (mmc->ios.bus_width != host->mode) {
+ 			mxc_dma_free(host->dma);
+@@ -903,13 +953,8 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	else
+ 		ctrl &= ~SDHCI_CTRL_4BITBUS;
+ 
+-	/* Only 4bit bus mode is enabled now :( */
+-#if 0
+-	if (ios->timing == MMC_TIMING_SD_HS)
+-		ctrl |= SDHCI_CTRL_HISPD;
+-	else
+-		ctrl &= ~SDHCI_CTRL_HISPD;
+-#endif
++	if (host->flags & SDHCI_USE_DMA)
++		ctrl |= SDHCI_CTRL_ADMA;
+ 
+ 	writel(ctrl, host->ioaddr + SDHCI_HOST_CONTROL);
+ 
+@@ -928,18 +973,13 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ static int sdhci_get_ro(struct mmc_host *mmc)
+ {
+ 	struct sdhci_host *host;
+-	unsigned long flags;
+-	int present;
+ 
+ 	host = mmc_priv(mmc);
+ 
+-	spin_lock_irqsave(&host->lock, flags);
+-
+-	present = readl(host->ioaddr + SDHCI_PRESENT_STATE);
+-
+-	spin_unlock_irqrestore(&host->lock, flags);
+-
+-	return !(present & SDHCI_WRITE_PROTECT);
++	if (host->plat_data->wp_status)
++		return host->plat_data->wp_status();
++	else
++		return 0;
+ }
+ 
+ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+@@ -974,9 +1014,9 @@ static const struct mmc_host_ops sdhci_ops = {
+ };
+ 
+ /*****************************************************************************\
+-*                                                                           *
+-* Tasklets                                                                  *
+-*                                                                           *
++ *                                                                           *
++ * Tasklets                                                                  *
++ *                                                                           *
+ \*****************************************************************************/
+ 
+ static void sdhci_tasklet_card(unsigned long param)
+@@ -999,11 +1039,9 @@ static void sdhci_tasklet_card(unsigned long param)
+ 
+ 	if (!(host->flags & SDHCI_CD_PRESENT)) {
+ 		if (host->mrq) {
+-			printk(KERN_ERR
+-			       "%s: Card removed during transfer!\n",
++			printk(KERN_ERR "%s: Card removed during transfer!\n",
+ 			       mmc_hostname(host->mmc));
+-			printk(KERN_ERR
+-			       "%s: Resetting controller.\n",
++			printk(KERN_ERR "%s: Resetting controller.\n",
+ 			       mmc_hostname(host->mmc));
+ 
+ 			sdhci_reset(host, SDHCI_RESET_CMD);
+@@ -1039,8 +1077,8 @@ static void sdhci_tasklet_finish(unsigned long param)
+ 	 */
+ 	if (mrq->cmd->error ||
+ 	    (mrq->data && (mrq->data->error ||
+-			   (mrq->data->stop && mrq->data->stop->error)))
+-	    || (host->chip->quirks & SDHCI_QUIRK_RESET_AFTER_REQUEST)) {
++			   (mrq->data->stop && mrq->data->stop->error))) ||
++	    (host->chip->quirks & SDHCI_QUIRK_RESET_AFTER_REQUEST)) {
+ 
+ 		/* Some controllers need this kick or reset won't work here */
+ 		if (host->chip->quirks & SDHCI_QUIRK_CLOCK_BEFORE_RESET) {
+@@ -1062,7 +1100,9 @@ static void sdhci_tasklet_finish(unsigned long param)
+ 	host->cmd = NULL;
+ 	host->data = NULL;
+ 
++#ifndef CONFIG_LEDS_CLASS
+ 	sdhci_deactivate_led(host);
++#endif
+ 
+ 	mmiowb();
+ 	spin_unlock_irqrestore(&host->lock, flags);
+@@ -1080,8 +1120,7 @@ static void sdhci_timeout_timer(unsigned long data)
+ 	spin_lock_irqsave(&host->lock, flags);
+ 
+ 	if (host->mrq) {
+-		printk(KERN_ERR
+-		       "%s: Timeout waiting for hardware "
++		printk(KERN_ERR "%s: Timeout waiting for hardware "
+ 		       "interrupt.\n", mmc_hostname(host->mmc));
+ 		sdhci_dumpregs(host);
+ 
+@@ -1103,9 +1142,9 @@ static void sdhci_timeout_timer(unsigned long data)
+ }
+ 
+ /*****************************************************************************\
+-*                                                                           *
+-* Interrupt handling                                                        *
+-*                                                                           *
++ *                                                                           *
++ * Interrupt handling                                                        *
++ *                                                                           *
+ \*****************************************************************************/
+ 
+ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
+@@ -1113,8 +1152,7 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask)
+ 	BUG_ON(intmask == 0);
+ 
+ 	if (!host->cmd) {
+-		printk(KERN_ERR
+-		       "%s: Got command interrupt 0x%08x even "
++		printk(KERN_ERR "%s: Got command interrupt 0x%08x even "
+ 		       "though no command operation was in progress.\n",
+ 		       mmc_hostname(host->mmc), (unsigned)intmask);
+ 		sdhci_dumpregs(host);
+@@ -1147,8 +1185,7 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
+ 		if (intmask & SDHCI_INT_DATA_END)
+ 			return;
+ 
+-		printk(KERN_ERR
+-		       "%s: Got data interrupt 0x%08x even "
++		printk(KERN_ERR "%s: Got data interrupt 0x%08x even "
+ 		       "though no data operation was in progress.\n",
+ 		       mmc_hostname(host->mmc), (unsigned)intmask);
+ 		sdhci_dumpregs(host);
+@@ -1192,13 +1229,9 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
+ 		 * we need to at least restart the transfer.
+ 		 */
+ 		if ((intmask & SDHCI_INT_DMA_END) &&
+-		    (!(intmask & SDHCI_INT_DATA_END))) {
+-			/*
+-			 * A scatterlist segment completed,
+-			 * prepare the next one.
+-			 */
+-			sdhci_prepare_dma(host, host->data);
+-		}
++		    (!(intmask & SDHCI_INT_DATA_END)))
++			writel(readl(host->ioaddr + SDHCI_DMA_ADDRESS),
++			       host->ioaddr + SDHCI_DMA_ADDRESS);
+ 
+ 		if (intmask & SDHCI_INT_DATA_END) {
+ 			if (host->cmd) {
+@@ -1342,12 +1375,11 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 		goto out;
+ 	}
+ 
+-	DBG("*** %s got interrupt: 0x%08x\n", host->slot_descr, intmask);
++	DBG("*** %s got interrupt: 0x%08x\n", mmc_hostname(host->mmc), intmask);
+ 
+ 	if (intmask & (SDHCI_INT_CARD_INSERT | SDHCI_INT_CARD_REMOVE)) {
+ 		writel(intmask &
+-		       (SDHCI_INT_CARD_INSERT |
+-			SDHCI_INT_CARD_REMOVE),
++		       (SDHCI_INT_CARD_INSERT | SDHCI_INT_CARD_REMOVE),
+ 		       host->ioaddr + SDHCI_INT_STATUS);
+ 		tasklet_schedule(&host->card_tasklet);
+ 	}
+@@ -1371,8 +1403,7 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 	intmask &= ~SDHCI_INT_ERROR;
+ 
+ 	if (intmask & SDHCI_INT_BUS_POWER) {
+-		printk(KERN_ERR
+-		       "%s: Card is consuming too much power!\n",
++		printk(KERN_ERR "%s: Card is consuming too much power!\n",
+ 		       mmc_hostname(host->mmc));
+ 		writel(SDHCI_INT_BUS_POWER, host->ioaddr + SDHCI_INT_STATUS);
+ 	}
+@@ -1385,8 +1416,7 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 	intmask &= ~SDHCI_INT_CARD_INT;
+ 
+ 	if (intmask) {
+-		printk(KERN_ERR
+-		       "%s: Unexpected interrupt 0x%08x.\n",
++		printk(KERN_ERR "%s: Unexpected interrupt 0x%08x.\n",
+ 		       mmc_hostname(host->mmc), intmask);
+ 		sdhci_dumpregs(host);
+ 
+@@ -1409,9 +1439,9 @@ out:
+ }
+ 
+ /*****************************************************************************\
+-*                                                                           *
+-* Suspend/resume                                                            *
+-*                                                                           *
++ *                                                                           *
++ * Suspend/resume                                                            *
++ *                                                                           *
+ \*****************************************************************************/
+ 
+ #ifdef CONFIG_PM
+@@ -1473,10 +1503,10 @@ static int sdhci_resume(struct platform_device *pdev)
+ 	for (i = 0; i < chip->num_slots; i++) {
+ 		if (!chip->hosts[i])
+ 			continue;
+-		ret =
+-		    request_irq(chip->hosts[i]->irq, sdhci_irq,
+-				IRQF_SHARED,
+-				chip->hosts[i]->slot_descr, chip->hosts[i]);
++		ret = request_irq(chip->hosts[i]->irq, sdhci_irq,
++				  IRQF_SHARED,
++				  mmc_hostname(chip->hosts[i]->mmc),
++				  chip->hosts[i]);
+ 		if (ret)
+ 			return ret;
+ 		sdhci_init(chip->hosts[i]);
+@@ -1497,9 +1527,9 @@ static int sdhci_resume(struct platform_device *pdev)
+ #endif				/* CONFIG_PM */
+ 
+ /*****************************************************************************\
+-*                                                                           *
+-* Device probing/removal                                                    *
+-*                                                                           *
++ *                                                                           *
++ * Device probing/removal                                                    *
++ *                                                                           *
+ \*****************************************************************************/
+ 
+ static int __devinit sdhci_probe_slot(struct platform_device
+@@ -1519,12 +1549,11 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	chip = dev_get_drvdata(&pdev->dev);
+ 	BUG_ON(!chip);
+ 
+-	mmc = mmc_alloc_host(sizeof(struct mmc_host), &pdev->dev);
++	mmc = mmc_alloc_host(sizeof(struct sdhci_host), &pdev->dev);
+ 	if (!mmc)
+ 		return -ENOMEM;
+ 
+ 	host = mmc_priv(mmc);
+-
+ 	host->mmc = mmc;
+ 	host->dma = -1;
+ 	host->plat_data = mmc_plat;
+@@ -1599,10 +1628,9 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	version = readl(host->ioaddr + SDHCI_HOST_VERSION);
+ 	version = (version & SDHCI_SPEC_VER_MASK) >> SDHCI_SPEC_VER_SHIFT;
+ 	if (version != 1) {
+-		printk(KERN_ERR
+-		       "%s: Unknown controller version (%d). "
+-		       "You may experience problems.\n",
+-		       host->slot_descr, version);
++		printk(KERN_ERR "%s: Unknown controller version (%d). "
++		       "You may experience problems.\n", mmc_hostname(mmc),
++		       version);
+ 	}
+ 
+ 	caps = readl(host->ioaddr + SDHCI_CAPABILITIES);
+@@ -1648,9 +1676,8 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 		mmc->ocr_avail |= MMC_VDD_165_195;
+ 
+ 	if (mmc->ocr_avail == 0) {
+-		printk(KERN_ERR
+-		       "%s: Hardware doesn't report any "
+-		       "support voltages.\n", host->slot_descr);
++		printk(KERN_ERR "%s: Hardware doesn't report any "
++		       "support voltages.\n", mmc_hostname(mmc));
+ 		ret = -ENODEV;
+ 		goto out3;
+ 	}
+@@ -1688,12 +1715,11 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	mmc->max_blk_size =
+ 	    (caps & SDHCI_MAX_BLOCK_MASK) >> SDHCI_MAX_BLOCK_SHIFT;
+ 	if (mmc->max_blk_size > 3) {
+-		printk(KERN_ERR
+-		       "%s: Invalid maximum block size.\n", host->slot_descr);
+-		ret = -ENODEV;
+-		goto out3;
+-	}
+-	mmc->max_blk_size = 512 << mmc->max_blk_size;
++		printk(KERN_WARNING "%s: Invalid maximum block size, "
++		       "assuming 512 bytes\n", mmc_hostname(mmc));
++		mmc->max_blk_size = 512;
++	} else
++		mmc->max_blk_size = 512 << mmc->max_blk_size;
+ 
+ 	/*
+ 	 * Maximum block count.
+@@ -1701,12 +1727,27 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	mmc->max_blk_count = 65535;
+ 
+ 	/*
++	 * Apply a continous physical memory used for storing the ADMA
++	 * descriptor table.
++	 */
++	if (host->flags & SDHCI_USE_DMA) {
++		adma_des_table = kcalloc((2 * (mmc->max_phys_segs) + 1),
++					 sizeof(unsigned int), GFP_DMA);
++		if (adma_des_table == NULL) {
++			printk(KERN_ERR "Cannot allocate ADMA memory\n");
++			ret = -ENOMEM;
++			goto out3;
++		}
++	}
++
++	/*
+ 	 * Init tasklets.
+ 	 */
+ 	tasklet_init(&host->card_tasklet,
+ 		     sdhci_tasklet_card, (unsigned long)host);
+ 	tasklet_init(&host->finish_tasklet,
+ 		     sdhci_tasklet_finish, (unsigned long)host);
++
+ 	/* initialize the work queue */
+ 	INIT_WORK(&host->cd_wq, esdhc_cd_callback);
+ 
+@@ -1735,11 +1776,21 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 		}
+ 		mxc_dma_callback_set(host->dma, sdhci_dma_irq, (void *)host);
+ 	}
+-
+ #ifdef CONFIG_MMC_DEBUG
+ 	sdhci_dumpregs(host);
+ #endif
+ 
++#ifdef CONFIG_LEDS_CLASS
++	host->led.name = mmc_hostname(mmc);
++	host->led.brightness = LED_OFF;
++	host->led.default_trigger = mmc_hostname(mmc);
++	host->led.brightness_set = sdhci_led_control;
++
++	ret = led_classdev_register(&pdev->dev, &host->led);
++	if (ret)
++		goto out6;
++#endif
++
+ 	mmiowb();
+ 
+ 	if (mmc_add_host(mmc) < 0)
+@@ -1765,6 +1816,8 @@ out4:
+ 	tasklet_kill(&host->card_tasklet);
+ 	tasklet_kill(&host->finish_tasklet);
+ out3:
++	if (host->flags & SDHCI_USE_DMA)
++		kfree(adma_des_table);
+ 	release_mem_region(host->res->start,
+ 			   host->res->end - host->res->start + 1);
+ out1:
+@@ -1790,6 +1843,10 @@ static void sdhci_remove_slot(struct platform_device *pdev, int slot)
+ 
+ 	mmc_remove_host(mmc);
+ 
++#ifdef CONFIG_LEDS_CLASS
++	led_classdev_unregister(&host->led);
++#endif
++
+ 	sdhci_reset(host, SDHCI_RESET_ALL);
+ 
+ 	if (host->detect_irq)
+@@ -1805,6 +1862,8 @@ static void sdhci_remove_slot(struct platform_device *pdev, int slot)
+ 	tasklet_kill(&host->card_tasklet);
+ 	tasklet_kill(&host->finish_tasklet);
+ 
++	if (host->flags & SDHCI_USE_DMA)
++		kfree(adma_des_table);
+ 	release_mem_region(host->res->start,
+ 			   host->res->end - host->res->start + 1);
+ 	clk_disable(host->clk);
+@@ -1893,9 +1952,9 @@ static struct platform_driver sdhci_driver = {
+ };
+ 
+ /*****************************************************************************\
+-*                                                                           *
+-* Driver init/exit                                                          *
+-*                                                                           *
++ *                                                                           *
++ * Driver init/exit                                                          *
++ *                                                                           *
+ \*****************************************************************************/
+ 
+ static int __init sdhci_drv_init(void)
+diff --git a/drivers/mmc/host/mx_sdhci.h b/drivers/mmc/host/mx_sdhci.h
+index 6d4077a..6f280fd 100644
+--- a/drivers/mmc/host/mx_sdhci.h
++++ b/drivers/mmc/host/mx_sdhci.h
+@@ -66,6 +66,11 @@
+ #define  SDHCI_CTRL_LED		0x00000001
+ #define  SDHCI_CTRL_4BITBUS	0x00000002
+ #define  SDHCI_CTRL_HISPD	0x00000004
++#define  SDHCI_CTRL_DMA_MASK	0x18
++#define   SDHCI_CTRL_SDMA	0x00
++#define   SDHCI_CTRL_ADMA1	0x08
++#define   SDHCI_CTRL_ADMA32	0x10
++#define   SDHCI_CTRL_ADMA64	0x18
+ #define  SDHCI_CTRL_D3CD 	0x00000008
+ #define  SDHCI_CTRL_ADMA 	0x00000100
+ /* wake up control */
+@@ -116,7 +121,7 @@
+ #define  SDHCI_INT_DATA_END_BIT	0x00400000
+ #define  SDHCI_INT_BUS_POWER	0x00800000
+ #define  SDHCI_INT_ACMD12ERR	0x01000000
+-#define  SDHCI_INT_DMAERR	0x10000000
++#define  SDHCI_INT_ADMA_ERROR	0x10000000
+ 
+ #define  SDHCI_INT_NORMAL_MASK	0x00007FFF
+ #define  SDHCI_INT_ERROR_MASK	0xFFFF8000
+@@ -126,7 +131,7 @@
+ #define  SDHCI_INT_DATA_MASK	(SDHCI_INT_DATA_END | SDHCI_INT_DMA_END | \
+ 		SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL | \
+ 		SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_DATA_CRC | \
+-		SDHCI_INT_DATA_END_BIT | SDHCI_INT_DMAERR)
++		SDHCI_INT_DATA_END_BIT | SDHCI_INT_ADMA_ERROR)
+ #define  SDHCI_INT_DATA_RE_MASK	(SDHCI_INT_DMA_END | \
+ 		SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL)
+ 
+@@ -142,11 +147,14 @@
+ #define  SDHCI_CLOCK_BASE_SHIFT	8
+ #define  SDHCI_MAX_BLOCK_MASK	0x00030000
+ #define  SDHCI_MAX_BLOCK_SHIFT  16
++#define  SDHCI_CAN_DO_ADMA2	0x00080000
++#define  SDHCI_CAN_DO_ADMA1	0x00100000
+ #define  SDHCI_CAN_DO_HISPD	0x00200000
+ #define  SDHCI_CAN_DO_DMA	0x00400000
+ #define  SDHCI_CAN_VDD_330	0x01000000
+ #define  SDHCI_CAN_VDD_300	0x02000000
+ #define  SDHCI_CAN_VDD_180	0x04000000
++#define  SDHCI_CAN_64BIT	0x10000000
+ 
+ /* 44-47 reserved for more caps */
+ #define SDHCI_WML 		0x44
+@@ -159,13 +167,34 @@
+ 
+ /* 4C-4F reserved for more max current */
+ 
+-/* 50-FB reserved */
++#define SDHCI_SET_ACMD12_ERROR	0x50
++#define SDHCI_SET_INT_ERROR	0x52
++
++#define SDHCI_ADMA_ERROR	0x54
++
++/* 55-57 reserved */
++
++#define SDHCI_ADMA_ADDRESS	0x58
++
++/* 60-FB reserved */
++
++/* ADMA Addr Descriptor Attribute Filed */
++enum {
++	FSL_ADMA_DES_ATTR_VALID = 0x01,
++	FSL_ADMA_DES_ATTR_END = 0x02,
++	FSL_ADMA_DES_ATTR_INT = 0x04,
++	FSL_ADMA_DES_ATTR_SET = 0x10,
++	FSL_ADMA_DES_ATTR_TRAN = 0x20,
++	FSL_ADMA_DES_ATTR_LINK = 0x30,
++};
+ 
+ #define SDHCI_HOST_VERSION	0xFC
+ #define  SDHCI_VENDOR_VER_MASK	0xFF00
+ #define  SDHCI_VENDOR_VER_SHIFT	8
+ #define  SDHCI_SPEC_VER_MASK	0x00FF
+ #define  SDHCI_SPEC_VER_SHIFT	0
++#define   SDHCI_SPEC_100	0
++#define   SDHCI_SPEC_200	1
+ 
+ struct sdhci_chip;
+ 
+@@ -173,6 +202,10 @@ struct sdhci_host {
+ 	struct sdhci_chip *chip;
+ 	struct mmc_host *mmc;	/* MMC structure */
+ 
++#ifdef CONFIG_LEDS_CLASS
++	struct led_classdev led;	/* LED control */
++#endif
++
+ 	spinlock_t lock;	/* Mutex */
+ 
+ 	int flags;		/* Host attributes */
+@@ -193,7 +226,7 @@ struct sdhci_host {
+ 	struct mmc_request *mrq;	/* Current request */
+ 	struct mmc_command *cmd;	/* Current command */
+ 	struct mmc_data *data;	/* Current data request */
+-	int data_early:1;	/* Data finished before cmd */
++	unsigned int data_early:1;	/* Data finished before cmd */
+ 
+ 	unsigned int id;	/* Id for SD/MMC block */
+ 	int mode;		/* SD/MMC mode */
+@@ -207,21 +240,21 @@ struct sdhci_host {
+ 	int offset;		/* Offset into current sg */
+ 	int remain;		/* Bytes left in current */
+ 
+-	char slot_descr[20];	/* Name for reservations */
+-	struct resource *res;	/* Base address for storing resources */
+-
++	struct resource *res;	/* IO map memory */
+ 	int irq;		/* Device IRQ */
+ 	int detect_irq;		/* Card Detect IRQ number. */
+-	struct clk *clk;	/* Clock id to hold ipg_perclk. */
++	struct clk *clk;	/* Clock id */
++	int bar;		/* PCI BAR index */
++	unsigned long addr;	/* Bus address */
+ 	void __iomem *ioaddr;	/* Mapped address */
+ 
+ 	struct tasklet_struct card_tasklet;	/* Tasklet structures */
+ 	struct tasklet_struct finish_tasklet;
+-	struct work_struct cd_wq;
+-
+-	struct timer_list timer;	/* Timer for timeouts */
++	struct work_struct cd_wq;	/* card detection work queue */
+ 	/* Platform specific data */
+ 	struct mxc_mmc_platform_data *plat_data;
++
++	struct timer_list timer;	/* Timer for timeouts */
+ };
+ 
+ struct sdhci_chip {
+-- 
+1.5.4.4
+

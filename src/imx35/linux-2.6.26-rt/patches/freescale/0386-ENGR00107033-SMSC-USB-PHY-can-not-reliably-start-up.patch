@@ -1,0 +1,56 @@
+From f1c2ef7af0b0b03f0826d267a2da1b430ed3605c Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 4 Feb 2009 18:10:20 +0800
+Subject: [PATCH] ENGR00107033 SMSC USB PHY can not reliably start up in the correct mode.
+
+i.MX31 3stack USB Host2 and i.MX51 3stack USB Host1 are using
+SMCS USB3317 and the current pad setting of CLKOUT is pull enable
+in Pull/Keeper control.
+From the SMSC USB3317C datasheet,we require that the DC value of
+CLKOUT not exceed 0.4*VDDIO or else the chip can fail to start up
+in the correct mode. In order to insure a highly reliable startup
+of our PHY, we need to turn the pullup OFF.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack_gpio.c   |    5 +++--
+ arch/arm/mach-mx51/mx51_3stack_gpio.c |    2 +-
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index 3c59054..2d1014e 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1029,7 +1029,8 @@ int gpio_usbh2_active(void)
+ 		return -EINVAL;
+ 	}
+ 	mxc_iomux_set_pad(MX31_PIN_USBH2_CLK,
+-			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
++			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST |
++			   PAD_CTL_PKE_NONE));
+ 	mxc_iomux_set_pad(MX31_PIN_USBH2_DIR,
+ 			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
+ 	mxc_iomux_set_pad(MX31_PIN_USBH2_NXT,
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index b5f2630..5be5e15 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -1280,7 +1280,7 @@ int gpio_usbh1_active(void)
+ 	mxc_request_iomux(MX51_PIN_USBH1_CLK, IOMUX_CONFIG_ALT0);
+ 	mxc_iomux_set_pad(MX51_PIN_USBH1_CLK, PAD_CTL_SRE_FAST |
+ 			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
+-			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_NONE |
+ 			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
+ 			  PAD_CTL_DRV_VOT_LOW);
+ 
+-- 
+1.5.4.4
+

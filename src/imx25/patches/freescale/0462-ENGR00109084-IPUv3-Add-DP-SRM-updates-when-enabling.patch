@@ -1,0 +1,39 @@
+From 9af8bdd02bbd95dca4becefc886c782dfd5ab432 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Fri, 6 Mar 2009 16:59:03 +0800
+Subject: [PATCH] ENGR00109084 IPUv3: Add DP SRM updates when enabling/disabling DP_FG
+
+Add DP SRM updates when enabling/disabling DP_FG to fix v4l2 dequeue
+buffer failure issue after playing a video of two frames.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_disp.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 7141850..5e9a92c 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -489,6 +489,8 @@ void _ipu_dp_dc_enable(ipu_channel_t channel)
+ 		reg = __raw_readl(DP_COM_CONF(DP_SYNC));
+ 		__raw_writel(reg | DP_COM_CONF_FG_EN, DP_COM_CONF(DP_SYNC));
+ 
++		reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
++		__raw_writel(reg, IPU_SRM_PRI2);
+ 		return;
+ 	}
+ 
+@@ -570,6 +572,9 @@ void _ipu_dp_dc_disable(ipu_channel_t channel)
+ 		reg &= ~DP_COM_CONF_FG_EN;
+ 		__raw_writel(reg, DP_COM_CONF(DP_SYNC));
+ 
++		reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
++		__raw_writel(reg, IPU_SRM_PRI2);
++
+ 		spin_unlock_irqrestore(&ipu_lock, lock_flags);
+ 
+ 		__raw_writel(IPUIRQ_2_MASK(IPU_IRQ_DP_SF_END),
+-- 
+1.5.4.4
+

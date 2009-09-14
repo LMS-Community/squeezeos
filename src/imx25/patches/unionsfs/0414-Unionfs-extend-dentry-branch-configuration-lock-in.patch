@@ -1,0 +1,75 @@
+From ed4f43e05de90cf0b5195612324c2d8f8a8bce3e Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 17:18:48 -0500
+Subject: [PATCH] Unionfs: extend dentry branch configuration lock in open
+
+Dentry branch configuration "info node" lock should extend to calls to
+copy_attr_times.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   14 ++++----------
+ 1 files changed, 4 insertions(+), 10 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index f37192f..96473c4 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -521,11 +521,12 @@ int unionfs_open(struct inode *inode, struct file *file)
+ {
+ 	int err = 0;
+ 	struct file *lower_file = NULL;
+-	struct dentry *dentry = NULL;
++	struct dentry *dentry = file->f_path.dentry;
+ 	int bindex = 0, bstart = 0, bend = 0;
+ 	int size;
+ 
+ 	unionfs_read_lock(inode->i_sb, UNIONFS_SMUTEX_PARENT);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	file->private_data =
+ 		kzalloc(sizeof(struct unionfs_file_info), GFP_KERNEL);
+@@ -551,9 +552,6 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 		goto out;
+ 	}
+ 
+-	dentry = file->f_path.dentry;
+-	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+-
+ 	bstart = fbstart(file) = dbstart(dentry);
+ 	bend = fbend(file) = dbend(dentry);
+ 
+@@ -573,15 +571,12 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 			if (!lower_file)
+ 				continue;
+ 
+-			branchput(file->f_path.dentry->d_sb, bindex);
++			branchput(dentry->d_sb, bindex);
+ 			/* fput calls dput for lower_dentry */
+ 			fput(lower_file);
+ 		}
+ 	}
+ 
+-	/* XXX: should this unlock be moved to the function bottom? */
+-	unionfs_unlock_dentry(dentry);
+-
+ out:
+ 	if (err) {
+ 		kfree(UNIONFS_F(file)->lower_files);
+@@ -590,12 +585,11 @@ out:
+ 	}
+ out_nofree:
+ 	if (!err) {
+-		dentry = file->f_path.dentry;
+-		unionfs_copy_attr_times(dentry->d_parent->d_inode);
+ 		unionfs_copy_attr_times(inode);
+ 		unionfs_check_file(file);
+ 		unionfs_check_inode(inode);
+ 	}
++	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(inode->i_sb);
+ 	return err;
+ }
+-- 
+1.5.4.3
+

@@ -1,0 +1,54 @@
+From 2353fd14767e28ee3bb65f6b0fe2cf57a8a0c366 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 4 Dec 2007 21:36:12 +0200
+Subject: [PATCH] UBI: bugfix: allocate mandatory EBs first
+
+First allocate the necessary eraseblocks, then the optional ones.
+Otherwise it allocates all PEBs for bad EB handling, and fails
+on then following EBA LEB allocation.
+
+Reported-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c |   18 +++++++++---------
+ 1 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 880fa36..85f50c8 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -1168,6 +1168,15 @@ int ubi_eba_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 		}
+ 	}
+ 
++	if (ubi->avail_pebs < EBA_RESERVED_PEBS) {
++		ubi_err("no enough physical eraseblocks (%d, need %d)",
++			ubi->avail_pebs, EBA_RESERVED_PEBS);
++		err = -ENOSPC;
++		goto out_free;
++	}
++	ubi->avail_pebs -= EBA_RESERVED_PEBS;
++	ubi->rsvd_pebs += EBA_RESERVED_PEBS;
++
+ 	if (ubi->bad_allowed) {
+ 		ubi_calculate_reserved(ubi);
+ 
+@@ -1184,15 +1193,6 @@ int ubi_eba_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 		ubi->rsvd_pebs  += ubi->beb_rsvd_pebs;
+ 	}
+ 
+-	if (ubi->avail_pebs < EBA_RESERVED_PEBS) {
+-		ubi_err("no enough physical eraseblocks (%d, need %d)",
+-			ubi->avail_pebs, EBA_RESERVED_PEBS);
+-		err = -ENOSPC;
+-		goto out_free;
+-	}
+-	ubi->avail_pebs -= EBA_RESERVED_PEBS;
+-	ubi->rsvd_pebs += EBA_RESERVED_PEBS;
+-
+ 	dbg_eba("EBA unit is initialized");
+ 	return 0;
+ 
+-- 
+1.5.6.3
+

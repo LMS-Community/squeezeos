@@ -1,0 +1,242 @@
+From c723d960a7b02c2efe21d3cb7f2cf839f0ca3b02 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Wed, 21 Jan 2009 09:28:56 +0800
+Subject: [PATCH] ENGR00105182-1 IPUv3: Support IPUv3EX function
+
+1) Add register mapping for IPUv3EX.
+2) Add a function to reset display panel via DI.
+3) Add the logic of clear idamc channel buffer ready bit,
+   when disabling channel.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c  |   28 +++++++++++++++-
+ drivers/mxc/ipu3/ipu_disp.c    |   17 +++++++++-
+ drivers/mxc/ipu3/ipu_prv.h     |    3 +-
+ drivers/mxc/ipu3/ipu_regs.h    |   72 ++++++++++++++++++++++++++++++----------
+ include/asm-arm/arch-mxc/ipu.h |    3 +-
+ 5 files changed, 101 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index ac550e1..072d624 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -129,6 +129,8 @@ static int ipu_probe(struct platform_device *pdev)
+ 
+ 	spin_lock_init(&ipu_lock);
+ 
++	g_ipu_hw_rev = plat_data->rev;
++
+ 	g_ipu_dev = &pdev->dev;
+ 
+ 	/* Register IPU interrupts */
+@@ -1380,6 +1382,30 @@ int32_t ipu_disable_channel(ipu_channel_t channel, bool wait_for_stop)
+ 		__raw_writel(idma_mask(out_dma), IPU_CHA_CUR_BUF(out_dma));
+ 	}
+ 
++	/* Set channel buffers NOT to be ready */
++	__raw_writel(0xF0000000, IPU_GPR); /* write one to clear */
++	if (idma_is_valid(in_dma)) {
++		if (idma_is_set(IPU_CHA_BUF0_RDY, in_dma)) {
++			__raw_writel(idma_mask(in_dma),
++				     IPU_CHA_BUF0_RDY(in_dma));
++		}
++		if (idma_is_set(IPU_CHA_BUF1_RDY, in_dma)) {
++			__raw_writel(idma_mask(in_dma),
++				     IPU_CHA_BUF1_RDY(in_dma));
++		}
++	}
++	if (idma_is_valid(out_dma)) {
++		if (idma_is_set(IPU_CHA_BUF0_RDY, out_dma)) {
++			__raw_writel(idma_mask(out_dma),
++				     IPU_CHA_BUF0_RDY(out_dma));
++		}
++		if (idma_is_set(IPU_CHA_BUF1_RDY, out_dma)) {
++			__raw_writel(idma_mask(out_dma),
++				     IPU_CHA_BUF1_RDY(out_dma));
++		}
++	}
++	__raw_writel(0x0, IPU_GPR); /* write one to set */
++
+ 	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+ 
+ 	return 0;
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 39a0f6b..61558a4 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1104,3 +1104,18 @@ void ipu_disp_direct_write(ipu_channel_t channel, u32 value, u32 offset)
+ 		__raw_writel(value, ipu_disp_base[1] + offset);
+ }
+ EXPORT_SYMBOL(ipu_disp_direct_write);
++
++void ipu_reset_disp_panel(void)
++{
++	uint32_t tmp;
++
++	tmp = __raw_readl(DI_GENERAL(1));
++	__raw_writel(tmp | 0x08, DI_GENERAL(1));
++	msleep(10); /* tRES >= 100us */
++	tmp = __raw_readl(DI_GENERAL(1));
++	__raw_writel(tmp & ~0x08, DI_GENERAL(1));
++	msleep(60);
++
++	return;
++}
++EXPORT_SYMBOL(ipu_reset_disp_panel);
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index 4ac3268..fe3e17f 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -27,6 +27,7 @@ extern struct clk *g_ipu_clk;
+ extern struct clk *g_di_clk[2];
+ extern struct clk *g_csi_clk[2];
+ extern unsigned char g_dc_di_assignment[];
++extern int g_ipu_hw_rev;
+ 
+ #define IDMA_CHAN_INVALID	0xFF
+ 
+diff --git a/drivers/mxc/ipu3/ipu_regs.h b/drivers/mxc/ipu3/ipu_regs.h
+index e3e4d5d..746b4c8 100644
+--- a/drivers/mxc/ipu3/ipu_regs.h
++++ b/drivers/mxc/ipu3/ipu_regs.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -79,23 +79,45 @@ extern u32 *ipu_disp_base[];
+ #define IPU_MEM_RST		(ipu_cm_reg + 0x00DC/4)
+ #define IPU_PM			(ipu_cm_reg + 0x00E0/4)
+ #define IPU_GPR			(ipu_cm_reg + 0x00E4/4)
+-#define IPU_CHA_CUR_BUF(ch)	(ipu_cm_reg + 0x0124/4 + (ch / 32))
+-#define IPU_ALT_CUR_BUF0	(ipu_cm_reg + 0x012C/4)
+-#define IPU_ALT_CUR_BUF1	(ipu_cm_reg + 0x0130/4)
+-#define IPU_SRM_STAT		(ipu_cm_reg + 0x0134/4)
+-#define IPU_PROC_TASK_STAT	(ipu_cm_reg + 0x0138/4)
+-#define IPU_DISP_TASK_STAT	(ipu_cm_reg + 0x013C/4)
+-#define IPU_CHA_BUF0_RDY(ch)	(ipu_cm_reg + 0x0140/4 + (ch / 32))
+-#define IPU_CHA_BUF1_RDY(ch)	(ipu_cm_reg + 0x0148/4 + (ch / 32))
+ #define IPU_CHA_DB_MODE_SEL(ch)	(ipu_cm_reg + 0x0150/4 + (ch / 32))
+-#define IPU_ALT_CHA_BUF0_RDY(ch) (ipu_cm_reg + 0x0158/4 + (ch / 32))
+-#define IPU_ALT_CHA_BUF1_RDY(ch) (ipu_cm_reg + 0x0160/4 + (ch / 32))
+ #define IPU_ALT_CHA_DB_MODE_SEL(ch) (ipu_cm_reg + 0x0168/4 + (ch / 32))
++#define IPU_CHA_CUR_BUF(ch)	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x023C/4 + (ch / 32)) : \
++				  (ipu_cm_reg + 0x0124/4 + (ch / 32)); })
++#define IPU_ALT_CUR_BUF0	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0244/4) : \
++				  (ipu_cm_reg + 0x012C/4); })
++#define IPU_ALT_CUR_BUF1	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0248/4) : \
++				  (ipu_cm_reg + 0x0130/4); })
++#define IPU_SRM_STAT		({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x024C/4) : \
++				  (ipu_cm_reg + 0x0134/4); })
++#define IPU_PROC_TASK_STAT	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0250/4) : \
++				  (ipu_cm_reg + 0x0138/4); })
++#define IPU_DISP_TASK_STAT	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0254/4) : \
++				  (ipu_cm_reg + 0x013C/4); })
++#define IPU_CHA_BUF0_RDY(ch)	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0268/4 + (ch / 32)) : \
++				  (ipu_cm_reg + 0x0140/4 + (ch / 32)); })
++#define IPU_CHA_BUF1_RDY(ch)	({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0270/4 + (ch / 32)) : \
++				  (ipu_cm_reg + 0x0148/4 + (ch / 32)); })
++#define IPU_ALT_CHA_BUF0_RDY(ch) ({g_ipu_hw_rev == 2 ? \
++				   (ipu_cm_reg + 0x0278/4 + (ch / 32)) : \
++				   (ipu_cm_reg + 0x0158/4 + (ch / 32)); })
++#define IPU_ALT_CHA_BUF1_RDY(ch) ({g_ipu_hw_rev == 2 ? \
++				   (ipu_cm_reg + 0x0280/4 + (ch / 32)) : \
++				   (ipu_cm_reg + 0x0160/4 + (ch / 32)); })
+ 
+ #define IPU_INT_CTRL(n)		(ipu_cm_reg + 0x003C/4 + ((n) - 1))
+ #define IPU_INT_CTRL_IRQ(irq)	IPU_INT_CTRL(((irq) / 32))
+-#define IPU_INT_STAT(n)		(ipu_cm_reg + 0x00E8/4 + ((n) - 1))
+ #define IPU_INT_STAT_IRQ(irq)	IPU_INT_STAT(((irq) / 32))
++#define IPU_INT_STAT(n)		({g_ipu_hw_rev == 2 ? \
++				  (ipu_cm_reg + 0x0200/4 + ((n) - 1)) : \
++				  (ipu_cm_reg + 0x00E8/4 + ((n) - 1)); })
+ 
+ #define IPUIRQ_2_STATREG(irq)	(IPU_INT_STAT(1) + ((irq) / 32))
+ #define IPUIRQ_2_CTRLREG(irq)	(IPU_INT_CTRL(1) + ((irq) / 32))
+@@ -147,12 +169,26 @@ extern u32 *ipu_disp_base[];
+ #define IDMAC_ALT_SEP_ALPHA	(ipu_idmac_reg + 0x0010/4)
+ #define IDMAC_CHA_PRI(ch)	(ipu_idmac_reg + 0x0014/4 + (ch/32))
+ #define IDMAC_WM_EN(ch)		(ipu_idmac_reg + 0x001C/4 + (ch/32))
+-#define IDMAC_CH_LOCK_EN_2	(ipu_idmac_reg + 0x0024/4)
+-#define IDMAC_SUB_ADDR_0	(ipu_idmac_reg + 0x0028/4)
+-#define IDMAC_SUB_ADDR_1	(ipu_idmac_reg + 0x002C/4)
+-#define IDMAC_SUB_ADDR_2	(ipu_idmac_reg + 0x0030/4)
+-#define IDMAC_BAND_EN(ch)	(ipu_idmac_reg + 0x0034/4 + (ch/32))
+-#define IDMAC_CHA_BUSY(ch)	(ipu_idmac_reg + 0x0040/4 + (ch/32))
++#define IDMAC_CH_LOCK_EN_1	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x0024/4) : 0; })
++#define IDMAC_CH_LOCK_EN_2	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x0028/4) : \
++				  (ipu_idmac_reg + 0x0024/4); })
++#define IDMAC_SUB_ADDR_0	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x002C/4) : \
++				  (ipu_idmac_reg + 0x0028/4); })
++#define IDMAC_SUB_ADDR_1	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x0030/4) : \
++				  (ipu_idmac_reg + 0x002C/4); })
++#define IDMAC_SUB_ADDR_2	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x0034/4) : \
++				  (ipu_idmac_reg + 0x0030/4); })
++#define IDMAC_BAND_EN(ch)	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x0040/4 + (ch/32)) : \
++				  (ipu_idmac_reg + 0x0034/4 + (ch/32)); })
++#define IDMAC_CHA_BUSY(ch)	({g_ipu_hw_rev == 2 ? \
++				  (ipu_idmac_reg + 0x0100/4 + (ch/32)) : \
++				  (ipu_idmac_reg + 0x0040/4 + (ch/32)); })
+ 
+ #define DI_GENERAL(di)		(ipu_di_reg[di])
+ #define DI_BS_CLKGEN0(di)	(ipu_di_reg[di] + 0x0004/4)
+diff --git a/include/asm-arm/arch-mxc/ipu.h b/include/asm-arm/arch-mxc/ipu.h
+index 996af86..09a4bfc 100644
+--- a/include/asm-arm/arch-mxc/ipu.h
++++ b/include/asm-arm/arch-mxc/ipu.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -898,6 +898,7 @@ int32_t ipu_disp_set_color_key(ipu_channel_t channel, bool enable,
+ int ipu_init_async_panel(int disp, int type, uint32_t cycle_time,
+ 			 uint32_t pixel_fmt, ipu_adc_sig_cfg_t sig);
+ void ipu_disp_direct_write(ipu_channel_t channel, u32 value, u32 offset);
++void ipu_reset_disp_panel(void);
+ 
+ /* ADC API */
+ int32_t ipu_adc_write_template(display_port_t disp, uint32_t * pCmd,
+-- 
+1.5.4.4
+

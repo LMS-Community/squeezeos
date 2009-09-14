@@ -1,0 +1,89 @@
+Add option to bypass printk buffer, and printk unbuffered
+
+This patch allows bypassing the printk buffer, and prints the printk()
+directly to the console via the low-level printch() function.
+It can also be used to print all the console output to the ICEDD.
+
+It is destined for debugging only when e.g. the kernel crashes before the printk
+buffer is initialised, or on preempt-RT when an RT-thread is consuming all
+CPU-time, and the printk logging cannot be printed anymore.
+
+Notice: logging is done unbuffered, thus intrusive!
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net> 
+---
+ arch/arm/Kconfig.debug     |   13 +++++++++++++
+ arch/arm/mach-mx35/clock.c |    4 +++-
+ kernel/printk.c            |    6 ++++++
+ 3 files changed, 22 insertions(+), 1 deletion(-)
+
+Index: linux-2.6.26/kernel/printk.c
+===================================================================
+--- linux-2.6.26.orig/kernel/printk.c	2009-03-16 21:34:35.000000000 +0100
++++ linux-2.6.26/kernel/printk.c	2009-03-16 21:44:07.000000000 +0100
+@@ -535,6 +535,11 @@ static void call_console_drivers(unsigne
+ 
+ static void emit_log_char(char c)
+ {
++#ifdef CONFIG_DEBUG_LL_PRINTK_BYPASS
++	extern void printch(char c);
++
++	printch(c);
++#else
+ 	LOG_BUF(log_end) = c;
+ 	log_end++;
+ 	if (log_end - log_start > log_buf_len)
+@@ -543,6 +548,7 @@ static void emit_log_char(char c)
+ 		con_start = log_end - log_buf_len;
+ 	if (logged_chars < log_buf_len)
+ 		logged_chars++;
++#endif
+ }
+ 
+ /*
+Index: linux-2.6.26/arch/arm/Kconfig.debug
+===================================================================
+--- linux-2.6.26.orig/arch/arm/Kconfig.debug	2009-03-16 21:34:35.000000000 +0100
++++ linux-2.6.26/arch/arm/Kconfig.debug	2009-03-16 21:44:07.000000000 +0100
+@@ -59,6 +59,19 @@ config DEBUG_LL
+ 	  in the kernel.  This is helpful if you are debugging code that
+ 	  executes before the console is initialized.
+ 
++config DEBUG_LL_PRINTK_BYPASS
++	bool "Use low-level debugging functions for printk"
++	depends on DEBUG_LL
++	default n
++	help
++	  Say Y here if you want all printk() logging to be redirected to
++	  the low-level debugging functions. This is useful for getting
++	  debug printks when the console is configured late and the kernel
++	  panics before that. It also makes the printk() logging unbuffered,
++	  which is useful for debugging RT-hangups.
++
++	  Should not be used in production code.
++
+ config DEBUG_ICEDCC
+ 	bool "Kernel low-level debugging via EmbeddedICE DCC channel"
+ 	depends on DEBUG_LL
+Index: linux-2.6.26/arch/arm/mach-mx35/clock.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/clock.c	2009-03-16 23:06:02.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx35/clock.c	2009-03-16 23:06:50.000000000 +0100
+@@ -1814,6 +1814,8 @@ int __init mxc_clocks_init(void)
+ 	/* Turn off all possible clocks */
+ 	__raw_writel(MXC_CCM_CGR0_ECT_MASK | MXC_CCM_CGR0_EMI_MASK,
+ 		     MXC_CCM_CGR0);
++
++#ifndef CONFIG_DEBUG_LL_PRINTK_BYPASS
+ 	__raw_writel(MXC_CCM_CGR1_GPIO1_MASK | MXC_CCM_CGR1_GPIO2_MASK |
+ 		     MXC_CCM_CGR1_GPIO3_MASK | MXC_CCM_CGR1_GPT_MASK |
+ 		     MXC_CCM_CGR1_IOMUXC_MASK, MXC_CCM_CGR1);
+@@ -1821,7 +1823,7 @@ int __init mxc_clocks_init(void)
+ 		     MXC_CCM_CGR2_AUDMUX_MASK | MXC_CCM_CGR2_MAX_ENABLE,
+ 		     MXC_CCM_CGR2);
+ 	__raw_writel(MXC_CCM_CGR3_IIM_MASK, MXC_CCM_CGR3);
+-
++#endif
+ 	mxc_update_clocks();
+ 	pr_info("Clock input source is %ld\n", ckih_clk.rate);
+ 

@@ -1,5 +1,7 @@
 DESCRIPTION = "SqueezeOS - base image with debugging"
 
-require squeezeos-image-boot.bb
+require squeezeos-image.bb
 
-IMAGE_INSTALL += "squeezeplay-dbg dropbear patch wireless-tools alsa-utils-aplay alsa-utils-amixer"
+IMAGE_INSTALL += "squeezeplay-dbg"
+IMAGE_INSTALL += "gdb gdbserver"
+IMAGE_INSTALL += "strace oprofile"

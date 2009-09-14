@@ -1,0 +1,308 @@
+From 5662eb54427e8c40c93ab1a3f4de506dc246597f Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 3 Dec 2008 14:40:09 +0200
+Subject: [PATCH] UBIFS: remove iget compat code
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/compat.c |  165 -----------------------------------------------------
+ fs/ubifs/compat.h |    6 --
+ fs/ubifs/super.c  |   48 +++++++--------
+ 3 files changed, 22 insertions(+), 197 deletions(-)
+
+diff --git a/fs/ubifs/compat.c b/fs/ubifs/compat.c
+index 4c32bdc..127361a 100644
+--- a/fs/ubifs/compat.c
++++ b/fs/ubifs/compat.c
+@@ -58,171 +58,6 @@ void ubifs_hexdump(const void *ptr, int size)
+ }
+ #endif /* LINUX_VERSION_CODE < 2.6.23 */
+ 
+-#ifdef UBIFS_COMPAT_USE_OLD_IGET
+-struct inode *ubifs_iget(struct super_block *sb, unsigned long inum)
+-{
+-	struct inode *inode;
+-
+-	inode = iget(sb, inum);
+-	if (!inode) {
+-		make_bad_inode(inode);
+-		return ERR_PTR(-EINVAL);
+-	}
+-
+-	return inode;
+-}
+-
+-int validate_inode(struct ubifs_info *c, const struct inode *inode);
+-
+-void ubifs_read_inode(struct inode *inode)
+-{
+-	int err;
+-	union ubifs_key key;
+-	struct ubifs_ino_node *ino;
+-	struct ubifs_info *c = inode->i_sb->s_fs_info;
+-	struct ubifs_inode *ui = ubifs_inode(inode);
+-
+-	dbg_gen("inode %lu", inode->i_ino);
+-	ubifs_assert(inode->i_state & I_LOCK);
+-
+-	ino = kmalloc(UBIFS_MAX_INO_NODE_SZ, GFP_NOFS);
+-	if (!ino) {
+-		err = -ENOMEM;
+-		goto out;
+-	}
+-
+-	ino_key_init(c, &key, inode->i_ino);
+-
+-	err = ubifs_tnc_lookup(c, &key, ino);
+-	if (err)
+-		goto out_ino;
+-
+-	inode->i_flags |= (S_NOCMTIME | S_NOATIME);
+-	inode->i_nlink = le32_to_cpu(ino->nlink);
+-	inode->i_uid   = le32_to_cpu(ino->uid);
+-	inode->i_gid   = le32_to_cpu(ino->gid);
+-	inode->i_atime.tv_sec  = (int64_t)le64_to_cpu(ino->atime_sec);
+-	inode->i_atime.tv_nsec = le32_to_cpu(ino->atime_nsec);
+-	inode->i_mtime.tv_sec  = (int64_t)le64_to_cpu(ino->mtime_sec);
+-	inode->i_mtime.tv_nsec = le32_to_cpu(ino->mtime_nsec);
+-	inode->i_ctime.tv_sec  = (int64_t)le64_to_cpu(ino->ctime_sec);
+-	inode->i_ctime.tv_nsec = le32_to_cpu(ino->ctime_nsec);
+-	inode->i_mode = le32_to_cpu(ino->mode);
+-	inode->i_size = le64_to_cpu(ino->size);
+-
+-	ui->data_len    = le32_to_cpu(ino->data_len);
+-	ui->flags       = le32_to_cpu(ino->flags);
+-	ui->compr_type  = le16_to_cpu(ino->compr_type);
+-	ui->creat_sqnum = le64_to_cpu(ino->creat_sqnum);
+-	ui->xattr_cnt   = le32_to_cpu(ino->xattr_cnt);
+-	ui->xattr_size  = le64_to_cpu(ino->xattr_size);
+-	ui->xattr_names = le32_to_cpu(ino->xattr_names);
+-	ui->synced_i_size = ui->ui_size = inode->i_size;
+-
+-	ui->xattr = (ui->flags & UBIFS_XATTR_FL) ? 1 : 0;
+-
+-	err = validate_inode(c, inode);
+-	if (err)
+-		goto out_invalid;
+-
+-	switch (inode->i_mode & S_IFMT) {
+-	case S_IFREG:
+-		inode->i_mapping->a_ops = &ubifs_file_address_operations;
+-		inode->i_op = &ubifs_file_inode_operations;
+-		inode->i_fop = &ubifs_file_operations;
+-		if (ui->xattr) {
+-			ui->data = kmalloc(ui->data_len + 1, GFP_NOFS);
+-			if (!ui->data) {
+-				err = -ENOMEM;
+-				goto out_ino;
+-			}
+-			memcpy(ui->data, ino->data, ui->data_len);
+-			((char *)ui->data)[ui->data_len] = '\0';
+-		} else if (ui->data_len != 0) {
+-			err = 10;
+-			goto out_invalid;
+-		}
+-		break;
+-	case S_IFDIR:
+-		inode->i_op  = &ubifs_dir_inode_operations;
+-		inode->i_fop = &ubifs_dir_operations;
+-		if (ui->data_len != 0) {
+-			err = 11;
+-			goto out_invalid;
+-		}
+-		break;
+-	case S_IFLNK:
+-		inode->i_op = &ubifs_symlink_inode_operations;
+-		if (ui->data_len <= 0 || ui->data_len > UBIFS_MAX_INO_DATA) {
+-			err = 12;
+-			goto out_invalid;
+-		}
+-		ui->data = kmalloc(ui->data_len + 1, GFP_NOFS);
+-		if (!ui->data) {
+-			err = -ENOMEM;
+-			goto out_ino;
+-		}
+-		memcpy(ui->data, ino->data, ui->data_len);
+-		((char *)ui->data)[ui->data_len] = '\0';
+-		break;
+-	case S_IFBLK:
+-	case S_IFCHR:
+-	{
+-		dev_t rdev;
+-		union ubifs_dev_desc *dev;
+-
+-		ui->data = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
+-		if (!ui->data) {
+-			err = -ENOMEM;
+-			goto out_ino;
+-		}
+-
+-		dev = (union ubifs_dev_desc *)ino->data;
+-		if (ui->data_len == sizeof(dev->new))
+-			rdev = new_decode_dev(le32_to_cpu(dev->new));
+-		else if (ui->data_len == sizeof(dev->huge))
+-			rdev = huge_decode_dev(le64_to_cpu(dev->huge));
+-		else {
+-			err = 13;
+-			goto out_invalid;
+-		}
+-		memcpy(ui->data, ino->data, ui->data_len);
+-		inode->i_op = &ubifs_file_inode_operations;
+-		init_special_inode(inode, inode->i_mode, rdev);
+-		break;
+-	}
+-	case S_IFSOCK:
+-	case S_IFIFO:
+-		inode->i_op = &ubifs_file_inode_operations;
+-		init_special_inode(inode, inode->i_mode, 0);
+-		if (ui->data_len != 0) {
+-			err = 14;
+-			goto out_invalid;
+-		}
+-		break;
+-	default:
+-		err = 15;
+-		goto out_invalid;
+-	}
+-
+-	ubifs_set_inode_flags(inode);
+-	kfree(ino);
+-	return;
+-
+-out_invalid:
+-	ubifs_err("inode %lu validation failed, error %d", inode->i_ino, err);
+-	dbg_dump_inode(c, inode);
+-	dbg_dump_node(c, ino);
+-	err = -EINVAL;
+-out_ino:
+-	kfree(ino);
+-out:
+-	ubifs_err("failed to read inode %lu, error %d", inode->i_ino, err);
+-	make_bad_inode(inode);
+-	return;
+-}
+-#endif /* UBIFS_COMPAT_USE_OLD_IGET */
+-
+ #ifdef UBIFS_COMPAT_USE_OLD_PREPARE_WRITE
+ int ubifs_prepare_write(struct file *file, struct page *page, unsigned from,
+ 			unsigned to)
+diff --git a/fs/ubifs/compat.h b/fs/ubifs/compat.h
+index 6c1a9c4..6b80375 100644
+--- a/fs/ubifs/compat.h
++++ b/fs/ubifs/compat.h
+@@ -31,12 +31,6 @@ struct page;
+ struct ubifs_info;
+ struct retries_info;
+ 
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25))
+-/* iget() does not exist since 2.6.25 */
+-#define UBIFS_COMPAT_USE_OLD_IGET
+-void ubifs_read_inode(struct inode *inode);
+-#endif
+-
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
+ /*
+  * We have write_begin() write_end() instead of prepare_write(), commit_write()
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 8b611f2..2c7a323 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -66,11 +66,7 @@ static struct shrinker ubifs_shrinker_info = {
+  * possible vulnerabilities. Returns zero if the inode is all right and
+  * a non-zero error code if not.
+  */
+-#ifndef UBIFS_COMPAT_USE_OLD_IGET
+ static int validate_inode(struct ubifs_info *c, const struct inode *inode)
+-#else
+-int validate_inode(struct ubifs_info *c, const struct inode *inode)
+-#endif
+ {
+ 	int err;
+ 	const struct ubifs_inode *ui = ubifs_inode(inode);
+@@ -105,24 +101,29 @@ int validate_inode(struct ubifs_info *c, const struct inode *inode)
+ 	return err;
+ }
+ 
+-#ifndef UBIFS_COMPAT_USE_OLD_IGET
+ struct inode *ubifs_iget(struct super_block *sb, unsigned long inum)
+ {
++	struct inode *inode;
++
++	inode = iget(sb, inum);
++	if (!inode) {
++		make_bad_inode(inode);
++		return ERR_PTR(-EINVAL);
++	}
++
++	return inode;
++}
++
++void ubifs_read_inode(struct inode *inode)
++{
+ 	int err;
+ 	union ubifs_key key;
+ 	struct ubifs_ino_node *ino;
+-	struct ubifs_info *c = sb->s_fs_info;
+-	struct inode *inode;
+-	struct ubifs_inode *ui;
+-
+-	dbg_gen("inode %lu", inum);
++	struct ubifs_info *c = inode->i_sb->s_fs_info;
++	struct ubifs_inode *ui = ubifs_inode(inode);
+ 
+-	inode = iget_locked(sb, inum);
+-	if (!inode)
+-		return ERR_PTR(-ENOMEM);
+-	if (!(inode->i_state & I_NEW))
+-		return inode;
+-	ui = ubifs_inode(inode);
++	dbg_gen("inode %lu", inode->i_ino);
++	ubifs_assert(inode->i_state & I_LOCK);
+ 
+ 	ino = kmalloc(UBIFS_MAX_INO_NODE_SZ, GFP_NOFS);
+ 	if (!ino) {
+@@ -247,26 +248,23 @@ struct inode *ubifs_iget(struct super_block *sb, unsigned long inum)
+ 		goto out_invalid;
+ 	}
+ 
+-	kfree(ino);
+ 	ubifs_set_inode_flags(inode);
+-	unlock_new_inode(inode);
+-	return inode;
++	kfree(ino);
++	return;
+ 
+ out_invalid:
+ 	ubifs_err("inode %lu validation failed, error %d", inode->i_ino, err);
+-	dbg_dump_node(c, ino);
+ 	dbg_dump_inode(c, inode);
++	dbg_dump_node(c, ino);
+ 	err = -EINVAL;
+ out_ino:
+ 	kfree(ino);
+ out:
+ 	ubifs_err("failed to read inode %lu, error %d", inode->i_ino, err);
+-	iget_failed(inode);
+-	return ERR_PTR(err);
++	make_bad_inode(inode);
++	return;
+ }
+ 
+-#endif /* UBIFS_COMPAT_USE_OLD_IGET */
+-
+ static struct inode *ubifs_alloc_inode(struct super_block *sb)
+ {
+ 	struct ubifs_inode *ui;
+@@ -1722,9 +1720,7 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
+ }
+ 
+ struct super_operations ubifs_super_operations = {
+-#ifdef UBIFS_COMPAT_USE_OLD_IGET
+ 	.read_inode    = ubifs_read_inode,
+-#endif
+ 	.alloc_inode   = ubifs_alloc_inode,
+ 	.destroy_inode = ubifs_destroy_inode,
+ 	.put_super     = ubifs_put_super,
+-- 
+1.5.6.3
+

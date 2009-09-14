@@ -1,0 +1,36 @@
+From 10f536ce29b1bd171846e5c0f5ebbf247390e78c Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Fri, 23 Feb 2007 01:04:09 -0500
+Subject: [PATCH] fs/unionfs/: Don't grab dentry private data mutex in unionfs_d_release
+
+Grabbing the UNIONFS_D(dentry)->lock is completely unnecessary and there are
+no other references; we are about to free the object anyway. Additionally,
+grabbing the mutex produces warning when the slab object is reused - as it
+was freed while there still was a reference to it.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    6 ------
+ 1 files changed, 0 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 3721409..ac4bf0e 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -190,12 +190,6 @@ static void unionfs_d_release(struct dentry *dentry)
+ {
+ 	int bindex, bstart, bend;
+ 
+-	/* There is no reason to lock the dentry, because we have the only
+-	 * reference, but the printing functions verify that we have a lock
+-	 * on the dentry before calling dbstart, etc.
+-	 */
+-	unionfs_lock_dentry(dentry);
+-
+ 	/* this could be a negative dentry, so check first */
+ 	if (!UNIONFS_D(dentry)) {
+ 		printk(KERN_DEBUG "dentry without private data: %.*s",
+-- 
+1.5.4.3
+

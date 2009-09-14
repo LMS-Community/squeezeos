@@ -1,0 +1,35 @@
+From 7cc55029789315cb98a0f66d5e7ddc1f7cdf07ef Mon Sep 17 00:00:00 2001
+From: JasonHua <Jason.Hua@freescale.com>
+Date: Fri, 16 Jan 2009 14:24:46 +0800
+Subject: [PATCH] ENGR00105253 Fix uart console suspend issue when use no_console_suspend command
+
+Console will suspend when use "no_console_suspend" command.
+The solution is uart suspend/resume will check the status of uart before
+enter suspend or resume.
+
+Signed-off-by: Jason Hua <Jason.Hua@freescale.com>
+---
+ drivers/serial/mxc_uart.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/serial/mxc_uart.c b/drivers/serial/mxc_uart.c
+index 69d657c..8e9de98 100644
+--- a/drivers/serial/mxc_uart.c
++++ b/drivers/serial/mxc_uart.c
+@@ -1804,10 +1804,11 @@ static int mxcuart_suspend(struct platform_device *pdev, pm_message_t state)
+ 	if (umxc == NULL)
+ 		return 0;	/* skip disabled ports */
+ 
+-	if (umxc->port.info && umxc->port.info->flags & UIF_INITIALIZED) {
++	if (umxc->port.info && umxc->port.info->flags & UIF_INITIALIZED)
+ 		uart_suspend_port(&mxc_reg, &umxc->port);
++
++	if (umxc->port.info && umxc->port.info->flags & UIF_SUSPENDED)
+ 		umxc->port.info->tty->hw_stopped = 1;
+-	}
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

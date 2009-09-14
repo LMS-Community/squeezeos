@@ -1,0 +1,31 @@
+From c880a0f3ed4e6930ef674fad0d6f4b357672b56b Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 8 Jun 2009 19:28:18 +0300
+Subject: [PATCH] UBI: fix kmem_cache_free on error patch
+
+'kmem_cache_free()' oopeses if NULL is passed, and there is
+one error-path place where UBI may call it with NULL object.
+This problem was pointed to by Adrian Hunter.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/wl.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 51182b0..1c65f73 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -826,7 +826,8 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 	err = schedule_erase(ubi, e1, 0);
+ 	if (err) {
+ 		kmem_cache_free(ubi_wl_entry_slab, e1);
+-		kmem_cache_free(ubi_wl_entry_slab, e2);
++		if (e2)
++			kmem_cache_free(ubi_wl_entry_slab, e2);
+ 		goto out_ro;
+ 	}
+ 
+-- 
+1.5.4.3
+

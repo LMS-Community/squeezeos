@@ -76,6 +76,7 @@ EXTRA_OECONF += "${MUTEX}"
 CONFIG_SITE = ""
 do_configure() {
 	oe_runconf
+	sed -i -e 's/^LIBSO_LIBS=.*/LIBSO_LIBS=	-lpthread/' ../build_unix/Makefile
 }
 
 do_stage() {

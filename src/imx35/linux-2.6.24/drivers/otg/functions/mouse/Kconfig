@@ -1,0 +1,141 @@
+# @(#) sp@belcarra.com|otg/functions/mouse/Kconfig|20070417200305|04741
+# Copyright (c) 2005-2006 Belcarra Technologies 2005 Corp
+
+menu "OTG Random Mouse function"
+	depends on OTG
+
+config OTG_MOUSE
+        tristate "Random Mouse Function"
+        depends on OTG
+	---help---
+        This implements a simple Mouse driver that sends HID packets with
+        small random movements. This is a good function for initial testing
+        of Peripheral Controller Drivers as it provides for a complicated
+        enumeration but a simple uni-directional (send Interrupt only) data
+        transport.
+
+menu "Mouse support modules:"
+	depends on OTG_MOUSE && OTG
+
+
+config OTG_MOUSE_INTERFACE
+	bool "Build an interface module"
+	depends on OTG && OTG_MOUSE
+	default "y"
+	---help---
+	This module needs a composite function module, such as
+	mouse_cf or generic_cf to be activated
+
+config OTG_MOUSE_COMPOSITE
+	bool "Build a simple OTG 2.x style composite function with mouse"
+	depends on  OTG && OTG_MOUSE && OTG_MOUSE_INTERFACE
+	default "n"
+	---help---
+	This module provides a very simple composite function to drive
+	the mouse_if module (see above).  The generic_cf module provides
+	a much richer composite function supporting multiple functions.
+
+config OTG_MOUSE_TRADITIONAL
+	bool "Build an OTG 1.x style function module/driver"
+	depends on OTG && OTG_MOUSE
+	default "n"
+	---help---
+	This is the mouse function driver from previous releases. It
+	does not use the composite/interface mechanism. If this module
+	is used, neither of the other two mouse modules is required.
+
+endmenu
+
+
+menu "OTG Random Mouse function options"
+	depends on OTG && OTG_MOUSE
+
+config OTG_MOUSE_VENDORID
+        hex "VendorID (hex value)"
+        depends on OTG && OTG_MOUSE
+        default "0x15ec"
+	---help---
+	This parameter is not used by the mouse_if module because the
+	composite layer is responsible for setting this parameter
+
+config OTG_MOUSE_PRODUCTID
+        hex "ProductID (hex value)"
+        depends on OTG && OTG_MOUSE
+        default "0xf003"
+	---help---
+	Parameters such as PRODUCTID, VENDORID are now the responsibility
+	of the composite driver rather than the interface driver. For this
+	reason, the module parameters vendor_id, etc are not available in
+	the interface versions. Therefore, appropriate values should be set
+	in the kernel configuration. These configuration parameters
+	are referenced in both mouse_cf and generic_cf.
+
+config OTG_MOUSE_BCDDEVICE
+        hex "bcdDevice (binary-coded decimal)"
+        depends on OTG && OTG_MOUSE
+        default "0x0100"
+
+config OTG_MOUSE_MANUFACTURER
+        string "iManufacturer (string)"
+        depends on OTG && OTG_MOUSE
+        default "Belcarra"
+
+config OTG_MOUSE_PRODUCT_NAME
+        string "iProduct (string)"
+        depends on OTG && OTG_MOUSE
+        default "Random Mouse Device"
+
+config OTG_MOUSE_COMM_INTF
+        string "MOUSE Bulk Only iInterface (string)"
+        depends on OTG && OTG_MOUSE
+        default "MOUSE Data Intf"
+
+config OTG_MOUSE_DESC
+        string "Data Interface iConfiguration (string)"
+        depends on OTG && OTG_MOUSE
+        default "MOUSE Configuration"
+
+config OTG_MOUSE_BH
+        bool "MOUSE BH Test"
+        depends on OTG && OTG_MOUSE
+        default n
+	---help---
+        Implement the Mouse send packet in a bottom half handler,
+        this will delay responses to test the PCD works correctly
+        when the host polls before a send data urb is queued.
+
+config OTG_MOUSE_PACKETS
+        int "Number of packets (zero is continous)"
+        depends on OTG && OTG_MOUSE
+        default 10
+	---help---
+        Number of Mouse packets to send, will run
+        forever if set to zero.
+
+config OTG_MOUSE_STALL
+        bool "MOUSE Stall Test"
+        depends on OTG && OTG_MOUSE
+        default n
+	---help---
+        Periodically stall the INTERRUPT endpoint.
+        Used for testing.
+
+config OTG_MOUSE_STALL_COUNT
+        int "Number of Stalls"
+        depends on OTG && OTG_MOUSE_STALL
+        default 1
+	---help---
+        Number of Stall tests to perform.
+
+config OTG_MOUSE_INTERVAL
+        int 'Polling Interval '
+        depends on OTG && OTG_MOUSE
+        default 1
+        ---help---
+        Sets interrupt endpoint interval.
+
+
+endmenu
+
+
+endmenu

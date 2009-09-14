@@ -1,0 +1,47 @@
+From 90c954643882f835a7ec2b2006b215f002abcd2a Mon Sep 17 00:00:00 2001
+From: Alexander Beregalov <a.beregalov@gmail.com>
+Date: Wed, 17 Sep 2008 22:09:41 +0400
+Subject: [PATCH] UBIFS: fix printk format warnings
+
+fs/ubifs/dir.c:428: warning: format '%llu' expects type 'long long
+unsigned int', but argument 5 has type 'long unsigned int'
+
+fs/ubifs/debug.c:541: warning: format '%llu' expects type 'long long
+unsigned int', but argument 2 has type 'long unsigned int'
+
+Signed-off-by: Alexander Beregalov <a.beregalov@gmail.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/debug.c |    2 +-
+ fs/ubifs/dir.c   |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ubifs/debug.c b/fs/ubifs/debug.c
+index 5e94a3e..5f3efe9 100644
+--- a/fs/ubifs/debug.c
++++ b/fs/ubifs/debug.c
+@@ -538,7 +538,7 @@ void dbg_dump_node(const struct ubifs_info *c, const void *node)
+ 		printk(KERN_DEBUG "\t%d orphan inode numbers:\n", n);
+ 		for (i = 0; i < n; i++)
+ 			printk(KERN_DEBUG "\t  ino %llu\n",
+-			       le64_to_cpu(orph->inos[i]));
++			       (unsigned long long)le64_to_cpu(orph->inos[i]));
+ 		break;
+ 	}
+ 	default:
+diff --git a/fs/ubifs/dir.c b/fs/ubifs/dir.c
+index 33e4a2f..459cd1f 100644
+--- a/fs/ubifs/dir.c
++++ b/fs/ubifs/dir.c
+@@ -429,7 +429,7 @@ static int ubifs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 
+ 	while (1) {
+ 		dbg_gen("feed '%s', ino %llu, new f_pos %#x",
+-			dent->name, le64_to_cpu(dent->inum),
++			dent->name, (unsigned long long)le64_to_cpu(dent->inum),
+ 			key_hash_flash(c, &dent->key));
+ 		ubifs_assert(dent->ch.sqnum > ubifs_inode(dir)->creat_sqnum);
+ 
+-- 
+1.5.6.3
+

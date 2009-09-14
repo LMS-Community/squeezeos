@@ -1,0 +1,246 @@
+From 9080b930aab096f5f0331adac993f922c945bd34 Mon Sep 17 00:00:00 2001
+From: Catalin Marinas <catalin.marinas@arm.com>
+Date: Tue, 25 Sep 2007 15:22:24 +0100
+Subject: [PATCH] [ARM] 4583/1: ARMv7: Add VFPv3 support
+
+This patch adds the support for VFPv3 (the kernel currently supports
+VFPv2). The main difference is 32 double registers (compared to 16).
+
+Signed-off-by: Catalin Marinas <catalin.marinas@arm.com>
+Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+---
+ arch/arm/Kconfig            |    7 ++++++-
+ arch/arm/vfp/vfp.h          |    4 ++++
+ arch/arm/vfp/vfphw.S        |   22 ++++++++++++++++++----
+ arch/arm/vfp/vfpinstr.h     |    6 +++---
+ include/asm-arm/fpstate.h   |    9 +++++++--
+ include/asm-arm/vfp.h       |    6 ++++++
+ include/asm-arm/vfpmacros.h |   18 ++++++++++++++++--
+ 7 files changed, 60 insertions(+), 12 deletions(-)
+
+Index: linux-2.6.24/arch/arm/Kconfig
+===================================================================
+--- linux-2.6.24.orig/arch/arm/Kconfig	2009-01-24 22:02:41.000000000 +0100
++++ linux-2.6.24/arch/arm/Kconfig	2009-01-24 22:03:41.000000000 +0100
+@@ -947,7 +947,7 @@
+ 
+ config VFP
+ 	bool "VFP-format floating point maths"
+-	depends on CPU_V6 || CPU_ARM926T
++	depends on CPU_V6 || CPU_ARM926T || CPU_V7
+ 	help
+ 	  Say Y to include VFP support code in the kernel. This is needed
+ 	  if your hardware includes a VFP unit.
+@@ -957,6 +957,11 @@
+ 
+ 	  Say N if your target does not have VFP hardware.
+ 
++config VFPv3
++	bool
++	depends on VFP
++	default y if CPU_V7
++
+ endmenu
+ 
+ menu "Userspace binary formats"
+Index: linux-2.6.24/arch/arm/vfp/vfp.h
+===================================================================
+--- linux-2.6.24.orig/arch/arm/vfp/vfp.h	2009-01-24 21:59:07.000000000 +0100
++++ linux-2.6.24/arch/arm/vfp/vfp.h	2009-01-24 22:03:41.000000000 +0100
+@@ -265,7 +265,11 @@
+  * which returns (double)0.0.  This is useful for the compare with
+  * zero instructions.
+  */
++#ifdef CONFIG_VFPv3
++#define VFP_REG_ZERO	32
++#else
+ #define VFP_REG_ZERO	16
++#endif
+ extern u64 vfp_get_double(unsigned int reg);
+ extern void vfp_put_double(u64 val, unsigned int reg);
+ 
+Index: linux-2.6.24/arch/arm/vfp/vfphw.S
+===================================================================
+--- linux-2.6.24.orig/arch/arm/vfp/vfphw.S	2009-01-24 22:03:40.000000000 +0100
++++ linux-2.6.24/arch/arm/vfp/vfphw.S	2009-01-24 22:03:41.000000000 +0100
+@@ -99,12 +99,12 @@
+ 	DBGSTR1	"save old state %p", r4
+ 	cmp	r4, #0
+ 	beq	no_old_VFP_process
++	VFPFSTMIA r4, r5		@ save the working registers
+ 	VFPFMRX	r5, FPSCR		@ current status
+ 	tst	r1, #FPEXC_EX		@ is there additional state to save?
+ 	VFPFMRX	r6, FPINST, NE		@ FPINST (only if FPEXC.EX is set)
+ 	tstne	r1, #FPEXC_FP2V		@ is there an FPINST2 to read?
+ 	VFPFMRX	r8, FPINST2, NE		@ FPINST2 if needed (and present)
+-	VFPFSTMIA r4 			@ save the working registers
+ 	stmia	r4, {r1, r5, r6, r8}	@ save FPEXC, FPSCR, FPINST, FPINST2
+ 					@ and point r4 at the word at the
+ 					@ start of the register dump
+@@ -114,7 +114,7 @@
+ 	DBGSTR1	"load state %p", r10
+ 	str	r10, [r3, r11, lsl #2]	@ update the last_VFP_context pointer
+ 					@ Load the saved state back into the VFP
+-	VFPFLDMIA r10	 		@ reload the working registers while
++	VFPFLDMIA r10, r5		@ reload the working registers while
+ 					@ FPEXC is in a safe state
+ 	ldmia	r10, {r1, r5, r6, r8}	@ load FPEXC, FPSCR, FPINST, FPINST2
+ 	tst	r1, #FPEXC_EX		@ is there additional state to restore?
+@@ -174,12 +174,12 @@
+ 	@ r0 - save location
+ 	@ r1 - FPEXC
+ 	DBGSTR1	"save VFP state %p", r0
++	VFPFSTMIA r0, r2		@ save the working registers
+ 	VFPFMRX	r2, FPSCR		@ current status
+ 	tst	r1, #FPEXC_EX		@ is there additional state to save?
+ 	VFPFMRX	r3, FPINST, NE		@ FPINST (only if FPEXC.EX is set)
+ 	tstne	r1, #FPEXC_FP2V		@ is there an FPINST2 to read?
+ 	VFPFMRX	r12, FPINST2, NE	@ FPINST2 if needed (and present)
+-	VFPFSTMIA r0 			@ save the working registers
+ 	stmia	r0, {r1, r2, r3, r12}	@ save FPEXC, FPSCR, FPINST, FPINST2
+ 	mov	pc, lr
+ #endif
+@@ -217,8 +217,15 @@
+ 	fmrrd	r0, r1, d\dr
+ 	mov	pc, lr
+ 	.endr
++#ifdef CONFIG_VFPv3
++	@ d16 - d31 registers
++	.irp	dr,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
++	mrrc	p11, 3, r0, r1, c\dr	@ fmrrd	r0, r1, d\dr
++	mov	pc, lr
++	.endr
++#endif
+ 
+-	@ virtual register 16 for compare with zero
++	@ virtual register 16 (or 32 if VFPv3) for compare with zero
+ 	mov	r0, #0
+ 	mov	r1, #0
+ 	mov	pc, lr
+@@ -231,3 +238,10 @@
+ 	fmdrr	d\dr, r0, r1
+ 	mov	pc, lr
+ 	.endr
++#ifdef CONFIG_VFPv3
++	@ d16 - d31 registers
++	.irp	dr,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
++	mcrr	p11, 3, r1, r2, c\dr	@ fmdrr	r1, r2, d\dr
++	mov	pc, lr
++	.endr
++#endif
+Index: linux-2.6.24/arch/arm/vfp/vfpinstr.h
+===================================================================
+--- linux-2.6.24.orig/arch/arm/vfp/vfpinstr.h	2009-01-24 21:59:07.000000000 +0100
++++ linux-2.6.24/arch/arm/vfp/vfpinstr.h	2009-01-24 22:03:41.000000000 +0100
+@@ -52,11 +52,11 @@
+ #define FEXT_TO_IDX(inst)	((inst & 0x000f0000) >> 15 | (inst & (1 << 7)) >> 7)
+ 
+ #define vfp_get_sd(inst)	((inst & 0x0000f000) >> 11 | (inst & (1 << 22)) >> 22)
+-#define vfp_get_dd(inst)	((inst & 0x0000f000) >> 12)
++#define vfp_get_dd(inst)	((inst & 0x0000f000) >> 12 | (inst & (1 << 22)) >> 18)
+ #define vfp_get_sm(inst)	((inst & 0x0000000f) << 1 | (inst & (1 << 5)) >> 5)
+-#define vfp_get_dm(inst)	((inst & 0x0000000f))
++#define vfp_get_dm(inst)	((inst & 0x0000000f) | (inst & (1 << 5)) >> 1)
+ #define vfp_get_sn(inst)	((inst & 0x000f0000) >> 15 | (inst & (1 << 7)) >> 7)
+-#define vfp_get_dn(inst)	((inst & 0x000f0000) >> 16)
++#define vfp_get_dn(inst)	((inst & 0x000f0000) >> 16 | (inst & (1 << 7)) >> 3)
+ 
+ #define vfp_single(inst)	(((inst) & 0x0000f00) == 0xa00)
+ 
+Index: linux-2.6.24/include/asm-arm/fpstate.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/fpstate.h	2009-01-24 21:59:07.000000000 +0100
++++ linux-2.6.24/include/asm-arm/fpstate.h	2009-01-24 22:03:41.000000000 +0100
+@@ -17,14 +17,18 @@
+ /*
+  * VFP storage area has:
+  *  - FPEXC, FPSCR, FPINST and FPINST2.
+- *  - 16 double precision data registers
+- *  - an implementation-dependant word of state for FLDMX/FSTMX
++ *  - 16 or 32 double precision data registers
++ *  - an implementation-dependant word of state for FLDMX/FSTMX (pre-ARMv6)
+  * 
+  *  FPEXC will always be non-zero once the VFP has been used in this process.
+  */
+ 
+ struct vfp_hard_struct {
++#ifdef CONFIG_VFPv3
++	__u64 fpregs[32];
++#else
+ 	__u64 fpregs[16];
++#endif
+ #if __LINUX_ARM_ARCH__ < 6
+ 	__u32 fpmx_state;
+ #endif
+@@ -35,6 +39,7 @@
+ 	 */
+ 	__u32 fpinst;
+ 	__u32 fpinst2;
++
+ #ifdef CONFIG_SMP
+ 	__u32 cpu;
+ #endif
+Index: linux-2.6.24/include/asm-arm/vfp.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/vfp.h	2009-01-24 22:03:40.000000000 +0100
++++ linux-2.6.24/include/asm-arm/vfp.h	2009-01-24 22:03:41.000000000 +0100
+@@ -7,6 +7,8 @@
+ 
+ #define FPSID			cr0
+ #define FPSCR			cr1
++#define MVFR1			cr6
++#define MVFR0			cr7
+ #define FPEXC			cr8
+ #define FPINST			cr9
+ #define FPINST2			cr10
+@@ -70,6 +72,10 @@
+ #define FPSCR_IXC		(1<<4)
+ #define FPSCR_IDC		(1<<7)
+ 
++/* MVFR0 bits */
++#define MVFR0_A_SIMD_BIT	(0)
++#define MVFR0_A_SIMD_MASK	(0xf << MVFR0_A_SIMD_BIT)
++
+ /* Bit patterns for decoding the packaged operation descriptors */
+ #define VFPOPDESC_LENGTH_BIT	(9)
+ #define VFPOPDESC_LENGTH_MASK	(0x07 << VFPOPDESC_LENGTH_BIT)
+Index: linux-2.6.24/include/asm-arm/vfpmacros.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/vfpmacros.h	2009-01-24 21:59:07.000000000 +0100
++++ linux-2.6.24/include/asm-arm/vfpmacros.h	2009-01-24 22:03:41.000000000 +0100
+@@ -15,19 +15,33 @@
+ 	.endm
+ 
+ 	@ read all the working registers back into the VFP
+-	.macro	VFPFLDMIA, base
++	.macro	VFPFLDMIA, base, tmp
+ #if __LINUX_ARM_ARCH__ < 6
+ 	LDC	p11, cr0, [\base],#33*4		    @ FLDMIAX \base!, {d0-d15}
+ #else
+ 	LDC	p11, cr0, [\base],#32*4		    @ FLDMIAD \base!, {d0-d15}
+ #endif
++#ifdef CONFIG_VFPv3
++	VFPFMRX	\tmp, MVFR0			    @ Media and VFP Feature Register 0
++	and	\tmp, \tmp, #MVFR0_A_SIMD_MASK	    @ A_SIMD field
++	cmp	\tmp, #2			    @ 32 x 64bit registers?
++	ldceql	p11, cr0, [\base],#32*4		    @ FLDMIAD \base!, {d16-d31}
++	addne	\base, \base, #32*4		    @ step over unused register space
++#endif
+ 	.endm
+ 
+ 	@ write all the working registers out of the VFP
+-	.macro	VFPFSTMIA, base
++	.macro	VFPFSTMIA, base, tmp
+ #if __LINUX_ARM_ARCH__ < 6
+ 	STC	p11, cr0, [\base],#33*4		    @ FSTMIAX \base!, {d0-d15}
+ #else
+ 	STC	p11, cr0, [\base],#32*4		    @ FSTMIAD \base!, {d0-d15}
+ #endif
++#ifdef CONFIG_VFPv3
++	VFPFMRX	\tmp, MVFR0			    @ Media and VFP Feature Register 0
++	and	\tmp, \tmp, #MVFR0_A_SIMD_MASK	    @ A_SIMD field
++	cmp	\tmp, #2			    @ 32 x 64bit registers?
++	stceql	p11, cr0, [\base],#32*4		    @ FSTMIAD \base!, {d16-d31}
++	addne	\base, \base, #32*4		    @ step over unused register space
++#endif
+ 	.endm

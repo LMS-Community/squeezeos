@@ -1,0 +1,112 @@
+From e0d59281d5a5b0b203457d652015099c303da438 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Mon, 6 Oct 2008 23:37:18 +0800
+Subject: [PATCH] ENGR00091651 fix pmic i2c read error
+
+fix the potential logic error while using signed/unsigned value
+
+Signed-off-by: Zhou Jingyu <b02241@freescale.com>
+---
+ drivers/mxc/pmic/core/mc13892.c          |   13 +++++--------
+ drivers/mxc/pmic/core/pmic_core_i2c.c    |   14 +++++++-------
+ include/asm-arm/arch-mxc/pmic_external.h |    3 ++-
+ 3 files changed, 14 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/mxc/pmic/core/mc13892.c b/drivers/mxc/pmic/core/mc13892.c
+index 195b961..5be480d 100644
+--- a/drivers/mxc/pmic/core/mc13892.c
++++ b/drivers/mxc/pmic/core/mc13892.c
+@@ -41,18 +41,17 @@
+  * Defines
+  */
+ 
+-int pmic_i2c_24bit_read(struct i2c_client *client, unsigned int reg_num)
++int pmic_i2c_24bit_read(struct i2c_client *client, unsigned int reg_num,
++			unsigned int *value)
+ {
+-	char buf[3];
++	unsigned char buf[3];
+ 	int ret;
+ 
+ 	memset(buf, 0, 3);
+ 	ret = i2c_smbus_read_i2c_block_data(client, reg_num, 3, buf);
+ 
+ 	if (ret == 3) {
+-		ret =
+-		    ((buf[0] << 16) & 0xFF0000) | ((buf[1] << 8) & 0xFF00) |
+-		    (buf[2] & 0xFF);
++		*value = buf[0] << 16 | buf[1] << 8 | buf[2];
+ 		return ret;
+ 	} else {
+ 		pr_debug("24bit read error, ret = %d\n", ret);
+@@ -77,9 +76,7 @@ int pmic_read(int reg_num, unsigned int *reg_val)
+ 	if (mc13892_client == NULL)
+ 		return PMIC_ERROR;
+ 
+-	*reg_val = pmic_i2c_24bit_read(mc13892_client, reg_num);
+-
+-	if (*reg_val == -1)
++	if (pmic_i2c_24bit_read(mc13892_client, reg_num, reg_val) == -1)
+ 		return PMIC_ERROR;
+ 
+ 	return PMIC_SUCCESS;
+diff --git a/drivers/mxc/pmic/core/pmic_core_i2c.c b/drivers/mxc/pmic/core/pmic_core_i2c.c
+index 928ce70..f8cbf9f 100644
+--- a/drivers/mxc/pmic/core/pmic_core_i2c.c
++++ b/drivers/mxc/pmic/core/pmic_core_i2c.c
+@@ -168,13 +168,11 @@ EXPORT_SYMBOL(pmic_get_version);
+ 
+ static int __devinit is_chip_onboard(struct i2c_client *client)
+ {
+-	int ret = 0;
++	unsigned int ret = 0;
+ 
+ 	/*bind the right device to the driver */
+-	ret = pmic_i2c_24bit_read(client, REG_IDENTIFICATION);
+-
+-	if (ret == -1)
+-		return ret;
++	if (pmic_i2c_24bit_read(client, REG_IDENTIFICATION, &ret) == -1)
++		return -1;
+ 
+ 	if (MC13892_GEN_ID_VALUE != BITFEXT(ret, MC13892_GENERATION_ID)) {
+ 		/*compare the address value */
+@@ -248,7 +246,8 @@ static struct device_attribute mc13892_dev_attr = {
+ 	.store = mc13892_store,
+ };
+ 
+-static int __devinit pmic_probe(struct i2c_client *client, const struct i2c_device_id *id)
++static int __devinit pmic_probe(struct i2c_client *client,
++				const struct i2c_device_id *id)
+ {
+ 	int ret = 0;
+ 	int pmic_irq;
+@@ -321,9 +320,10 @@ static int pmic_resume(struct i2c_client *client)
+ }
+ 
+ static const struct i2c_device_id mc13892_id[] = {
+-	{ "mc13892", 0 },
++	{"mc13892", 0},
+ 	{},
+ };
++
+ MODULE_DEVICE_TABLE(i2c, mc13892_id);
+ 
+ static struct i2c_driver pmic_driver = {
+diff --git a/include/asm-arm/arch-mxc/pmic_external.h b/include/asm-arm/arch-mxc/pmic_external.h
+index f7287da..930ed2a 100644
+--- a/include/asm-arm/arch-mxc/pmic_external.h
++++ b/include/asm-arm/arch-mxc/pmic_external.h
+@@ -952,7 +952,8 @@ typedef struct {
+ } t_sensor_bits;
+ 
+ extern struct i2c_client *mc13892_client;
+-int pmic_i2c_24bit_read(struct i2c_client *client, unsigned int reg_num);
++int pmic_i2c_24bit_read(struct i2c_client *client, unsigned int reg_num,
++			unsigned int *value);
+ int pmic_read(int reg_num, unsigned int *reg_val);
+ int pmic_write(int reg_num, const unsigned int reg_val);
+ void gpio_pmic_active(void);
+-- 
+1.5.4.4
+

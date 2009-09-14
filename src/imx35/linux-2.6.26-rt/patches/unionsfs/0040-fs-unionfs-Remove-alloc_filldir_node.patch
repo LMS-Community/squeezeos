@@ -1,0 +1,42 @@
+From f99188bcb79667490fed093be9b91b167bbd8e34 Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Sun, 25 Feb 2007 17:30:34 -0500
+Subject: [PATCH] fs/unionfs/: Remove alloc_filldir_node
+
+alloc_filldir_node was used only once. Additionally, all the arguments
+passed to it were ignored wasting stack space for no reason whatsoever.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/rdstate.c |    8 +-------
+ 1 files changed, 1 insertions(+), 7 deletions(-)
+
+diff --git a/fs/unionfs/rdstate.c b/fs/unionfs/rdstate.c
+index e240285..b67a86a 100644
+--- a/fs/unionfs/rdstate.c
++++ b/fs/unionfs/rdstate.c
+@@ -225,12 +225,6 @@ struct filldir_node *find_filldir_node(struct unionfs_dir_state *rdstate,
+ 	return cursor;
+ }
+ 
+-static struct filldir_node *alloc_filldir_node(const char *name, int namelen,
+-					       unsigned int hash, int bindex)
+-{
+-	return kmem_cache_alloc(unionfs_filldir_cachep, GFP_KERNEL);
+-}
+-
+ int add_filldir_node(struct unionfs_dir_state *rdstate, const char *name,
+ 		     int namelen, int bindex, int whiteout)
+ {
+@@ -246,7 +240,7 @@ int add_filldir_node(struct unionfs_dir_state *rdstate, const char *name,
+ 	index = hash % rdstate->size;
+ 	head = &(rdstate->list[index]);
+ 
+-	new = alloc_filldir_node(name, namelen, hash, bindex);
++	new = kmem_cache_alloc(unionfs_filldir_cachep, GFP_KERNEL);
+ 	if (!new) {
+ 		err = -ENOMEM;
+ 		goto out;
+-- 
+1.5.4.3
+

@@ -1,0 +1,86 @@
+From 03087549ccbc9991ebcf09ee0184cd0826dc6ff5 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Sat, 22 Nov 2008 13:50:32 -0700
+Subject: [PATCH] ENGR00100020 UART: Extend mxc_uart baudrate calc to 4Mbps
+
+This extends the baud-rate calculation for mxc_uart to include
+4Mbps.  It minimizes the cases where fractional scaling is
+required and limits the maximum baud-rate error to 0.5%.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ drivers/serial/mxc_uart.c |   40 +++++++++++++++++++++++++++++-----------
+ 1 files changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/serial/mxc_uart.c b/drivers/serial/mxc_uart.c
+index ef1b87d..68b6b45 100644
+--- a/drivers/serial/mxc_uart.c
++++ b/drivers/serial/mxc_uart.c
+@@ -38,6 +38,7 @@
+ #include <asm/io.h>
+ #include <asm/irq.h>
+ #include <asm/dma.h>
++#include <asm/div64.h>
+ #include <asm/arch/hardware.h>
+ #include <asm/arch/mxc_uart.h>
+ 
+@@ -1074,14 +1075,19 @@ static void mxcuart_free_interrupts(uart_mxc_port * umxc)
+ static void mxcuart_set_ref_freq(uart_mxc_port * umxc, unsigned long per_clk,
+ 				 unsigned int req_baud, int *div)
+ {
+-	int d = 1;
++	unsigned int d = 1;
+ 
+-	d = per_clk / ((req_baud * 16) + 1000);
+-	if (d > 6) {
+-		d = 6;
+-	}
++	/*
++	 * Choose the smallest possible prescaler to maximize
++	 * the chance of using integer scaling.  Ensure that
++	 * the calculation won't overflow.  Limit the denom
++	 * to 15 bits since a 16-bit denom doesn't work.
++	 */
++	if (req_baud < (1 << (31 - (4 + 15))))
++		d = per_clk / (req_baud << (4 + 15)) + 1;
+ 
+ 	umxc->port.uartclk = per_clk / d;
++
+ 	/*
+ 	 * Set the ONEMS register that is used by IR special case bit and
+ 	 * the Escape character detect logic
+@@ -1400,13 +1406,25 @@ static void mxcuart_set_termios(struct uart_port *port,
+ 	   }
+ 	   } */
+ 	writel(cr4, umxc->port.membase + MXC_UARTUCR4);
+-	/* Set baud rate */
+-	num = (baud / 100) - 1;
+-	denom = (umxc->port.uartclk / 1600) - 1;
+-	if ((denom < 65536) && (umxc->port.uartclk > 1600)) {
+-		writel(num, umxc->port.membase + MXC_UARTUBIR);
+-		writel(denom, umxc->port.membase + MXC_UARTUBMR);
++
++	/*
++	 * Set baud rate
++	 */
++
++	/* Use integer scaling, if possible. Limit the denom to 15 bits. */
++	num = 0;
++	denom = (umxc->port.uartclk + 8 * baud) / (16 * baud) - 1;
++
++	/* Use fractional scaling if needed to limit the max error to 0.5% */
++	if (denom < 100) {
++		u64 n64 = (u64) 16 * 0x8000 * baud + (umxc->port.uartclk / 2);
++		do_div(n64, umxc->port.uartclk);
++		num = (u_int) n64 - 1;
++		denom = 0x7fff;
+ 	}
++	writel(num, umxc->port.membase + MXC_UARTUBIR);
++	writel(denom, umxc->port.membase + MXC_UARTUBMR);
++
+ 	spin_unlock_irqrestore(&umxc->port.lock, flags);
+ }
+ 
+-- 
+1.5.4.4
+

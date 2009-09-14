@@ -1,0 +1,73 @@
+From 2a6e8288e8e843e1245e1c32c1404341a4c4717e Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Thu, 20 Nov 2008 19:26:13 +0800
+Subject: [PATCH] ENGR00099720 MX31: Fix section mismatch link warning in alsa mixer driver
+
+On kernel 2.6.24, __devinit has no effect when CONFIG_HOTPLUG enabled, while
+in kenerl 2.6.26, define new section for __devinit when CONFIG_HOTPLUG enabled.
+To use the __devinitdata structure, the function also should use __devinit
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/arm/mxc-alsa-mixer.c |    2 +-
+ sound/arm/mxc-alsa-pmic.c  |   10 +++++-----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/sound/arm/mxc-alsa-mixer.c b/sound/arm/mxc-alsa-mixer.c
+index 12ea4a2..f303bda 100644
+--- a/sound/arm/mxc-alsa-mixer.c
++++ b/sound/arm/mxc-alsa-mixer.c
+@@ -372,7 +372,7 @@ struct snd_kcontrol_new pmic_control_loop_out __devinitdata = {
+   *
+   * @return              0 on success, -ve otherwise.
+   */
+-int mxc_alsa_create_ctl(struct snd_card *card, void *p_value)
++int __devinit mxc_alsa_create_ctl(struct snd_card *card, void *p_value)
+ {
+ 	int err = 0;
+ 
+diff --git a/sound/arm/mxc-alsa-pmic.c b/sound/arm/mxc-alsa-pmic.c
+index 298386e..a23ae0c 100644
+--- a/sound/arm/mxc-alsa-pmic.c
++++ b/sound/arm/mxc-alsa-pmic.c
+@@ -3537,8 +3537,8 @@ void mxc_pmic_audio_init(mxc_pmic_audio_t * mxc_audio, int device)
+   *
+   * @return              0 on success, -1 otherwise.
+   */
+-static int __init snd_card_mxc_audio_pcm(mxc_pmic_audio_t * mxc_audio,
+-					 int device)
++static int __devinit snd_card_mxc_audio_pcm(mxc_pmic_audio_t *mxc_audio,
++					    int device)
+ {
+ 	struct snd_pcm *pcm;
+ 	int err;
+@@ -3682,7 +3682,7 @@ void snd_mxc_audio_free(struct snd_card *card)
+   *
+   * @return              0 on success, -1 otherwise.
+   */
+-static int __init mxc_alsa_audio_probe(struct platform_device *pdev)
++static int __devinit mxc_alsa_audio_probe(struct platform_device *pdev)
+ {
+ 	int err;
+ 	struct snd_card *card;
+@@ -3741,7 +3741,7 @@ static int __init mxc_alsa_audio_probe(struct platform_device *pdev)
+ 	return err;
+ }
+ 
+-static int mxc_alsa_audio_remove(struct platform_device *dev)
++static int __devexit mxc_alsa_audio_remove(struct platform_device *dev)
+ {
+ 	snd_card_free(mxc_audio->card);
+ 	kfree(mxc_audio);
+@@ -3752,7 +3752,7 @@ static int mxc_alsa_audio_remove(struct platform_device *dev)
+ 
+ static struct platform_driver mxc_alsa_audio_driver = {
+ 	.probe = mxc_alsa_audio_probe,
+-	.remove = mxc_alsa_audio_remove,
++	.remove = __devexit_p(mxc_alsa_audio_remove),
+ #ifdef CONFIG_PM
+ 	.suspend = snd_mxc_audio_suspend,
+ 	.resume = snd_mxc_audio_resume,
+-- 
+1.5.4.4
+

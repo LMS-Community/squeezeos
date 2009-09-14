@@ -1,0 +1,109 @@
+From 66b8cabd87a1f11953670439c268f245a96f3ae8 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 21 Jul 2007 02:44:32 -0400
+Subject: [PATCH] Unionfs: mmap fixes to ->writepage/readpage/sync_page
+
+unionfs_writepage: handle true errors differently from
+AOP_WRITEPAGE_ACTIVATE conditions returned by lower file systems (such as
+tmpfs).
+
+unionfs_readpage: call flush_dcache_page as required.
+
+unionfs_sync_page: don't call grab_cache_page to get the lower page, because
+that function does too much and could lead to deadlocks.  Instead, call the
+lighter-weight find_lock_page.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   49 ++++++++++++++++++++++++++++++++++++++-----------
+ 1 files changed, 38 insertions(+), 11 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index f97f6cf..9cd51f0 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -91,16 +91,31 @@ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	/* b/c grab_cache_page increased refcnt */
+ 	page_cache_release(lower_page);
+ 
+-	if (err)
++	if (err < 0) {
+ 		ClearPageUptodate(page);
+-	else {
+-		SetPageUptodate(page);
+-		/* lower mtimes has changed: update ours */
+-		unionfs_copy_attr_times(inode);
++		goto out;
++	}
++	if (err == AOP_WRITEPAGE_ACTIVATE) {
++		/*
++		 * Lower file systems such as ramfs and tmpfs, may return
++		 * AOP_WRITEPAGE_ACTIVATE so that the VM won't try to
++		 * (pointlessly) write the page again for a while.  But
++		 * those lower file systems also set the page dirty bit back
++		 * again.  So we mimic that behaviour here.
++		 */
++		if (PageDirty(lower_page))
++			set_page_dirty(page);
++		goto out;
+ 	}
+ 
+-out:
++	/* all is well */
++	SetPageUptodate(page);
++	/* lower mtimes has changed: update ours */
++	unionfs_copy_attr_times(inode);
++
+ 	unlock_page(page);
++
++out:
+ 	return err;
+ }
+ 
+@@ -155,6 +170,8 @@ static int unionfs_do_readpage(struct file *file, struct page *page)
+ 	/* if vfs_read succeeded above, sync up our times */
+ 	unionfs_copy_attr_times(inode);
+ 
++	flush_dcache_page(page);
++
+ out:
+ 	if (err == 0)
+ 		SetPageUptodate(page);
+@@ -295,10 +312,19 @@ void unionfs_sync_page(struct page *page)
+ 	inode = page->mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+ 
+-	/* find lower page (returns a locked page) */
+-	lower_page = grab_cache_page(lower_inode->i_mapping, page->index);
+-	if (!lower_page)
++	/*
++	 * Find lower page (returns a locked page).
++	 *
++	 * NOTE: we used to call grab_cache_page(), but that was unnecessary
++	 * as it would have tried to create a new lower page if it didn't
++	 * exist, leading to deadlocks.  All our sync_page method needs to
++	 * do is ensure that pending I/O gets done.
++	 */
++	lower_page = find_lock_page(lower_inode->i_mapping, page->index);
++	if (!lower_page) {
++		printk(KERN_DEBUG "unionfs: find_lock_page failed\n");
+ 		goto out;
++	}
+ 
+ 	/* do the actual sync */
+ 	mapping = lower_page->mapping;
+@@ -309,8 +335,9 @@ void unionfs_sync_page(struct page *page)
+ 	if (mapping && mapping->a_ops && mapping->a_ops->sync_page)
+ 		mapping->a_ops->sync_page(lower_page);
+ 
+-	unlock_page(lower_page);	/* b/c grab_cache_page locked it */
+-	/* b/c grab_cache_page increased refcnt */
++	/* b/c find_lock_page locked it */
++	unlock_page(lower_page);
++	/* b/c find_lock_page increased refcnt */
+ 	page_cache_release(lower_page);
+ 
+ out:
+-- 
+1.5.4.3
+

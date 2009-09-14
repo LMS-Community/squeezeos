@@ -1,0 +1,155 @@
+From 04f78b782f9eab9e4bf4d8020c017e00ea7f17df Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Mon, 17 Nov 2008 11:42:03 -0700
+Subject: [PATCH] ENGR00099218 MX25: Add MTD NAND support
+
+Add MTD NAND support for MX25 3-stack board which
+includes an on-board K9LAG08U0M 2k-page MLC part.
+
+Signed-off-by: Quinn Jensen <quinn.jensen@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |   10 ++++++++--
+ arch/arm/mach-mx25/Kconfig              |   16 ++++++++++++++++
+ arch/arm/mach-mx25/clock.c              |    4 ++++
+ arch/arm/mach-mx25/crm_regs.h           |    2 +-
+ arch/arm/mach-mx25/mx25_3stack.c        |    6 +++---
+ include/asm-arm/arch-mxc/mx25.h         |    8 ++++----
+ 6 files changed, 36 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 087c7ce..d6aadda 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -183,6 +183,8 @@ CONFIG_MX25_OPTIONS=y
+ CONFIG_MACH_MX25_3DS=y
+ # CONFIG_MX25_DOZE_DURING_IDLE is not set
+ CONFIG_MXC_SDMA_API=y
++CONFIG_ARCH_MXC_HAS_NFC_V2=y
++CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ 
+ #
+ # Device options
+@@ -504,13 +506,17 @@ CONFIG_MTD_RAM=y
+ # CONFIG_MTD_DOC2000 is not set
+ # CONFIG_MTD_DOC2001 is not set
+ # CONFIG_MTD_DOC2001PLUS is not set
+-CONFIG_MTD_NAND=m
++CONFIG_MTD_NAND=y
+ # CONFIG_MTD_NAND_VERIFY_WRITE is not set
+ # CONFIG_MTD_NAND_ECC_SMC is not set
+ # CONFIG_MTD_NAND_MUSEUM_IDS is not set
+-CONFIG_MTD_NAND_IDS=m
++CONFIG_MTD_NAND_IDS=y
+ # CONFIG_MTD_NAND_DISKONCHIP is not set
+ # CONFIG_MTD_NAND_NANDSIM is not set
++CONFIG_MTD_NAND_MXC_V2=y
++# CONFIG_MTD_NAND_MXC_SWECC is not set
++# CONFIG_MTD_NAND_MXC_FORCE_CE is not set
++# CONFIG_MXC_NAND_LOW_LEVEL_ERASE is not set
+ # CONFIG_MTD_NAND_PLATFORM is not set
+ # CONFIG_MTD_ONENAND is not set
+ 
+diff --git a/arch/arm/mach-mx25/Kconfig b/arch/arm/mach-mx25/Kconfig
+index bfea884..5a28920 100644
+--- a/arch/arm/mach-mx25/Kconfig
++++ b/arch/arm/mach-mx25/Kconfig
+@@ -27,6 +27,22 @@ config MXC_SDMA_API
+            This selects the Freescale MXC SDMA API.
+            If unsure, say N.
+ 
++config ARCH_MXC_HAS_NFC_V2
++        bool "MXC NFC Hardware Version 2"
++        depends on ARCH_MX25
++        default y
++        help
++           This selects the Freescale MXC Nand Flash Controller Hardware Version 2
++           If unsure, say N.
++
++config ARCH_MXC_HAS_NFC_V2_1
++        bool "MXC NFC Hardware Version 2.1"
++        depends on ARCH_MXC_HAS_NFC_V2
++        default y
++        help
++           This selects the Freescale MXC Nand Flash Controller Hardware Version 2.1
++           If unsure, say N.
++
+ menu "Device options"
+ 
+ config I2C_MXC_SELECT1
+diff --git a/arch/arm/mach-mx25/clock.c b/arch/arm/mach-mx25/clock.c
+index 538b584..7c20359 100644
+--- a/arch/arm/mach-mx25/clock.c
++++ b/arch/arm/mach-mx25/clock.c
+@@ -1652,6 +1652,10 @@ int __init mxc_clocks_init(void)
+ 	propagate_rate(&osc24m_clk);
+ 	propagate_rate(&osc32k_clk);
+ 
++	/* the NFC clock must be derived from AHB clock */
++	clk_set_parent(&per_clk[8], &ahb_clk);
++	clk_set_rate(&per_clk[8], ahb_clk.rate / 6);
++
+ 	pr_info("Clock input source is %ld\n", osc24m_clk.rate);
+ 
+ 	clk_enable(&emi_clk);
+diff --git a/arch/arm/mach-mx25/crm_regs.h b/arch/arm/mach-mx25/crm_regs.h
+index a607c46..94860f2 100644
+--- a/arch/arm/mach-mx25/crm_regs.h
++++ b/arch/arm/mach-mx25/crm_regs.h
+@@ -27,7 +27,7 @@
+ #define MXC_CCM_PCDR1               (IO_ADDRESS(CCM_BASE_ADDR) + 0x1C)
+ #define MXC_CCM_PCDR2               (IO_ADDRESS(CCM_BASE_ADDR) + 0x20)
+ #define MXC_CCM_PCDR3               (IO_ADDRESS(CCM_BASE_ADDR) + 0x24)
+-#define MXC_CCM_CRSR                (IO_ADDRESS(CCM_BASE_ADDR) + 0x28)
++#define MXC_CCM_RCSR                (IO_ADDRESS(CCM_BASE_ADDR) + 0x28)
+ #define MXC_CCM_CRDR                (IO_ADDRESS(CCM_BASE_ADDR) + 0x2C)
+ #define MXC_CCM_DCVR0               (IO_ADDRESS(CCM_BASE_ADDR) + 0x30)
+ #define MXC_CCM_DCVR1               (IO_ADDRESS(CCM_BASE_ADDR) + 0x34)
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index 5e10c52..e94c1a7 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -107,11 +107,11 @@ static inline void mxc_init_keypad(void)
+ 
+ /* MTD NAND flash */
+ 
+-#if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)
++#if defined(CONFIG_MTD_NAND_MXC_V2) || defined(CONFIG_MTD_NAND_MXC_V2_MODULE)
+ 
+ static struct mtd_partition mxc_nand_partitions[] = {
+ 	{
+-	 .name = "IPL-SPL",
++	 .name = "nand.bootloader",
+ 	 .offset = 0,
+ 	 .size = 256 * 1024},
+ 	{
+@@ -139,7 +139,7 @@ static struct flash_platform_data mxc_nand_data = {
+ };
+ 
+ static struct platform_device mxc_nand_mtd_device = {
+-	.name = "mxc_nand_flash",
++	.name = "mxc_nandv2_flash",
+ 	.id = 0,
+ 	.dev = {
+ 		.release = mxc_nop_release,
+diff --git a/include/asm-arm/arch-mxc/mx25.h b/include/asm-arm/arch-mxc/mx25.h
+index 757ee67..6336ec7 100644
+--- a/include/asm-arm/arch-mxc/mx25.h
++++ b/include/asm-arm/arch-mxc/mx25.h
+@@ -468,10 +468,10 @@
+ #define MXC_TIMER_GPT4          4
+ 
+ /*!
+- * NFMS bit in FMCR register for pagesize of nandflash
++ * NFMS bit in RCSR register for pagesize of nandflash
+  */
+-#define NFMS (*((volatile u32 *)IO_ADDRESS(SYSCTRL_BASE_ADDR+0x28)))
+-
+-#define NFMS_BIT 8
++#define NFMS (*((volatile u32 *)IO_ADDRESS(CCM_BASE_ADDR + 0x28)))
++#define NFMS_NF_DWIDTH		14
++#define NFMS_NF_PG_SZ		8
+ 
+ #endif				/* __ASM_ARCH_MXC_MX25_H__ */
+-- 
+1.5.4.4
+

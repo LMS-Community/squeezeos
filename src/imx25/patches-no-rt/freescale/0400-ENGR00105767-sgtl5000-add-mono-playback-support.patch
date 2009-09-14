@@ -1,0 +1,118 @@
+From 96f8a692e276801004c4a99e308b1533721fea23 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Tue, 10 Feb 2009 16:43:33 +0800
+Subject: [PATCH] ENGR00105767 sgtl5000: add mono playback support
+
+For Rev2 or higher, CODEC will copy left channel data to right.
+For Rev1, set playback channels_min to 2.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ sound/soc/codecs/sgtl5000.c |   20 ++++++++++++++++++--
+ sound/soc/codecs/sgtl5000.h |    9 ++++++---
+ 2 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/sound/soc/codecs/sgtl5000.c b/sound/soc/codecs/sgtl5000.c
+index e3c896a..085b148 100644
+--- a/sound/soc/codecs/sgtl5000.c
++++ b/sound/soc/codecs/sgtl5000.c
+@@ -31,6 +31,7 @@ struct sgtl5000_priv {
+ 	int fmt;
+ 	int playback_active;
+ 	int capture_active;
++	int rev;
+ };
+ 
+ static int sgtl5000_dapm_event(struct snd_soc_codec *codec, int event);
+@@ -487,6 +488,7 @@ static int sgtl5000_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	struct snd_soc_codec *codec = pcm_link->codec;
+ 	struct sgtl5000_priv *sgtl5000 = codec->private_data;
+ 	int fs = params_rate(params);
++	int channels = params_channels(params);
+ 	int clk_ctl = 0;
+ 	int pll_ctl = 0;
+ 	int i2s_ctl;
+@@ -498,6 +500,16 @@ static int sgtl5000_pcm_hw_params(struct snd_pcm_substream *substream,
+ 		return -EFAULT;
+ 	}
+ 
++	if (sgtl5000->rev != 0x00) { /* rev 1 not support mono playback */
++		reg = sgtl5000_read(codec, SGTL5000_CHIP_ANA_TEST2);
++		if (channels == 1)
++			reg |= SGTL5000_MONO_DAC;
++		else
++			reg &= ~SGTL5000_MONO_DAC;
++		sgtl5000_write(codec, SGTL5000_CHIP_ANA_TEST2, reg);
++	}
++
++
+ 	switch (fs) {
+ 	case 32000:
+ 		clk_ctl |= SGTL5000_SYS_FS_32k << SGTL5000_SYS_FS_SHIFT;
+@@ -619,7 +631,7 @@ static int sgtl5000_pcm_hw_params(struct snd_pcm_substream *substream,
+ 			SNDRV_PCM_FMTBIT_S20_3LE |\
+ 			SNDRV_PCM_FMTBIT_S24_LE)
+ 
+-static const struct snd_soc_pcm_stream sgtl5000_dai_playback = {
++static struct snd_soc_pcm_stream sgtl5000_dai_playback = {
+ 	.stream_name = "Playback",
+ 	.channels_min = 1,
+ 	.channels_max = 2,
+@@ -740,6 +752,7 @@ static int sgtl5000_codec_io_probe(struct snd_soc_codec *codec,
+ 	int vag;
+ 	unsigned int val;
+ 	struct sgtl5000_platform_data *plat = codec->platform_data;
++	struct sgtl5000_priv *sgtl5000 = codec->private_data;
+ 
+ 	val = sgtl5000_read(NULL, SGTL5000_CHIP_ID);
+ 	if (((val & SGTL5000_PARTID_MASK) >> SGTL5000_PARTID_SHIFT) !=
+@@ -749,8 +762,11 @@ static int sgtl5000_codec_io_probe(struct snd_soc_codec *codec,
+ 		return -ENODEV;
+ 	}
+ 
++	sgtl5000->rev = (val & SGTL5000_REVID_MASK) >> SGTL5000_REVID_SHIFT;
+ 	dev_info(&sgtl5000_i2c_client->dev, "SGTL5000 revision %d\n",
+-		(val & SGTL5000_REVID_MASK) >> SGTL5000_REVID_SHIFT);
++		 sgtl5000->rev);
++	if (sgtl5000->rev == 0x00) /* if chip is rev 1 */
++		sgtl5000_dai_playback.channels_min = 2;
+ 
+ 	/* reset value */
+ 	ana_pwr = SGTL5000_DAC_STERO |
+diff --git a/sound/soc/codecs/sgtl5000.h b/sound/soc/codecs/sgtl5000.h
+index 02aa979..3df13d7 100644
+--- a/sound/soc/codecs/sgtl5000.h
++++ b/sound/soc/codecs/sgtl5000.h
+@@ -36,6 +36,7 @@
+ #define SGTL5000_CHIP_CLK_TOP_CTRL		0x0034
+ #define SGTL5000_CHIP_ANA_STATUS		0x0036
+ #define SGTL5000_CHIP_SHORT_CTRL		0x003c
++#define SGTL5000_CHIP_ANA_TEST2			0x003a
+ #define SGTL5000_DAP_CTRL			0x0100
+ #define SGTL5000_DAP_PEQ			0x0102
+ #define SGTL5000_DAP_BASS_ENHANCE		0x0104
+@@ -65,9 +66,6 @@
+ #define SGTL5000_DAP_COEF_WR_A2_MSB		0x0138
+ #define SGTL5000_DAP_COEF_WR_A2_LSB		0x013a
+ 
+-#define WM8903_REGISTER_COUNT			49
+-#define WM8903_MAX_REGISTER			0x013a
+-
+ /*
+  * Field Definitions.
+  */
+@@ -380,6 +378,11 @@
+ #define SGTL5000_CM_SHORT_MOD_WIDTH		2
+ 
+ /*
++ *SGTL5000_CHIP_ANA_TEST2
++ */
++#define SGTL5000_MONO_DAC			0x1000
++
++/*
+  * SGTL5000_DAP_CTRL
+  */
+ #define SGTL5000_DAP_MIX_EN			0x0010
+-- 
+1.5.4.4
+

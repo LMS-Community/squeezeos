@@ -1,0 +1,163 @@
+From 4009ddcdfca0abc9b6abe1806f5a2b1d7eb6e556 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 6 Jan 2009 16:06:27 +0800
+Subject: [PATCH] ENGR00104156 MX35: Regulator updates for TO2 blue board
+
+Related regulators to be Updated due to PMIC changes:
+WIFI, CAMERA, FM, GPS, BLUETOOTH, FlexCan
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c |   70 +++++++++++++++++++++++++++++---------
+ 1 files changed, 54 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index d37c572..1c5012c 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -277,7 +277,7 @@ static struct resource mlb_resource[] = {
+ static struct mxc_mlb_platform_data mlb_data = {
+ 	.buf_address = IRAM_BASE_ADDR_VIRT + MLB_IRAM_ADDR_OFFSET,
+ 	.phy_address = IRAM_BASE_ADDR + MLB_IRAM_ADDR_OFFSET,
+-	.reg_nvcc = "LDO6",
++	.reg_nvcc = "VVIDEO",
+ 	.mlb_clk = "mlb_clk",
+ };
+ 
+@@ -321,9 +321,11 @@ static void mxc_unifi_enable(int en)
+ static struct mxc_unifi_platform_data unifi_data = {
+ 	.hardreset = mxc_unifi_hardreset,
+ 	.enable = mxc_unifi_enable,
+-	.reg_1v5_ana_bb = "SW4",
+-	.reg_vdd_vpa = "SW1",
+-	.reg_1v5_dd = "SW4",
++	.reg_gpo1 = "GPO2",
++	.reg_gpo2 = "GPO3",
++	.reg_1v5_ana_bb = "PWGT1",
++	.reg_vdd_vpa = "VAUDIO",
++	.reg_1v5_dd = "SW1",
+ 	.host_id = 1,
+ };
+ 
+@@ -348,10 +350,10 @@ static struct mxc_tsc_platform_data tsc2007_data = {
+ };
+ 
+ static struct mxc_camera_platform_data camera_data = {
+-	.core_regulator = NULL,
+-	.io_regulator = NULL,
+-	.analog_regulator = "LDO7",
+-	.gpo_regulator = NULL,
++	.core_regulator = "SW1",
++	.io_regulator = "VAUDIO",
++	.analog_regulator = "VIOHI",
++	.gpo_regulator = "PWGT1",
+ 	.mclk = 20000000,
+ };
+ 
+@@ -377,8 +379,8 @@ static void si4702_gpio_put(void)
+ }
+ 
+ static struct mxc_fm_platform_data si4702_data = {
+-	.reg_vio = "SW1",
+-	.reg_vdd = "SW1",
++	.reg_vio = "GPO2",
++	.reg_vdd = "GPO2",
+ 	.gpio_get = si4702_gpio_get,
+ 	.gpio_put = si4702_gpio_put,
+ 	.reset = si4702_reset,
+@@ -698,8 +700,8 @@ static void __init mxc_init_pata(void)
+ 
+ #if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
+ static struct mxc_gps_platform_data gps_data = {
+-	.core_reg = "SW1",
+-	.analog_reg = "SW2",
++	.core_reg = "SW3",
++	.analog_reg = "PWGT2",
+ };
+ 
+ static struct platform_device mxc_gps_device = {
+@@ -761,7 +763,7 @@ static void bt_reset(void)
+ }
+ 
+ static struct mxc_bt_platform_data mxc_bt_data = {
+-	.bt_vdd = "SW1",
++	.bt_vdd = "GPO2",
+ 	.bt_vdd_parent = NULL,
+ 	.bt_vusb = NULL,
+ 	.bt_vusb_parent = NULL,
+@@ -803,13 +805,13 @@ static void flexcan_xcvr_enable(int id, int en)
+ 
+ struct flexcan_platform_data flexcan_data[] = {
+ 	{
+-	 .core_reg = "SW1",
++	 .core_reg = "GPO2",
+ 	 .io_reg = NULL,
+ 	 .xcvr_enable = flexcan_xcvr_enable,
+ 	 .active = gpio_can_active,
+ 	 .inactive = gpio_can_inactive,},
+ 	{
+-	 .core_reg = "SW1",
++	 .core_reg = "GPO2",
+ 	 .io_reg = NULL,
+ 	 .xcvr_enable = flexcan_xcvr_enable,
+ 	 .active = gpio_can_active,
+@@ -818,6 +820,40 @@ struct flexcan_platform_data flexcan_data[] = {
+ #endif
+ 
+ /*!
++ * fixup for mx35 3stack board v1.0 (MAX8660)
++ */
++static void mx35_3stack_fixup_for_board_v1(void)
++{
++#if defined(CONFIG_MXC_MLB) || defined(CONFIG_MXC_MLB_MODULE)
++	mlb_data.reg_nvcc = "LDO6";
++#endif
++
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++	unifi_data.reg_gpo1 = NULL;
++	unifi_data.reg_gpo2 = NULL;
++	unifi_data.reg_1v5_ana_bb = "SW4";
++	unifi_data.reg_vdd_vpa = "SW1";
++	unifi_data.reg_1v5_dd = "SW4";
++#endif
++	camera_data.analog_regulator = "LDO7";
++	camera_data.core_regulator = NULL;
++	camera_data.io_regulator = NULL;
++	camera_data.gpo_regulator = NULL;
++
++#if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
++	gps_data.core_reg = "SW1";
++	gps_data.analog_reg = "SW2";
++#endif
++
++	mxc_bt_data.bt_vdd = "SW1";
++
++#if defined(CONFIG_CAN_FLEXCAN) || defined(CONFIG_CAN_FLEXCAN_MODULE)
++	flexcan_data[0].core_reg = "GPO2";
++	flexcan_data[1].core_reg = "GPO2";
++#endif
++}
++
++/*!
+  * Board specific initialization.
+  */
+ static void __init mxc_board_init(void)
+@@ -828,6 +864,8 @@ static void __init mxc_board_init(void)
+ 	early_console_setup(saved_command_line);
+ 	mxc_gpio_init();
+ 	mxc_init_devices();
++	if (!board_is_mx35(BOARD_REV_2))
++		mx35_3stack_fixup_for_board_v1();
+ 	mx35_3stack_gpio_init();
+ 	mxc_init_enet();
+ 	mxc_init_nor_mtd();
+-- 
+1.5.4.4
+

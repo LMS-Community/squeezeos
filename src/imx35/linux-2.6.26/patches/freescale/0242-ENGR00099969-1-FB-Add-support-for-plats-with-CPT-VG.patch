@@ -1,0 +1,90 @@
+From 20d6e286cf242520481b0ba026341160fac378e1 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Fri, 21 Nov 2008 14:41:49 -0700
+Subject: [PATCH] ENGR00099969-1 FB: Add support for plats with CPT-VGA LCD display
+
+Add support for platforms that have a CPT-VGA LCD display.
+
+Signed-off-by: Ross Wille <wille@freecale.com>
+---
+ drivers/mxc/Kconfig              |    1 +
+ drivers/video/backlight/Kconfig  |    2 +-
+ drivers/video/mxc/Kconfig        |    2 +-
+ drivers/video/mxc/Makefile       |    2 +-
+ drivers/video/mxc/mxcfb_modedb.c |    8 +++++++-
+ 5 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/Kconfig b/drivers/mxc/Kconfig
+index 3af42e2..61a80fd 100644
+--- a/drivers/mxc/Kconfig
++++ b/drivers/mxc/Kconfig
+@@ -8,6 +8,7 @@ config MXC_IPU
+ 	bool "Image Processing Unit Driver"
+ 	depends on !ARCH_MX21
+ 	depends on !ARCH_MX27
++	depends on !ARCH_MX25
+ 	select MXC_IPU_V1 if !ARCH_MX37 && !ARCH_MX51
+ 	select MXC_IPU_V3 if ARCH_MX37 || ARCH_MX51
+ 	help
+diff --git a/drivers/video/backlight/Kconfig b/drivers/video/backlight/Kconfig
+index 94e6ba9..64e21b8 100644
+--- a/drivers/video/backlight/Kconfig
++++ b/drivers/video/backlight/Kconfig
+@@ -128,7 +128,7 @@ config BACKLIGHT_MXC_IPU
+ 
+ config BACKLIGHT_MXC_LCDC
+ 	tristate "LCDC PWM Backlight Driver"
+-	depends on BACKLIGHT_MXC && (ARCH_MX21 || ARCH_MX27)
++	depends on BACKLIGHT_MXC && (ARCH_MX21 || ARCH_MX27 || ARCH_MX25)
+ 	default y
+ 
+ config BACKLIGHT_MXC_PMIC
+diff --git a/drivers/video/mxc/Kconfig b/drivers/video/mxc/Kconfig
+index 70cbbca..aac30a5 100644
+--- a/drivers/video/mxc/Kconfig
++++ b/drivers/video/mxc/Kconfig
+@@ -1,6 +1,6 @@
+ config FB_MXC
+ 	tristate "MXC Framebuffer support"
+-	depends on FB && (MXC_IPU || ARCH_MX21 || ARCH_MX27)
++	depends on FB && (MXC_IPU || ARCH_MX21 || ARCH_MX27 || ARCH_MX25)
+ 	select FB_CFB_FILLRECT
+ 	select FB_CFB_COPYAREA
+ 	select FB_CFB_IMAGEBLIT
+diff --git a/drivers/video/mxc/Makefile b/drivers/video/mxc/Makefile
+index 4b70421..e432bb5 100644
+--- a/drivers/video/mxc/Makefile
++++ b/drivers/video/mxc/Makefile
+@@ -1,4 +1,4 @@
+-ifeq ($(CONFIG_ARCH_MX21)$(CONFIG_ARCH_MX27),y)
++ifeq ($(CONFIG_ARCH_MX21)$(CONFIG_ARCH_MX27)$(CONFIG_ARCH_MX25),y)
+ 	obj-$(CONFIG_FB_MXC_TVOUT)              += fs453.o
+ 	obj-$(CONFIG_FB_MXC_SYNC_PANEL)         += mx2fb.o mxcfb_modedb.o
+ 	obj-$(CONFIG_FB_MXC_EPSON_PANEL)        += mx2fb_epson.o
+diff --git a/drivers/video/mxc/mxcfb_modedb.c b/drivers/video/mxc/mxcfb_modedb.c
+index 2662211..d7cb1aa 100644
+--- a/drivers/video/mxc/mxcfb_modedb.c
++++ b/drivers/video/mxc/mxcfb_modedb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -36,6 +36,12 @@ struct fb_videomode mxcfb_modedb[] = {
+ 	 FB_VMODE_NONINTERLACED,
+ 	 0,},
+ 	{
++	 /* 640x480 @ 60 Hz */
++	 "CPT-VGA", 60, 640, 480, 39683, 45, 114, 33, 11, 1, 1,
++	 FB_SYNC_OE_ACT_HIGH,
++	 FB_VMODE_NONINTERLACED,
++	 0,},
++	{
+ 	 /* NTSC TV output */
+ 	 "TV-NTSC", 60, 640, 480, 37538,
+ 	 38, 858 - 640 - 38 - 3,
+-- 
+1.5.4.4
+

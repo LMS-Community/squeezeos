@@ -1,0 +1,62 @@
+From 58d5a5451122fdad6af5571e8041103c07de0673 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 30 Dec 2008 17:58:42 +0200
+Subject: [PATCH] UBIFS: print debugging messages properly
+
+We cannot use ubifs_err() macro with DBGKEY() and DBGKEY1(),
+because this is racy and holding dbg_lock is needed. Use
+dbg_err() instead, which does have the lock held.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/debug.c |   20 ++++++++++----------
+ 1 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/fs/ubifs/debug.c b/fs/ubifs/debug.c
+index d54b5e9..ab60da2 100644
+--- a/fs/ubifs/debug.c
++++ b/fs/ubifs/debug.c
+@@ -1010,20 +1010,20 @@ static int dbg_check_key_order(struct ubifs_info *c, struct ubifs_zbranch *zbr1,
+ 	err = 1;
+ 	key_read(c, &dent1->key, &key);
+ 	if (keys_cmp(c, &zbr1->key, &key)) {
+-		ubifs_err("1st entry at %d:%d has key %s", zbr1->lnum,
+-			  zbr1->offs, DBGKEY(&key));
+-		ubifs_err("but it should have key %s according to tnc",
+-			  DBGKEY(&zbr1->key));
++		dbg_err("1st entry at %d:%d has key %s", zbr1->lnum,
++			zbr1->offs, DBGKEY(&key));
++		dbg_err("but it should have key %s according to tnc",
++			DBGKEY(&zbr1->key));
+ 		dbg_dump_node(c, dent1);
+ 		goto out_free;
+ 	}
+ 
+ 	key_read(c, &dent2->key, &key);
+ 	if (keys_cmp(c, &zbr2->key, &key)) {
+-		ubifs_err("2nd entry at %d:%d has key %s", zbr1->lnum,
+-			  zbr1->offs, DBGKEY(&key));
+-		ubifs_err("but it should have key %s according to tnc",
+-			  DBGKEY(&zbr2->key));
++		dbg_err("2nd entry at %d:%d has key %s", zbr1->lnum,
++			zbr1->offs, DBGKEY(&key));
++		dbg_err("but it should have key %s according to tnc",
++			DBGKEY(&zbr2->key));
+ 		dbg_dump_node(c, dent2);
+ 		goto out_free;
+ 	}
+@@ -1037,9 +1037,9 @@ static int dbg_check_key_order(struct ubifs_info *c, struct ubifs_zbranch *zbr1,
+ 		goto out_free;
+ 	}
+ 	if (cmp == 0 && nlen1 == nlen2)
+-		ubifs_err("2 xent/dent nodes with the same name");
++		dbg_err("2 xent/dent nodes with the same name");
+ 	else
+-		ubifs_err("bad order of colliding key %s",
++		dbg_err("bad order of colliding key %s",
+ 			DBGKEY(&key));
+ 
+ 	ubifs_msg("first node at %d:%d\n", zbr1->lnum, zbr1->offs);
+-- 
+1.5.4.3
+

@@ -1,0 +1,70 @@
+From 657e0f8c7a514d0bca453261eaffb21232306b3c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 27 Dec 2007 19:05:05 -0500
+Subject: [PATCH] Unionfs: implement d_iput method
+
+This is needed to drop lower objects early enough, under certain conditions,
+so the lower objects don't stay behind until umount(). [LTP testing]
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   42 ++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 42 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 0e89308..0369d93 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -484,7 +484,49 @@ out:
+ 	return;
+ }
+ 
++/*
++ * Called when we're removing the last reference to our dentry.  So we
++ * should drop all lower references too.
++ */
++static void unionfs_d_iput(struct dentry *dentry, struct inode *inode)
++{
++	int bindex, rc;
++
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++
++	if (dbstart(dentry) < 0)
++		goto drop_lower_inodes;
++	for (bindex = dbstart(dentry); bindex <= dbend(dentry); bindex++) {
++		if (unionfs_lower_mnt_idx(dentry, bindex)) {
++			unionfs_mntput(dentry, bindex);
++			unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
++		}
++		if (unionfs_lower_dentry_idx(dentry, bindex)) {
++			dput(unionfs_lower_dentry_idx(dentry, bindex));
++			unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
++		}
++	}
++	set_dbstart(dentry, -1);
++	set_dbend(dentry, -1);
++
++drop_lower_inodes:
++	rc = atomic_read(&inode->i_count);
++	if (rc == 1 && inode->i_nlink == 1 && ibstart(inode) >= 0) {
++		/* see Documentation/filesystems/unionfs/issues.txt */
++		lockdep_off();
++		iput(unionfs_lower_inode(inode));
++		lockdep_on();
++		unionfs_set_lower_inode(inode, NULL);
++		/* XXX: may need to set start/end to -1? */
++	}
++
++	iput(inode);
++
++	unionfs_read_unlock(dentry->d_sb);
++}
++
+ struct dentry_operations unionfs_dops = {
+ 	.d_revalidate	= unionfs_d_revalidate,
+ 	.d_release	= unionfs_d_release,
++	.d_iput		= unionfs_d_iput,
+ };
+-- 
+1.5.4.3
+

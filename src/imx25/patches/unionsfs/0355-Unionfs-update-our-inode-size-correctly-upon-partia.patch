@@ -1,0 +1,40 @@
+From 5bdb7ea19adb9a7970035ef08f50561dc3de92af Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 25 Nov 2007 13:34:04 -0500
+Subject: [PATCH] Unionfs: update our inode size correctly upon partial write
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    9 ++-------
+ 1 files changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index ea5ef3d..8c07eed 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -250,7 +250,6 @@ static int unionfs_commit_write(struct file *file, struct page *page,
+ 	int err = -ENOMEM;
+ 	struct inode *inode, *lower_inode;
+ 	struct file *lower_file = NULL;
+-	loff_t pos;
+ 	unsigned bytes = to - from;
+ 	char *page_data = NULL;
+ 	mm_segment_t old_fs;
+@@ -293,12 +292,8 @@ static int unionfs_commit_write(struct file *file, struct page *page,
+ 	if (err < 0)
+ 		goto out;
+ 
+-	inode->i_blocks = lower_inode->i_blocks;
+-	/* we may have to update i_size */
+-	pos = page_offset(page) + to;
+-	if (pos > i_size_read(inode))
+-		i_size_write(inode, pos);
+-	/* if vfs_write succeeded above, sync up our times */
++	/* if vfs_write succeeded above, sync up our times/sizes */
++	fsstack_copy_inode_size(inode, lower_inode);
+ 	unionfs_copy_attr_times(inode);
+ 	mark_inode_dirty_sync(inode);
+ 
+-- 
+1.5.4.3
+

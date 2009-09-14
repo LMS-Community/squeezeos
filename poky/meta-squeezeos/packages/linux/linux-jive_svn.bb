@@ -9,7 +9,7 @@ PR = "r3"
 inherit kernel
 
 SRC_URI = " \
-          ${SQUEEZEOS_SVN}/s3c2412;proto=http;module=linux-${LINUX_VERSION} \
+          ${SQUEEZEOS_SVN}/s3c2412;proto=https;module=linux-${LINUX_VERSION} \
           file://defconfig-jive \
           "
 

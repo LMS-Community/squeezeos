@@ -1,0 +1,157 @@
+From d0fca78bec3e063aa9329f13355876df77a81761 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+Date: Mon, 2 Feb 2009 12:50:08 -0600
+Subject: [PATCH] ENGR00106771-2 : MX51: Fixed DVFS core failure.
+
+Changed the code to use the ARM PODF divider for changing the CPU frequency if the DDR is sourced from PLL1.
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+---
+ arch/arm/mach-mx51/clock.c       |  106 ++++++++++++++++++++++----------------
+ arch/arm/mach-mx51/mx51_3stack.c |    4 +-
+ 2 files changed, 64 insertions(+), 46 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 2c872fe..0595a71 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -2902,53 +2902,69 @@ static int cpu_clk_set_wp(int wp)
+ 
+ 	p = &cpu_wp_tbl[wp];
+ 
+-	/* Change the ARM clock to requested frequency */
+-	/* First move the ARM clock to step clock which is running at 24MHz. */
+-
+-	/* Change the source of pll1_sw_clk to be the step_clk */
+-	reg = __raw_readl(MXC_CCM_CCSR);
+-	reg |= MXC_CCM_CCSR_PLL1_SW_CLK_SEL;
+-	__raw_writel(reg, MXC_CCM_CCSR);
+-
+-	/* Stop the PLL */
+-	reg = __raw_readl(MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
+-	reg &= ~MXC_PLL_DP_CTL_UPEN;
+-	__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
+-
+-	/* PDF and MFI */
+-	reg = p->pdf | p->mfi << MXC_PLL_DP_OP_MFI_OFFSET;
+-	__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_OP);
+-
+-	/* MFD */
+-	__raw_writel(p->mfd, MXC_DPLL1_BASE + MXC_PLL_DP_MFD);
+-
+-	/* MFI */
+-	__raw_writel(p->mfn, MXC_DPLL1_BASE + MXC_PLL_DP_MFN);
+-
+-	reg = __raw_readl(MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
+-	reg |= MXC_PLL_DP_CTL_UPEN;
+-	/* Set the UPEN bits */
+-	__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
+-	/* Forcefully restart the PLL */
+-	reg |= MXC_PLL_DP_CTL_RST;
+-	__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
+-
+-	/* Wait for the PLL to lock */
+-	do {
+-		stat = __raw_readl(MXC_DPLL1_BASE + MXC_PLL_DP_CTL) &
+-		    MXC_PLL_DP_CTL_LRF;
+-	} while (!stat);
+-
+-	reg = __raw_readl(MXC_CCM_CCSR);
+-	/* Move the PLL1 back to the pll1_main_clk */
+-	reg &= ~MXC_CCM_CCSR_PLL1_SW_CLK_SEL;
+-	__raw_writel(reg, MXC_CCM_CCSR);
++	/*
++	 * If DDR clock is sourced from PLL1, we cannot drop PLL1 freq.
++	 * Use the ARM_PODF to change the freq of the core, leave the PLL1
++	 * freq unchanged.
++	 */
++	if (ddr_clk.parent == &ddr_hf_clk) {
++		reg = __raw_readl(MXC_CCM_CACRR);
++		reg &= ~MXC_CCM_CACRR_ARM_PODF_MASK;
++		reg |= cpu_wp_tbl[wp].cpu_podf << MXC_CCM_CACRR_ARM_PODF_OFFSET;
++		__raw_writel(reg, MXC_CCM_CACRR);
++		cpu_curr_wp = wp;
++		cpu_clk.rate = cpu_wp_tbl[wp].cpu_rate;
++	} else {
++		/* Change the ARM clock to requested frequency */
++		/* First move the ARM clock to step clock which is running
++		 * at 24MHz.
++		 */
++
++		/* Change the source of pll1_sw_clk to be the step_clk */
++		reg = __raw_readl(MXC_CCM_CCSR);
++		reg |= MXC_CCM_CCSR_PLL1_SW_CLK_SEL;
++		__raw_writel(reg, MXC_CCM_CCSR);
++
++		/* Stop the PLL */
++		reg = __raw_readl(MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
++		reg &= ~MXC_PLL_DP_CTL_UPEN;
++		__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
++
++		/* PDF and MFI */
++		reg = p->pdf | p->mfi << MXC_PLL_DP_OP_MFI_OFFSET;
++		__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_OP);
++
++		/* MFD */
++		__raw_writel(p->mfd, MXC_DPLL1_BASE + MXC_PLL_DP_MFD);
++
++		/* MFI */
++		__raw_writel(p->mfn, MXC_DPLL1_BASE + MXC_PLL_DP_MFN);
++
++		reg = __raw_readl(MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
++		reg |= MXC_PLL_DP_CTL_UPEN;
++		/* Set the UPEN bits */
++		__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
++		/* Forcefully restart the PLL */
++		reg |= MXC_PLL_DP_CTL_RST;
++		__raw_writel(reg, MXC_DPLL1_BASE + MXC_PLL_DP_CTL);
++
++		/* Wait for the PLL to lock */
++		do {
++			stat = __raw_readl(MXC_DPLL1_BASE + MXC_PLL_DP_CTL) &
++			    MXC_PLL_DP_CTL_LRF;
++		} while (!stat);
++
++		reg = __raw_readl(MXC_CCM_CCSR);
++		/* Move the PLL1 back to the pll1_main_clk */
++		reg &= ~MXC_CCM_CCSR_PLL1_SW_CLK_SEL;
++		__raw_writel(reg, MXC_CCM_CCSR);
+ 
+-	cpu_curr_wp = wp;
++		cpu_curr_wp = wp;
+ 
+-	pll1_sw_clk.rate = cpu_wp_tbl[wp].cpu_rate;
+-	pll1_main_clk.rate = pll1_sw_clk.rate;
+-	cpu_clk.rate = pll1_sw_clk.rate;
++		pll1_sw_clk.rate = cpu_wp_tbl[wp].cpu_rate;
++		pll1_main_clk.rate = pll1_sw_clk.rate;
++		cpu_clk.rate = pll1_sw_clk.rate;
++	}
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 9f9a4f5..b5aa690 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -76,14 +76,16 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .mfi = 8,
+ 	 .mfd = 2,
+ 	 .mfn = 1,
++	 .cpu_podf = 0,
+ 	 .cpu_voltage = 1050000,},
+ 	{
+-	 .pll_rate = 200000000,
++	 .pll_rate = 800000000,
+ 	 .cpu_rate = 200000000,
+ 	 .pdf = 3,
+ 	 .mfi = 8,
+ 	 .mfd = 2,
+ 	 .mfn = 1,
++	 .cpu_podf = 3,
+ 	 .cpu_voltage = 775000,},
+ };
+ 
+-- 
+1.5.4.4
+

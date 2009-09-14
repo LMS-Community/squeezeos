@@ -1,0 +1,99 @@
+From b3446010060b9a4928d737f27b93f8b7f6f1bbdd Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 18 Nov 2008 18:09:49 +0200
+Subject: [PATCH] UBIFS: do not print scary memory allocation warnings
+
+Bulk-read allocates a lot of memory with 'kmalloc()', and when it
+is/gets fragmented 'kmalloc()' fails with a scarry warning. But
+because bulk-read is just an optimization, UBIFS keeps working fine.
+Supress the warning by passing __GFP_NOWARN option to 'kmalloc()'.
+
+This patch also introduces a macro for the magic 128KiB constant.
+This is just neater.
+
+Note, this is not really fixes the problem we had, but just hides
+the warnings. The further patches fix the problem.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/file.c  |    4 ++--
+ fs/ubifs/super.c |   17 ++++++++++++-----
+ fs/ubifs/ubifs.h |    2 +-
+ 3 files changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/fs/ubifs/file.c b/fs/ubifs/file.c
+index 9e0e437..5bd79e4 100644
+--- a/fs/ubifs/file.c
++++ b/fs/ubifs/file.c
+@@ -704,12 +704,12 @@ static int ubifs_do_bulk_read(struct ubifs_info *c, struct page *page1)
+ 	int err, page_idx, page_cnt, ret = 0, n = 0;
+ 	loff_t isize;
+ 
+-	bu = kmalloc(sizeof(struct bu_info), GFP_NOFS);
++	bu = kmalloc(sizeof(struct bu_info), GFP_NOFS | __GFP_NOWARN);
+ 	if (!bu)
+ 		return 0;
+ 
+ 	bu->buf_len = c->bulk_read_buf_size;
+-	bu->buf = kmalloc(bu->buf_len, GFP_NOFS);
++	bu->buf = kmalloc(bu->buf_len, GFP_NOFS | __GFP_NOWARN);
+ 	if (!bu->buf)
+ 		goto out_free;
+ 
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 19d69ab..3870ba5 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -36,6 +36,12 @@
+ #include <linux/mount.h>
+ #include "ubifs.h"
+ 
++/*
++ * Maximum amount of memory we may 'kmalloc()' without worrying that we are
++ * allocating too much.
++ */
++#define UBIFS_KMALLOC_OK (128*1024)
++
+ /* Slab cache for UBIFS inodes */
+ struct kmem_cache *ubifs_inode_slab;
+ 
+@@ -559,17 +565,18 @@ static int init_constants_early(struct ubifs_info *c)
+ 	 * calculations when reporting free space.
+ 	 */
+ 	c->leb_overhead = c->leb_size % UBIFS_MAX_DATA_NODE_SZ;
++
+ 	/* Buffer size for bulk-reads */
+ 	c->bulk_read_buf_size = UBIFS_MAX_BULK_READ * UBIFS_MAX_DATA_NODE_SZ;
+ 	if (c->bulk_read_buf_size > c->leb_size)
+ 		c->bulk_read_buf_size = c->leb_size;
+-	if (c->bulk_read_buf_size > 128 * 1024) {
+-		/* Check if we can kmalloc more than 128KiB */
+-		void *try = kmalloc(c->bulk_read_buf_size, GFP_KERNEL);
+-
++	if (c->bulk_read_buf_size > UBIFS_KMALLOC_OK) {
++		/* Check if we can kmalloc that much */
++		void *try = kmalloc(c->bulk_read_buf_size,
++				    GFP_KERNEL | __GFP_NOWARN);
+ 		kfree(try);
+ 		if (!try)
+-			c->bulk_read_buf_size = 128 * 1024;
++			c->bulk_read_buf_size = UBIFS_KMALLOC_OK;
+ 	}
+ 	return 0;
+ }
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 1c947c3..82b0d79 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -750,7 +750,7 @@ struct ubifs_znode {
+ };
+ 
+ /**
+- * struct bu_info - bulk-read information
++ * struct bu_info - bulk-read information.
+  * @key: first data node key
+  * @zbranch: zbranches of data nodes to bulk read
+  * @buf: buffer to read into
+-- 
+1.5.4.3
+

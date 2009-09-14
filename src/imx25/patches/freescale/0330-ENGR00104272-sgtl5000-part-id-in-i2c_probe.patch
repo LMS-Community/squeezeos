@@ -1,0 +1,147 @@
+From dfb381af2dcba3640d7a8d72aa3669a8892772ee Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Tue, 6 Jan 2009 15:27:59 -0600
+Subject: [PATCH] ENGR00104272 sgtl5000: part id in i2c_probe
+
+Do part id in i2c_probe.  Exit error if sgtl5000 not found.
+Prevent io probe and codec probe if i2c probe failed.
+Make mach_remove safe to call.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/codecs/sgtl5000.c         |   17 +++++++++++----
+ sound/soc/codecs/sgtl5000.h         |    3 +-
+ sound/soc/imx/imx-3stack-sgtl5000.c |   36 +++++++++++++++++++++-------------
+ 3 files changed, 36 insertions(+), 20 deletions(-)
+
+diff --git a/sound/soc/codecs/sgtl5000.c b/sound/soc/codecs/sgtl5000.c
+index 4ec7b57..ad8d61b 100644
+--- a/sound/soc/codecs/sgtl5000.c
++++ b/sound/soc/codecs/sgtl5000.c
+@@ -868,7 +868,6 @@ static int sgtl5000_codec_probe(struct device *dev)
+ {
+ 	struct snd_soc_codec *codec = to_snd_soc_codec(dev);
+ 	struct sgtl5000_priv *sgtl5000;
+-	u16 val;
+ 
+ 	codec->owner = THIS_MODULE;
+ 	codec->ops = &sgtl5000_codec_ops;
+@@ -880,10 +879,6 @@ static int sgtl5000_codec_probe(struct device *dev)
+ 
+ 	snd_soc_register_codec(codec);
+ 
+-	val = sgtl5000_read(codec, SGTL5000_CHIP_ID);
+-	dev_info(&sgtl5000_i2c_client->dev, "SGTL5000 revision %d\n",
+-		 (val & SGTL5000_REVID_MASK) >> SGTL5000_REVID_SHIFT);
+-
+ 	return 0;
+ }
+ 
+@@ -940,9 +935,21 @@ static int sgtl5000_i2c_probe(struct i2c_client *client,
+ 				const struct i2c_device_id *id)
+ {
+ 	int ret;
++	unsigned int val;
+ 
+ 	sgtl5000_i2c_client = client;
+ 
++	val = sgtl5000_read(NULL, SGTL5000_CHIP_ID);
++	if (((val & SGTL5000_PARTID_MASK) >> SGTL5000_PARTID_SHIFT) !=
++		SGTL5000_PARTID_PART_ID) {
++		sgtl5000_i2c_client = NULL;
++		pr_err("Device with ID register %x is not a SGTL5000\n", val);
++		return -ENODEV;
++	}
++
++	dev_info(&sgtl5000_i2c_client->dev, "SGTL5000 revision %d\n",
++		 (val & SGTL5000_REVID_MASK) >> SGTL5000_REVID_SHIFT);
++
+ 	ret = driver_register(&sgtl5000_codec_driver.driver);
+ 	if (ret < 0)
+ 		return ret;
+diff --git a/sound/soc/codecs/sgtl5000.h b/sound/soc/codecs/sgtl5000.h
+index b8b8d08..02aa979 100644
+--- a/sound/soc/codecs/sgtl5000.h
++++ b/sound/soc/codecs/sgtl5000.h
+@@ -1,7 +1,7 @@
+ /*
+  * sgtl5000.h - SGTL5000 audio codec interface
+  *
+- * Copyright 2008 Freescale Semiconductor, Inc.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc.
+  *
+  *  This program is free software; you can redistribute  it and/or modify it
+  *  under  the terms of  the GNU General  Public License as published by the
+@@ -78,6 +78,7 @@
+ #define SGTL5000_PARTID_MASK			0xff00
+ #define SGTL5000_PARTID_SHIFT			8
+ #define SGTL5000_PARTID_WIDTH			8
++#define SGTL5000_PARTID_PART_ID		0xa0
+ #define SGTL5000_REVID_MASK			0x00ff
+ #define SGTL5000_REVID_SHIFT			0
+ #define SGTL5000_REVID_WIDTH			8
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index 95b4f6b..dedd1e3 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -542,8 +542,10 @@ err_reg_vdda:
+ 		regulator_put(priv->reg_vddio, &pdev->dev);
+ err_reg_vddio:
+ 	kfree(codec_data);
++	codec->platform_data = NULL;
+ err_codec_data:
+ 	kfree(priv);
++	machine->platform_data = NULL;
+ 	return ret;
+ }
+ 
+@@ -555,26 +557,32 @@ static int mach_remove(struct snd_soc_machine *machine)
+ 	struct platform_device *pdev = machine->pdev;
+ 	struct mxc_sgtl5000_platform_data *plat = pdev->dev.platform_data;
+ 
+-	free_irq(plat->hp_irq, machine);
++	if (machine->platform_data)
++		free_irq(plat->hp_irq, machine);
+ 
+ 	pcm_link = list_first_entry(&machine->active_list,
+ 				    struct snd_soc_pcm_link, active_list);
+ 
+ 	codec = pcm_link->codec;
+-	kfree(codec->platform_data);
+-	codec->platform_data = NULL;
+ 
+-	priv = machine->platform_data;
+-	if (priv->reg_vddio)
+-		regulator_disable(priv->reg_vddio);
+-	regulator_disable(priv->reg_vdda);
+-	regulator_disable(priv->reg_amp_gpo);
+-	regulator_put(priv->reg_amp_gpo, &pdev->dev);
+-	regulator_put(priv->reg_vdda, &pdev->dev);
+-	if (priv->reg_vddio)
+-		regulator_put(priv->reg_vddio, &pdev->dev);
+-	kfree(machine->platform_data);
+-	machine->platform_data = NULL;
++	if (codec && codec->platform_data) {
++		kfree(codec->platform_data);
++		codec->platform_data = NULL;
++	}
++
++	if (machine->platform_data) {
++		priv = machine->platform_data;
++		if (priv->reg_vddio)
++			regulator_disable(priv->reg_vddio);
++		regulator_disable(priv->reg_vdda);
++		regulator_disable(priv->reg_amp_gpo);
++		regulator_put(priv->reg_amp_gpo, &pdev->dev);
++		regulator_put(priv->reg_vdda, &pdev->dev);
++		if (priv->reg_vddio)
++			regulator_put(priv->reg_vddio, &pdev->dev);
++		kfree(machine->platform_data);
++		machine->platform_data = NULL;
++	}
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

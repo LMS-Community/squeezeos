@@ -1,0 +1,55 @@
+From ddbf013f23e74fae17ef47a973f066bab1b98631 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 28 Dec 2007 13:46:14 -0500
+Subject: [PATCH] Unionfs: handle on lower inodes in lookup
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    6 +++++-
+ fs/unionfs/lookup.c |    5 +++++
+ 2 files changed, 10 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index b207a6f..0e89308 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -151,8 +151,12 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 			valid = false;
+ 	}
+ 
+-	if (!dentry->d_inode)
++	if (!dentry->d_inode ||
++	    ibstart(dentry->d_inode) < 0 ||
++	    ibend(dentry->d_inode) < 0) {
+ 		valid = false;
++		goto out;
++	}
+ 
+ 	if (valid) {
+ 		/*
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 85a85aa..b9ee072 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -225,6 +225,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 		wh_lower_dentry = NULL;
+ 
+ 		/* Now do regular lookup; lookup foo */
++		BUG_ON(!lower_dir_dentry);
+ 		lower_dentry = lookup_one_len(name, lower_dir_dentry, namelen);
+ 		if (IS_ERR(lower_dentry)) {
+ 			dput(first_lower_dentry);
+@@ -315,6 +316,10 @@ out_negative:
+ 			UNIONFS_I(dentry->d_inode)->stale = 1;
+ 		goto out;
+ 	}
++	if (!lower_dir_dentry) {
++		err = -ENOENT;
++		goto out;
++	}
+ 	/* This should only happen if we found a whiteout. */
+ 	if (first_dentry_offset == -1) {
+ 		first_lower_dentry = lookup_one_len(name, lower_dir_dentry,
+-- 
+1.5.4.3
+

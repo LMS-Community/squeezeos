@@ -1,0 +1,181 @@
+From 6655e52ecfffd220acf804737bdc7feb8f3635c9 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Thu, 9 Oct 2008 13:03:20 -0500
+Subject: [PATCH] ENGR00070689-3 mx51: add tve support
+
+Add TVE driver support to MX51
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |    2 +-
+ arch/arm/mach-mx51/clock.c              |   47 +++++++++++++++++++++++++++++-
+ arch/arm/mach-mx51/devices.c            |   44 ++++++++++++++++++++++++++++-
+ 3 files changed, 89 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index c29219d..2b8820f 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -970,7 +970,7 @@ CONFIG_FB_CFB_IMAGEBLIT=y
+ CONFIG_FB_MXC=y
+ CONFIG_FB_MXC_SYNC_PANEL=y
+ CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL=y
+-# CONFIG_FB_MXC_TVOUT_TVE is not set
++CONFIG_FB_MXC_TVOUT_TVE=y
+ # CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_TVOUT is not set
+ # CONFIG_FB_MXC_TVOUT_CH7024 is not set
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 4d1fa8b..5defff7 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -35,6 +35,7 @@ static struct clk pll1_sw_clk;
+ static struct clk pll2_sw_clk;
+ static struct clk pll3_sw_clk;
+ static struct clk lp_apm_clk;
++static struct clk tve_clk;
+ 
+ extern void propagate_rate(struct clk *tclk);
+ extern void board_ref_clk_rate(unsigned long *ckil, unsigned long *osc,
+@@ -542,18 +543,60 @@ static struct clk sdma_clk[] = {
+ 
+ static struct clk ipu_clk = {
+ 	.name = "ipu_clk",
+-	.parent = &axi_a_clk,
++	.parent = &ahb_clk,
+ 	.enable_reg = MXC_CCM_CCGR5,
+ 	.enable_shift = MXC_CCM_CCGR5_CG5_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ };
+ 
++static int _clk_ipu_di_set_parent(struct clk *clk, struct clk *parent)
++{
++	u32 reg;
++
++	reg = __raw_readl(MXC_CCM_CSCMR2);
++	reg &= ~MXC_CCM_CSCMR2_DI_CLK_SEL_MASK;
++	if (parent == &pll3_sw_clk)
++		;
++	else if (parent == &osc_clk)
++		reg |= 1 << MXC_CCM_CSCMR2_DI_CLK_SEL_OFFSET;
++	else if (parent == &ckih_clk)
++		reg |= 2 << MXC_CCM_CSCMR2_DI_CLK_SEL_OFFSET;
++	else if (parent == &tve_clk)
++		reg |= 3 << MXC_CCM_CSCMR2_DI_CLK_SEL_OFFSET;
++	else	/* Assume any other clock is external clock pin */
++		reg |= 4 << MXC_CCM_CSCMR2_DI_CLK_SEL_OFFSET;
++	__raw_writel(reg, MXC_CCM_CSCMR2);
++
++	return 0;
++}
++
++static void _clk_ipu_di_recalc(struct clk *clk)
++{
++	u32 reg, div, mux;
++
++	reg = __raw_readl(MXC_CCM_CSCMR2);
++	mux = (reg & MXC_CCM_CSCMR2_DI_CLK_SEL_MASK) >>
++		MXC_CCM_CSCMR2_DI_CLK_SEL_OFFSET;
++	if (mux == 0) {
++		reg = __raw_readl(MXC_CCM_CDCDR) &
++		    MXC_CCM_CDCDR_DI_CLK_PRED_MASK;
++		div = (reg >> MXC_CCM_CDCDR_DI_CLK_PRED_OFFSET) + 1;
++		clk->rate = clk->parent->rate / div;
++	} else if (mux == 3) {
++		clk->rate = clk->parent->rate / 8;
++	} else {
++		clk->rate = clk->parent->rate;
++	}
++}
++
+ static struct clk ipu_di_clk = {
+ 	.name = "ipu_di_clk",
+-	.parent = &osc_clk,
++	.parent = &pll3_sw_clk,
+ 	.enable_reg = MXC_CCM_CCGR5,
+ 	.enable_shift = MXC_CCM_CCGR5_CG6_OFFSET,
++	.recalc = _clk_ipu_di_recalc,
++	.set_parent = _clk_ipu_di_set_parent,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ };
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 22ae8ae..8d95c28 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -225,6 +225,11 @@ static void mxc_init_ipu(void)
+ 	u32 base = IO_ADDRESS(MIPI_HSC_BASE_ADDR);
+ 	struct clk *clk;
+ 
++	mxc_ipu_data.di_clk[1] = clk_get(NULL, "ipu_di_clk");
++	clk = clk_get(NULL, "tve_clk");
++	clk_set_parent(mxc_ipu_data.di_clk[1], clk);
++	clk_put(clk);
++
+ 	/* Temporarily setup MIPI module to legacy mode */
+ 	clk = clk_get(NULL, "mipi_hsp_clk");
+ 	if (!IS_ERR(clk)) {
+@@ -628,7 +633,6 @@ static inline void mxc_init_i2c(void)
+ #endif
+ 
+ #if defined(CONFIG_I2C_MXC_HS) || defined(CONFIG_I2C_MXC_HS_MODULE)
+-
+ static struct resource mxci2c_hs_resources[] = {
+ 	[0] = {
+ 	       .start = HSI2C_DMA_BASE_ADDR,
+@@ -670,6 +674,43 @@ static inline void mxc_init_i2c_hs(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_FB_MXC_TVOUT_TVE) || defined(CONFIG_FB_MXC_TVOUT_TVE_MODULE)
++static struct resource tve_resources[] = {
++	{
++	 .start = TVE_BASE_ADDR,
++	 .end = TVE_BASE_ADDR + SZ_4K - 1,
++	 .flags = IORESOURCE_MEM,
++	 },
++	{
++	 .start = MXC_INT_TVE,
++	 .flags = IORESOURCE_IRQ,
++	 },
++};
++static struct tve_platform_data tve_data = {
++	.dac_reg = "VVIDEO",
++	.dig_reg = "VDIG",
++};
++
++static struct platform_device mxc_tve_device = {
++	.name = "tve",
++	.dev = {
++		.platform_data = &tve_data,
++		.release = mxc_nop_release,
++		},
++	.num_resources = ARRAY_SIZE(tve_resources),
++	.resource = tve_resources,
++};
++
++void __init mxc_init_tve(void)
++{
++	platform_device_register(&mxc_tve_device);
++}
++#else
++static inline void mxc_init_tve(void)
++{
++}
++#endif
++
+ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ 	{
+ 	 .num = 0,
+@@ -790,6 +831,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_vpu();
+ 	mxc_init_audio();
+ 	mxc_init_spdif();
++	mxc_init_tve();
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

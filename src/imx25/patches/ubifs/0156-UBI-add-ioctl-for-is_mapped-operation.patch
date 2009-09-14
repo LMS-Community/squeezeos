@@ -1,0 +1,59 @@
+From d69abe5e22865d4796313f69707f0caa645f9e3f Mon Sep 17 00:00:00 2001
+From: Corentin Chary <corentincj@iksaif.net>
+Date: Mon, 5 Jan 2009 14:48:59 +0100
+Subject: [PATCH] UBI: add ioctl for is_mapped operation
+
+This patch adds ioctl to check if an LEB is mapped or not (as a
+debugging option so far).
+
+[Re-named ioctl to make it look the same as the other one and made
+ some minor stylistic changes. Artem Bityutskiy.]
+
+Signed-off-by: Corentin Chary <corentincj@iksaif.net>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |   14 ++++++++++++++
+ include/mtd/ubi-user.h |    2 ++
+ 2 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 481da3e..98cf7a4 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -545,6 +545,20 @@ static int vol_cdev_ioctl(struct inode *inode, struct file *file,
+ 		err = ubi_leb_unmap(desc, lnum);
+ 		break;
+ 	}
++
++	/* Check if logical eraseblock is mapped command */
++	case UBI_IOCEBISMAP:
++	{
++		int32_t lnum;
++
++		err = get_user(lnum, (__user int32_t *)argp);
++		if (err) {
++			err = -EFAULT;
++			break;
++		}
++		err = ubi_is_mapped(desc, lnum);
++		break;
++	}
+ #endif
+ 
+ 	default:
+diff --git a/include/mtd/ubi-user.h b/include/mtd/ubi-user.h
+index 0348e63..65e5df8 100644
+--- a/include/mtd/ubi-user.h
++++ b/include/mtd/ubi-user.h
+@@ -137,6 +137,8 @@
+ #define UBI_IOCEBMAP _IOW(UBI_VOL_IOC_MAGIC, 3, struct ubi_map_req)
+ /* Unmap an eraseblock, used for debugging, disabled by default */
+ #define UBI_IOCEBUNMAP _IOW(UBI_VOL_IOC_MAGIC, 4, int32_t)
++/* Check if an eraseblock is mapped, used for debugging, disabled by default */
++#define UBI_IOCEBISMAP _IOR(UBI_VOL_IOC_MAGIC, 5, int32_t)
+ 
+ /* Maximum MTD device name length supported by UBI */
+ #define MAX_UBI_MTD_NAME_LEN 127
+-- 
+1.5.4.3
+

@@ -1,0 +1,219 @@
+From 916df22afd131f48443345b2108e06f0d16c2184 Mon Sep 17 00:00:00 2001
+From: Robby Cai <r63905@freescale.com>
+Date: Tue, 17 Jun 2008 19:20:58 +0800
+Subject: [PATCH] ENGR00080709: Fix overlap IRAM usage for audio/sdma/VPU
+
+Fix overlap IRAM usage for audio/sdma/VPU
+Now the IRAM usage for VPU is dynamically determined by the free
+IRAM setting in kernel.
+
+Signed-off-by: Robby Cai <r63905@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |    6 +++++-
+ arch/arm/mach-mx37/devices.c            |   10 ++++++++++
+ drivers/mxc/vpu/Kconfig                 |    8 ++++++++
+ drivers/mxc/vpu/mxc_vpu.c               |   31 ++++++++++++++++++++++++++++++-
+ include/asm-arm/arch-mxc/mx37.h         |    7 +++++++
+ include/asm-arm/arch-mxc/mxc_vpu.h      |    3 ++-
+ 6 files changed, 62 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 63e39fd..7e00a94 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Wed May 28 15:52:17 2008
++# Tue Jun 17 19:31:38 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -157,6 +157,7 @@ CONFIG_ARCH_MXC=y
+ # CONFIG_ARCH_MXC91321 is not set
+ CONFIG_ARCH_MX37=y
+ # CONFIG_ARCH_MX35 is not set
++# CONFIG_ARCH_MX51 is not set
+ # CONFIG_ARCH_MX3 is not set
+ # CONFIG_ARCH_MX27 is not set
+ # CONFIG_ARCH_MX21 is not set
+@@ -194,6 +195,7 @@ CONFIG_CPU_32=y
+ # CONFIG_CPU_ARM926T is not set
+ CONFIG_CPU_V6=y
+ CONFIG_CPU_32v6K=y
++# CONFIG_CPU_V7 is not set
+ CONFIG_CPU_32v6=y
+ CONFIG_CPU_ABRT_EV6=y
+ CONFIG_CPU_CACHE_V6=y
+@@ -1086,6 +1088,7 @@ CONFIG_USB_DEVICEFS=y
+ CONFIG_USB_EHCI_HCD=m
+ CONFIG_USB_EHCI_ARC=y
+ CONFIG_USB_EHCI_ARC_OTG=y
++# CONFIG_USB_STATIC_IRAM is not set
+ CONFIG_USB_EHCI_ARC_OTGHS=y
+ # CONFIG_USB_EHCI_ARC_OTGFS is not set
+ # CONFIG_USB_EHCI_SPLIT_ISO is not set
+@@ -1307,6 +1310,7 @@ CONFIG_MXC_IPU_V3=y
+ # MXC VPU(Video Processing Unit) support
+ #
+ CONFIG_MXC_VPU=y
++CONFIG_MXC_VPU_IRAM=y
+ # CONFIG_MXC_VPU_DEBUG is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index 5756831..e11d45a 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -579,6 +579,14 @@ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ };
+ 
+ #if defined(CONFIG_MXC_VPU) || defined(CONFIG_MXC_VPU_MODULE)
++static struct resource vpu_resources[] = {
++	{
++	 .start = VPU_IRAM_BASE_ADDR,
++	 .end = VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE,
++	 .flags = IORESOURCE_MEM,
++	 },
++};
++
+ /*! Platform Data for MXC VPU */
+ static struct platform_device mxcvpu_device = {
+ 	.name = "mxc_vpu",
+@@ -586,6 +594,8 @@ static struct platform_device mxcvpu_device = {
+ 	.dev = {
+ 		.release = mxc_nop_release,
+ 		},
++	.num_resources = ARRAY_SIZE(vpu_resources),
++	.resource = vpu_resources,
+ };
+ 
+ static inline void mxc_init_vpu(void)
+diff --git a/drivers/mxc/vpu/Kconfig b/drivers/mxc/vpu/Kconfig
+index 7c73a52..e54baf0 100644
+--- a/drivers/mxc/vpu/Kconfig
++++ b/drivers/mxc/vpu/Kconfig
+@@ -12,6 +12,14 @@ config MXC_VPU
+ 	  The VPU codec device provides codec function for H.264/MPEG4/H.263,
+ 	  as well as MPEG2/VC-1/DivX on some platforms.
+ 
++config MXC_VPU_IRAM
++	  tristate "Use IRAM as temporary buffer for VPU to enhance performace"
++	  depends on ARCH_MX37
++	  default y
++	---help---
++	  The VPU can use internal RAM as temporary buffer to save external
++	  memroy bandwith, thus to enhance video performance.
++
+ config MXC_VPU_DEBUG
+ 	bool "MXC VPU debugging"
+ 	depends on MXC_VPU != n
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 7b546a3..75aadd8 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2006-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2006-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -54,6 +54,11 @@ typedef struct memalloc_record {
+ 	vpu_mem_desc mem;
+ } memalloc_record;
+ 
++struct iram_setting {
++	u32 start;
++	u32 end;
++};
++
+ static DEFINE_SPINLOCK(vpu_lock);
+ static LIST_HEAD(head);
+ 
+@@ -63,6 +68,9 @@ static struct vpu_t vpu_data;
+ static u8 open_count = 0;
+ static struct clk *vpu_clk;
+ 
++/* IRAM setting */
++static struct iram_setting iram;
++
+ /* implement the blocking ioctl */
+ static int codec_done = 0;
+ static wait_queue_head_t vpu_queue;
+@@ -271,6 +279,17 @@ static int vpu_ioctl(struct inode *inode, struct file *filp, u_int cmd,
+ 			vl2cc_flush();
+ 		}
+ 		break;
++	case VPU_IOC_IRAM_SETTING:
++		{
++			ret = copy_to_user((void __user *)arg, &iram,
++					   sizeof(struct iram_setting));
++			if (ret) {
++				ret = -EFAULT;
++				break;
++			}
++
++			break;
++		}
+ 	case VPU_IOC_REG_DUMP:
+ 		break;
+ 	case VPU_IOC_PHYMEM_DUMP:
+@@ -391,6 +410,16 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 			return err;
+ 	}
+ 
++	if (cpu_is_mx37()) {
++		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++		if (!res) {
++			printk(KERN_ERR "vpu: unable to get VPU IRAM base\n");
++			return -ENOENT;
++		}
++		iram.start = res->start;
++		iram.end = res->end;
++	}
++
+ 	vpu_major = register_chrdev(vpu_major, "mxc_vpu", &vpu_fops);
+ 	if (vpu_major < 0) {
+ 		printk(KERN_ERR "vpu: unable to get a major for VPU\n");
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index d60fc7c..98243cf 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -88,6 +88,13 @@
+ #define USB_IRAM_SIZE 0
+ #endif
+ 
++#define VPU_IRAM_BASE_ADDR	(USB_IRAM_BASE_ADDR + USB_IRAM_SIZE)
++#ifdef CONFIG_MXC_VPU_IRAM
++#define VPU_IRAM_SIZE	(IRAM_BASE_ADDR + IRAM_SIZE - VPU_IRAM_BASE_ADDR)
++#else
++#define VPU_IRAM_SIZE 0
++#endif
++
+ /*
+  * NFC
+  */
+diff --git a/include/asm-arm/arch-mxc/mxc_vpu.h b/include/asm-arm/arch-mxc/mxc_vpu.h
+index 82dffd9..dbbf174 100644
+--- a/include/asm-arm/arch-mxc/mxc_vpu.h
++++ b/include/asm-arm/arch-mxc/mxc_vpu.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -43,6 +43,7 @@ typedef struct vpu_mem_desc {
+ #define VPU_IOC_PHYMEM_DUMP	_IO(VPU_IOC_MAGIC, 3)
+ #define VPU_IOC_REG_DUMP	_IO(VPU_IOC_MAGIC, 4)
+ #define VPU_IOC_VL2CC_FLUSH	_IO(VPU_IOC_MAGIC, 5)
++#define VPU_IOC_IRAM_SETTING	_IO(VPU_IOC_MAGIC, 6)
+ 
+ int vl2cc_init(u32 vl2cc_hw_base);
+ void vl2cc_enable(void);
+-- 
+1.5.4.4
+

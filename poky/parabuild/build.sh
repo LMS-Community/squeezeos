@@ -1,6 +1,7 @@
 #!/bin/sh
 
 PARABUILD_ENV_SCRIPT="/home/parabuild/private-env-7.4.sh"
+CPUCOUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 
 # Figure out how many CPUs we have, and set our multithreading
 # options accordingly. 
@@ -26,10 +27,11 @@ fi
 echo "*** Clean cache and squeezeplay ***"
 
 # Clean the cache to ensure poky checks out updated packages from SVN
+rm -rf tmp-${MACHINE}/cache
 rm -rf tmp/cache
 
 # Clean squeezeplay to ensure that the firmware revision number is correct
-run_bitbake "squeezeplay -c clean"
+run_bitbake "squeezeplay -c clean" > /dev/null
 
 echo "*** Update the local.conf file ***"
 if [ "x${SQUEEZEOS_PRIVATE_SVN}" != "x" ]
@@ -57,7 +59,7 @@ fi
 echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Make build use all available CPUs
-echo "BB_NUMBER_THREADS = $DOUBLECPUCOUNT
+echo "BB_NUMBER_THREADS = $CPUCOUNT
 DL_DIR = $HOME/.poky_dl_dir
 PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
 
@@ -66,15 +68,15 @@ echo "*** Building ***"
 run_bitbake "squeezeos-image"
 
 # Do not leave the source code on the build machine, cleanup private modules
-for PKG in 'marvell-wlan-tools-src' 'marvell-gspi-module-src'
+for PKG in 'marvell-wlan-tools-src' 'marvell-gspi-module-src' 'marvell-wps-src' 'squeezeplay-private'
 do
 	echo "*** Cleaning $PKG ***"
 	run_bitbake "$PKG -c clean -f"
 done
 
 # QA: Check version numbers match
-SQUEEZEOS_VERSION=`cat tmp/rootfs/etc/squeezeos.version | perl -nle 'print if s/^[\d\.]+\sr(\d+)$/$1/'`
-SQUEEZEPLAY_VERSION=`strings tmp/rootfs/usr/bin/jive | perl -nle 'print if s/^[\d\.]+\sr(\d+)$/$1/'`
+SQUEEZEOS_VERSION=`cat tmp-${MACHINE}/rootfs/etc/squeezeos.version | perl -nle 'print if s/^[\d\.]+\sr(\d+)$/$1/'`
+SQUEEZEPLAY_VERSION=`strings tmp-${MACHINE}/rootfs/usr/bin/jive | perl -nle 'print if s/^[\d\.]+\sr(\d+)$/$1/'`
 
 echo "SQUEEZEOS_VERSION=${SQUEEZEOS_VERSION}"
 echo "SQUEEZEPLAY_VERSION=${SQUEEZEPLAY_VERSION}"

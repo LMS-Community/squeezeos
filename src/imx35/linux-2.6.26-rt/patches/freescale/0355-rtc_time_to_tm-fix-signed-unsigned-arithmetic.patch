@@ -1,0 +1,58 @@
+From 42a136874a01b1a5ce954f383e0d9aef35eaa328 Mon Sep 17 00:00:00 2001
+From: Jan Altenberg <jan.altenberg@linutronix.de>
+Date: Tue, 2 Sep 2008 14:36:05 -0700
+Subject: [PATCH] rtc_time_to_tm: fix signed/unsigned arithmetic
+
+commit 945185a69daa457c4c5e46e47f4afad7dcea734f ("rtc: rtc_time_to_tm: use
+unsigned arithmetic") changed the some types in rtc_time_to_tm() to
+unsigned:
+
+ void rtc_time_to_tm(unsigned long time, struct rtc_time *tm)
+ {
+-       register int days, month, year;
++       unsigned int days, month, year;
+
+This doesn't work for all cases, because days is checked for < 0 later
+on:
+
+if (days < 0) {
+	year -= 1;
+	days += 365 + LEAP_YEAR(year);
+}
+
+I think the correct fix would be to keep days signed and do an appropriate
+cast later on.
+
+Signed-off-by: Jan Altenberg <jan.altenberg@linutronix.de>
+Cc: Maciej W. Rozycki <macro@linux-mips.org>
+Cc: Alessandro Zummo <a.zummo@towertech.it>
+Cc: David Brownell <david-b@pacbell.net>
+Cc: Dmitri Vorobiev <dmitri.vorobiev@gmail.com>
+Cc: <stable@kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ drivers/rtc/rtc-lib.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/rtc/rtc-lib.c b/drivers/rtc/rtc-lib.c
+index 9f996ec..dd70bf7 100644
+--- a/drivers/rtc/rtc-lib.c
++++ b/drivers/rtc/rtc-lib.c
+@@ -51,10 +51,11 @@ EXPORT_SYMBOL(rtc_year_days);
+  */
+ void rtc_time_to_tm(unsigned long time, struct rtc_time *tm)
+ {
+-	unsigned int days, month, year;
++	unsigned int month, year;
++	int days;
+ 
+ 	days = time / 86400;
+-	time -= days * 86400;
++	time -= (unsigned int) days * 86400;
+ 
+ 	/* day of the week, 1970-01-01 was a Thursday */
+ 	tm->tm_wday = (days + 4) % 7;
+-- 
+1.5.4.4
+

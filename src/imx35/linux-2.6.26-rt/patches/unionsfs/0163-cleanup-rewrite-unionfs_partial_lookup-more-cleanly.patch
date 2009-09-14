@@ -1,0 +1,54 @@
+From 88faf4e1b82a11a09ee81d00a47f40bed4594f7a Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 28 May 2007 19:39:44 -0400
+Subject: [PATCH] cleanup: rewrite unionfs_partial_lookup more cleanly and add comments
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |   22 ++++++++++++++++------
+ 1 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index ead0c6a..5c2334e 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -422,20 +422,30 @@ out:
+ 	return ERR_PTR(err);
+ }
+ 
+-/* This is a utility function that fills in a unionfs dentry */
++/*
++ * This is a utility function that fills in a unionfs dentry.
++ *
++ * Returns: 0 (ok), or -ERRNO if an error occurred.
++ */
+ int unionfs_partial_lookup(struct dentry *dentry)
+ {
+ 	struct dentry *tmp;
+ 	struct nameidata nd = { .flags = 0 };
++	int err = -ENOSYS;
+ 
+ 	tmp = unionfs_lookup_backend(dentry, &nd, INTERPOSE_PARTIAL);
+-	if (!tmp)
+-		return 0;
+-	if (IS_ERR(tmp))
+-		return PTR_ERR(tmp);
++	if (!tmp) {
++		err = 0;
++		goto out;
++	}
++	if (IS_ERR(tmp)) {
++		err = PTR_ERR(tmp);
++		goto out;
++	}
+ 	/* need to change the interface */
+ 	BUG_ON(tmp != dentry);
+-	return -ENOSYS;
++out:
++	return err;
+ }
+ 
+ /* The dentry cache is just so we have properly sized dentries. */
+-- 
+1.5.4.3
+

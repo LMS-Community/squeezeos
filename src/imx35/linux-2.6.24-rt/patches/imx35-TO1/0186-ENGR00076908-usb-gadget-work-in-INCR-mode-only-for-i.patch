@@ -1,0 +1,47 @@
+From 43e77a616c78e1ee887787101cb091382325d3dc Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Tue, 20 May 2008 20:29:35 +0800
+Subject: [PATCH] ENGR00076908 usb gadget work in INCR mode only for iMX35
+
+Make only MX35 gadget in INCR mode
+
+Signed-off-by: Jun Li <r65092@freescale.com>
+---
+ arch/arm/plat-mxc/usb_common.c  |    2 +-
+ drivers/usb/gadget/arcotg_udc.c |    7 +++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 5480f4c..8c93bf0 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -588,7 +588,7 @@ static void otg_set_utmi_xcvr(void)
+ 	USBCTRL &= ~UCTRL_PP;	/* USBOTG_PWR low active */
+ 	USBCTRL &= ~UCTRL_OCPOL;	/* OverCurrent Polarity is Low Active */
+ 	USBCTRL &= ~UCTRL_OPM;	/* OTG Power Mask */
+-	USBCTRL |= UCTRL_OWIE;	/* ULPI intr enable */
++	USBCTRL |= UCTRL_OWIE;	/* OTG Wakeup Intr Enable */
+ 
+ 	/* set UTMI xcvr */
+ 	tmp = UOG_PORTSC1 & ~PORTSC_PTS_MASK;
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 70613ee..645f746 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -346,8 +346,11 @@ static int dr_controller_setup(struct arcotg_udc *udc)
+ 
+ 	usb_slave_regs->portsc1 = cpu_to_le32(portctrl);
+ 
+-	/* AHB burst INCR mode */
+-	usb_slave_regs->sbuscfg = (usb_slave_regs->sbuscfg & (~0x07));
++	/* AHB burst INCR mode if imx35 */
++	if (cpu_is_mx35()) {
++		usb_slave_regs->sbuscfg = (usb_slave_regs->sbuscfg & (~0x07));
++	}
++
+ 	fsl_platform_set_vbus_power(pdata, 0);
+ 
+ 	return 0;
+-- 
+1.5.4.4
+

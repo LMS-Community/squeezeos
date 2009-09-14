@@ -1,0 +1,58 @@
+From 807b37ba24582f19d75b8a10e1969ad2931eadab Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 28 Apr 2009 18:18:38 +0800
+Subject: [PATCH] ENGR00111946 Watchdog: oops when watchdog resume
+
+The watchdong resume funcation takes physical address
+as virtual address
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ drivers/watchdog/mxc_wdt.c |   10 +++++-----
+ 1 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/watchdog/mxc_wdt.c b/drivers/watchdog/mxc_wdt.c
+index 126b143..66f6dc0 100644
+--- a/drivers/watchdog/mxc_wdt.c
++++ b/drivers/watchdog/mxc_wdt.c
+@@ -3,7 +3,7 @@
+  *
+  * Watchdog driver for FSL MXC. It is based on omap1610_wdt.c
+  *
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  * 2005 (c) MontaVista Software, Inc.  All Rights Reserved.
+ 
+  * This program is free software; you can redistribute it and/or modify
+@@ -297,7 +297,7 @@ static int __init mxc_wdt_probe(struct platform_device *pdev)
+ static void mxc_wdt_shutdown(struct platform_device *pdev)
+ {
+ 	struct resource *res = platform_get_drvdata(pdev);
+-	mxc_wdt_disable(res->start);
++	mxc_wdt_disable(wdt_base_reg);
+ 	pr_info("MXC Watchdog # %d shutdown\n", dev_num);
+ }
+ 
+@@ -323,7 +323,7 @@ static int mxc_wdt_suspend(struct platform_device *pdev, pm_message_t state)
+ 	struct resource *res = platform_get_drvdata(pdev);
+ 
+ 	if (mxc_wdt_users) {
+-		mxc_wdt_disable(res->start);
++		mxc_wdt_disable(wdt_base_reg);
+ 	}
+ 	return 0;
+ }
+@@ -332,8 +332,8 @@ static int mxc_wdt_resume(struct platform_device *pdev)
+ {
+ 	struct resource *res = platform_get_drvdata(pdev);
+ 	if (mxc_wdt_users) {
+-		mxc_wdt_enable(res->start);
+-		mxc_wdt_ping(res->start);
++		mxc_wdt_enable(wdt_base_reg);
++		mxc_wdt_ping(wdt_base_reg);
+ 	}
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

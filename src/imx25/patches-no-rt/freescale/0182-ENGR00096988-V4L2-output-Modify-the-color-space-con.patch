@@ -1,0 +1,63 @@
+From 8ba17139c5fd05373d1d62ddf0b31d6ed58ad43c Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Wed, 29 Oct 2008 13:53:24 +0800
+Subject: [PATCH] ENGR00096988 V4L2 output: Modify the color space convert place
+
+Modify the color space convert place
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |   16 +++++++++-------
+ 1 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index 3ab8bb9..e145d97 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -323,7 +323,6 @@ static irqreturn_t mxc_v4l2out_pp_in_irq_handler(int irq, void *dev_id)
+ 	unsigned long timeout;
+ 	unsigned long lock_flags = 0;
+ 	vout_data *vout = dev_id;
+-	int param[5][3];
+ 
+ 	spin_lock_irqsave(&g_lock, lock_flags);
+ 
+@@ -339,12 +338,6 @@ static irqreturn_t mxc_v4l2out_pp_in_irq_handler(int irq, void *dev_id)
+ 		wake_up_interruptible(&vout->v4l_bufq);
+ 		/* printk("pp_irq: buf %d done\n", vout->next_done_ipu_buf); */
+ 		vout->next_done_ipu_buf = !vout->next_done_ipu_buf;
+-		if (vout->v4l2_bufs[last_buf].reserved)
+-			if (!copy_from_user(&param[0][0],
+-					    (void *)vout->v4l2_bufs[last_buf]
+-					    .reserved, sizeof(param)))
+-				ipu_set_csc_coefficients(vout->display_ch,
+-							 param);
+ 	}
+ 
+ 	if (vout->state == STATE_STREAM_STOPPING) {
+@@ -1258,6 +1251,7 @@ mxc_v4l2out_do_ioctl(struct inode *inode, struct file *file,
+ 			struct v4l2_buffer *buf = arg;
+ 			int index = buf->index;
+ 			unsigned long lock_flags;
++			int param[5][3];
+ 
+ 			if ((buf->type != V4L2_BUF_TYPE_VIDEO_OUTPUT) ||
+ 			    (index >= vout->buffer_cnt)) {
+@@ -1279,6 +1273,14 @@ mxc_v4l2out_do_ioctl(struct inode *inode, struct file *file,
+ 			vout->v4l2_bufs[index].flags |= V4L2_BUF_FLAG_QUEUED;
+ 
+ 			g_buf_q_cnt++;
++			if (vout->v4l2_bufs[index].reserved)
++				if (!copy_from_user(&param[0][0],
++						    (void *)vout->
++						    v4l2_bufs[index]
++						    .reserved, sizeof(param)))
++					ipu_set_csc_coefficients(vout->
++								 display_ch,
++								 param);
+ 			queue_buf(&vout->ready_q, index);
+ 			if (vout->state == STATE_STREAM_PAUSED) {
+ 				unsigned long timeout;
+-- 
+1.5.4.4
+

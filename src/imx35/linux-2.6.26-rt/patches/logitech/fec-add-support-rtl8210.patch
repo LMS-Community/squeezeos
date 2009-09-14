@@ -1,0 +1,89 @@
+Added support for the RTL8210CP PHY.
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ drivers/net/fec.c |   55 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 55 insertions(+)
+
+Index: linux-2.6.26/drivers/net/fec.c
+===================================================================
+--- linux-2.6.26.orig/drivers/net/fec.c	2009-04-28 11:16:30.000000000 +0100
++++ linux-2.6.26/drivers/net/fec.c	2009-04-28 11:16:34.000000000 +0100
+@@ -1320,6 +1320,60 @@
+ 		{ mk_mii_end, }
+ 	},
+ };
++
++static void mii_parse_rtl8210cp_cr(uint mii_reg, struct net_device *dev)
++{
++	struct fec_enet_private *fep = netdev_priv(dev);
++	volatile uint *s = &(fep->phy_status);
++	uint status;
++
++	status = *s & ~(PHY_CONF_ANE | PHY_CONF_LOOP | PHY_STAT_SPMASK);
++
++	if (mii_reg & (1<<12))
++		status |= PHY_CONF_ANE;
++	if (mii_reg & (1<<14))
++		status |= PHY_CONF_LOOP;
++
++	if (status & PHY_STAT_ANC) {
++		if (mii_reg & (1<<13)) {
++			if (mii_reg & (1<<8))
++				status |= PHY_STAT_100FDX;
++			else
++				status |= PHY_STAT_100HDX;
++		} else {
++			if (mii_reg & (1<<8))
++				status |= PHY_STAT_10FDX;
++			else
++				status |= PHY_STAT_10HDX;
++		}
++	}
++	*s = status;
++}
++
++static phy_info_t phy_info_rtl8210cp = {
++	0x0000820,
++	"RTL8210CP",
++	(const phy_cmd_t []) { /* config */
++		{ mk_mii_read(MII_REG_CR), mii_parse_rtl8210cp_cr },
++		{ mk_mii_read(MII_REG_ANAR), mii_parse_anar },
++		{ mk_mii_end, }
++	},
++	(const phy_cmd_t []) { /* startup */
++		{ mk_mii_write(MII_REG_CR, 0x1200), NULL }, /* autonegotiate */
++		{ mk_mii_read(MII_REG_SR), mii_parse_sr },
++		{ mk_mii_end, }
++	},
++	(const phy_cmd_t []) { /* act_int */
++		{ mk_mii_read(MII_REG_SR), mii_parse_sr },
++		{ mk_mii_read(MII_REG_ANAR), mii_parse_anar },
++		{ mk_mii_read(MII_REG_CR), mii_parse_rtl8210cp_cr },
++		{ mk_mii_end, }
++	},
++	(const phy_cmd_t []) { /* shutdown */
++		{ mk_mii_end, }
++	},
++};
++
+ /* ------------------------------------------------------------------------- */
+ 
+ static phy_info_t const * const phy_info[] = {
+@@ -1330,6 +1384,7 @@
+ 	&phy_info_ks8721bl,
+ 	&phy_info_dp83848,
+ 	&phy_info_lan8700,
++	&phy_info_rtl8210cp,
+ 	NULL
+ };
+ 
+@@ -2723,7 +2778,7 @@
+ 	fecp = fep->hwp;
+ 
+ 	if (fep->phy_addr < 32) {
+-		if ((phytype = (mii_reg & 0xffff)) != 0xffff && phytype != 0) {
++		if ((phytype = (mii_reg & 0xffff)) != 0xffff) {
+ 
+ 			/* Got first part of ID, now get remainder.
+ 			*/

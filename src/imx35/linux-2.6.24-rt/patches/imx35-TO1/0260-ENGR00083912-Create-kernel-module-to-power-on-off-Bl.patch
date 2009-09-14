@@ -1,0 +1,412 @@
+From 84227f2e64448b03df7bf47e132962d099ec41b4 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Wed, 16 Jul 2008 09:52:11 +0800
+Subject: [PATCH] ENGR00083912 Create kernel module to power on/off Bluetooth moudle
+
+1, Create a mxc_bt.c to power on/off BT
+2. The implemenation of poweron/poweroff depends on platform
+3. The poweron/poweroff function pointer is delivered by platform device
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |   43 +++++++++--
+ arch/arm/mach-mx3/mx3_3stack.c          |   28 +++++++
+ drivers/mxc/Kconfig                     |    1 +
+ drivers/mxc/Makefile                    |    1 +
+ drivers/mxc/bt/Kconfig                  |   13 +++
+ drivers/mxc/bt/Makefile                 |    4 +
+ drivers/mxc/bt/mxc_bt.c                 |  127 +++++++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mxc.h          |    8 ++
+ 8 files changed, 218 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index 1b5b38c..3a9a4fa 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Tue Apr  1 13:51:29 2008
++# Wed Jul 16 09:49:45 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -156,6 +156,7 @@ CONFIG_ARCH_MXC=y
+ # CONFIG_ARCH_MXC91321 is not set
+ # CONFIG_ARCH_MX37 is not set
+ # CONFIG_ARCH_MX35 is not set
++# CONFIG_ARCH_MX51 is not set
+ CONFIG_ARCH_MX3=y
+ # CONFIG_ARCH_MX27 is not set
+ # CONFIG_ARCH_MX21 is not set
+@@ -183,7 +184,11 @@ CONFIG_ARCH_MXC_HAS_NFC_V2=y
+ # CONFIG_I2C_MXC_SELECT3 is not set
+ CONFIG_ARCH_HAS_EVTMON=y
+ CONFIG_DMA_ZONE_SIZE=24
+-CONFIG_ISP1504_MXC=y
++CONFIG_MC13783_MXC=y
++CONFIG_MXC_USB_SU6=y
++# CONFIG_MXC_USB_SB3 is not set
++# CONFIG_MXC_USB_DU6 is not set
++# CONFIG_MXC_USB_DB4 is not set
+ 
+ #
+ # Processor Type
+@@ -192,6 +197,7 @@ CONFIG_CPU_32=y
+ # CONFIG_CPU_ARM926T is not set
+ CONFIG_CPU_V6=y
+ # CONFIG_CPU_32v6K is not set
++# CONFIG_CPU_V7 is not set
+ CONFIG_CPU_32v6=y
+ CONFIG_CPU_ABRT_EV6=y
+ CONFIG_CPU_CACHE_V6=y
+@@ -787,6 +793,7 @@ CONFIG_I2C_MXC=y
+ # CONFIG_I2C_DEBUG_ALGO is not set
+ # CONFIG_I2C_DEBUG_BUS is not set
+ # CONFIG_I2C_DEBUG_CHIP is not set
++# CONFIG_I2C_SLAVE is not set
+ 
+ #
+ # SPI support
+@@ -914,6 +921,7 @@ CONFIG_VIDEO_MXC_IPU_CAMERA=y
+ # CONFIG_MXC_CAMERA_MC521DA is not set
+ # CONFIG_MXC_CAMERA_MICRON111 is not set
+ CONFIG_MXC_CAMERA_OV2640=m
++# CONFIG_MXC_TVIN_ADV7180 is not set
+ CONFIG_MXC_IPU_PRP_VF_SDC=m
+ CONFIG_MXC_IPU_PRP_ENC=m
+ CONFIG_VIDEO_MXC_OUTPUT=y
+@@ -987,6 +995,7 @@ CONFIG_FB_DEFERRED_IO=y
+ CONFIG_FB_MXC=y
+ CONFIG_FB_MXC_SYNC_PANEL=y
+ CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL=y
++# CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_TVOUT is not set
+ CONFIG_FB_MXC_TVOUT_CH7024=y
+ # CONFIG_FB_MXC_ASYNC_PANEL is not set
+@@ -1080,7 +1089,10 @@ CONFIG_SND_MXC_PMIC=y
+ # SoC Audio support for SuperH
+ #
+ # CONFIG_SND_MXC_SOC is not set
++# CONFIG_SND_MXC_SOC_IRAM is not set
+ # CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
++# CONFIG_SND_SOC_IMX_3STACK_AK4647 is not set
++# CONFIG_SND_SOC_IMX_3STACK_WM8580 is not set
+ 
+ #
+ # Open Sound System
+@@ -1129,8 +1141,11 @@ CONFIG_USB_EHCI_ARC=y
+ # CONFIG_USB_EHCI_ARC_H1 is not set
+ CONFIG_USB_EHCI_ARC_H2=y
+ CONFIG_USB_EHCI_ARC_OTG=y
+-CONFIG_USB_EHCI_ARC_OTGHS=y
+-# CONFIG_USB_EHCI_ARC_OTGFS is not set
++# CONFIG_USB_STATIC_IRAM is not set
++CONFIG_USB_EHCI_FSL_MC13783=y
++# CONFIG_USB_EHCI_FSL_1301 is not set
++# CONFIG_USB_EHCI_FSL_1504 is not set
++# CONFIG_USB_EHCI_FSL_UTMI is not set
+ # CONFIG_USB_EHCI_SPLIT_ISO is not set
+ CONFIG_USB_EHCI_ROOT_HUB_TT=y
+ # CONFIG_USB_EHCI_TT_NEWSCHED is not set
+@@ -1234,10 +1249,12 @@ CONFIG_USB_ARC=m
+ # CONFIG_USB_GADGET_S3C2410 is not set
+ # CONFIG_USB_GADGET_AT91 is not set
+ # CONFIG_USB_GADGET_DUMMY_HCD is not set
+-CONFIG_USB_GADGET_DUALSPEED=y
++# CONFIG_USB_GADGET_DUALSPEED is not set
+ CONFIG_USB_GADGET_ARC_OTG=y
+-# CONFIG_USB_GADGET_ARC_OTGFS is not set
+-CONFIG_USB_GADGET_ARC_OTGHS=y
++CONFIG_USB_GADGET_FSL_MC13783=y
++# CONFIG_USB_GADGET_FSL_1301 is not set
++# CONFIG_USB_GADGET_FSL_1504 is not set
++# CONFIG_USB_GADGET_FSL_UTMI is not set
+ # CONFIG_USB_ZERO is not set
+ CONFIG_USB_ETH=m
+ CONFIG_USB_ETH_RNDIS=y
+@@ -1275,6 +1292,8 @@ CONFIG_MMC_BLOCK_BOUNCE=y
+ #
+ # CONFIG_MMC_SPI is not set
+ CONFIG_MMC_MXC=m
++# CONFIG_MMC_IMX_ESDHCI is not set
++# CONFIG_MMC_IMX_ESDHCI_PIO_MODE is not set
+ # CONFIG_NEW_LEDS is not set
+ CONFIG_RTC_LIB=y
+ CONFIG_RTC_CLASS=y
+@@ -1349,6 +1368,7 @@ CONFIG_MXC_DAM=y
+ # MXC PMIC support
+ #
+ CONFIG_MXC_SPI_PMIC_CORE=y
++# CONFIG_MXC_I2C_MCU_PMIC_CORE is not set
+ CONFIG_MXC_PMIC=y
+ CONFIG_MXC_PMIC_CHARDEV=y
+ 
+@@ -1399,6 +1419,15 @@ CONFIG_MXC_HWEVENT=y
+ # CONFIG_MXC_VPU is not set
+ 
+ #
++# MXC Asynchronous Sample Rate Converter support
++#
++
++#
++# MXC Bluetooth support
++#
++CONFIG_MXC_BLUETOOTH=m
++
++#
+ # File systems
+ #
+ CONFIG_EXT2_FS=y
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 8dface1..e13cb0c 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -821,6 +821,33 @@ static void __init mxc_init_pata(void)
+ }
+ #endif				/* CONFIG_PATA_FSL */
+ 
++static void bt_reset(void)
++{
++	mxc_set_gpio_dataout(MX31_PIN_DCD_DCE1, 1);
++}
++
++static struct mxc_bt_platform_data mxc_bt_data = {
++	.bt_vdd = "VMMC2",
++	.bt_vdd_parent = "GPO1",
++	.bt_vusb = NULL,
++	.bt_vusb_parent = "GPO3",
++	.bt_reset = bt_reset,
++};
++
++static struct platform_device mxc_bt_device = {
++	.name = "mxc_bt",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_bt_data,
++		},
++};
++
++static void mxc_init_bluetooth(void)
++{
++	(void)platform_device_register(&mxc_bt_device);
++}
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -864,6 +891,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_mmc();
+ 	mxc_init_ide();
+ 	mxc_init_pata();
++	mxc_init_bluetooth();
+ 
+ 	/* set power off hook to mc13783 power off */
+ 	pm_power_off = pmic_power_off;
+diff --git a/drivers/mxc/Kconfig b/drivers/mxc/Kconfig
+index cdbd7b4..5d959e4 100644
+--- a/drivers/mxc/Kconfig
++++ b/drivers/mxc/Kconfig
+@@ -26,6 +26,7 @@ source "drivers/mxc/hmp4e/Kconfig"
+ source "drivers/mxc/hw_event/Kconfig"
+ source "drivers/mxc/vpu/Kconfig"
+ source "drivers/mxc/asrc/Kconfig"
++source "drivers/mxc/bt/Kconfig"
+ 
+ endmenu
+ 
+diff --git a/drivers/mxc/Makefile b/drivers/mxc/Makefile
+index 64e0a0c..32dd4ac 100644
+--- a/drivers/mxc/Makefile
++++ b/drivers/mxc/Makefile
+@@ -12,3 +12,4 @@ obj-y                                   += security/
+ obj-$(CONFIG_MXC_VPU)                   += vpu/
+ obj-$(CONFIG_MXC_HWEVENT)               += hw_event/
+ obj-$(CONFIG_MXC_ASRC)                 += asrc/
++obj-$(CONFIG_MXC_BLUETOOTH)		+= bt/
+diff --git a/drivers/mxc/bt/Kconfig b/drivers/mxc/bt/Kconfig
+new file mode 100644
+index 0000000..6ee6221
+--- /dev/null
++++ b/drivers/mxc/bt/Kconfig
+@@ -0,0 +1,13 @@
++#
++# Bluetooth configuration
++#
++
++menu "MXC Bluetooth support"
++
++config MXC_BLUETOOTH
++	tristate "MXC Bluetooth support"
++	depends on MACH_MX31_3DS
++	---help---
++         Say Y to get the third party Bluetooth service.
++
++endmenu
+diff --git a/drivers/mxc/bt/Makefile b/drivers/mxc/bt/Makefile
+new file mode 100644
+index 0000000..91bc4cf
+--- /dev/null
++++ b/drivers/mxc/bt/Makefile
+@@ -0,0 +1,4 @@
++#
++# Makefile for the kernel Bluetooth power-on/reset
++#
++obj-$(CONFIG_MXC_BLUETOOTH) += mxc_bt.o
+diff --git a/drivers/mxc/bt/mxc_bt.c b/drivers/mxc/bt/mxc_bt.c
+new file mode 100644
+index 0000000..398ce2d
+--- /dev/null
++++ b/drivers/mxc/bt/mxc_bt.c
+@@ -0,0 +1,127 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file mxc_bt.c
++ *
++ * @brief MXC Thirty party Bluetooth
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/regulator/regulator.h>
++
++static struct regulator *bt_vdd;
++static struct regulator *bt_vdd_parent;
++static struct regulator *bt_vusb;
++static struct regulator *bt_vusb_parent;
++
++/*!
++  * This function poweron the bluetooth hardware module
++  *
++  * @param      pdev    Pointer to the platform device
++  * @return              0 on success, -1 otherwise.
++  */
++static int mxc_bt_probe(struct platform_device *pdev)
++{
++	struct mxc_bt_platform_data *platform_data;
++	platform_data = (struct mxc_bt_platform_data *)pdev->dev.platform_data;
++	if (platform_data->bt_vdd) {
++		bt_vdd = regulator_get(&pdev->dev, platform_data->bt_vdd);
++		regulator_enable(bt_vdd);
++	}
++	if (platform_data->bt_vdd_parent) {
++		bt_vdd_parent =
++		    regulator_get(&pdev->dev, platform_data->bt_vdd_parent);
++		regulator_enable(bt_vdd_parent);
++	}
++	if (platform_data->bt_vusb) {
++		bt_vusb = regulator_get(&pdev->dev, platform_data->bt_vusb);
++		regulator_enable(bt_vusb);
++	}
++	if (platform_data->bt_vusb_parent) {
++		bt_vusb_parent =
++		    regulator_get(&pdev->dev, platform_data->bt_vusb_parent);
++		regulator_enable(bt_vusb_parent);
++	}
++
++	if (platform_data->bt_reset != NULL)
++		platform_data->bt_reset();
++	return 0;
++
++}
++
++/*!
++  * This function poweroff the bluetooth hardware module
++  *
++  * @param      pdev    Pointer to the platform device
++  * @return              0 on success, -1 otherwise.
++  */
++static int mxc_bt_remove(struct platform_device *pdev)
++{
++	struct mxc_bt_platform_data *platform_data;
++	platform_data = (struct mxc_bt_platform_data *)pdev->dev.platform_data;
++	if (bt_vdd) {
++		regulator_disable(bt_vdd);
++		regulator_put(bt_vdd, &pdev->dev);
++	}
++	if (bt_vdd_parent) {
++		regulator_disable(bt_vdd_parent);
++		regulator_put(bt_vdd_parent, &pdev->dev);
++	}
++	if (bt_vusb) {
++		regulator_disable(bt_vusb);
++		regulator_put(bt_vusb, &pdev->dev);
++	}
++	if (bt_vusb_parent) {
++		regulator_disable(bt_vusb_parent);
++		regulator_put(bt_vusb_parent, &pdev->dev);
++	}
++	return 0;
++
++}
++
++static struct platform_driver bluetooth_driver = {
++	.driver = {
++		   .name = "mxc_bt",
++		   },
++	.probe = mxc_bt_probe,
++	.remove = mxc_bt_remove,
++};
++
++/*!
++ * Register bluetooth driver module
++ *
++ */
++static __init int bluetooth_init(void)
++{
++	return platform_driver_register(&bluetooth_driver);
++}
++
++/*!
++ * Exit and free the bluetooth module
++ *
++ */
++static void __exit bluetooth_exit(void)
++{
++	platform_driver_unregister(&bluetooth_driver);
++}
++
++module_init(bluetooth_init);
++module_exit(bluetooth_exit);
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("MXC Thirty party Bluetooth");
++MODULE_LICENSE("GPL");
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index dd214a7..5b54dc5 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -103,6 +103,14 @@ struct mxc_asrc_platform_data {
+ 	struct clk *asrc_audio_clk;
+ };
+ 
++struct mxc_bt_platform_data {
++	char *bt_vdd;
++	char *bt_vdd_parent;
++	char *bt_vusb;
++	char *bt_vusb_parent;
++	void (*bt_reset) (void);
++};
++
+ struct mxc_lcd_platform_data {
+ 	char *io_reg;
+ 	char *core_reg;
+-- 
+1.5.4.4
+

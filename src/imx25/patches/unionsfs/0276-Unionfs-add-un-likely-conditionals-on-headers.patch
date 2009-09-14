@@ -1,0 +1,66 @@
+From 0a9309cda42267f1276663d227fcb04cc249ad66 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 24 Sep 2007 02:21:09 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on headers
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/fanout.h |   13 ++++++++-----
+ fs/unionfs/union.h  |    4 ++--
+ 2 files changed, 10 insertions(+), 7 deletions(-)
+
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 51aa0de..6405399 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -308,17 +308,20 @@ static inline void unionfs_copy_attr_times(struct inode *upper)
+ 	int bindex;
+ 	struct inode *lower;
+ 
+-	if (!upper || ibstart(upper) < 0)
++	if (unlikely(!upper || ibstart(upper) < 0))
+ 		return;
+ 	for (bindex=ibstart(upper); bindex <= ibend(upper); bindex++) {
+ 		lower = unionfs_lower_inode_idx(upper, bindex);
+-		if (!lower)
++		if (unlikely(!lower))
+ 			continue; /* not all lower dir objects may exist */
+-		if (timespec_compare(&upper->i_mtime, &lower->i_mtime) < 0)
++		if (unlikely(timespec_compare(&upper->i_mtime,
++					      &lower->i_mtime) < 0))
+ 			upper->i_mtime = lower->i_mtime;
+-		if (timespec_compare(&upper->i_ctime, &lower->i_ctime) < 0)
++		if (likely(timespec_compare(&upper->i_ctime,
++					    &lower->i_ctime) < 0))
+ 			upper->i_ctime = lower->i_ctime;
+-		if (timespec_compare(&upper->i_atime, &lower->i_atime) < 0)
++		if (likely(timespec_compare(&upper->i_atime,
++					    &lower->i_atime) < 0))
+ 			upper->i_atime = lower->i_atime;
+ 	}
+ }
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 870fe56..c371bef 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -476,7 +476,7 @@ static inline struct vfsmount *unionfs_mntget(struct dentry *dentry,
+ 
+ 	mnt = mntget(unionfs_lower_mnt_idx(dentry, bindex));
+ #ifdef CONFIG_UNION_FS_DEBUG
+-	if (!mnt)
++	if (unlikely(!mnt))
+ 		printk(KERN_DEBUG "unionfs_mntget: mnt=%p bindex=%d\n",
+ 		       mnt, bindex);
+ #endif /* CONFIG_UNION_FS_DEBUG */
+@@ -488,7 +488,7 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ {
+ 	struct vfsmount *mnt;
+ 
+-	if (!dentry && bindex < 0)
++	if (unlikely(!dentry && bindex < 0))
+ 		return;
+ 	BUG_ON(!dentry || bindex < 0);
+ 
+-- 
+1.5.4.3
+

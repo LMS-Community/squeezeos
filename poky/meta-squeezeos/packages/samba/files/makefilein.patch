@@ -1,0 +1,135 @@
+--- source/Makefile.in.orig	2006-07-10 18:27:55.000000000 +0200
++++ source/Makefile.in	2009-05-15 14:57:54.000000000 +0200
+@@ -136,6 +136,9 @@
+ 
+ SBIN_PROGS = bin/smbd@EXEEXT@ bin/nmbd@EXEEXT@ bin/swat@EXEEXT@ @EXTRA_SBIN_PROGS@
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++SHAREDPROGS = bin/smbd.shared bin/nmbd.shared bin/smbpasswd.shared
++
+ ROOT_SBIN_PROGS = @CIFSMOUNT_PROGS@
+ 
+ BIN_PROGS1 = bin/smbclient@EXEEXT@ bin/net@EXEEXT@ bin/smbspool@EXEEXT@ \
+@@ -437,6 +440,19 @@
+ PRINTBACKEND_OBJ = printing/printing.o printing/nt_printing.o $(PRINTBASE_OBJ) 
+ 
+ SMBD_OBJ = $(SMBD_OBJ_BASE) $(SMBD_OBJ_MAIN)
++
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++# $(PARAM_OBJ), $(RPC_PARSE_OBJ), $(SECRETS_OBJ) and $(PASSDB_OBJ) 
++#  are in the shared library, but execution fails if not linked statically
++# $(LIBSMB_OBJ) and $(LIB_OBJ) are in the shared library, but compilation
++#  fails if not linked statically
++SMBDSHARED_OBJ = $(PARAM_OBJ) $(SMBD_OBJ_SRV) $(LIBSMB_OBJ) $(RPC_SERVER_OBJ) \
++		$(RPC_PARSE_OBJ) $(SECRETS_OBJ) $(LOCKING_OBJ) $(PASSDB_OBJ) \
++		$(PRINTING_OBJ) $(LIB_OBJ) $(PRINTBACKEND_OBJ) $(OPLOCK_OBJ) \
++		$(NOTIFY_OBJ) $(AUTH_OBJ) $(LIBADS_OBJ) $(LIBADS_SERVER_OBJ) \
++		$(REGISTRY_OBJ) $(POPT_LIB_OBJ) $(BUILDOPT_OBJ) \
++		$(SMBD_OBJ_MAIN)
++
+ NMBD_OBJ1 = nmbd/asyncdns.o nmbd/nmbd.o nmbd/nmbd_become_dmb.o \
+             nmbd/nmbd_become_lmb.o nmbd/nmbd_browserdb.o \
+             nmbd/nmbd_browsesync.o nmbd/nmbd_elections.o \
+@@ -453,6 +464,12 @@
+ NMBD_OBJ = $(NMBD_OBJ1) $(PARAM_OBJ) $(LIBSMB_OBJ) $(KRBCLIENT_OBJ) \
+            $(PROFILE_OBJ) $(LIB_NONSMBD_OBJ) $(SECRETS_OBJ) $(POPT_LIB_OBJ)
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++# $(LIBSMB_OBJ) and $(PARAM_OBJ) are in the shared library, but
++# execution fails if not linked statically
++NMBDSHARED_OBJ = $(NMBD_OBJ1) \
++		$(LIB_NONSMBD_OBJ) $(LIBSMB_OBJ) $(PARAM_OBJ)
++
+ SWAT_OBJ1 = web/cgi.o web/diagnose.o web/startstop.o web/statuspage.o \
+            web/swat.o web/neg_lang.o 
+ 
+@@ -493,6 +510,13 @@
+ 		$(GROUPDB_OBJ) $(LIB_NONSMBD_OBJ) $(KRBCLIENT_OBJ) \
+ 		$(POPT_LIB_OBJ) $(SMBLDAP_OBJ) $(RPC_PARSE_OBJ) $(LIBMSRPC_OBJ)
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++# $(PASSDB_OBJ) and $(SECRETS_OBJ) are in the shared library, but
++#  execution fails if not linked statically 
++SMBPASSWDSHARED_OBJ = utils/smbpasswd.o utils/passwd_util.o $(PASSCHANGE_OBJ) \
++		$(LIB_NONSMBD_OBJ) $(SECRETS_OBJ) $(PARAM_OBJ) \
++		$(LIBSMB_OBJ) $(PASSDB_OBJ)
++
+ PDBEDIT_OBJ = utils/pdbedit.o utils/passwd_util.o $(PARAM_OBJ) $(PASSDB_OBJ) \
+ 		$(LIBSAMBA_OBJ) $(LIB_NONSMBD_OBJ) $(GROUPDB_OBJ) \
+ 		$(SECRETS_OBJ) $(POPT_LIB_OBJ) $(SMBLDAP_OBJ) libsmb/asn1.o \
+@@ -684,6 +708,15 @@
+             $(IDMAP_OBJ) libsmb/spnego.o $(PASSCHANGE_OBJ) \
+             $(RPC_NTSVCS_OBJ) utils/passwd_util.o
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++LIBSMBSHARED_OBJ = $(LIBSMB_OBJ) \
++		$(PASSDB_OBJ) $(RPC_PARSE_OBJ) $(GROUPDB_OBJ) \
++		$(SECRETS_OBJ) $(KRBCLIENT_OBJ) $(POPT_LIB_OBJ) \
++		$(SMBLDAP_OBJ) $(LIBMSRPC_OBJ) $(PROFILE_OBJ)
++
++LIBSMB_PICOBJS = $(LIBSMBSHARED_OBJ:.o=.@PICSUFFIX@)
++
++
+ WINBIND_WINS_NSS_OBJ = nsswitch/wins.o $(PARAM_OBJ) \
+ 	$(LIBSMB_OBJ) $(LIB_NONSMBD_OBJ) $(NSSWINS_OBJ) $(KRBCLIENT_OBJ)
+ 
+@@ -768,6 +801,9 @@
+ all : SHOWFLAGS proto_exists $(SBIN_PROGS) $(BIN_PROGS) $(ROOT_SBIN_PROGS) \
+ 	$(SHLIBS) $(MODULES) $(PAM_MODULES) @EXTRA_ALL_TARGETS@
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++shared : $(SHAREDPROGS)
++
+ pam_modules : $(PAM_MODULES)
+ 
+ pam_smbpass : SHOWFLAGS proto_exists bin/pam_smbpass.@SHLIBEXT@
+@@ -912,10 +948,23 @@
+ 		$(KRB5LIBS) $(DYNEXP) $(PRINT_LIBS) $(AUTH_LIBS) \
+ 		$(ACL_LIBS) $(PASSDB_LIBS) $(LIBS) @POPTLIBS@ @SMBD_LIBS@
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++bin/smbd.shared: $(SMBDSHARED_OBJ) bin/libsmb.@SHLIBEXT@ @BUILD_POPT@ bin/.dummy
++	@echo Linking $@
++	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(SMBDSHARED_OBJ) $(LDFLAGS) $(LDAP_LIBS) \
++		$(KRB5LIBS) $(DYNEXP) $(PRINT_LIBS) $(AUTH_LIBS) \
++		$(ACL_LIBS) $(PASSDB_LIBS) $(LIBS) -Lbin -lsmb @POPTLIBS@ @SMBD_LIBS@
++
+ bin/nmbd@EXEEXT@: $(NMBD_OBJ) @BUILD_POPT@ bin/.dummy
+ 	@echo Linking $@
+ 	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(NMBD_OBJ) $(LDFLAGS) $(DYNEXP) $(LIBS) @POPTLIBS@ $(KRB5LIBS) $(LDAP_LIBS)
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++bin/nmbd.shared: $(NMBDSHARED_OBJ) bin/libsmb.@SHLIBEXT@ @BUILD_POPT@ bin/.dummy
++	@echo Linking $@
++	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(NMBDSHARED_OBJ) $(LDFLAGS) $(LDAP_LIBS) \
++		$(KRB5LIBS) $(DYNEXP) $(LIBS) -Lbin -lsmb @POPTLIBS@
++
+ bin/swat@EXEEXT@: $(SWAT_OBJ) @BUILD_POPT@ bin/.dummy
+ 	@echo Linking $@
+ 	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(SWAT_OBJ) $(LDFLAGS) $(DYNEXP) $(PRINT_LIBS) \
+@@ -991,6 +1040,12 @@
+ 	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(SMBPASSWD_OBJ) $(LDFLAGS) $(PASSDB_LIBS) \
+ 		$(DYNEXP) $(LIBS) @POPTLIBS@ $(KRB5LIBS) $(LDAP_LIBS)
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++bin/smbpasswd.shared: $(SMBPASSWDSHARED_OBJ) bin/libsmb.@SHLIBEXT@ @BUILD_POPT@ bin/.dummy
++	@echo Linking $@
++	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(SMBPASSWDSHARED_OBJ) $(LDFLAGS) $(PASSDB_LIBS) \
++		$(DYNEXP) $(LIBS) @POPTLIBS@ $(KRB5LIBS) $(LDAP_LIBS) -Lbin -lsmb
++
+ bin/pdbedit@EXEEXT@: $(PDBEDIT_OBJ) @BUILD_POPT@ bin/.dummy
+ 	@echo Linking $@
+ 	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(PDBEDIT_OBJ) $(LDFLAGS) $(DYNEXP) $(LIBS) @POPTLIBS@ $(PASSDB_LIBS) $(LDAP_LIBS)
+@@ -1196,6 +1251,12 @@
+ 	@$(SHLD) $(LDSHFLAGS) -o $@ $(RPC_ECHO_OBJ) -lc \
+ 		@SONAMEFLAG@`basename $@`
+ 
++# Shared library libsmb.so for smbd, nmbd and smbpasswd
++bin/libsmb.@SHLIBEXT@: $(LIBSMB_PICOBJS)
++	@echo "Linking shared library $@"
++	@$(SHLD) $(LDSHFLAGS) -o $@ $(LIBSMB_PICOBJS) -lc \
++		@SONAMEFLAG@`basename $@`
++
+ bin/winbindd@EXEEXT@: $(WINBINDD_OBJ) @BUILD_POPT@ bin/.dummy
+ 	@echo "Linking $@"
+ 	@$(CC) $(FLAGS) @PIE_LDFLAGS@ -o $@ $(WINBINDD_OBJ) $(LDFLAGS) $(DYNEXP) $(LIBS) \

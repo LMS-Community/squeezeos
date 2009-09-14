@@ -1,7 +1,6 @@
 require gtk+.inc
 
-DEPENDS += "cairo"
-PR = "r8"
+PR = "r9"
 
 SRC_URI = "http://download.gnome.org/sources/gtk+/2.12/gtk+-${PV}.tar.bz2 \
            file://xsettings.patch;patch=1 \
@@ -29,7 +28,7 @@ EXTRA_OECONF = "--without-libtiff --disable-xkb --disable-glibtest --enable-disp
 
 LIBV = "2.10.0"
 
-PACKAGES_DYNAMIC = "gdk-pixbuf-loader-* gtk-immodule-* gtk-printbackend-*"
+PACKAGES_DYNAMIC += "gdk-pixbuf-loader-* gtk-immodule-* gtk-printbackend-*"
 
 python populate_packages_prepend () {
 	import os.path

@@ -1,0 +1,1004 @@
+From 76d501726d958a5b5f54883a0a9a0155c7037d1f Mon Sep 17 00:00:00 2001
+From: kevin shen <b00984@freescale.com>
+Date: Tue, 1 Apr 2008 14:51:05 +0800
+Subject: [PATCH] ENGR00070699 mma7450 device driver
+
+support device mma7450
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |   55 +++-
+ arch/arm/mach-mx3/mx3_3stack.c          |   37 ++-
+ drivers/hwmon/Kconfig                   |    4 +
+ drivers/hwmon/Makefile                  |    1 +
+ drivers/hwmon/mxc_mma7450.c             |  766 +++++++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mxc.h          |   13 +-
+ 6 files changed, 869 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index 6d1abbf..1b5b38c 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Mon Mar 31 09:56:31 2008
++# Tue Apr  1 13:51:29 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -155,6 +155,7 @@ CONFIG_ARCH_MXC=y
+ #
+ # CONFIG_ARCH_MXC91321 is not set
+ # CONFIG_ARCH_MX37 is not set
++# CONFIG_ARCH_MX35 is not set
+ CONFIG_ARCH_MX3=y
+ # CONFIG_ARCH_MX27 is not set
+ # CONFIG_ARCH_MX21 is not set
+@@ -660,7 +661,7 @@ CONFIG_NET_PCI=y
+ #
+ CONFIG_INPUT=y
+ # CONFIG_INPUT_FF_MEMLESS is not set
+-# CONFIG_INPUT_POLLDEV is not set
++CONFIG_INPUT_POLLDEV=y
+ 
+ #
+ # Userland interfaces
+@@ -811,7 +812,55 @@ CONFIG_SPI_MXC_SELECT2=y
+ # CONFIG_SPI_TLE62X0 is not set
+ # CONFIG_W1 is not set
+ # CONFIG_POWER_SUPPLY is not set
+-# CONFIG_HWMON is not set
++CONFIG_HWMON=y
++# CONFIG_HWMON_VID is not set
++# CONFIG_SENSORS_AD7418 is not set
++# CONFIG_SENSORS_ADM1021 is not set
++# CONFIG_SENSORS_ADM1025 is not set
++# CONFIG_SENSORS_ADM1026 is not set
++# CONFIG_SENSORS_ADM1029 is not set
++# CONFIG_SENSORS_ADM1031 is not set
++# CONFIG_SENSORS_ADM9240 is not set
++# CONFIG_SENSORS_ADT7470 is not set
++# CONFIG_SENSORS_ATXP1 is not set
++# CONFIG_SENSORS_DS1621 is not set
++# CONFIG_SENSORS_F71805F is not set
++# CONFIG_SENSORS_F71882FG is not set
++# CONFIG_SENSORS_F75375S is not set
++# CONFIG_SENSORS_GL518SM is not set
++# CONFIG_SENSORS_GL520SM is not set
++# CONFIG_SENSORS_IT87 is not set
++# CONFIG_SENSORS_LM63 is not set
++# CONFIG_SENSORS_LM70 is not set
++# CONFIG_SENSORS_LM75 is not set
++# CONFIG_SENSORS_LM77 is not set
++# CONFIG_SENSORS_LM78 is not set
++# CONFIG_SENSORS_LM80 is not set
++# CONFIG_SENSORS_LM83 is not set
++# CONFIG_SENSORS_LM85 is not set
++# CONFIG_SENSORS_LM87 is not set
++# CONFIG_SENSORS_LM90 is not set
++# CONFIG_SENSORS_LM92 is not set
++# CONFIG_SENSORS_LM93 is not set
++# CONFIG_SENSORS_MAX1619 is not set
++# CONFIG_SENSORS_MAX6650 is not set
++# CONFIG_SENSORS_PC87360 is not set
++# CONFIG_SENSORS_PC87427 is not set
++# CONFIG_SENSORS_DME1737 is not set
++# CONFIG_SENSORS_SMSC47M1 is not set
++# CONFIG_SENSORS_SMSC47M192 is not set
++# CONFIG_SENSORS_SMSC47B397 is not set
++# CONFIG_SENSORS_THMC50 is not set
++# CONFIG_SENSORS_VT1211 is not set
++# CONFIG_SENSORS_W83781D is not set
++# CONFIG_SENSORS_W83791D is not set
++# CONFIG_SENSORS_W83792D is not set
++# CONFIG_SENSORS_W83793 is not set
++# CONFIG_SENSORS_W83L785TS is not set
++# CONFIG_SENSORS_W83627HF is not set
++# CONFIG_SENSORS_W83627EHF is not set
++# CONFIG_HWMON_DEBUG_CHIP is not set
++CONFIG_MXC_MMA7450=m
+ CONFIG_WATCHDOG=y
+ CONFIG_WATCHDOG_NOWAYOUT=y
+ 
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 5a5f78e..78c1fe0 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -268,6 +268,34 @@ static struct mxc_fm_platform_data si4702_data = {
+ 	.reset = si4702_reset,
+ 	.clock_ctl = si4702_clock_ctl,
+ };
++
++/* setup GPIO for mma7450 */
++static void gpio_mma7450_get(void)
++{
++	mxc_request_iomux(MX31_PIN_STX0, OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++	mxc_iomux_set_pad(MX31_PIN_STX0, PAD_CTL_PKE_NONE);
++	mxc_set_gpio_direction(MX31_PIN_STX0, 1);
++
++	mxc_request_iomux(MX31_PIN_SRX0, OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++	mxc_iomux_set_pad(MX31_PIN_SRX0, PAD_CTL_PKE_NONE);
++	mxc_set_gpio_direction(MX31_PIN_SRX0, 1);
++}
++
++static void gpio_mma7450_put(void)
++{
++	mxc_free_iomux(MX31_PIN_STX0, OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++	mxc_free_iomux(MX31_PIN_SRX0, OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++}
++
++static struct mxc_mma7450_platform_data mma7450_data = {
++	.reg_dvdd_io = "GPO3",
++	.reg_avdd = "VMMC1",
++	.gpio_pin_get = gpio_mma7450_get,
++	.gpio_pin_put = gpio_mma7450_put,
++	.int1 = IOMUX_TO_IRQ(MX31_PIN_STX0),
++	.int2 = IOMUX_TO_IRQ(MX31_PIN_SRX0),
++};
++
+ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	{
+ 	 .driver_name = "ov2640",
+@@ -283,6 +311,11 @@ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	 .addr = 0x10,
+ 	 .platform_data = (void *)&si4702_data,
+ 	 },
++	{
++	 .driver_name = "mma7450",
++	 .addr = 0x1d,
++	 .platform_data = (void *)&mma7450_data,
++	 },
+ };
+ 
+ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+@@ -763,11 +796,11 @@ static void __init mxc_init_pata(void)
+ {
+ 	(void)platform_device_register(&pata_fsl_device);
+ }
+-#else				/* CONFIG_PATA_FSL */
++#else /* CONFIG_PATA_FSL */
+ static void __init mxc_init_pata(void)
+ {
+ }
+-#endif				/* CONFIG_PATA_FSL */
++#endif /* CONFIG_PATA_FSL */
+ 
+ /*!
+  * Board specific initialization.
+diff --git a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+index a0445be..0439694 100644
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -763,4 +763,8 @@ config HWMON_DEBUG_CHIP
+ 	  a problem with I2C support and want to see more of what is going
+ 	  on.
+ 
++config MXC_MMA7450
++	tristate "MMA7450 device driver"
++	depends on MACH_MX31_3DS
++	default n
+ endif # HWMON
+diff --git a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
+index 55595f6..94f7a76 100644
+--- a/drivers/hwmon/Makefile
++++ b/drivers/hwmon/Makefile
+@@ -68,6 +68,7 @@ obj-$(CONFIG_SENSORS_VT1211)	+= vt1211.o
+ obj-$(CONFIG_SENSORS_VT8231)	+= vt8231.o
+ obj-$(CONFIG_SENSORS_W83627EHF)	+= w83627ehf.o
+ obj-$(CONFIG_SENSORS_W83L785TS)	+= w83l785ts.o
++obj-$(CONFIG_MXC_MMA7450)		+= mxc_mma7450.o
+ 
+ ifeq ($(CONFIG_HWMON_DEBUG_CHIP),y)
+ EXTRA_CFLAGS += -DDEBUG
+diff --git a/drivers/hwmon/mxc_mma7450.c b/drivers/hwmon/mxc_mma7450.c
+new file mode 100644
+index 0000000..8248b90
+--- /dev/null
++++ b/drivers/hwmon/mxc_mma7450.c
+@@ -0,0 +1,766 @@
++/*
++ * linux/drivers/hwmon/mma7450.c
++ *
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*include file*/
++#include <linux/module.h>
++#include <linux/i2c.h>
++#include <linux/err.h>
++#include <linux/input-polldev.h>
++#include <linux/hwmon.h>
++#include <linux/regulator/regulator.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
++#include <asm/arch/mxc.h>
++
++/*macro define*/
++#define MMA7450_I2C_ADDR	0x1D
++#define DEVICE_NAME		"mma7450"
++#define POLL_INTERVAL		50
++#define DEBUG
++
++enum {
++	REG_XOUTL = 0x00,
++	REG_XOUTH,
++	REG_YOUTL,
++	REG_YOUTH,
++	REG_ZOUTL,
++	REG_ZOUTH,
++	REG_XOUT8,
++	REG_YOUT8,
++	REG_ZOUT8,
++	REG_STATUS,
++	REG_DETSRC,
++	REG_TOUT,
++	REG_RESERVED_0,
++	REG_I2CAD,
++	REG_USRINF,
++	REG_WHOAMI,
++	REG_XOFFL,
++	REG_XOFFH,
++	REG_YOFFL,
++	REG_YOFFH,
++	REG_ZOFFL,
++	REG_ZOFFH,
++	REG_MCTL,
++	REG_INTRST,
++	REG_CTL1,
++	REG_CTL2,
++	REG_LDTH,
++	REG_PDTH,
++	REG_PD,
++	REG_LT,
++	REG_TW,
++	REG_REVERVED_1,
++};
++
++enum {
++	MOD_STANDBY = 0,
++	MOD_MEASURE,
++	MOD_LEVEL_D,
++	MOD_PULSE_D,
++};
++
++enum {
++	INT_1L_2P = 0,
++	INT_1P_2L,
++	INT_1SP_2P,
++};
++
++struct mma7450_status {
++	u8 mod;
++	u8 ctl1;
++	u8 ctl2;
++};
++
++/*forward declear*/
++static ssize_t mma7450_show(struct device *dev,
++			    struct device_attribute *attr, char *buf);
++static ssize_t mma7450_store(struct device *dev,
++			     struct device_attribute *attr, const char *buf,
++			     size_t count);
++static int mma7450_probe(struct i2c_client *client);
++static int mma7450_remove(struct i2c_client *client);
++static int mma7450_suspend(struct i2c_client *client, pm_message_t state);
++static int mma7450_resume(struct i2c_client *client);
++static void mma_bh_handler(struct work_struct *work);
++
++/*definition*/
++static struct regulator *reg_dvdd_io;
++static struct regulator *reg_avdd;
++static struct i2c_client *mma7450_client;
++static struct device *hwmon_dev;
++static struct input_polled_dev *mma7450_idev;
++static struct mxc_mma7450_platform_data *plat_data;
++static u8 mma7450_mode;
++static struct device_attribute mma7450_dev_attr = {
++	.attr = {
++		 .name = "mma7450_ctl",
++		 .mode = S_IRUSR | S_IWUSR,
++		 },
++	.show = mma7450_show,
++	.store = mma7450_store,
++};
++static struct i2c_driver i2c_mma7450_driver = {
++	.driver = {
++		   .name = "mma7450",
++		   },
++	.probe = mma7450_probe,
++	.remove = mma7450_remove,
++	.suspend = mma7450_suspend,
++	.resume = mma7450_resume,
++};
++
++static struct mma7450_status mma_status = {
++	.mod = 0,
++	.ctl1 = 0,
++	.ctl2 = 0,
++};
++
++DECLARE_WORK(mma_work, mma_bh_handler);
++
++#ifdef DEBUG
++enum {
++	MMA_REG_R = 0,
++	MMA_REG_W,
++	MMA_SET_MOD,
++	MMA_SET_L_THR,
++	MMA_SET_P_THR,
++	MMA_SET_INTP,
++	MMA_SET_INTB,
++	MMA_SET_G,
++	MMA_I2C_EABLE,
++	MMA_OFF_X,
++	MMA_OFF_Y,
++	MMA_OFF_Z,
++	MMA_SELF_TEST,
++	MMA_SET_LDPL,
++	MMA_SET_PDPL,
++	MMA_SET_PDV,
++	MMA_SET_LTV,
++	MMA_SET_TW,
++	MMA_CMD_MAX
++};
++
++static char *command[MMA_CMD_MAX] = {
++	[MMA_REG_R] = "readreg",
++	[MMA_REG_W] = "writereg",
++	[MMA_SET_MOD] = "setmod",
++	[MMA_SET_L_THR] = "setlt",
++	[MMA_SET_P_THR] = "setpt",
++	[MMA_SET_INTP] = "setintp",
++	[MMA_SET_INTB] = "setintb",
++	[MMA_SET_G] = "setg",
++	[MMA_I2C_EABLE] = "setie",
++	[MMA_OFF_X] = "setxo",
++	[MMA_OFF_Y] = "setyo",
++	[MMA_OFF_Z] = "setzo",
++	[MMA_SELF_TEST] = "selft",
++	[MMA_SET_LDPL] = "setldp",
++	[MMA_SET_PDPL] = "setpdp",
++	[MMA_SET_PDV] = "setpdv",
++	[MMA_SET_LTV] = "setltv",
++	[MMA_SET_TW] = "settw",
++};
++
++static void set_mod(u8 mode)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_MCTL);
++	/* shall I test the ret value? */
++	ret = (ret & ~0x3) | (mode & 0x3);
++	mma_status.mod = ret;
++	i2c_smbus_write_byte_data(mma7450_client, REG_MCTL, ret);
++}
++
++static void set_level_thr(u8 lth)
++{
++	i2c_smbus_write_byte_data(mma7450_client, REG_LDTH, lth);
++}
++
++static void set_pulse_thr(u8 pth)
++{
++	i2c_smbus_write_byte_data(mma7450_client, REG_PDTH, pth);
++}
++
++static void set_int_pin(u8 pin)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_CTL1);
++	ret = (ret & ~0x1) | (pin & 0x1);
++	mma_status.ctl1 = ret;
++	i2c_smbus_write_byte_data(mma7450_client, REG_CTL1, ret);
++}
++
++static void set_int_bit(u8 bit)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_CTL1);
++	ret = (ret & ~0x6) | ((bit << 1) & 0x6);
++	mma_status.ctl1 = ret;
++	i2c_smbus_write_byte_data(mma7450_client, REG_CTL1, ret);
++}
++
++static void set_g_level(u8 gl)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_MCTL);
++	ret = (ret & ~0xC) | ((gl << 2) & 0xC);
++	i2c_smbus_write_byte_data(mma7450_client, REG_MCTL, ret);
++}
++
++static void set_i2c_enable(u8 i2c_e)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_I2CAD);
++	ret = (ret & ~0x80) | ((i2c_e << 7) & 0x80);
++	i2c_smbus_write_byte_data(mma7450_client, REG_I2CAD, ret);
++}
++
++static void set_x_offset(u16 xo)
++{
++	u8 data;
++
++	data = (xo & 0x0F);
++	i2c_smbus_write_byte_data(mma7450_client, REG_XOFFL, data);
++	data = (xo & 0xF0) >> 8;
++	i2c_smbus_write_byte_data(mma7450_client, REG_XOFFH, data);
++}
++
++static void set_y_offset(u16 yo)
++{
++	u8 data;
++
++	data = (yo & 0x0F);
++	i2c_smbus_write_byte_data(mma7450_client, REG_YOFFL, data);
++	data = (yo & 0xF0) >> 8;
++	i2c_smbus_write_byte_data(mma7450_client, REG_YOFFH, data);
++}
++
++static void set_z_offset(u16 zo)
++{
++	u8 data;
++
++	data = (zo & 0x0F);
++	i2c_smbus_write_byte_data(mma7450_client, REG_ZOFFL, data);
++	data = (zo & 0xF0) >> 8;
++	i2c_smbus_write_byte_data(mma7450_client, REG_ZOFFH, data);
++}
++
++static void selftest(u8 st)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_MCTL);
++	ret = (ret & ~0x10) | ((st << 4) & 0x10);
++	i2c_smbus_write_byte_data(mma7450_client, REG_MCTL, ret);
++}
++
++static void set_level_det_p(u8 ldp)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_CTL2);
++	ret = (ret & ~0x1) | ((ldp << 0) & 0x1);
++	mma_status.ctl2 = ret;
++	i2c_smbus_write_byte_data(mma7450_client, REG_CTL2, ret);
++}
++
++static void set_pulse_det_p(u8 pdp)
++{
++	int ret;
++
++	ret = i2c_smbus_read_byte_data(mma7450_client, REG_CTL2);
++	ret = (ret & ~0x2) | ((pdp << 1) & 0x2);
++	mma_status.ctl2 = ret;
++	i2c_smbus_write_byte_data(mma7450_client, REG_CTL2, ret);
++}
++
++static void set_pulse_duration(u8 pd)
++{
++	i2c_smbus_write_byte_data(mma7450_client, REG_PD, pd);
++}
++
++static void set_latency_time(u8 lt)
++{
++	i2c_smbus_write_byte_data(mma7450_client, REG_LT, lt);
++}
++
++static void set_time_window(u8 tw)
++{
++	i2c_smbus_write_byte_data(mma7450_client, REG_TW, tw);
++}
++
++static void parse_arg(const char *arg, int *reg, int *value)
++{
++	const char *p;
++
++	for (p = arg;; p++) {
++		if (*p == ' ' || *p == '\0')
++			break;
++	}
++
++	p++;
++
++	*reg = simple_strtoul(arg, NULL, 16);
++	*value = simple_strtoul(p, NULL, 16);
++}
++
++static void cmd_read_reg(const char *arg)
++{
++	int reg, value, ret;
++
++	parse_arg(arg, &reg, &value);
++	ret = i2c_smbus_read_byte_data(mma7450_client, reg);
++	dev_info(&mma7450_client->dev, "read reg0x%x = %x\n", reg, ret);
++}
++
++static void cmd_write_reg(const char *arg)
++{
++	int reg, value, ret;
++
++	parse_arg(arg, &reg, &value);
++	ret = i2c_smbus_write_byte_data(mma7450_client, reg, value);
++	dev_info(&mma7450_client->dev, "write reg result %s\n",
++		 ret ? "failed" : "success");
++}
++
++static int exec_command(const char *buf, size_t count)
++{
++	const char *p, *s;
++	const char *arg;
++	int i, value = 0;
++
++	for (p = buf;; p++) {
++		if (*p == ' ' || *p == '\0' || p - buf >= count)
++			break;
++	}
++	arg = p + 1;
++
++	for (i = MMA_REG_R; i < MMA_CMD_MAX; i++) {
++		s = command[i];
++		if (s && !strncmp(buf, s, p - buf)) {
++			dev_info(&mma7450_client->dev, "command %s\n", s);
++			goto mma_exec_command;
++		}
++	}
++
++	dev_err(&mma7450_client->dev, "command is not found\n");
++	return -1;
++
++mma_exec_command:
++	if (i != MMA_REG_R && i != MMA_REG_W)
++		value = simple_strtoul(arg, NULL, 16);
++
++	switch (i) {
++	case MMA_REG_R:
++		cmd_read_reg(arg);
++		break;
++	case MMA_REG_W:
++		cmd_write_reg(arg);
++		break;
++	case MMA_SET_MOD:
++		set_mod(value);
++		break;
++	case MMA_SET_L_THR:
++		set_level_thr(value);
++		break;
++	case MMA_SET_P_THR:
++		set_pulse_thr(value);
++		break;
++	case MMA_SET_INTP:
++		set_int_pin(value);
++		break;
++	case MMA_SET_INTB:
++		set_int_bit(value);
++		break;
++	case MMA_SET_G:
++		set_g_level(value);
++		break;
++	case MMA_I2C_EABLE:
++		set_i2c_enable(value);
++		break;
++	case MMA_OFF_X:
++		set_x_offset(value);
++		break;
++	case MMA_OFF_Y:
++		set_y_offset(value);
++		break;
++	case MMA_OFF_Z:
++		set_z_offset(value);
++		break;
++	case MMA_SELF_TEST:
++		selftest(value);
++		break;
++	case MMA_SET_LDPL:
++		set_level_det_p(value);
++		break;
++	case MMA_SET_PDPL:
++		set_pulse_det_p(value);
++		break;
++	case MMA_SET_PDV:
++		set_pulse_duration(value);
++		break;
++	case MMA_SET_LTV:
++		set_latency_time(value);
++		break;
++	case MMA_SET_TW:
++		set_time_window(value);
++		break;
++	default:
++		dev_err(&mma7450_client->dev, "command is not found\n");
++		break;
++	}
++
++	return 0;
++}
++
++static ssize_t mma7450_show(struct device *dev,
++			    struct device_attribute *attr, char *buf)
++{
++	int ret, reg;
++
++	for (reg = REG_XOUTL; reg < REG_REVERVED_1; reg++) {
++		ret = i2c_smbus_read_byte_data(mma7450_client, reg);
++		dev_info(&mma7450_client->dev, "reg0x%02x:\t%03d\t0x%02x\n",
++			 reg, (s8) ret, ret);
++	}
++
++	return 0;
++}
++
++static ssize_t mma7450_store(struct device *dev,
++			     struct device_attribute *attr, const char *buf,
++			     size_t count)
++{
++	exec_command(buf, count);
++
++	return count;
++}
++
++#else
++
++static ssize_t mma7450_show(struct device *dev,
++			    struct device_attribute *attr, char *buf)
++{
++	return 0;
++}
++
++static ssize_t mma7450_store(struct device *dev,
++			     struct device_attribute *attr, const char *buf,
++			     size_t count)
++{
++	return count;
++}
++
++#endif
++
++static void report_rel(void)
++{
++	u8 status, mod = mma_status.mod;
++	u16 x, y, z;
++
++	status = i2c_smbus_read_byte_data(mma7450_client, REG_STATUS);
++	if (!(status & 0x01)) {	/* data ready in measurement mode? */
++		return;
++	}
++	if ((mod & 0x0c) == 0) { /* 8g range */
++		x = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_XOUTL);
++		y = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_YOUTL);
++		z = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_ZOUTL);
++		x |= 0xF0 &
++		(i2c_smbus_read_byte_data(mma7450_client, REG_XOUTH) << 8);
++		y |= 0xF0 &
++		(i2c_smbus_read_byte_data(mma7450_client, REG_YOUTH) << 8);
++		z |= 0xF0 &
++		(i2c_smbus_read_byte_data(mma7450_client, REG_ZOUTH) << 8);
++	} else { /* 2g/4g range */
++		x = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_XOUT8);
++		y = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_YOUT8);
++		z = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_ZOUT8);
++	}
++
++	status = i2c_smbus_read_byte_data(mma7450_client, REG_STATUS);
++	if (status & 0x02) {	/* data is overwrite */
++		return;
++	}
++
++	input_report_rel(mma7450_idev->input, REL_X, x);
++	input_report_rel(mma7450_idev->input, REL_Y, y);
++	input_report_rel(mma7450_idev->input, REL_Z, z);
++	input_sync(mma7450_idev->input);
++}
++
++static void mma_bh_handler(struct work_struct *work)
++{
++	report_rel();
++}
++
++static void mma7450_dev_poll(struct input_polled_dev *dev)
++{
++	report_rel();
++}
++
++static irqreturn_t mma7450_interrupt(int irq, void *dev_id)
++{
++	struct input_dev *input_dev = dev_id;
++	u8 int_bit, int_pin;
++
++	int_bit = mma_status.ctl1 & 0x6;
++	int_pin = mma_status.ctl1 & 0x1;
++
++	switch (mma_status.mod & 0x03) {
++	case 1:
++		/*only int1 report data ready int */
++		if (plat_data->int1 != irq)
++			goto error_bad_int;
++		schedule_work(&mma_work);
++		break;
++	case 2:
++		/* for level and pulse detection mode,
++		 * choice tasklet to handle interrupt quickly.
++		 * Currently, leave it doing nothing*/
++		if (plat_data->int1 == irq) {
++			if ((int_bit == 0) && (int_pin != 0))
++				goto error_bad_int;
++			if ((int_bit == 0x2) && (int_pin != 0x1))
++				goto error_bad_int;
++			if (int_bit == 0x4)
++				goto error_bad_int;
++		}
++		if (plat_data->int2 == irq) {
++			if ((int_bit == 0) && (int_pin != 0x1))
++				goto error_bad_int;
++			if ((int_bit == 0x2) && (int_pin != 0))
++				goto error_bad_int;
++			if (int_bit == 0x4)
++				goto error_bad_int;
++		}
++
++		dev_info(&input_dev->dev, "motion detected in level mod\n");
++
++		break;
++	case 3:
++		if (plat_data->int1 == irq) {
++			if ((int_bit == 0) && (int_pin != 0x1))
++				goto error_bad_int;
++			if ((int_bit == 0x2) && (int_pin != 0))
++				goto error_bad_int;
++			if ((int_bit == 0x4) && (int_pin != 0x1))
++				goto error_bad_int;
++		}
++		if (plat_data->int2 == irq) {
++			if ((int_bit == 0) && (int_pin != 0))
++				goto error_bad_int;
++			if ((int_bit == 0x2) && (int_pin != 0x1))
++				goto error_bad_int;
++			if ((int_bit == 0x4) && (int_pin != 0))
++				goto error_bad_int;
++		}
++
++		if (mma_status.ctl2 & 0x02)
++			dev_info(&input_dev->dev,
++				 "freefall detected in pulse mod\n");
++		else
++			dev_info(&input_dev->dev,
++				 "motion detected in pulse mod\n");
++
++		break;
++	case 0:
++	default:
++		break;
++	}
++	return IRQ_RETVAL(1);
++error_bad_int:
++	return IRQ_RETVAL(1);
++}
++
++static int mma7450_probe(struct i2c_client *client)
++{
++	int ret;
++	struct input_dev *idev;
++
++	plat_data =
++	    (struct mxc_mma7450_platform_data *)client->dev.platform_data;
++	if (plat_data == NULL) {
++		dev_err(&client->dev, "lack of platform data!\n");
++		return -ENODEV;
++	}
++
++	/*enable power supply */
++	/*when to power on/off the power is to be considered later */
++	/*shall I check the return value */
++	reg_dvdd_io = regulator_get(&client->dev, plat_data->reg_dvdd_io);
++	if (reg_dvdd_io != ERR_PTR(-ENOENT))
++		regulator_enable(reg_dvdd_io);
++	else
++		return -EINVAL;
++
++	reg_avdd = regulator_get(&client->dev, plat_data->reg_avdd);
++	if (reg_avdd != ERR_PTR(-ENOENT))
++		regulator_enable(reg_avdd);
++	else {
++		regulator_put(reg_dvdd_io, &client->dev);
++		return -EINVAL;
++	}
++
++	/*bind the right device to the driver */
++	ret = i2c_smbus_read_byte_data(client, REG_I2CAD);
++	if (MMA7450_I2C_ADDR != (0x7F & ret)) {	/*compare the address value */
++		dev_err(&client->dev,
++			"read chip ID 0x%x is not equal to 0x%x!\n", ret,
++			MMA7450_I2C_ADDR);
++		goto error_disable_power;
++	}
++	mma7450_client = client;
++
++	/*interrupt register */
++	/*when to register interrupt is to be considered later */
++
++	/*create device file in sysfs as user interface */
++	ret = device_create_file(&client->dev, &mma7450_dev_attr);
++	if (ret) {
++		dev_err(&client->dev, "create device file failed!\n");
++		goto error_disable_power;
++	}
++
++	/*register to hwmon device */
++	hwmon_dev = hwmon_device_register(&client->dev);
++	if (IS_ERR(hwmon_dev)) {
++		dev_err(&client->dev, "hwmon register failed!\n");
++		ret = PTR_ERR(hwmon_dev);
++		goto error_rm_dev_file;
++	}
++
++	/*input poll device register */
++	mma7450_idev = input_allocate_polled_device();
++	if (!mma7450_idev) {
++		dev_err(&client->dev, "alloc poll device failed!\n");
++		ret = -ENOMEM;
++		goto error_rm_hwmon_dev;
++	}
++	mma7450_idev->poll = mma7450_dev_poll;
++	mma7450_idev->poll_interval = POLL_INTERVAL;
++	idev = mma7450_idev->input;
++	idev->name = DEVICE_NAME;
++	idev->id.bustype = BUS_I2C;
++	idev->dev.parent = &client->dev;
++	idev->evbit[0] = BIT_MASK(EV_REL);
++	ret = input_register_polled_device(mma7450_idev);
++	if (ret) {
++		dev_err(&client->dev, "register poll device failed!\n");
++		goto error_free_poll_dev;
++	}
++
++	/* configure gpio as input for interrupt monitor */
++	plat_data->gpio_pin_get();
++
++	set_irq_type(plat_data->int1, IRQF_TRIGGER_RISING);
++	/* register interrupt handle */
++	ret = request_irq(plat_data->int1, mma7450_interrupt,
++			  IRQF_TRIGGER_RISING, DEVICE_NAME, idev);
++
++	if (ret) {
++		dev_err(&client->dev, "request_irq(%d) returned error %d\n",
++			plat_data->int1, ret);
++		goto error_rm_poll_dev;
++	}
++
++	set_irq_type(plat_data->int2, IRQF_TRIGGER_RISING);
++	ret = request_irq(plat_data->int2, mma7450_interrupt,
++			  IRQF_TRIGGER_RISING, DEVICE_NAME, idev);
++	if (ret) {
++		dev_err(&client->dev, "request_irq(%d) returned error %d\n",
++			plat_data->int2, ret);
++		goto error_free_irq1;
++	}
++
++	dev_info(&client->dev, "mma7450 device is probed successfully.\n");
++
++	return 0;		/*what value shall be return */
++
++	/*error handle */
++error_free_irq1:
++	free_irq(plat_data->int1, 0);
++error_rm_poll_dev:
++	input_unregister_polled_device(mma7450_idev);
++error_free_poll_dev:
++	input_free_polled_device(mma7450_idev);
++error_rm_hwmon_dev:
++	hwmon_device_unregister(hwmon_dev);
++error_rm_dev_file:
++	device_remove_file(&client->dev, &mma7450_dev_attr);
++error_disable_power:
++	regulator_disable(reg_dvdd_io);	/*shall I check the return value */
++	regulator_disable(reg_avdd);
++	regulator_put(reg_dvdd_io, &client->dev);
++	regulator_put(reg_avdd, &client->dev);
++
++	return ret;
++}
++
++static int mma7450_remove(struct i2c_client *client)
++{
++	free_irq(plat_data->int2, mma7450_idev->input);
++	free_irq(plat_data->int1, mma7450_idev->input);
++	plat_data->gpio_pin_put();
++	input_unregister_polled_device(mma7450_idev);
++	input_free_polled_device(mma7450_idev);
++	hwmon_device_unregister(hwmon_dev);
++	device_remove_file(&client->dev, &mma7450_dev_attr);
++	regulator_disable(reg_dvdd_io);	/*shall I check the return value */
++	regulator_disable(reg_avdd);
++	regulator_put(reg_dvdd_io, &client->dev);
++	regulator_put(reg_avdd, &client->dev);
++	return 0;
++}
++
++static int mma7450_suspend(struct i2c_client *client, pm_message_t state)
++{
++	mma7450_mode = i2c_smbus_read_byte_data(mma7450_client, REG_MCTL);
++	i2c_smbus_write_byte_data(mma7450_client, REG_MCTL,
++				  mma7450_mode & ~0x3);
++	return 0;
++}
++
++static int mma7450_resume(struct i2c_client *client)
++{
++	i2c_smbus_write_byte_data(mma7450_client, REG_MCTL, mma7450_mode);
++	return 0;
++}
++
++static int __init init_mma7450(void)
++{
++	/*register driver */
++	printk(KERN_INFO "add mma i2c driver\n");
++	return i2c_add_driver(&i2c_mma7450_driver);
++}
++
++static void __exit exit_mma7450(void)
++{
++	printk(KERN_INFO "del mma i2c driver.\n");
++	return i2c_del_driver(&i2c_mma7450_driver);
++}
++
++module_init(init_mma7450);
++module_exit(exit_mma7450);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("MMA7450 sensor driver");
++MODULE_LICENSE("GPL");
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 2619a96..f264555 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -134,6 +134,15 @@ struct mxc_fm_platform_data {
+ 	void (*clock_ctl) (int flag);
+ };
+ 
++struct mxc_mma7450_platform_data {
++	char *reg_dvdd_io;
++	char *reg_avdd;
++	void (*gpio_pin_get) (void);
++	void (*gpio_pin_put) (void);
++	int int1;
++	int int2;
++};
++
+ extern void mxc_wd_reset(void);
+ extern void mxc_kick_wd(void);
+ unsigned long board_get_ckih_rate(void);
+@@ -141,7 +150,7 @@ unsigned long board_get_ckih_rate(void);
+ int mxc_snoop_set_config(u32 num, unsigned long base, int size);
+ int mxc_snoop_get_status(u32 num, u32 * statl, u32 * stath);
+ 
+-#endif				/* __ASSEMBLY__ */
++#endif /* __ASSEMBLY__ */
+ 
+ #define IOMUX_TO_GPIO(pin) 	((((unsigned int)pin >> MUX_IO_P) * GPIO_NUM_PIN) + ((pin >> MUX_IO_I) & ((1 << (MUX_IO_P - MUX_IO_I)) -1)))
+ #define IOMUX_TO_IRQ(pin)	(MXC_GPIO_INT_BASE + IOMUX_TO_GPIO(pin))
+@@ -248,4 +257,4 @@ int tzic_enable_wake(int is_idle);
+ 
+ #endif
+ 
+-#endif				/*  __ASM_ARCH_MXC_H__ */
++#endif /*  __ASM_ARCH_MXC_H__ */
+-- 
+1.5.4.4
+

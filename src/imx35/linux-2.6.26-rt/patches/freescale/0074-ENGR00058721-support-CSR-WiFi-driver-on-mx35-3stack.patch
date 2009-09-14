@@ -1,0 +1,767 @@
+From cd684eba62e213498d7dd248a443b90c6d1745be Mon Sep 17 00:00:00 2001
+From: Fred Fan <r.herring@freescale.com>
+Date: Mon, 1 Sep 2008 20:56:52 +0800
+Subject: [PATCH] ENGR00058721 support CSR WiFi driver on mx35 3stack board
+
+1) In SDHCI driver, enable IPG_CLK and PER_CLK.
+	Set D3CD bit in protocl control register.
+2) Modify export interface in mxc_mmc and sdhci driver,
+	to support directly trigger detect by host id.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |   37 ++++++-
+ arch/arm/mach-mx35/mx35_3stack.c        |   88 +++++++++++++++-
+ arch/arm/mach-mx35/mx35_3stack_gpio.c   |   54 +++++++++-
+ drivers/mmc/card/Kconfig                |    3 +-
+ drivers/mmc/card/unifi_fs/fs_lx.c       |  178 ++++++++++++++++++++-----------
+ drivers/mmc/host/mx_sdhci.c             |   80 ++++++++++++--
+ drivers/mmc/host/mx_sdhci.h             |    1 +
+ drivers/mmc/host/mxc_mmc.c              |   10 +-
+ include/asm-arm/arch-mxc/mxc.h          |    2 +-
+ 9 files changed, 367 insertions(+), 86 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 0f73525..b6795e0 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Thu Aug 28 16:42:06 2008
++# Mon Sep  1 20:48:16 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -356,7 +356,39 @@ CONFIG_DEFAULT_TCP_CONG="cubic"
+ # CONFIG_LAPB is not set
+ # CONFIG_ECONET is not set
+ # CONFIG_WAN_ROUTER is not set
+-# CONFIG_NET_SCHED is not set
++CONFIG_NET_SCHED=y
++
++#
++# Queueing/Scheduling
++#
++# CONFIG_NET_SCH_CBQ is not set
++# CONFIG_NET_SCH_HTB is not set
++# CONFIG_NET_SCH_HFSC is not set
++# CONFIG_NET_SCH_PRIO is not set
++# CONFIG_NET_SCH_RR is not set
++# CONFIG_NET_SCH_RED is not set
++# CONFIG_NET_SCH_SFQ is not set
++# CONFIG_NET_SCH_TEQL is not set
++# CONFIG_NET_SCH_TBF is not set
++# CONFIG_NET_SCH_GRED is not set
++# CONFIG_NET_SCH_DSMARK is not set
++# CONFIG_NET_SCH_NETEM is not set
++# CONFIG_NET_SCH_INGRESS is not set
++
++#
++# Classification
++#
++# CONFIG_NET_CLS_BASIC is not set
++# CONFIG_NET_CLS_TCINDEX is not set
++# CONFIG_NET_CLS_ROUTE4 is not set
++# CONFIG_NET_CLS_FW is not set
++# CONFIG_NET_CLS_U32 is not set
++# CONFIG_NET_CLS_RSVP is not set
++# CONFIG_NET_CLS_RSVP6 is not set
++# CONFIG_NET_EMATCH is not set
++# CONFIG_NET_CLS_ACT is not set
++# CONFIG_NET_CLS_POLICE is not set
++CONFIG_NET_SCH_FIFO=y
+ 
+ #
+ # Network testing
+@@ -1205,6 +1237,7 @@ CONFIG_MMC=y
+ CONFIG_MMC_BLOCK=y
+ CONFIG_MMC_BLOCK_BOUNCE=y
+ # CONFIG_SDIO_UART is not set
++CONFIG_SDIO_UNIFI_FS=m
+ 
+ #
+ # MMC/SD Host Controller Drivers
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 606db95..12abd53 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -299,6 +299,45 @@ static inline void mxc_init_mlb(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++static void mxc_unifi_hardreset(void)
++{
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 1, 0);
++	msleep(100);
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 1, 1);
++}
++
++static void mxc_unifi_enable(int en)
++{
++	if (en) {
++		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 5, 1);
++		msleep(10);
++	} else
++		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 5, 0);
++}
++
++static struct mxc_unifi_platform_data unifi_data = {
++	.hardreset = mxc_unifi_hardreset,
++	.enable = mxc_unifi_enable,
++	.reg_1v5_ana_bb = "SW4",
++	.reg_vdd_vpa = "SW1",
++	.reg_1v5_dd = "SW4",
++	.host_id = 1,
++};
++
++struct mxc_unifi_platform_data *get_unifi_plat_data(void)
++{
++	return &unifi_data;
++}
++#else
++struct mxc_unifi_platform_data *get_unifi_plat_data(void)
++{
++	return NULL;
++}
++#endif
++
++EXPORT_SYMBOL(get_unifi_plat_data);
++
+ static struct mxc_tsc_platform_data tsc2007_data = {
+ 	.vdd_reg = "SW1",
+ 	.penup_threshold = 30,
+@@ -435,7 +474,7 @@ EXPORT_SYMBOL(expio_intr_fec);
+ #endif
+ 
+ #if defined(CONFIG_MMC_IMX_ESDHCI) || defined(CONFIG_MMC_IMX_ESDHCI_MODULE)
+-static struct mxc_mmc_platform_data mmc_data = {
++static struct mxc_mmc_platform_data mmc0_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
+ 	.min_clk = 400000,
+ 	.max_clk = 52000000,
+@@ -472,15 +511,60 @@ static struct platform_device mxcsdhc1_device = {
+ 	.id = 0,
+ 	.dev = {
+ 		.release = mxc_nop_release,
+-		.platform_data = &mmc_data,
++		.platform_data = &mmc0_data,
+ 		},
+ 	.num_resources = ARRAY_SIZE(mxcsdhc1_resources),
+ 	.resource = mxcsdhc1_resources,
+ };
+ 
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++static struct mxc_mmc_platform_data mmc1_data = {
++	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30 |
++		    MMC_VDD_31_32,
++	.min_clk = 150000,
++	.max_clk = 25000000,
++	.card_inserted_state = 1,
++	.status = sdhc_get_card_det_status,
++	.wp_status = sdhc_write_protect,
++	.clock_mmc = "sdhc_clk",
++};
++
++static struct resource mxcsdhc2_resources[] = {
++	[0] = {
++	       .start = MMC_SDHC2_BASE_ADDR,
++	       .end = MMC_SDHC2_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_MMC_SDHC2,
++	       .end = MXC_INT_MMC_SDHC2,
++	       .flags = IORESOURCE_IRQ,
++	},
++	[2] = {
++	       .start = 0,
++	       .end = 0,
++	       .flags = IORESOURCE_IRQ,
++	},
++};
++
++static struct platform_device mxcsdhc2_device = {
++	.name = "mxsdhci",
++	.id = 1,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mmc1_data,
++		},
++	.num_resources = ARRAY_SIZE(mxcsdhc2_resources),
++	.resource = mxcsdhc2_resources,
++};
++#endif
++
+ static inline void mxc_init_mmc(void)
+ {
+ 	(void)platform_device_register(&mxcsdhc1_device);
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++	(void)platform_device_register(&mxcsdhc2_device);
++#endif
+ }
+ #else
+ static inline void mxc_init_mmc(void)
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index d2f1635..35b8955 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -550,6 +550,34 @@ void gpio_sdhc_active(int module)
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_DATA3, pad_val);
+ 		break;
+ 	case 1:
++		mxc_request_iomux(MX35_PIN_SD2_CLK,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_CMD,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA0,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA1,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA2,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA3,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++			PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++			PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
++
++		mxc_iomux_set_pad(MX35_PIN_SD2_CLK, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_CMD, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA0, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA1, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA2, pad_val);
++
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++			PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++			PAD_CTL_100K_PU | PAD_CTL_SRE_FAST;
++
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA3, pad_val);
+ 		break;
+ 	default:
+ 		break;
+@@ -590,7 +618,31 @@ void gpio_sdhc_inactive(int module)
+ 				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
+ 		break;
+ 	case 1:
+-		/* TODO:what are the pins for SDHC2? */
++		mxc_free_iomux(MX35_PIN_SD2_CLK,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_CMD,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA0,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA1,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA2,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA3,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++
++		mxc_iomux_set_pad(MX35_PIN_SD2_CLK,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_CMD,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA0,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA1,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA2,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA3,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
+ 		break;
+ 	default:
+ 		break;
+diff --git a/drivers/mmc/card/Kconfig b/drivers/mmc/card/Kconfig
+index 7a16d3c..f7a4e4e 100644
+--- a/drivers/mmc/card/Kconfig
++++ b/drivers/mmc/card/Kconfig
+@@ -54,7 +54,8 @@ config MMC_TEST
+ 
+ config SDIO_UNIFI_FS
+ 	tristate "UniFi SDIO glue for Freescale MMC/SDIO"
+-	depends on MMC_MXC && MACH_MX31_3DS
++	depends on (MMC_MXC || MMC_IMX_ESDHCI)
++	depends on (MACH_MX31_3DS || MACH_MX35_3DS)
+ 	help
+ 	  This provides an interface between the CSR UniFi WiFi
+ 	  driver and the Freescale MMC/SDIO interface.
+diff --git a/drivers/mmc/card/unifi_fs/fs_lx.c b/drivers/mmc/card/unifi_fs/fs_lx.c
+index da3936a..41b9d2b 100644
+--- a/drivers/mmc/card/unifi_fs/fs_lx.c
++++ b/drivers/mmc/card/unifi_fs/fs_lx.c
+@@ -72,8 +72,7 @@ static struct sdio_dev *available_sdio_dev;
+ static struct fs_driver *available_driver;
+ struct mxc_unifi_platform_data *plat_data;
+ 
+-static struct mmc_host *fsl_mmc_host;
+-struct mmc_host *mxc_mmc_get_host(int id);
++extern void mxc_mmc_force_detect(int id);
+ 
+ enum sdio_cmd_direction {
+ 	CMD_READ,
+@@ -254,27 +253,44 @@ EXPORT_SYMBOL(fs_sdio_set_block_size);
+ static void fs_unifi_power_on(int check_card)
+ {
+ 	struct regulator_unifi *reg_unifi;
++	unsigned int tmp;
+ 
+ 	reg_unifi = plat_data->priv;
+ 
+-	regulator_enable(reg_unifi->reg_gpo1);
+-	regulator_enable(reg_unifi->reg_gpo2);
++	if (reg_unifi->reg_gpo1)
++		regulator_enable(reg_unifi->reg_gpo1);
++	if (reg_unifi->reg_gpo2)
++		regulator_enable(reg_unifi->reg_gpo2);
+ 
+-	regulator_set_voltage(reg_unifi->reg_1v5_ana_bb, 1500000);
+-	regulator_enable(reg_unifi->reg_1v5_ana_bb);
+-
+-	regulator_set_voltage(reg_unifi->reg_vdd_vpa, 3000000);
+-	regulator_enable(reg_unifi->reg_vdd_vpa);
++	if (plat_data->enable)
++		plat_data->enable(1);
+ 
++	if (reg_unifi->reg_1v5_ana_bb) {
++		tmp = regulator_get_voltage(reg_unifi->reg_1v5_ana_bb);
++		if (tmp < 1500000)
++			regulator_set_voltage(reg_unifi->reg_1v5_ana_bb,
++					     1500000);
++		regulator_enable(reg_unifi->reg_1v5_ana_bb);
++	}
++	if (reg_unifi->reg_vdd_vpa) {
++		tmp = regulator_get_voltage(reg_unifi->reg_vdd_vpa);
++		if (tmp < 3000000)
++			regulator_set_voltage(reg_unifi->reg_vdd_vpa, 3000000);
++		regulator_enable(reg_unifi->reg_vdd_vpa);
++	}
+ 	/* WL_1V5DD should come on last, 10ms after other supplies */
+ 	msleep(10);
+-	regulator_set_voltage(reg_unifi->reg_1v5_dd, 1500000);
+-	regulator_enable(reg_unifi->reg_1v5_dd);
++	if (reg_unifi->reg_1v5_dd) {
++		tmp = regulator_get_voltage(reg_unifi->reg_1v5_dd);
++		if (tmp < 1500000)
++			regulator_set_voltage(reg_unifi->reg_1v5_dd, 1500000);
++		regulator_enable(reg_unifi->reg_1v5_dd);
++	}
+ 	msleep(10);
+-	if (check_card && fsl_mmc_host) {
++	if (check_card) {
+ 		do_sdio_hard_reset(NULL);
+ 		msleep(500);
+-		mmc_detect_change(fsl_mmc_host, msecs_to_jiffies(100));
++		mxc_mmc_force_detect(plat_data->host_id);
+ 	}
+ }
+ 
+@@ -290,13 +306,25 @@ static void fs_unifi_power_off(int check_card)
+ 	struct regulator_unifi *reg_unifi;
+ 
+ 	reg_unifi = plat_data->priv;
+-	regulator_disable(reg_unifi->reg_gpo2);
+-	regulator_disable(reg_unifi->reg_1v5_ana_bb);
+-	regulator_disable(reg_unifi->reg_1v5_dd);
+-	regulator_disable(reg_unifi->reg_vdd_vpa);
++	if (reg_unifi->reg_1v5_dd)
++		regulator_disable(reg_unifi->reg_1v5_dd);
++	if (reg_unifi->reg_vdd_vpa)
++		regulator_disable(reg_unifi->reg_vdd_vpa);
++
++	if (reg_unifi->reg_1v5_ana_bb)
++		regulator_disable(reg_unifi->reg_1v5_ana_bb);
+ 
+-	if (check_card && fsl_mmc_host)
+-		mmc_detect_change(fsl_mmc_host, msecs_to_jiffies(5));
++	if (plat_data->enable)
++		plat_data->enable(0);
++
++	if (reg_unifi->reg_gpo2)
++		regulator_disable(reg_unifi->reg_gpo2);
++
++	if (reg_unifi->reg_gpo1)
++		regulator_disable(reg_unifi->reg_gpo1);
++
++	if (check_card)
++		mxc_mmc_force_detect(plat_data->host_id);
+ 
+ }
+ 
+@@ -441,6 +469,8 @@ static int fs_sdio_probe(struct sdio_func *func,
+ 
+ 	/* Allocate our private context */
+ 	fdev = kmalloc(sizeof(struct sdio_dev), GFP_KERNEL);
++	if (!fdev)
++		return -ENOMEM;
+ 	available_sdio_dev = fdev;
+ 	memset(fdev, 0, sizeof(struct sdio_dev));
+ 	fdev->func = func;
+@@ -505,63 +535,78 @@ static int fs_unifi_init(void)
+ 	int err = 0;
+ 
+ 	plat_data = get_unifi_plat_data();
+-	fsl_mmc_host = mxc_mmc_get_host(plat_data->host_id);
+-	if (!fsl_mmc_host || !plat_data)
++
++	if (!plat_data)
+ 		return -ENOENT;
+ 
+ 	reg_unifi = kzalloc(sizeof(struct regulator_unifi), GFP_KERNEL);
+-
+-	reg = regulator_get(NULL, plat_data->reg_gpo1);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_gpo1 = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_gpo1;
++	if (!reg_unifi)
++		return -ENOMEM;
++
++	if (plat_data->reg_gpo1) {
++		reg = regulator_get(NULL, plat_data->reg_gpo1);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_gpo1 = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_gpo1;
++		}
+ 	}
+ 
+-	reg = regulator_get(NULL, plat_data->reg_gpo2);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_gpo2 = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_gpo2;
++	if (plat_data->reg_gpo2) {
++		reg = regulator_get(NULL, plat_data->reg_gpo2);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_gpo2 = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_gpo2;
++		}
+ 	}
+ 
+-	reg = regulator_get(NULL, plat_data->reg_1v5_ana_bb);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_1v5_ana_bb = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_1v5_ana_bb;
++	if (plat_data->reg_1v5_ana_bb) {
++		reg = regulator_get(NULL, plat_data->reg_1v5_ana_bb);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_1v5_ana_bb = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_1v5_ana_bb;
++		}
+ 	}
+ 
+-	reg = regulator_get(NULL, plat_data->reg_vdd_vpa);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_vdd_vpa = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_vdd_vpa;
++	if (plat_data->reg_vdd_vpa) {
++		reg = regulator_get(NULL, plat_data->reg_vdd_vpa);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_vdd_vpa = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_vdd_vpa;
++		}
+ 	}
+ 
+-	reg = regulator_get(NULL, plat_data->reg_1v5_dd);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_1v5_dd = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_1v5_dd;
++	if (plat_data->reg_1v5_dd) {
++		reg = regulator_get(NULL, plat_data->reg_1v5_dd);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_1v5_dd = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_1v5_dd;
++		}
+ 	}
+-
+ 	plat_data->priv = reg_unifi;
+ 	return 0;
+ 
+ err_reg_1v5_dd:
+-	regulator_put(reg_unifi->reg_vdd_vpa, NULL);
++	if (reg_unifi->reg_vdd_vpa)
++		regulator_put(reg_unifi->reg_vdd_vpa, NULL);
+ err_reg_vdd_vpa:
+-	regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
++	if (reg_unifi->reg_1v5_ana_bb)
++		regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
+ err_reg_1v5_ana_bb:
+-	regulator_put(reg_unifi->reg_gpo2, NULL);
++	if (reg_unifi->reg_gpo2)
++		regulator_put(reg_unifi->reg_gpo2, NULL);
+ err_reg_gpo2:
+-	regulator_put(reg_unifi->reg_gpo1, NULL);
++	if (reg_unifi->reg_gpo1)
++		regulator_put(reg_unifi->reg_gpo1, NULL);
+ err_reg_gpo1:
+ 	kfree(reg_unifi);
+ 	return err;
+@@ -574,11 +619,20 @@ int fs_unifi_remove(void)
+ 	reg_unifi = plat_data->priv;
+ 	plat_data->priv = NULL;
+ 
+-	regulator_put(reg_unifi->reg_1v5_dd, NULL);
+-	regulator_put(reg_unifi->reg_vdd_vpa, NULL);
+-	regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
+-	regulator_put(reg_unifi->reg_gpo2, NULL);
+-	regulator_put(reg_unifi->reg_gpo1, NULL);
++	if (reg_unifi->reg_1v5_dd)
++		regulator_put(reg_unifi->reg_1v5_dd, NULL);
++	if (reg_unifi->reg_vdd_vpa)
++		regulator_put(reg_unifi->reg_vdd_vpa, NULL);
++
++	if (reg_unifi->reg_1v5_ana_bb)
++		regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
++
++	if (reg_unifi->reg_gpo2)
++		regulator_put(reg_unifi->reg_gpo2, NULL);
++
++	if (reg_unifi->reg_gpo1)
++		regulator_put(reg_unifi->reg_gpo1, NULL);
++
+ 	kfree(reg_unifi);
+ 	return 0;
+ }
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index f57331f..50691d8 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -103,6 +103,12 @@ static unsigned int debug_quirks;
+ static unsigned int mxc_wml_value = 512;
+ static unsigned int *adma_des_table;
+ 
++#ifndef MXC_SDHCI_NUM
++#define MXC_SDHCI_NUM	4
++#endif
++
++static struct sdhci_chip *mxc_fix_chips[MXC_SDHCI_NUM];
++
+ static void sdhci_prepare_data(struct sdhci_host *, struct mmc_data *);
+ static void sdhci_finish_data(struct sdhci_host *);
+ 
+@@ -114,6 +120,25 @@ extern void gpio_sdhc_active(int module);
+ extern void gpio_sdhc_inactive(int module);
+ static void sdhci_dma_irq(void *devid, int error, unsigned int cnt);
+ 
++void mxc_mmc_force_detect(int id)
++{
++	struct sdhci_host *host;
++	if ((id < 0) || (id >= MXC_SDHCI_NUM))
++		return;
++	if (!mxc_fix_chips[id])
++		return;
++	host = mxc_fix_chips[id]->hosts[0];
++	if (host->flags & SDHCI_CD_PRESENT)
++		return;
++	if (host->detect_irq)
++		return;
++
++	schedule_work(&host->cd_wq);
++	return;
++}
++
++EXPORT_SYMBOL(mxc_mmc_force_detect);
++
+ static void sdhci_dumpregs(struct sdhci_host *host)
+ {
+ 	printk(KERN_DEBUG DRIVER_NAME
+@@ -966,23 +991,41 @@ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ {
+ 	struct sdhci_host *host;
+ 	unsigned long flags;
+-	u32 ier;
++	u32 ier, prot, clk;
+ 
+ 	host = mmc_priv(mmc);
+ 
+ 	spin_lock_irqsave(&host->lock, flags);
+ 
++	if (enable) {
++		if (host->sdio_enable++)
++			goto exit_unlock;
++	} else {
++		if (--(host->sdio_enable))
++			goto exit_unlock;
++	}
+ 	ier = readl(host->ioaddr + SDHCI_INT_ENABLE);
++	prot = readl(host->ioaddr + SDHCI_HOST_CONTROL);
++	clk = readl(host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+-	ier &= ~SDHCI_INT_CARD_INT;
+-	if (enable)
++	if (enable) {
+ 		ier |= SDHCI_INT_CARD_INT;
++		prot |= SDHCI_CTRL_D3CD;
++		clk |= SDHCI_CLOCK_PER_EN | SDHCI_CLOCK_IPG_EN;
++	} else {
++		ier &= ~SDHCI_INT_CARD_INT;
++		prot &= ~SDHCI_CTRL_D3CD;
++		clk &= ~(SDHCI_CLOCK_PER_EN | SDHCI_CLOCK_IPG_EN);
++	}
++	writel(SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_STATUS);
+ 
++	writel(prot, host->ioaddr + SDHCI_HOST_CONTROL);
+ 	writel(ier, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(ier, host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	writel(clk, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	mmiowb();
+-
++exit_unlock:
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ }
+ 
+@@ -1310,6 +1353,8 @@ static void esdhc_cd_callback(struct work_struct *work)
+ 
+ 	mmc_detect_change(host->mmc, msecs_to_jiffies(500));
+ 
++	if (!host->detect_irq)
++		return;
+ 	do {
+ 		cd_status = host->plat_data->status(host->mmc->parent);
+ 		if (cd_status)
+@@ -1570,8 +1615,10 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	}
+ 	host->detect_irq = platform_get_irq(pdev, 1);
+ 	if (!host->detect_irq) {
+-		ret = -ENOMEM;
+-		goto out2;
++		host->flags &= ~SDHCI_CD_PRESENT;
++		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
++			mxc_fix_chips[pdev->id] = chip;
++		goto no_detect_irq;
+ 	}
+ 
+ 	do {
+@@ -1589,7 +1636,7 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 		host->flags |= SDHCI_CD_PRESENT;
+ 
+ 	DBG("slot %d at 0x%x, irq %d\n", slot, host->res->start, host->irq);
+-
++no_detect_irq:
+ 	if (!request_mem_region(host->res->start,
+ 				host->res->end -
+ 				host->res->start + 1, pdev->name)) {
+@@ -1648,7 +1695,7 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	if (caps & SDHCI_CAN_DO_HISPD)
+ 		mmc->caps |= MMC_CAP_SD_HIGHSPEED;
+ 
+-	mmc->ocr_avail = 0;
++	mmc->ocr_avail = mmc_plat->ocr_mask;
+ 	if (caps & SDHCI_CAN_VDD_330)
+ 		mmc->ocr_avail |= MMC_VDD_32_33 | MMC_VDD_33_34;
+ 	if (caps & SDHCI_CAN_VDD_300)
+@@ -1734,9 +1781,12 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 
+ 	setup_timer(&host->timer, sdhci_timeout_timer, (unsigned long)host);
+ 
+-	ret = request_irq(host->detect_irq, sdhci_cd_irq, 0, pdev->name, host);
+-	if (ret)
+-		goto out4;
++	if (host->detect_irq) {
++		ret = request_irq(host->detect_irq, sdhci_cd_irq, 0,
++				  pdev->name, host);
++		if (ret)
++			goto out4;
++	}
+ 
+ 	ret = request_irq(host->irq, sdhci_irq, IRQF_SHARED, pdev->name, host);
+ 	if (ret)
+@@ -1781,6 +1831,10 @@ out6:
+ out5:
+ 	if (host->detect_irq)
+ 		free_irq(host->detect_irq, host);
++	else {
++		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
++			mxc_fix_chips[pdev->id] = chip;
++	}
+ out4:
+ 	del_timer_sync(&host->timer);
+ 	tasklet_kill(&host->card_tasklet);
+@@ -1817,6 +1871,10 @@ static void sdhci_remove_slot(struct platform_device *pdev, int slot)
+ 
+ 	if (host->detect_irq)
+ 		free_irq(host->detect_irq, host);
++	else {
++		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
++			mxc_fix_chips[pdev->id] = NULL;
++	}
+ 	free_irq(host->irq, host);
+ 	if (chip->quirks & SDHCI_QUIRK_EXTERNAL_DMA_MODE) {
+ 		host->flags &= ~SDHCI_USE_EXTERNAL_DMA;
+diff --git a/drivers/mmc/host/mx_sdhci.h b/drivers/mmc/host/mx_sdhci.h
+index 6f280fd..12e2b68 100644
+--- a/drivers/mmc/host/mx_sdhci.h
++++ b/drivers/mmc/host/mx_sdhci.h
+@@ -243,6 +243,7 @@ struct sdhci_host {
+ 	struct resource *res;	/* IO map memory */
+ 	int irq;		/* Device IRQ */
+ 	int detect_irq;		/* Card Detect IRQ number. */
++	int sdio_enable;	/* sdio interrupt enable number. */
+ 	struct clk *clk;	/* Clock id */
+ 	int bar;		/* PCI BAR index */
+ 	unsigned long addr;	/* Bus address */
+diff --git a/drivers/mmc/host/mxc_mmc.c b/drivers/mmc/host/mxc_mmc.c
+index 89bd40a..153a715 100644
+--- a/drivers/mmc/host/mxc_mmc.c
++++ b/drivers/mmc/host/mxc_mmc.c
+@@ -315,17 +315,15 @@ static int mxcmci_data_done(struct mxcmci_host *host, unsigned int stat);
+ #define MAX_HOST 10
+ static struct mmc_host *hosts[MAX_HOST];
+ 
+-struct mmc_host *mxc_mmc_get_host(int id)
++void mxc_mmc_force_detect(int id)
+ {
+ 	if (id < MAX_HOST)
+-		return hosts[id];
+-	else
+-		return NULL;
++		mmc_detect_change(hosts[id], msecs_to_jiffies(100));
+ }
+-EXPORT_SYMBOL(mxc_mmc_get_host);
++EXPORT_SYMBOL(mxc_mmc_force_detect);
+ 
+ /*!
+- * This function sets the SDHC register to stop the clock and waits for the
++  This function sets the SDHC register to stop the clock and waits for the
+  * clock stop indication.
+  */
+ static void mxcmci_stop_clock(struct mxcmci_host *host, bool wait)
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index e405077..11ba022 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -180,7 +180,7 @@ struct mxc_keyp_platform_data {
+ 
+ struct mxc_unifi_platform_data {
+ 	void (*hardreset) (void);
+-
++	void (*enable) (int en);
+ 	/* power parameters */
+ 	char *reg_gpo1;
+ 	char *reg_gpo2;
+-- 
+1.5.4.4
+

@@ -1,0 +1,90 @@
+From d405eaff18ac2008b509f9e8497dd7954c9e306b Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 9 Jan 2008 15:26:56 -0500
+Subject: [PATCH] Unionfs: merged several printk KERN_CONT together into one pr_debug
+
+CC: Joe Perches <joe@perches.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |   51 +++++++++++++++++++++++++--------------------------
+ 1 files changed, 25 insertions(+), 26 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 5f1d887..d154c32 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -472,16 +472,16 @@ void __show_inode_times(const struct inode *inode,
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (unlikely(!lower_inode))
+ 			continue;
+-		pr_debug("IT(%lu:%d): ", inode->i_ino, bindex);
+-		printk(KERN_CONT "%s:%s:%d ", file, fxn, line);
+-		printk(KERN_CONT "um=%lu/%lu lm=%lu/%lu ",
+-		       inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
+-		       lower_inode->i_mtime.tv_sec,
+-		       lower_inode->i_mtime.tv_nsec);
+-		printk(KERN_CONT "uc=%lu/%lu lc=%lu/%lu\n",
+-		       inode->i_ctime.tv_sec, inode->i_ctime.tv_nsec,
+-		       lower_inode->i_ctime.tv_sec,
+-		       lower_inode->i_ctime.tv_nsec);
++		pr_debug("IT(%lu:%d): %s:%s:%d "
++			 "um=%lu/%lu lm=%lu/%lu uc=%lu/%lu lc=%lu/%lu\n",
++			 inode->i_ino, bindex,
++			 file, fxn, line,
++			 inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
++			 lower_inode->i_mtime.tv_sec,
++			 lower_inode->i_mtime.tv_nsec,
++			 inode->i_ctime.tv_sec, inode->i_ctime.tv_nsec,
++			 lower_inode->i_ctime.tv_sec,
++			 lower_inode->i_ctime.tv_nsec);
+ 	}
+ }
+ 
+@@ -496,17 +496,16 @@ void __show_dinode_times(const struct dentry *dentry,
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (!lower_inode)
+ 			continue;
+-		pr_debug("DT(%s:%lu:%d): ", dentry->d_name.name, inode->i_ino,
+-			 bindex);
+-		printk(KERN_CONT "%s:%s:%d ", file, fxn, line);
+-		printk(KERN_CONT "um=%lu/%lu lm=%lu/%lu ",
+-		       inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
+-		       lower_inode->i_mtime.tv_sec,
+-		       lower_inode->i_mtime.tv_nsec);
+-		printk(KERN_CONT "uc=%lu/%lu lc=%lu/%lu\n",
+-		       inode->i_ctime.tv_sec, inode->i_ctime.tv_nsec,
+-		       lower_inode->i_ctime.tv_sec,
+-		       lower_inode->i_ctime.tv_nsec);
++		pr_debug("DT(%s:%lu:%d): %s:%s:%d "
++			 "um=%lu/%lu lm=%lu/%lu uc=%lu/%lu lc=%lu/%lu\n",
++			 dentry->d_name.name, inode->i_ino, bindex,
++			 file, fxn, line,
++			 inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
++			 lower_inode->i_mtime.tv_sec,
++			 lower_inode->i_mtime.tv_nsec,
++			 inode->i_ctime.tv_sec, inode->i_ctime.tv_nsec,
++			 lower_inode->i_ctime.tv_sec,
++			 lower_inode->i_ctime.tv_nsec);
+ 	}
+ }
+ 
+@@ -525,10 +524,10 @@ void __show_inode_counts(const struct inode *inode,
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (unlikely(!lower_inode))
+ 			continue;
+-		printk(KERN_CONT "SIC(%lu:%d:%d): ", inode->i_ino, bindex,
+-		       atomic_read(&(inode)->i_count));
+-		printk(KERN_CONT "lc=%d ",
+-		       atomic_read(&(lower_inode)->i_count));
+-		printk(KERN_CONT "%s:%s:%d\n", file, fxn, line);
++		pr_debug("SIC(%lu:%d:%d): lc=%d %s:%s:%d\n",
++			 inode->i_ino, bindex,
++			 atomic_read(&(inode)->i_count),
++			 atomic_read(&(lower_inode)->i_count),
++			 file, fxn, line);
+ 	}
+ }
+-- 
+1.5.4.3
+

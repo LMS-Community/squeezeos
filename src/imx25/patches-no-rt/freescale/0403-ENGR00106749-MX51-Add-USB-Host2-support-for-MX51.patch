@@ -1,0 +1,343 @@
+From 1da3fab5ac82e355ecf59445ae71c332d1234cef Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Wed, 11 Feb 2009 10:03:15 -0600
+Subject: [PATCH] ENGR00106749 MX51: Add USB Host2 support for MX51
+
+Need to add support for USB host2 on MX51 for boards that have
+Host2 support.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ arch/arm/mach-mx51/mx51_3stack_gpio.c |  143 +++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx51/usb_h2.c           |   57 +++++++++++++
+ arch/arm/plat-mxc/Makefile            |    2 +-
+ arch/arm/plat-mxc/usb_common.c        |   13 +++
+ drivers/usb/host/Kconfig              |    2 +-
+ include/asm-arm/arch-mxc/arc_otg.h    |   12 +++-
+ 6 files changed, 226 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 7f9c075..a408f24 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -1519,6 +1519,149 @@ void gpio_usbh1_inactive(void)
+ 
+ EXPORT_SYMBOL(gpio_usbh1_inactive);
+ 
++int gpio_usbh2_active(void)
++{
++	/* Set USBH2_STP to GPIO and toggle it */
++	mxc_request_iomux(MX51_PIN_EIM_A26, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_EIM_A26, PAD_CTL_DRV_HIGH |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++	mxc_set_gpio_direction(MX51_PIN_EIM_A26, 0);
++	mxc_set_gpio_dataout(MX51_PIN_EIM_A26, 1);
++
++	msleep(100);
++
++	/* USBH2_CLK */
++	mxc_request_iomux(MX51_PIN_EIM_A24, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_A24, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++
++	/* USBH2_DIR */
++	mxc_request_iomux(MX51_PIN_EIM_A25, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_A25, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++
++	/* USBH2_NXT */
++	mxc_request_iomux(MX51_PIN_EIM_A27, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_A27, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++
++	/* USBH2_DATA0 */
++	mxc_request_iomux(MX51_PIN_EIM_D16, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D16, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA1 */
++	mxc_request_iomux(MX51_PIN_EIM_D17, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D17, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA2 */
++	mxc_request_iomux(MX51_PIN_EIM_D18, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D18, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA3 */
++	mxc_request_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D19, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA4 */
++	mxc_request_iomux(MX51_PIN_EIM_D20, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D20, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA5 */
++	mxc_request_iomux(MX51_PIN_EIM_D21, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D21, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA6 */
++	mxc_request_iomux(MX51_PIN_EIM_D22, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D22, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH2_DATA7 */
++	mxc_request_iomux(MX51_PIN_EIM_D23, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D23, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	msleep(100);
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_usbh2_active);
++
++void gpio_usbh2_inactive(void)
++{
++	mxc_request_gpio(MX51_PIN_EIM_D16);
++	mxc_request_gpio(MX51_PIN_EIM_D17);
++	mxc_request_gpio(MX51_PIN_EIM_D18);
++	mxc_request_gpio(MX51_PIN_EIM_D19);
++	mxc_request_gpio(MX51_PIN_EIM_D20);
++	mxc_request_gpio(MX51_PIN_EIM_D21);
++	mxc_request_gpio(MX51_PIN_EIM_D22);
++	mxc_request_gpio(MX51_PIN_EIM_D23);
++	mxc_request_gpio(MX51_PIN_EIM_A24);
++	mxc_request_gpio(MX51_PIN_EIM_A25);
++	mxc_request_gpio(MX51_PIN_EIM_A26);
++	mxc_request_gpio(MX51_PIN_EIM_A27);
++
++
++
++	mxc_free_iomux(MX51_PIN_EIM_A24, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_A25, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_A26, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_A27, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D16, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D17, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D18, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D20, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D21, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D22, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_EIM_D23, IOMUX_CONFIG_ALT0);
++}
++
++EXPORT_SYMBOL(gpio_usbh2_inactive);
++
++void gpio_usbh2_setback_stp(void)
++{
++	/* setback USBH2_STP to be function */
++	mxc_request_iomux(MX51_PIN_EIM_A26, IOMUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX51_PIN_EIM_A26, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++}
++
++EXPORT_SYMBOL(gpio_usbh2_setback_stp);
++
+ /*!
+  * Setup GPIO for PCMCIA interface
+  *
+diff --git a/arch/arm/mach-mx51/usb_h2.c b/arch/arm/mach-mx51/usb_h2.c
+new file mode 100644
+index 0000000..08d1757
+--- /dev/null
++++ b/arch/arm/mach-mx51/usb_h2.c
+@@ -0,0 +1,57 @@
++/*
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/delay.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <asm/arch/arc_otg.h>
++#include "usb.h"
++#include "iomux.h"
++
++static struct fsl_usb2_platform_data usbh2_config = {
++	.name = "Host 2",
++	.platform_init = fsl_usb_host_init,
++	.platform_uninit = fsl_usb_host_uninit,
++	.operating_mode = FSL_USB2_MPH_HOST,
++	.phy_mode = FSL_USB2_PHY_ULPI,
++	.power_budget = 500,	/* 500 mA max power */
++	.gpio_usb_active = gpio_usbh2_active,
++	.gpio_usb_inactive = gpio_usbh2_inactive,
++	.transceiver = "isp1504",
++};
++
++static struct resource usbh2_resources[] = {
++	[0] = {
++	       .start = (u32) (USB_H2REGS_BASE),
++	       .end = (u32) (USB_H2REGS_BASE + 0x1ff),
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_USB_H2,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++static int __init usbh2_init(void)
++{
++	pr_debug("%s: \n", __func__);
++
++	host_pdev_register(usbh2_resources, ARRAY_SIZE(usbh2_resources),
++			   &usbh2_config);
++	return 0;
++}
++
++module_init(usbh2_init);
++
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index c9d5f58..9a9b8f2 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -38,7 +38,7 @@ ifneq ($(strip $(CONFIG_USB_EHCI_FSL_UTMI) $(CONFIG_USB_GADGET_FSL_UTMI)),)
+ obj-y += utmixc.o
+ endif
+ 
+-ifneq ($(CONFIG_USB_EHCI_ARC_H1),)
++ifneq ($(CONFIG_USB_EHCI_ARC_H1)$(CONFIG_USB_EHCI_ARC_H2),)
+ ifneq ($(CONFIG_ARCH_MX51),y)
+ obj-y += serialxc.o
+ else
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index f6016ea..d332a6f 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -388,6 +388,7 @@ static void usbh2_set_serial_xcvr(void)
+ extern void usbh2_get_xcvr_power(struct device *dev);
+ extern void usbh2_put_xcvr_power(struct device *dev);
+ extern void gpio_usbh1_setback_stp(void);
++extern void gpio_usbh2_setback_stp(void);
+ 
+ int fsl_usb_host_init(struct platform_device *pdev)
+ {
+@@ -448,8 +449,20 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 			usbh1_set_serial_xcvr();
+ 	} else if (xops->xcvr_type == PORTSC_PTS_ULPI) {
+ 		if (cpu_is_mx51()) {
++#ifdef CONFIG_USB_EHCI_ARC_H1
++		if (pdata->name == "Host 1") {
+ 			usbh1_set_ulpi_xcvr();
++			if (cpu_is_mx51())
+ 			gpio_usbh1_setback_stp();
++			}
++#endif
++#ifdef CONFIG_USB_EHCI_ARC_H2
++		if (pdata->name == "Host 2") {
++			usbh2_set_ulpi_xcvr();
++			if (cpu_is_mx51())
++				gpio_usbh2_setback_stp();
++			}
++#endif
+ 		} else
+ 			usbh2_set_ulpi_xcvr();
+ 	}
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 8964a42..624a27c 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -61,7 +61,7 @@ config USB_EHCI_ARC_H1
+ config USB_EHCI_ARC_H2
+ 	bool "Support for Host2 port on Freescale controller"
+ 	depends on USB_EHCI_ARC	&& \
+-		   (ARCH_MX25 || ARCH_MX27 || ARCH_MX3 || ARCH_MX35)
++		   (ARCH_MX25 || ARCH_MX27 || ARCH_MX3 || ARCH_MX35 || ARCH_MX51)
+ 	---help---
+ 	  Enable support for the USB Host2 port.
+ 
+diff --git a/include/asm-arm/arch-mxc/arc_otg.h b/include/asm-arm/arch-mxc/arc_otg.h
+index f6129f4..fbfa95c 100644
+--- a/include/asm-arm/arch-mxc/arc_otg.h
++++ b/include/asm-arm/arch-mxc/arc_otg.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -143,6 +143,8 @@
+ #define USB_PHY_CTR_FUNC	USBOTHER_REG(0x08)      /* OTG UTMI PHY Function Control register */
+ #define USB_PHY_CTR_FUNC2	USBOTHER_REG(0x0c)      /* OTG UTMI PHY Function Control register */
+ #define USB_CTRL_1		USBOTHER_REG(0x10)	/* USB Cotrol Register 1*/
++#define USBCTRL_HOST2		USBOTHER_REG(0x14)	/* USB Cotrol Register 1*/
++#define USBCTRL_HOST3		USBOTHER_REG(0x18)	/* USB Cotrol Register 1*/
+ 
+ /*
+  * register bits
+@@ -247,10 +249,17 @@
+ #define UCTRL_H2SIC_SU6		(2 << 21)	/* single-ended/unidirectional 6 wire */
+ #define UCTRL_H2SIC_SB3		(3 << 21)	/* single-ended/bidirectional  3 wire */
+ 
++#ifdef CONFIG_ARCH_MX51
++#define UCTRL_H2UIE		(1 << 8)	/* HOST2 ULPI intr enable */
++#define UCTRL_H2WIE		(1 << 7)	/* HOST2 wakeup intr enable */
++#define UCTRL_H2PP		0	/* Power Polarity for uh2 */
++#define UCTRL_H2PM		(1 << 4)	/* HOST2 power mask */
++#else
+ #define UCTRL_H2UIE		(1 << 20)	/* HOST2 ULPI intr enable */
+ #define UCTRL_H2WIE		(1 << 19)	/* HOST2 wakeup intr enable */
+ #define UCTRL_H2PP		(1 << 18)	/* Power Polarity for uh2 */
+ #define UCTRL_H2PM		(1 << 16)	/* HOST2 power mask */
++#endif
+ 
+ #define UCTRL_H1WIR		(1 << 15)	/* HOST1 wakeup intr request received */
+ #define UCTRL_H1SIC_MASK	(3 << 13)	/* HOST1 Serial Interface Config: */
+@@ -309,6 +318,7 @@
+ 
+ /* USB_CTRL_1 */
+ #define USB_CTRL_UH1_EXT_CLK_EN			(1 << 25)
++#define USB_CTRL_UH2_EXT_CLK_EN			(1 << 26)
+ 
+ /* ULPIVIEW register bits */
+ #define ULPIVW_OFF		(0x170)
+-- 
+1.5.4.4
+

@@ -1,0 +1,33 @@
+From 233121d1380df7ec0916c476b4c610daaf362828 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 15 Apr 2008 13:07:44 -0400
+Subject: [PATCH] Unionfs: don't dereference dentry without lower branches in d_release
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index ee0da4f..e5f894c 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -482,12 +482,14 @@ static void unionfs_d_release(struct dentry *dentry)
+ 	int bindex, bstart, bend;
+ 
+ 	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	if (unlikely(!UNIONFS_D(dentry)))
++		goto out;	/* skip if no lower branches */
+ 	/* must lock our branch configuration here */
+ 	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	unionfs_check_dentry(dentry);
+ 	/* this could be a negative dentry, so check first */
+-	if (unlikely(!UNIONFS_D(dentry) || dbstart(dentry) < 0)) {
++	if (dbstart(dentry) < 0) {
+ 		unionfs_unlock_dentry(dentry);
+ 		goto out;	/* due to a (normal) failed lookup */
+ 	}
+-- 
+1.5.4.3
+

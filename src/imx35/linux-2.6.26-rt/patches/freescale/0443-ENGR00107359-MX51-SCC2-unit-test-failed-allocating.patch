@@ -1,0 +1,49 @@
+From e8587cea8611666b217e27c397f7d24ed6ec6529 Mon Sep 17 00:00:00 2001
+From: Raj Rajasekaran <b10872@freescale.com>
+Date: Thu, 26 Feb 2009 15:42:29 -0600
+Subject: [PATCH] ENGR00107359: MX51: SCC2 unit test failed allocating a partition.
+
+Added a msleep() to wait between write and read operations during
+partition deallocation.
+
+Signed-off-by: Raj Rajasekaran <b10872@freescale.com>
+---
+ arch/arm/mach-mx51/devices.c |    7 +++++--
+ 1 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 3e3993a..04ec341 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -345,15 +345,18 @@ static inline void mxc_init_scc(void)
+ 	}
+ 
+ 	for (partition_no = 0; partition_no < iram_partitions; partition_no++) {
++		/*De-allocate a Partition*/
+ 		reg_value = ((partition_no << SCM_ZCMD_PART_SHIFT) &
+ 			     SCM_ZCMD_PART_MASK) | ((0x03 <<
+ 						     SCM_ZCMD_CCMD_SHIFT)
+ 						    & SCM_ZCMD_CCMD_MASK);
+ 		__raw_writel(reg_value, scc_base + SCM_ZCMD_REG);
+-
++		msleep(1);
+ 		while ((__raw_readl(scc_base + SCM_STATUS_REG) &
+ 			SCM_STATUS_SRS_READY) != SCM_STATUS_SRS_READY) ;
+ 
++		/*In Supervisor mode claims a partition for it's own use
++		    by writing zero to SMID register.*/
+ 		__raw_writel(0, scc_base + (SCM_SMID0_REG + 8 * partition_no));
+ 
+ 		reg_mask |= (3 << (2 * (partition_no)));
+@@ -391,7 +394,7 @@ static inline void mxc_init_scc(void)
+ 						     SCM_ZCMD_CCMD_SHIFT)
+ 						    & SCM_ZCMD_CCMD_MASK);
+ 		__raw_writel(reg_value, scc_base + SCM_ZCMD_REG);
+-
++		msleep(1);
+ 		while ((__raw_readl(scc_base + SCM_STATUS_REG) &
+ 			SCM_STATUS_SRS_READY) != SCM_STATUS_SRS_READY) ;
+ 	}
+-- 
+1.5.4.4
+

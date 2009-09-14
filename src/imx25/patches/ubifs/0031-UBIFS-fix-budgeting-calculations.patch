@@ -1,0 +1,104 @@
+From 77b782c9aae0d12cdd0ee6377bf1bbe757365751 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 18 Jul 2008 18:54:29 +0300
+Subject: [PATCH] UBIFS: fix budgeting calculations
+
+The 'ubifs_release_dirty_inode_budget()' was buggy and incorrectly
+freed the budget, which led to not freeing all dirty data budget.
+This patch fixes that.
+
+Also, this patch fixes ubifs_mkdir() which passed 1 in dirty_ino_d,
+which makes no sense. Well, it is harmless though.
+
+Also, add few more useful assertions. And improve few debugging
+messages.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |    5 +++--
+ fs/ubifs/dir.c    |    3 +--
+ fs/ubifs/file.c   |    3 ++-
+ fs/ubifs/super.c  |    6 ++++--
+ 4 files changed, 10 insertions(+), 7 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index d81fb9e..12a1717 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -686,9 +686,10 @@ void ubifs_convert_page_budget(struct ubifs_info *c)
+ void ubifs_release_dirty_inode_budget(struct ubifs_info *c,
+ 				      struct ubifs_inode *ui)
+ {
+-	struct ubifs_budget_req req = {.dd_growth = c->inode_budget,
+-				       .dirtied_ino_d = ui->data_len};
++	struct ubifs_budget_req req;
+ 
++	memset(&req, 0, sizeof(struct ubifs_budget_req));
++	req.dd_growth = c->inode_budget + ui->data_len;
+ 	ubifs_release_budget(c, &req);
+ }
+ 
+diff --git a/fs/ubifs/dir.c b/fs/ubifs/dir.c
+index e90374b..a79e850 100644
+--- a/fs/ubifs/dir.c
++++ b/fs/ubifs/dir.c
+@@ -727,8 +727,7 @@ static int ubifs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+ 	struct ubifs_inode *dir_ui = ubifs_inode(dir);
+ 	struct ubifs_info *c = dir->i_sb->s_fs_info;
+ 	int err, sz_change = CALC_DENT_SIZE(dentry->d_name.len);
+-	struct ubifs_budget_req req = { .new_ino = 1, .new_dent = 1,
+-					.dirtied_ino_d = 1 };
++	struct ubifs_budget_req req = { .new_ino = 1, .new_dent = 1 };
+ 
+ 	/*
+ 	 * Budget request settings: new inode, new direntry and changing parent
+diff --git a/fs/ubifs/file.c b/fs/ubifs/file.c
+index 005a3b8..958e78d 100644
+--- a/fs/ubifs/file.c
++++ b/fs/ubifs/file.c
+@@ -940,7 +940,8 @@ int ubifs_setattr(struct dentry *dentry, struct iattr *attr)
+ 	struct inode *inode = dentry->d_inode;
+ 	struct ubifs_info *c = inode->i_sb->s_fs_info;
+ 
+-	dbg_gen("ino %lu, ia_valid %#x", inode->i_ino, attr->ia_valid);
++	dbg_gen("ino %lu, mode %#x, ia_valid %#x",
++		inode->i_ino, inode->i_mode, attr->ia_valid);
+ 	err = inode_change_ok(inode, attr);
+ 	if (err)
+ 		return err;
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index ca3e82d..61d1dae 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -299,7 +299,7 @@ static int ubifs_write_inode(struct inode *inode, int wait)
+ 		return 0;
+ 	}
+ 
+-	dbg_gen("inode %lu", inode->i_ino);
++	dbg_gen("inode %lu, mode %#x", inode->i_ino, (int)inode->i_mode);
+ 	err = ubifs_jnl_write_inode(c, inode, 0);
+ 	if (err)
+ 		ubifs_err("can't write inode %lu, error %d", inode->i_ino, err);
+@@ -323,9 +323,10 @@ static void ubifs_delete_inode(struct inode *inode)
+ 		 */
+ 		goto out;
+ 
+-	dbg_gen("inode %lu", inode->i_ino);
++	dbg_gen("inode %lu, mode %#x", inode->i_ino, (int)inode->i_mode);
+ 	ubifs_assert(!atomic_read(&inode->i_count));
+ 	ubifs_assert(inode->i_nlink == 0);
++	ubifs_assert(!ubifs_inode(inode)->dirty);
+ 
+ 	truncate_inode_pages(&inode->i_data, 0);
+ 	if (is_bad_inode(inode))
+@@ -1469,6 +1470,7 @@ static void ubifs_put_super(struct super_block *sb)
+ 	 */
+ 	ubifs_assert(atomic_long_read(&c->dirty_pg_cnt) == 0);
+ 	ubifs_assert(c->budg_idx_growth == 0);
++	ubifs_assert(c->budg_dd_growth == 0);
+ 	ubifs_assert(c->budg_data_growth == 0);
+ 
+ 	/*
+-- 
+1.5.4.3
+

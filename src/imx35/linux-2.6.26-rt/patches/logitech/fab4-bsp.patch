@@ -1,0 +1,2775 @@
+---
+ drivers/i2c/chips/Kconfig            |   19 
+ drivers/i2c/chips/Makefile           |    2 
+ drivers/i2c/chips/clearpad.c         |  307 ++++++++++++
+ drivers/i2c/chips/tsl2569.c          |  804 +++++++++++++++++++++++++++++++
+ drivers/input/touchscreen/Kconfig    |    3 
+ drivers/input/touchscreen/tsc2007.c  |   11 
+ drivers/mxc/Kconfig                  |    1 
+ drivers/mxc/Makefile                 |    1 
+ drivers/mxc/fab4/Kconfig             |   22 
+ drivers/mxc/fab4/Makefile            |    6 
+ drivers/mxc/fab4/fab4_gpio.c         |  177 +++++++
+ drivers/mxc/fab4/fab4_ir.c           |  882 +++++++++++++++++++++++++++++++++++
+ drivers/mxc/fab4/psoc.h              |  201 +++++++
+ drivers/mxc/ipu/ipu_regs.h           |    1 
+ drivers/mxc/ipu/ipu_sdc.c            |    6 
+ include/asm-arm/arch-mxc/hardware.h  |    9 
+ include/asm-arm/arch-mxc/mx35_fab4.h |   20 
+ include/asm-arm/arch-mxc/mxc.h       |    3 
+ include/asm-arm/setup.h              |    8 
+ localversion                         |    1 
+ 20 files changed, 2475 insertions(+), 9 deletions(-)
+
+Index: linux-2.6.26/localversion
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/localversion	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1 @@
++-332-g5849bfa
+Index: linux-2.6.26/drivers/i2c/chips/Kconfig
+===================================================================
+--- linux-2.6.26.orig/drivers/i2c/chips/Kconfig	2009-04-29 13:45:22.000000000 +0100
++++ linux-2.6.26/drivers/i2c/chips/Kconfig	2009-04-29 13:54:00.000000000 +0100
+@@ -139,4 +139,23 @@
+ 	  and other features that are often used in portable devices like
+ 	  cell phones and PDAs.
+ 
++config SENSORS_CLEARPAD
++        tristate "Synaptics ClearPad"
++        depends on EXPERIMENTAL
++        help
++          If you say yes here you get support for the Synaptics ClearPad.
++
++          This driver can also be built as a module.  If so, the module
++          will be called clearpad.
++
++config SENSORS_TSL2569
++	tristate "Taos TSL2569 ambient light sensor"
++	depends on EXPERIMENTAL
++	help
++	  If you say yes here you get support for the Taos TSL2569
++	  ambient light sensor.
++
++	  This driver can also be built as a module.  If so, the module
++	  will be called tsl2569.
++
+ endmenu
+Index: linux-2.6.26/drivers/i2c/chips/Makefile
+===================================================================
+--- linux-2.6.26.orig/drivers/i2c/chips/Makefile	2009-04-29 13:45:22.000000000 +0100
++++ linux-2.6.26/drivers/i2c/chips/Makefile	2009-04-29 13:54:00.000000000 +0100
+@@ -20,6 +20,8 @@
+ obj-$(CONFIG_TPS65010)		+= tps65010.o
+ obj-$(CONFIG_MENELAUS)		+= menelaus.o
+ obj-$(CONFIG_SENSORS_TSL2550)	+= tsl2550.o
++obj-$(CONFIG_SENSORS_CLEARPAD)  += clearpad.o
++obj-$(CONFIG_SENSORS_TSL2569)	+= tsl2569.o
+ 
+ ifeq ($(CONFIG_I2C_DEBUG_CHIP),y)
+ EXTRA_CFLAGS += -DDEBUG
+Index: linux-2.6.26/drivers/i2c/chips/clearpad.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/i2c/chips/clearpad.c	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1,307 @@
++/* drivers/i2c/chips/clearpad.c
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++
++
++static struct i2c_driver clearpad_driver;
++
++struct clearpad_data {
++	struct i2c_client	*client;
++	struct input_dev	*input_dev;
++
++	struct mutex		lock;
++	struct work_struct	irq_work;
++
++	char			product_id[0x1F];
++	s32			max_x;
++	s32			max_y;
++	u8			resolution;
++};
++
++#define RMI_ADDR_STATUS      0x00
++#define RMI_ADDR_Z           0x01
++#define RMI_ADDR_XH          0x02
++#define RMI_ADDR_XL          0x03
++#define RMI_ADDR_YH          0x04
++#define RMI_ADDR_YL          0x05
++#define RMI_ADDR_DELTA_X     0x06
++#define RMI_ADDR_DELTA_Y     0x07
++#define RMI_ADDR_GESTURE     0x08
++#define RMI_ADDR_MAGNITUDE   0x09
++
++
++#define work_to_data(_w) container_of(_w, struct clearpad_data, irq_work)
++
++static void clearpad_irq_work(struct work_struct *work)
++{
++	struct clearpad_data *data = work_to_data(work);
++	struct i2c_client *client = data->client;
++	u8 values[I2C_SMBUS_BLOCK_MAX];
++	int status, width, pressure, gesture, flick;
++	int x, y, xmag, ymag;
++
++	i2c_smbus_read_i2c_block_data(client, 0x00, 0x0A, values);
++
++	status = (values[RMI_ADDR_STATUS] & 0x07);
++	gesture = (values[RMI_ADDR_GESTURE] & 0x80) >> 7;
++
++	/* number of fingers */
++	input_report_abs(data->input_dev, ABS_MISC, status);
++
++	if (status >= 1 ) {
++		width = (values[RMI_ADDR_STATUS] & 0xf0) >> 4;
++		pressure = values[RMI_ADDR_Z];
++		x = ((values[RMI_ADDR_XH] & 0x1f) << 8) | values[RMI_ADDR_XL];
++		y = ((values[RMI_ADDR_YH] & 0x1f) << 8) | values[RMI_ADDR_YL];
++
++		/* button down on finger contact */
++		input_report_abs(data->input_dev, ABS_X, data->max_x - x);
++		input_report_abs(data->input_dev, ABS_Y, y);
++		input_report_abs(data->input_dev, ABS_PRESSURE, pressure);
++		input_report_abs(data->input_dev, ABS_TOOL_WIDTH, width);
++
++		input_report_rel(data->input_dev, REL_X, (s8) values[RMI_ADDR_DELTA_X]);
++		input_report_rel(data->input_dev, REL_Y, (s8) values[RMI_ADDR_DELTA_Y]);
++
++		//printk("%d,%d F%d W%d P%d\n", x,y, status, width, pressure);
++	}
++
++	if (gesture) {
++		flick = (values[RMI_ADDR_GESTURE] & 0x10) >> 4;
++
++		if (flick) {
++			xmag = ((s8)(values[RMI_ADDR_MAGNITUDE] << 4)) >> 4;
++			ymag = ((s8)values[RMI_ADDR_MAGNITUDE]) >> 4;
++
++			input_report_rel(data->input_dev, REL_RX, xmag);
++			input_report_rel(data->input_dev, REL_RY, ymag);
++
++			//printk("FLICK %d,%d\n", xmag, ymag);
++		}
++	}
++
++	input_sync(data->input_dev);
++
++	enable_irq(client->irq);
++}
++
++
++static irqreturn_t clearpad_irq(int irq, void *dev_id)
++{
++	struct clearpad_data *data = dev_id;
++
++	schedule_work(&data->irq_work);
++	disable_irq(irq);
++
++	return IRQ_HANDLED;
++}
++
++
++static int clearpad_init_client(struct i2c_client *client)
++{
++	struct clearpad_data *data = i2c_get_clientdata(client);
++	u8 values[I2C_SMBUS_BLOCK_MAX];
++	u8 reg;
++
++	/* Check Manufacturer id */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x04);
++	if (i2c_smbus_read_byte_data(client, 0xE1) != 0x01) {
++		return 0;
++	}
++
++	/* Check for 2-D sensor pad */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x03);
++	if (i2c_smbus_read_byte_data(client, 0x10) == 0x00) {
++		return 0;
++	}
++
++	/* Check Product ID */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x02);
++
++	i2c_smbus_read_i2c_block_data(client, 0x10, 16, values);
++	memcpy(data->product_id, values, sizeof(data->product_id));
++
++	/* Check Sensor Query Registers */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x10);
++
++	i2c_smbus_read_i2c_block_data(client, 0x00, 8, values);
++
++	data->max_x = (values[4] & 0x1F) << 8 | (values[5]);
++	data->max_y = (values[6] & 0x1F) << 8 | (values[7]);
++	data->resolution = values[8];
++
++	printk(KERN_INFO "Clearpad: %s (%d,%d)\n", data->product_id, data->max_x, data->max_y);
++
++	/* Enable Attention IRQ */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x00);
++	reg = i2c_smbus_read_byte_data(client, 0x01);
++	reg |= 0x07;
++	i2c_smbus_write_byte_data(client, 0x01, reg);
++
++	/* Restore to Data page */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x04);
++
++	INIT_WORK(&data->irq_work, clearpad_irq_work);
++
++	return 1;
++}
++
++
++static int clearpad_probe(struct i2c_client *client, const struct i2c_device_id *devid)
++{
++	struct clearpad_data *data;
++	struct input_dev *input_dev;
++	int err = 0;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
++		dev_err(&client->dev, "No SMBUS byte data capability\n");
++		goto error0;
++	}
++
++	if (!(data = kzalloc(sizeof(struct clearpad_data), GFP_KERNEL))) {
++		dev_err(&client->dev, "No space for state\n");
++		err = -ENOMEM;
++		goto error0;
++	}
++
++	i2c_set_clientdata(client, data);
++	data->client = client;
++
++	mutex_init(&data->lock);
++
++	/* Initialize the ClearPad */
++	if (!clearpad_init_client(client)) {
++		goto error1;
++	}
++
++	input_dev = input_allocate_device();
++	if (input_dev == NULL) {
++		dev_err(&client->dev, "Could not allocate input device\n");
++		goto error1;
++	}
++
++	input_dev->name = "Synaptics ClearPad";
++	input_dev->phys = data->product_id;
++	input_dev->dev.parent = &client->dev;
++
++	input_dev->evbit[0] = BIT(EV_ABS) | BIT(EV_REL);
++	set_bit(REL_X, input_dev->relbit);
++	set_bit(REL_Y, input_dev->relbit);
++	set_bit(REL_RX, input_dev->relbit);
++	set_bit(REL_RY, input_dev->relbit);
++	input_set_abs_params(input_dev, ABS_X, 0, data->max_x, 0, 0);
++	input_set_abs_params(input_dev, ABS_Y, 0, data->max_y, 0, 0);
++	input_set_abs_params(input_dev, ABS_PRESSURE, 0, 0xFF, 0, 0);
++	input_set_abs_params(input_dev, ABS_TOOL_WIDTH, 0, 0x0F, 0, 0);
++	input_set_abs_params(input_dev, ABS_MISC, 0, 0x03, 0, 0);
++
++	data->input_dev = input_dev;
++
++	err = input_register_device(input_dev);
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register input device\n");
++		input_free_device(input_dev);
++		goto error1;
++	}
++
++	err = request_irq(client->irq, clearpad_irq,
++			  IRQF_TRIGGER_LOW | IRQF_SAMPLE_RANDOM,
++			  client->dev.bus_id, data);
++
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register IRQ %d\n",
++			client->irq);
++		goto error2;
++	}
++
++	return 0;
++
++ error2:
++	input_unregister_device(input_dev);
++ error1:
++	kfree(data);
++ error0:
++	return err;
++}
++
++
++static int clearpad_remove(struct i2c_client *client)
++{
++	struct clearpad_data *data = i2c_get_clientdata(client);
++	int err;
++
++	free_irq(client->irq, data);
++
++	input_unregister_device(data->input_dev);
++
++	/* Try to detach the client from i2c space */
++	if ((err = i2c_detach_client(client))) {
++		dev_err(&client->dev,
++			"Client deregistration failed, not detached.\n");
++		return err;
++	}
++
++	kfree(client);
++
++	return 0;
++}
++
++static struct i2c_device_id clearpad_idtable[] = {
++	{ "clearpad", 0 },
++	{ }
++};
++
++MODULE_DEVICE_TABLE(i2c, clearpad_idtable);
++
++static struct i2c_driver clearpad_driver = {
++	.driver		= {
++		.owner		= THIS_MODULE,
++		.name		= "clearpad",
++	},
++	.probe	= clearpad_probe,
++	.remove	= clearpad_remove,
++	.id_table = clearpad_idtable,
++};
++
++
++static int __init clearpad_init(void)
++{
++	return i2c_add_driver(&clearpad_driver);
++}
++
++
++static void __exit clearpad_exit(void)
++{
++	i2c_del_driver(&clearpad_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("Synatics ClearPad driver");
++
++module_init(clearpad_init)
++module_exit(clearpad_exit)
+Index: linux-2.6.26/drivers/i2c/chips/tsl2569.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/i2c/chips/tsl2569.c	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1,804 @@
++/*
++ *  tsl2569.c - Linux kernel modules for ambient light sensor
++ *
++ *  Copyright (C) 2008 Logitech
++ *       Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ *  Some parts based on tsl2550.c:
++ *  Copyright (C) 2007 Rodolfo Giometti <giometti@linux.it>
++ *  Copyright (C) 2007 Eurotech S.p.A. <info@eurotech.it>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License as published by
++ *  the Free Software Foundation; either version 2 of the License, or
++ *  (at your option) any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/mutex.h>
++#include <linux/delay.h>
++
++#define TSL2569_DRV_NAME	"tsl2569"
++#define DRIVER_VERSION		"1.0"
++
++/*
++ * Defines
++ */
++
++#define TSL2569_REG_CONTROL		0x80
++#define TSL2569_REG_TIMING		0x81
++#define TSL2569_REG_PARTNO		0x8A
++#define TSL2569_REG_ADC0		0x9C
++#define TSL2569_REG_ADC1		0x9E
++
++#define TSL2569_PARTNO			0xB0
++
++#define TSL2569_POWER_DOWN		0x00
++#define TSL2569_POWER_UP		0x03
++
++/*
++ * Structs
++ */
++
++struct tsl2569_data {
++	struct i2c_client *client;
++	struct mutex update_lock;
++
++	unsigned int power_state : 1;
++	unsigned int gain : 1;  // 0: 1X , 1: 16X
++	unsigned int integration : 2; // 0:13.7mS, 1:100mS, 2:402mS, 3:Manual
++	unsigned int manual_cycle_state : 1; // 0: manual cycle stopped, 1: manual cycle started
++
++	unsigned int factor;
++};
++
++/*
++ * Management functions
++ */
++
++static int tsl2569_set_power_state(struct i2c_client *client, int state)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	if (state == 0) {
++		ret = i2c_smbus_write_byte_data(client, TSL2569_REG_CONTROL, TSL2569_POWER_UP);
++	} else {
++		ret = i2c_smbus_write_byte_data(client, TSL2569_REG_CONTROL, TSL2569_POWER_DOWN);
++	}
++
++	data->power_state = state;
++
++	return ret;
++}
++
++static int tsl2569_get_adc_value(struct i2c_client *client, u8 cmd)
++{
++	int ret = 0;
++	u8 values[2];
++
++	ret = i2c_smbus_read_i2c_block_data(client, cmd, 2, values);
++	if (ret < 0)
++		return ret;
++
++	ret = (values[1] << 8) | values[0];
++	return ret;
++}
++
++static int tsl2569_set_timing(struct i2c_client *client)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	u8 value;
++	value = ((data->gain & 0x01) << 4)
++		| (data->integration & 0x03);
++
++	printk("tsl2569: set timing: (%d,%d): %X\n", data->gain, data->integration, value);
++
++	ret = i2c_smbus_write_byte_data(client, TSL2569_REG_TIMING, value);
++	return ret;
++}
++
++static int tsl2569_integ_cycle(struct i2c_client *client, u8 cmd)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	u8 value;
++	value = ((data->gain & 0x01) << 4)
++		| ((cmd & 0x01) << 3)
++		| (data->integration & 0x03);
++	printk("tsl2569: integration cycle: (%d,%d,%d): %X\n", data->gain, data->integration, cmd, value);
++
++	ret = i2c_smbus_write_byte_data(client, TSL2569_REG_TIMING, value);
++	return ret;
++}
++
++/*
++ * sysfs access functions
++ */
++
++// rjuchli: Forward Declaration for TAOS Inc. Code
++unsigned int CalculateLux(unsigned int iFactor, unsigned int iGain, unsigned int tInt, unsigned int ch0, unsigned int ch1, int iType);
++
++static int tsl2569_get_lux_value(struct i2c_client *client, u8 cmd)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ch0, ch1;
++	unsigned int lux;
++
++	ch0 = tsl2569_get_adc_value(client, TSL2569_REG_ADC0);
++	if (ch0 < 0)
++		return ch0;
++
++	ch1 = tsl2569_get_adc_value(client, TSL2569_REG_ADC1);
++	if (ch1 < 0)
++		return ch1;
++
++	/*
++	 * Calculating the Lux Value using the current parameters
++	 * from the data structure
++	 */
++	lux = CalculateLux(data->factor, data->gain, data->integration, ch0, ch1, 0);
++
++	return lux;
++}
++
++
++/*
++ * SysFS support
++ */
++
++static ssize_t tsl2569_show_factor(struct device* dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct tsl2569_data* data = i2c_get_clientdata(to_i2c_client(dev));
++	return sprintf(buf, "%i\n", data->factor);
++}
++
++static ssize_t tsl2569_store_factor(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++
++	// Make sure it stays within unsigned int
++	if(val < 0 || val > 65536)
++		return -EINVAL;
++
++	data->factor = val;
++
++	printk("Store Factor: %d\n", data->factor);
++
++	return count;
++}
++
++static DEVICE_ATTR(factor, S_IWUSR | S_IRUGO,
++		   tsl2569_show_factor, tsl2569_store_factor);
++
++static ssize_t tsl2569_show_power_state(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(to_i2c_client(dev));
++
++	return sprintf(buf, "%u\n", data->power_state);
++}
++
++static ssize_t tsl2569_store_power_state(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 1)
++		return -EINVAL;
++
++	mutex_lock(&data->update_lock);
++	ret = tsl2569_set_power_state(client, val);
++	mutex_unlock(&data->update_lock);
++
++	if (ret < 0)
++		return ret;
++
++	return count;
++}
++
++static DEVICE_ATTR(power_state, S_IWUSR | S_IRUGO,
++		   tsl2569_show_power_state, tsl2569_store_power_state);
++
++static ssize_t tsl2569_show_adc(struct device *dev,
++			struct device_attribute *attr, char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret, ch0, ch1;
++
++	/* No LUX data if not operational */
++	if (!data->power_state)
++		return -EBUSY;
++
++	mutex_lock(&data->update_lock);
++
++	ch0 = tsl2569_get_adc_value(client, TSL2569_REG_ADC0);
++	if (ch0 < 0)
++		return ch0;
++
++	ch1 = tsl2569_get_adc_value(client, TSL2569_REG_ADC1);
++	if (ch1 < 0)
++		return ch1;
++
++	ret = 0; // FIXME tsl2569_calculate_lux(ch0, ch1);
++	if (ret < 0)
++		return ret;
++
++	ret = sprintf(buf, "%d,%d\n", ch0, ch1);
++
++	mutex_unlock(&data->update_lock);
++
++	return ret;
++}
++
++static DEVICE_ATTR(adc, S_IRUGO,
++		   tsl2569_show_adc, NULL);
++
++
++static ssize_t tsl2569_show_lux(struct device *dev,
++			struct device_attribute *attr, char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret, lux;
++
++	/* No LUX data if not operational */
++	if (!data->power_state)
++		return -EBUSY;
++
++	mutex_lock(&data->update_lock);
++
++	lux = tsl2569_get_lux_value(client, TSL2569_REG_ADC0);
++	if (lux < 0)
++		return lux;
++
++	ret = sprintf(buf, "%d\n", lux);
++
++	mutex_unlock(&data->update_lock);
++
++	return ret;
++}
++
++static DEVICE_ATTR(lux, S_IRUGO,
++		   tsl2569_show_lux, NULL);
++
++static ssize_t tsl2569_show_gain(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	mutex_lock(&data->update_lock);
++
++	ret = sprintf(buf, "%d\n", data->gain);
++
++	mutex_unlock(&data->update_lock);
++	return ret;
++}
++
++static ssize_t tsl2569_store_gain(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 1)
++		return -EINVAL;
++
++	data->gain = val;
++
++	mutex_lock(&data->update_lock);
++
++	// Update the Timing Register
++	ret = tsl2569_set_timing(client);
++	if(ret < 0)
++		return ret;
++
++	printk("Store Gain: %d\n", data->gain);
++
++	mutex_unlock(&data->update_lock);
++
++	return count;
++}
++
++
++static DEVICE_ATTR(gain, S_IWUSR | S_IRUGO,
++		tsl2569_show_gain, tsl2569_store_gain);
++
++
++static ssize_t tsl2569_show_integration(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	mutex_lock(&data->update_lock);
++
++	ret = sprintf(buf, "%d\n", data->integration);
++
++	mutex_unlock(&data->update_lock);
++	return ret;
++}
++
++static ssize_t tsl2569_store_integration(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 3)
++		return -EINVAL;
++
++	data->integration = val;
++
++	mutex_lock(&data->update_lock);
++
++	// Update the Timing Register
++	ret = tsl2569_set_timing(client);
++	if(ret < 0)
++		return ret;
++
++	printk("Store Integration: %d\n", data->integration);
++
++	mutex_unlock(&data->update_lock);
++
++	return count;
++}
++
++static DEVICE_ATTR(integration, S_IWUSR | S_IRUGO,
++		tsl2569_show_integration, tsl2569_store_integration);
++
++static ssize_t tsl2569_show_integ_cycle(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	mutex_lock(&data->update_lock);
++
++	ret = sprintf(buf, "%d\n", data->manual_cycle_state);
++
++	mutex_unlock(&data->update_lock);
++	return ret;
++}
++
++static ssize_t tsl2569_store_integ_cycle(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 1)
++		return -EINVAL;
++
++	mutex_lock(&data->update_lock);
++
++	if ( data->integration != 3 ) {
++		// Integration not set to manual
++		return -EINVAL;
++	}
++
++	// does this change the state?
++	if(val != data->manual_cycle_state) {
++
++		data->manual_cycle_state = val;
++
++		// Update the Timing Register
++		ret = tsl2569_integ_cycle(client, val);
++		if(ret < 0)
++			return ret;
++
++		printk("Manual Cycle: %d\n", data->manual_cycle_state);
++	}
++
++	mutex_unlock(&data->update_lock);
++
++	return count;
++}
++
++static DEVICE_ATTR(manual_cycle_state, S_IWUSR | S_IRUGO,
++		tsl2569_show_integ_cycle, tsl2569_store_integ_cycle);
++
++
++static struct attribute *tsl2569_attributes[] = {
++	&dev_attr_power_state.attr,
++	&dev_attr_adc.attr,
++	&dev_attr_lux.attr,
++	&dev_attr_gain.attr,
++	&dev_attr_integration.attr,
++	&dev_attr_manual_cycle_state.attr,
++	&dev_attr_factor.attr,
++	NULL
++};
++
++static const struct attribute_group tsl2569_attr_group = {
++	.attrs = tsl2569_attributes,
++};
++
++/*
++ * Initialization function
++ */
++
++static int tsl2569_init_client(struct i2c_client *client)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int err;
++
++	/* Verify the part number */
++	if ((i2c_smbus_read_byte_data(client, TSL2569_REG_PARTNO) & 0xF0) != TSL2569_PARTNO)
++		return -ENODEV;
++
++	/* Power up the device, and then read the status back */
++	err = i2c_smbus_write_byte_data(client, TSL2569_REG_CONTROL, TSL2569_POWER_UP);
++	if (err < 0)
++		return err;
++
++	mdelay(1);
++	if ((i2c_smbus_read_byte_data(client, TSL2569_REG_CONTROL) & 0x03) != TSL2569_POWER_UP)
++		return -ENODEV;
++
++	data->power_state = 1;
++
++	/* Initialize Gain / Integration time with default values */
++	data->gain = 0; // 1X gain is default
++	data->integration = 2; // 402ms is default
++	data->factor = 1;
++
++	return 0;
++}
++
++/*
++ * I2C init/probing/exit functions
++ */
++
++static struct i2c_driver tsl2569_driver;
++static int __devinit tsl2569_probe(struct i2c_client *client,
++				   const struct i2c_device_id *devid)
++{
++	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
++	struct tsl2569_data *data;
++	int err = 0;
++
++	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE)) {
++		err = -EIO;
++		goto exit;
++	}
++
++	data = kzalloc(sizeof(struct tsl2569_data), GFP_KERNEL);
++	if (!data) {
++		err = -ENOMEM;
++		goto exit;
++	}
++	data->client = client;
++	i2c_set_clientdata(client, data);
++
++	mutex_init(&data->update_lock);
++
++	/* Initialize the TSL2569 chip */
++	err = tsl2569_init_client(client);
++	if (err)
++		goto exit_kfree;
++
++	/* Register sysfs hooks */
++	err = sysfs_create_group(&client->dev.kobj, &tsl2569_attr_group);
++	if (err)
++		goto exit_kfree;
++
++	dev_info(&client->dev, "support ver. %s enabled\n", DRIVER_VERSION);
++
++	return 0;
++
++exit_kfree:
++	kfree(data);
++exit:
++	return err;
++}
++
++static int __devexit tsl2569_remove(struct i2c_client *client)
++{
++	sysfs_remove_group(&client->dev.kobj, &tsl2569_attr_group);
++
++	/* Power down the device */
++	tsl2569_set_power_state(client, 0);
++
++	kfree(i2c_get_clientdata(client));
++
++	return 0;
++}
++
++static struct i2c_device_id tsl2569_ids[] = {
++	{ TSL2569_DRV_NAME, 0 },
++	{ }
++};
++
++MODULE_DEVICE_TABLE(i2c, tsl2569_ids);
++
++static struct i2c_driver tsl2569_driver = {
++	.driver = {
++		.name	= TSL2569_DRV_NAME,
++		.owner	= THIS_MODULE,
++	},
++	.probe	= tsl2569_probe,
++	.remove	= __devexit_p(tsl2569_remove),
++	.id_table = tsl2569_ids,
++};
++
++static int __init tsl2569_init(void)
++{
++	return i2c_add_driver(&tsl2569_driver);
++}
++
++static void __exit tsl2569_exit(void)
++{
++	i2c_del_driver(&tsl2569_driver);
++}
++
++MODULE_AUTHOR("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("TSL2569 ambient light sensor driver");
++MODULE_LICENSE("GPL");
++MODULE_VERSION(DRIVER_VERSION);
++
++module_init(tsl2569_init);
++module_exit(tsl2569_exit);
++
++
++// ======================================================================
++// Lux Calculation Code follows taken directly out of the
++// specifications by TAOS, Inc.
++// - rjuchli
++// ======================================================================
++
++//****************************************************************************
++//
++// Copyright 2004-2008 TAOS, Inc.
++//
++// THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY
++// KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
++// IMPLIED WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR
++// PURPOSE.
++//
++// Module Name:
++// lux.cpp
++//
++//****************************************************************************
++
++#define LUX_SCALE 16 // scale by 2^16
++#define RATIO_SCALE 9 // scale ratio by 2^9
++
++//---------------------------------------------------
++// Integration time scaling factors
++//---------------------------------------------------
++
++#define CH_SCALE 10 // scale channel values by 2^10
++#define CHSCALE_TINT0 0x7517 // 322/11 * 2^CH_SCALE
++#define CHSCALE_TINT1 0x0fe7 // 322/81 * 2^CH_SCALE
++
++//---------------------------------------------------
++// T Package coefficients
++//---------------------------------------------------
++// For Ch1/Ch0=0.00 to 0.35:
++// Lux=0.00763*Ch0-0.01031*Ch1
++//
++// For Ch1/Ch0=0.35 to 0.50:
++// Lux=0.00817*Ch0-0.01188*Ch1
++//
++// For Ch1/Ch0=0.50 to 0.60:
++// Lux=0.00723*Ch0-0.01000*Ch1
++//
++// For Ch1/Ch0=0.60 to 0.72:
++// Lux=0.00573*Ch0-0.00750*Ch1
++//
++// For Ch1/Ch0=0.72 to 0.85:
++// Lux=0.00216*Ch0-0.00254*Ch1
++//
++// For Ch1/Ch0>0.85:
++// Lux/Ch0=0
++//
++//--------------------------------------------------
++
++#define K1T 0x00b3 // 0.35 * 2^RATIO_SCALE
++#define B1T 0x01f4 // 0.00763 * 2^LUX_SCALE
++#define M1T 0x02a4 // 0.01031 * 2^LUX_SCALE
++
++#define K2T 0x0100 // 0.50 * 2^RATIO_SCALE
++#define B2T 0x0217 // 0.00817 * 2^LUX_SCALE
++#define M2T 0x030a // 0.01188 * 2^LUX_SCALE
++
++#define K3T 0x0133 // 0.60 * 2^RATIO_SCALE
++#define B3T 0x01da // 0.00723 * 2^LUX_SCALE
++#define M3T 0x028f // 0.01000 * 2^LUX_SCALE
++
++#define K4T 0x0171 // 0.72 * 2^RATIO_SCALE
++#define B4T 0x0177 // 0.00573 * 2^LUX_SCALE
++#define M4T 0x01ec // 0.00750 * 2^LUX_SCALE
++
++#define K5T 0x01b3 // 0.85 * 2^RATIO_SCALE
++#define B5T 0x008d // 0.00216 * 2^LUX_SCALE
++#define M5T 0x00a6 // 0.00254 * 2^LUX_SCALE
++
++#define K6T 0x01b3 // 0.85 * 2^RATIO_SCALE
++#define B6T 0x0000 // 0.00000 * 2^LUX_SCALE
++#define M6T 0x0000 // 0.00000 * 2^LUX_SCALE
++
++
++//---------------------------------------------------
++// CS Package coefficients
++//---------------------------------------------------
++// For Ch1/Ch0=0.00 to 0.35:
++// Lux=0.00713*Ch0-0.00975*Ch1
++//
++// For Ch1/Ch0=0.35 to 0.45:
++// Lux=0.00813*Ch0-0.01250*Ch1
++//
++// For Ch1/Ch0=0.45 to 0.52:
++// Lux=0.00935*Ch0-0.01521*Ch1
++//
++// For Ch1/Ch0=0.52 to 0.67:
++// Lux=0.00394*Ch0-0.00482*Ch1
++//
++// For Ch1/Ch0=0.67 to 0.85:
++// Lux=0.00337*Ch0-0.00396*Ch1
++//
++// For Ch1/Ch0>0.85:
++// Lux/Ch0=0
++//
++//-------------------------------------------------
++#define K1C 0x00b3 // 0.35 * 2^RATIO_SCALE
++#define B1C 0x01d3 // 0.00713 * 2^LUX_SCALE
++#define M1C 0x027f // 0.00975 * 2^LUX_SCALE
++
++#define K2C 0x00e6 // 0.45 * 2^RATIO_SCALE
++#define B2C 0x0214 // 0.00813 * 2^LUX_SCALE
++#define M2C 0x0333 // 0.01250 * 2^LUX_SCALE
++
++#define K3C 0x010a // 0.52 * 2^RATIO_SCALE
++#define B3C 0x0265 // 0.00935 * 2^LUX_SCALE
++#define M3C 0x03e5 // 0.01521 * 2^LUX_SCALE
++
++#define K4C 0x0157 // 0.67 * 2^RATIO_SCALE
++#define B4C 0x0102 // 0.00394 * 2^LUX_SCALE
++#define M4C 0x013c // 0.00482 * 2^LUX_SCALE
++
++#define K5C 0x01b3 // 0.85 * 2^RATIO_SCALE
++#define B5C 0x00dd // 0.00337 * 2^LUX_SCALE
++#define M5C 0x0104 // 0.00396 * 2^LUX_SCALE
++
++#define K6C 0x01b3 // 0.85 * 2^RATIO_SCALE
++#define B6C 0x0000 // 0.00000 * 2^LUX_SCALE
++#define M6C 0x0000 // 0.00000 * 2^LUX_SCALE
++
++
++// lux equation approximation without floating point calculations
++//////////////////////////////////////////////////////////////////////////////
++// Routine: unsigned int CalculateLux(unsigned int ch0, unsigned int ch0, int iType)
++//
++// Description: Calculate the approximate illuminance (lux) given the raw
++// channel values of the TSL2568. The equation if implemented
++// as a piece-wise linear approximation.
++//
++// Arguments: unsigned int iGain - gain, where 0:1X, 1:16X
++// unsigned int tInt - integration time, where 0:13.7mS, 1:100mS, 2:402mS,
++// 3:Manual
++// unsigned int ch0 - raw channel value from channel 0 of TSL2568
++// unsigned int ch1 - raw channel value from channel 1 of TSL2568
++// unsigned int iType - package type (0:T, 1:CS)
++//
++// Return: unsigned int - the approximate illuminance (lux)
++//
++//////////////////////////////////////////////////////////////////////////////
++unsigned int CalculateLux(unsigned int iFactor, unsigned int iGain, unsigned int tInt, unsigned int ch0, unsigned int ch1, int iType)
++{
++	//------------------------------------------------------------------------
++	// first, scale the channel values depending on the gain and integration time
++	// 16X, 402mS is nominal.
++	// scale if integration time is NOT 402 msec
++	unsigned long chScale;
++	unsigned long channel1;
++	unsigned long channel0;
++	unsigned long ratio1 = 0;
++	unsigned long ratio;
++	unsigned int b = 0, m = 0;
++	unsigned long temp;
++	unsigned long lux;
++
++	switch (tInt)
++	{
++		case 0: // 13.7 msec
++			chScale = CHSCALE_TINT0;
++			break;
++		case 1: // 101 msec
++			chScale = CHSCALE_TINT1;
++			break;
++		default: // assume no scaling
++			chScale = (1 << CH_SCALE);
++			break;
++	}
++	// scale if gain is NOT 16X
++	if (!iGain) chScale = chScale << 4; // scale 1X to 16X
++
++	// scale the channel values
++	channel0 = (ch0 * chScale) >> CH_SCALE;
++	channel1 = (ch1 * chScale) >> CH_SCALE;
++	//-----------------------------------------------------------------
++
++	// find the ratio of the channel values (Channel1/Channel0)
++	// protect against divide by zero
++	if (channel0 != 0) ratio1 = (channel1 << (RATIO_SCALE+1)) / channel0;
++	// round the ratio value
++	ratio = (ratio1 + 1) >> 1;
++
++	// is ratio <= eachBreak ?
++	switch (iType)
++	{
++		case 0: // T package
++			if ((ratio >= 0) && (ratio <= K1T))
++				{b=B1T; m=M1T;}
++			else if (ratio <= K2T)
++				{b=B2T; m=M2T;}
++			else if (ratio <= K3T)
++				{b=B3T; m=M3T;}
++			else if (ratio <= K4T)
++				{b=B4T; m=M4T;}
++			else if (ratio <= K5T)
++				{b=B5T; m=M5T;}
++			else if (ratio > K6T)
++				{b=B6T; m=M6T;}
++			break;
++		case 1: // CS package
++			if ((ratio >= 0) && (ratio <= K1C))
++				{b=B1C; m=M1C;}
++			else if (ratio <= K2C)
++				{b=B2C; m=M2C;}
++			else if (ratio <= K3C)
++				{b=B3C; m=M3C;}
++			else if (ratio <= K4C)
++				{b=B4C; m=M4C;}
++			else if (ratio <= K5C)
++				{b=B5C; m=M5C;}
++			else if (ratio > K6C)
++				{b=B6C; m=M6C;}
++			break;
++	}
++
++	temp = ((channel0 * b * iFactor) - (channel1 * m * iFactor));
++
++	// scale CS or T package
++	// round lsb (2^(LUX_SCALE-1))
++	temp += (1 << (LUX_SCALE-1));
++	// strip off fractional portion
++	lux = temp >> LUX_SCALE;
++	return(lux);
++}
++
+Index: linux-2.6.26/drivers/input/touchscreen/Kconfig
+===================================================================
+--- linux-2.6.26.orig/drivers/input/touchscreen/Kconfig	2009-04-29 13:53:29.000000000 +0100
++++ linux-2.6.26/drivers/input/touchscreen/Kconfig	2009-04-29 13:54:00.000000000 +0100
+@@ -342,7 +342,8 @@
+ 
+ config TOUCHSCREEN_TSC2007
+ 	tristate "TI Touch Screen Controller Chip TSC2007"
+-	depends on ARCH_MX51 || ARCH_MX37 || MACH_MX35_3DS
++	depends on ARCH_MX51 || ARCH_MX37 || MACH_MX35_3DS || MACH_FAB4
++
+ 	help
+ 	  If you say yes here you get support for TSC2007 touch screen controller chip.
+ 	 
+Index: linux-2.6.26/drivers/input/touchscreen/tsc2007.c
+===================================================================
+--- linux-2.6.26.orig/drivers/input/touchscreen/tsc2007.c	2009-04-29 13:53:31.000000000 +0100
++++ linux-2.6.26/drivers/input/touchscreen/tsc2007.c	2009-04-29 13:54:00.000000000 +0100
+@@ -185,7 +185,6 @@
+ 		tsc2007_read_pressure(d, PD_PENIRQ_DISARM, &p);
+ 		input_report_abs(d->idev, ABS_X, 4096 - x);
+ 		input_report_abs(d->idev, ABS_Y, 4096 - y);
+-		input_report_abs(d->idev, ABS_PRESSURE, p);
+ 		input_sync(d->idev);
+ 
+ 		while (p > d->penup_threshold) {
+@@ -200,14 +199,14 @@
+ 
+ 			input_report_abs(d->idev, ABS_X, 4096 - x);
+ 			input_report_abs(d->idev, ABS_Y, 4096 - y);
+-			input_report_abs(d->idev, ABS_PRESSURE, p);
++			input_report_key(d->idev, BTN_TOUCH, (p > 1500));
+ 			input_sync(d->idev);
+ 		};
+ 
+ 		/* Pen Up */
+ 		input_report_abs(d->idev, ABS_X, 4096 - x);
+ 		input_report_abs(d->idev, ABS_Y, 4096 - y);
+-		input_report_abs(d->idev, ABS_PRESSURE, 0);
++		input_report_key(d->idev, BTN_TOUCH, 0);
+ 		input_sync(d->idev);
+ 
+ 		tsc2007_read(d, MEAS_TEMP0, PD_PENIRQ_ARM, 0);
+@@ -315,13 +314,13 @@
+ 	data->idev = idev;
+ 	input_set_drvdata(idev, data);
+ 	idev->name = DRIVER_NAME;
+-	idev->evbit[0] = BIT(EV_ABS);
++	idev->evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
++	idev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
+ 	idev->open = tsc2007_idev_open;
+ 	idev->close = tsc2007_idev_close;
+-	idev->absbit[0] = BIT(ABS_X) | BIT(ABS_Y) | BIT(ABS_PRESSURE);
++	idev->absbit[0] = BIT(ABS_X) | BIT(ABS_Y);
+ 	input_set_abs_params(idev, ABS_X, 0, ADC_MAX, 0, 0);
+ 	input_set_abs_params(idev, ABS_Y, 0, ADC_MAX, 0, 0);
+-	input_set_abs_params(idev, ABS_PRESSURE, 0, 0, 0, 0);
+ 
+ 	if (!ret)
+ 		ret = input_register_device(idev);
+Index: linux-2.6.26/drivers/mxc/Kconfig
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/Kconfig	2009-04-29 13:53:30.000000000 +0100
++++ linux-2.6.26/drivers/mxc/Kconfig	2009-04-29 13:54:00.000000000 +0100
+@@ -33,6 +33,7 @@
+ source "drivers/mxc/gps_ioctrl/Kconfig"
+ source "drivers/mxc/mlb/Kconfig"
+ source "drivers/mxc/adc/Kconfig"
++source "drivers/mxc/fab4/Kconfig"
+ 
+ endmenu
+ 
+Index: linux-2.6.26/drivers/mxc/Makefile
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/Makefile	2009-04-29 13:53:29.000000000 +0100
++++ linux-2.6.26/drivers/mxc/Makefile	2009-04-29 13:54:00.000000000 +0100
+@@ -17,3 +17,4 @@
+ obj-$(CONFIG_GPS_IOCTRL)		+= gps_ioctrl/
+ obj-$(CONFIG_MXC_MLB)                   += mlb/
+ obj-$(CONFIG_IMX_ADC)                   += adc/
++obj-$(CONFIG_MACH_FAB4)                 += fab4/
+Index: linux-2.6.26/drivers/mxc/fab4/Kconfig
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/fab4/Kconfig	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1,22 @@
++#
++# fab4 device driver configuration
++#
++
++menu "MXC FAB4 support"
++
++config MXC_FAB4_DEBUG_GPIO
++	bool "FAB4 Debug GPIO"
++	depends on MACH_FAB4
++	default n
++	---help---
++	This driver allows debugging Fab4 GPIOs via the /sys interface.
++
++
++config MXC_FAB4_IR
++	bool "FAB4 IR"
++	depends on MACH_FAB4
++	default n
++	---help---
++	This driver provides IR support on Fab4
++
++endmenu
+Index: linux-2.6.26/drivers/mxc/fab4/Makefile
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/fab4/Makefile	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1,6 @@
++#
++# Makefile for the MXC PMIC drivers.
++#
++
++obj-$(CONFIG_MXC_FAB4_DEBUG_GPIO)       += fab4_gpio.o
++obj-$(CONFIG_MXC_FAB4_IR)               += fab4_ir.o
+Index: linux-2.6.26/drivers/mxc/fab4/fab4_gpio.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/fab4/fab4_gpio.c	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1,177 @@
++/*
++ * Copyright 2008 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++#include <linux/platform_device.h>
++
++#include <asm/hardware.h>
++#include <asm/arch/gpio.h>
++#include <asm/arch/mx35_fab4.h>
++
++extern struct mxc_gpio_port mxc_gpio_ports[];
++
++enum gpio_reg {
++	GPIO_DR = 0x00,
++	GPIO_GDIR = 0x04,
++	GPIO_PSR = 0x08,
++	GPIO_ICR1 = 0x0C,
++	GPIO_ICR2 = 0x10,
++	GPIO_IMR = 0x14,
++	GPIO_ISR = 0x18,
++};
++
++#define MUX_I		0
++#define PAD_I		10
++#define RSVD_I		21
++
++#define PIN_TO_MUX_MASK	((1<<(PAD_I - MUX_I)) - 1)
++#define PIN_TO_PAD_MASK	((1<<(RSVD_I - PAD_I)) - 1)
++
++#define PIN_TO_IOMUX_MUX(pin) ((pin >> MUX_I) & PIN_TO_MUX_MASK)
++#define PIN_TO_IOMUX_PAD(pin) ((pin >> PAD_I) & PIN_TO_PAD_MASK)
++
++static ssize_t fab4_gpio_show(struct device *dev,
++			      struct device_attribute *attr, char *buf)
++{
++	int i;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		int datain;
++		u32 gpio, base;
++		int dr, gdir, psr;
++		u32 pin;
++		int input = 0;
++
++		if (strcmp(attr->attr.name, fab4_gpio_data->pins[i].name) != 0)
++			continue;
++
++		/* read gpio using offical api */
++		pin = fab4_gpio_data->pins[i].gpio;
++		datain = mxc_get_gpio_datain(pin);
++
++		/* read gpio state from registers */
++		gpio = IOMUX_TO_GPIO(pin);
++		base = mxc_gpio_ports[GPIO_TO_PORT(gpio)].base;
++
++		dr = (__raw_readl(base + GPIO_DR) >> GPIO_TO_INDEX(gpio)) & 1;
++		gdir = (__raw_readl(base + GPIO_GDIR) >> GPIO_TO_INDEX(gpio)) & 1;
++		psr = (__raw_readl(base + GPIO_PSR) >> GPIO_TO_INDEX(gpio)) & 1;
++
++		//input = __raw_readl(IO_ADDRESS(IOMUXC_BASE_ADDR) + 0x7AC + (pin << 2));
++
++		return snprintf(buf, PAGE_SIZE, "name:\t%s\ndatain:\t%d\ngdir:\t%s\ndr:\t%d\npsr:\t%d\ninput:\t%d\n", attr->attr.name, datain, (gdir==0)?"input":"output", dr, psr, input);
++	}
++
++	return 0;
++}
++
++static ssize_t fab4_gpio_store(struct device *dev,
++			       struct device_attribute *attr,
++			       const char *buf, size_t count)
++{
++	int i;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++	unsigned long val;
++	char *ptr;
++
++	val = simple_strtoul(buf, &ptr, 10);
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		if (strcmp(attr->attr.name, fab4_gpio_data->pins[i].name) != 0)
++			continue;
++
++		/* set gpio using offical api */
++		mxc_set_gpio_dataout(fab4_gpio_data->pins[i].gpio, val);
++
++		return count;
++	}
++
++	return count;
++}
++
++static int fab4_probe(struct platform_device *pdev)
++{
++	int i, err;
++	struct device *dev = &pdev->dev;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		struct device_attribute *attr;
++
++		attr = kmalloc(sizeof(struct device_attribute), GFP_KERNEL);
++
++		attr->attr.name = fab4_gpio_data->pins[i].name;
++		attr->attr.owner = THIS_MODULE;
++		attr->attr.mode = S_IRUGO | S_IWUSR;
++		attr->show = fab4_gpio_show;
++		attr->store = fab4_gpio_store;
++
++		fab4_gpio_data->pins[i].attr = attr;
++
++		if ((err = device_create_file(dev, attr))) {
++			dev_err(dev, "cannot attach resume attribute\n");
++			kfree(attr);
++		}
++	}
++
++	return 0;
++}
++
++static int fab4_remove(struct platform_device *pdev)
++{
++	int i;
++	struct device *dev = &pdev->dev;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		if (fab4_gpio_data->pins[i].attr) {
++			device_remove_file(dev, fab4_gpio_data->pins[i].attr);
++
++			kfree(fab4_gpio_data->pins[i].attr);
++			fab4_gpio_data->pins[i].attr = NULL;
++		}
++	}
++
++	return 0;
++}
++
++static struct platform_driver fab4_gpio_driver = {
++	.probe = fab4_probe,
++	.remove = fab4_remove,
++	.driver = {
++		.name = "fab4_gpio",
++	},
++};
++
++static int __init fab4_gpio_init(void)
++{
++	return platform_driver_register(&fab4_gpio_driver);
++}
++
++static void __exit fab4_gpio_exit(void)
++{
++	platform_driver_unregister(&fab4_gpio_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("Fab4 GPIO debug driver");
++MODULE_LICENSE("GPL");
++
++module_init(fab4_gpio_init)
++module_exit(fab4_gpio_exit)
+Index: linux-2.6.26/drivers/mxc/fab4/fab4_ir.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/fab4/fab4_ir.c	2009-05-01 12:59:20.000000000 +0100
+@@ -0,0 +1,1047 @@
++/* drivers/mxc/fab4/fab4-ir.c
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/timer.h>
++#include <linux/workqueue.h>
++#include <linux/delay.h>
++#include <linux/firmware.h>
++#include <linux/ctype.h>
++
++#include <asm/arch/gpio.h>
++
++#include "psoc.h"
++
++
++/*
++ * The IR receiver is implemented in a PIC that supports i2c.
++ * To get the ir code, read 6 bytes at address 0x47; the format is:
++ *
++ * struct S_I2C_READ {
++ *   U8 status;   // when bit 0 is set: we got a new ir code since last read
++ *   U32 rc_code; // most recent ir code
++ *   U8 fw_rev;   // 0x05 on the FW you have
++ *   U8 density;  // 0-64
++ * } i2c_read;
++ *
++ * status bits are automatically cleared after read;
++ * you can use ATTN line to avoid polling but you still need to check the status field to know the source of the event.
++ *
++ * Note: ir decoding and i2c code are not yet synchronized and you may miss some event if the master reads at the same time a rc code is received; that will be fixed later.
++ *
++ * I use this to test in RedBoot:
++ * >i2c_init 0 100000 1 6
++ * >i2c 0x47
++ * ---> 0x00 0x00 0x00 0x00 0x00 0x05 // status is 0 -> nothing; last byte is fw revision (0x05)
++ *
++ * beam code "7"
++ * >i2c 0x47
++ * ---> 0x01 0x76 0x89 0xa8 0x57 0x02 // status is 0x01 -> rc_code = 0x7689a857
++ * >i2c 0x47 // let's read again
++ *---> 0x00 0x76 0x89 0xa8 0x57 0x02 // status is 0x00 because previous read command cleared it but previous code is still present in the buffer
++ */
++
++/*
++ * Defines
++ */
++
++#define FAB4_IR_REG_STATUS	0x00
++#define FAB4_IR_REG_RC_CODE3	0x01
++#define FAB4_IR_REG_RC_CODE2	0x02
++#define FAB4_IR_REG_RC_CODE1	0x03
++#define FAB4_IR_REG_RC_CODE0	0x04
++#define FAB4_IR_REG_FW_REV	0x05
++#define FAB4_IR_REG_DENSITY	0x06
++
++#define FAB4_IR_REG_CONTROL	0x00
++#define FAB4_IR_REG_BITS0	0x01
++#define FAB4_IR_REG_BITS1	0x02
++#define FAB4_IR_REG_BITS2	0x03
++#define FAB4_IR_REG_BITS3	0x04
++#define FAB4_IR_REG_BITS4	0x05
++#define FAB4_IR_REG_BITS5	0x06
++#define FAB4_IR_REG_BITS6	0x07
++#define FAB4_IR_REG_BITS7	0x08
++#define FAB4_IR_REG_BIT_COUNT	0x09
++#define FAB4_IR_REG_HDR_PRE	0x0A
++#define FAB4_IR_REG_HDR_POST	0x0B
++#define FAB4_IR_REG_BIT0_PRE	0x0C
++#define FAB4_IR_REG_BIT0_POST	0x0D
++#define FAB4_IR_REG_BIT1_PRE	0x0E
++#define FAB4_IR_REG_BIT1_POST	0x0F
++#define FAB4_IR_REG_TRAIL	0x10
++
++
++#undef USE_TIMER
++#define TIMER_INTERVAL (HZ/20)
++
++
++struct fab4_ir_data {
++	struct i2c_client	*client;
++	struct input_dev	*input_dev;
++
++	struct mutex		lock;
++	struct work_struct	irq_work;
++#ifdef USE_TIMER
++	struct timer_list	timer;
++#endif
++
++	/* psoc programming */
++	iomux_pin_name_t	xres;
++	iomux_pin_name_t	sdata;
++	iomux_pin_name_t	sclk;
++
++	u8			*program;
++	u8			*secure;
++	u8			*chksum;
++
++	unsigned int proximity_control : 2;	// 0: stopped, 1: use IR_LED1, 2: use IR_LED2, 3: use both IR_LED1 and IR_LED2
++	unsigned int proximity_duty_cycle: 3;	// 0: 6.3%, 1: 8.4%, 2: 11.3%, 3: 15.2%, 4: 20.5%, 5: 27.6%, 6: 37.2%, 7: 50.0%
++};
++
++
++#define MAX_INTEL_HEX_DATA_LENGTH 64
++
++struct intel_hex_record {
++	u32 length;
++	u32 address;
++	u32 type;
++	u8 data[MAX_INTEL_HEX_DATA_LENGTH];
++};
++
++/*
++ * Management functions
++ */
++
++static int fab4_ir_set_proximity_control(struct i2c_client *client)
++{
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	u8 value;
++	value = ((data->proximity_duty_cycle & 0x07) << 4)
++		| (data->proximity_control & 0x03);
++
++	printk("fab4 ir: set proximity control: (%d,%d): %X\n", data->proximity_duty_cycle, data->proximity_control, value);
++
++	ret = i2c_smbus_write_byte_data(client, FAB4_IR_REG_CONTROL, value);
++	return ret;
++}
++
++static int fab4_ir_set_proximity_duty_cycle(struct i2c_client *client)
++{
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	u8 value;
++	value = ((data->proximity_duty_cycle & 0x07) << 4)
++		| (data->proximity_control & 0x03);
++
++	printk("fab4 ir: set proximity duty cycle: (%d,%d): %X\n", data->proximity_duty_cycle, data->proximity_control, value);
++
++	ret = i2c_smbus_write_byte_data(client, FAB4_IR_REG_CONTROL, value);
++	return ret;
++}
++
++/*
++ * SysFS support
++ */
++
++static ssize_t fab4_ir_show_proximity_control(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	mutex_lock(&data->lock);
++
++	ret = sprintf(buf, "%d\n", data->proximity_control);
++
++	mutex_unlock(&data->lock);
++	return ret;
++}
++
++static ssize_t fab4_ir_store_proximity_control(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 3)
++		return -EINVAL;
++
++	data->proximity_control = val;
++
++	mutex_lock(&data->lock);
++
++	// Update the proximity control
++	ret = fab4_ir_set_proximity_control(client);
++	if(ret < 0)
++		return ret;
++
++	printk("Store Proximity control: %d\n", data->proximity_control);
++
++	mutex_unlock(&data->lock);
++
++	return count;
++}
++
++static DEVICE_ATTR(proximity_control, S_IWUSR | S_IRUGO,
++		fab4_ir_show_proximity_control, fab4_ir_store_proximity_control);
++
++static ssize_t fab4_ir_show_proximity_duty_cycle(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	mutex_lock(&data->lock);
++
++	ret = sprintf(buf, "%d\n", data->proximity_duty_cycle);
++
++	mutex_unlock(&data->lock);
++	return ret;
++}
++
++static ssize_t fab4_ir_store_proximity_duty_cycle(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 7)
++		return -EINVAL;
++
++	data->proximity_duty_cycle = val;
++
++	mutex_lock(&data->lock);
++
++	// Update the proximity duty cycle
++	ret = fab4_ir_set_proximity_duty_cycle(client);
++	if(ret < 0)
++		return ret;
++
++	printk("Store Proximity Duty Cycle: %d\n", data->proximity_duty_cycle);
++
++	mutex_unlock(&data->lock);
++
++	return count;
++}
++
++static DEVICE_ATTR(proximity_duty_cycle, S_IWUSR | S_IRUGO,
++		fab4_ir_show_proximity_duty_cycle, fab4_ir_store_proximity_duty_cycle);
++
++static ssize_t fab4_ir_show_proximity_density(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int ret;
++	u8 values[7];
++
++	mutex_lock(&data->lock);
++
++// TODO: Fix reading density register direct
++//	ret = i2c_smbus_read_byte_data(client, FAB4_IR_REG_DENSITY);
++	ret = i2c_smbus_read_i2c_block_data(client, FAB4_IR_REG_STATUS, 0x07, values);
++	if(ret < 0)
++		return ret;
++
++	ret = sprintf(buf, "%d\n", values[6]);
++
++	mutex_unlock(&data->lock);
++	return ret;
++}
++
++static DEVICE_ATTR(proximity_density, S_IWUSR | S_IRUGO,
++		fab4_ir_show_proximity_density, NULL);
++
++
++static ssize_t fab4_ir_show_fw_rev(struct device  *dev,
++			struct device_attribute *attr, char* buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int ret;
++	u8 values[6];
++
++	mutex_lock(&data->lock);
++
++// TODO: Fix reading fw revision register direct
++//	ret = i2c_smbus_read_byte_data(client, FAB4_IR_REG_FW_REV);
++	ret = i2c_smbus_read_i2c_block_data(client, FAB4_IR_REG_STATUS, 0x06, values);
++	if(ret < 0)
++		return ret;
++
++	ret = sprintf(buf, "%d\n", values[5]);
++
++	mutex_unlock(&data->lock);
++	return ret;
++}
++
++static DEVICE_ATTR(fw_rev, S_IWUSR | S_IRUGO,
++		fab4_ir_show_fw_rev, NULL);
++
++
++static ssize_t fab4_ir_ir_blaster( struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client( dev);
++	struct fab4_ir_data *data = i2c_get_clientdata( client);
++
++	// Blaster load
++  	if( count > 2) {
++		u8 *out_val;
++		char *in_str;
++		char *in_str_2;
++		char *token;
++		int len;
++		int i = 0;
++
++		out_val = (u8 *) kzalloc( 16, GFP_KERNEL);
++		if( !out_val) {
++			return -ENOMEM;
++		}
++		in_str = (char *) kzalloc( count + 1, GFP_KERNEL);
++		if( !in_str) {
++			kfree( out_val);
++			return -ENOMEM;
++		}
++
++		// Need to make copies as strsep() does modify pointer and string
++		in_str_2 = in_str;
++		strncpy( in_str, buf, count);
++
++		while( true) {
++			token = strsep( &in_str_2, " \t\r\n\0");
++			if( !token) {
++				break;
++			}
++			if( token[0] == '\0') {
++				continue;
++			}
++			len = strlen( token);
++			if( ( len > 2) && ( token[0] == '0') && ( token[1] == 'x') && isxdigit( token[2])) {
++				out_val[i] = (u8) simple_strtol( &token[2], NULL, 16);
++			} else if( isdigit( token[0])) {
++				out_val[i] = (u8) simple_strtol( &token[0], NULL, 10);
++			} else {
++				out_val[i] = 0;
++			}
++			i++;
++			if( i > 15) {
++				break;
++			}
++		}
++		kfree( in_str);
++		mutex_lock( &data->lock);
++		i2c_smbus_write_i2c_block_data( client, 1, i, out_val);
++		mutex_unlock( &data->lock);
++		kfree( out_val);
++
++	} else {
++		unsigned long val = simple_strtoul( buf, NULL, 10);
++
++		mutex_lock( &data->lock);
++		switch( val) {
++			case 0:	// Blaster idle
++				i2c_smbus_write_byte_data( client, FAB4_IR_REG_CONTROL, 0x40);
++			break;
++			case 1: // Blaster blast
++				i2c_smbus_write_byte_data( client, FAB4_IR_REG_CONTROL, 0x44);
++			break;
++		}
++		mutex_unlock( &data->lock);
++	}
++	return count;
++}
++
++static DEVICE_ATTR(ir_blaster, S_IWUSR | S_IRUGO,
++		NULL, fab4_ir_ir_blaster);
++
++
++static int intel_hex_parse_byte(char **ptr, u32 *cksum)
++{
++	char c[3];
++	int v;
++
++	c[0] = *((*ptr)++);
++	c[1] = *((*ptr)++);
++	c[2] = '\0';
++
++	sscanf(c, "%x", &v);
++
++	*cksum += v;
++	return v;
++}
++
++static char *intel_hex_parse_record(char *ptr, struct intel_hex_record *record)
++{
++	int i;
++	u32 cksum = 0;
++
++	while (isspace(*ptr)) {
++		ptr++;
++	}
++
++	if (*ptr++ != ':') {
++		return NULL;
++	}
++
++	record->length = intel_hex_parse_byte(&ptr, &cksum);
++	record->address = (intel_hex_parse_byte(&ptr, &cksum) << 8);
++	record->address |= intel_hex_parse_byte(&ptr, &cksum);
++	record->type = intel_hex_parse_byte(&ptr, &cksum);
++	for (i=0; i<record->length; i++) {
++		record->data[i] = intel_hex_parse_byte(&ptr, &cksum);
++	}
++	intel_hex_parse_byte(&ptr, &cksum); /* checksum */
++	if (cksum & 0xFF) {
++		printk(KERN_ERR "Invalid checksum");
++		return NULL;
++	}
++
++	return ptr;
++}
++
++static int intel_hex_parse_firmware(struct fab4_ir_data *data, const struct firmware *fw)
++{
++	struct intel_hex_record record;
++	char *cptr, *cend;
++	u8 *dptr, *dend;
++	int extended;
++
++	cptr = fw->data;
++	cend = fw->data + fw->size;
++
++	dptr = data->program;
++	dend = dptr + (64*64);
++
++	while (cptr && cptr < cend) {
++		cptr = intel_hex_parse_record(cptr, &record);
++
++		switch (record.type) {
++		case 0: /* Data */
++			if (dptr + record.length > dend) {
++				return -1;
++			}
++			memcpy(dptr, record.data, record.length);
++			dptr += record.length;
++			break;
++
++		case 1: /* End record */
++			return 0;
++
++		case 4: /* Extended */
++			extended = (record.data[0] << 8) | record.data[1];
++			if (extended == 0x0010) {
++				dptr = data->secure;
++				dend = dptr + 64;
++			}
++			else if (extended == 0x0020) {
++				dptr = data->chksum;
++				dend = dptr + 2;
++			}
++			else {
++				return -1;
++			}
++			break;
++
++		default:
++			return -1;
++		}
++	}
++
++	return -1;
++}
++
++static void psoc_reset(struct fab4_ir_data *data)
++{
++	mxc_set_gpio_dataout(data->xres, 1);
++	udelay(40);
++	mxc_set_gpio_dataout(data->xres, 0);
++	udelay(40);
++}
++
++static void psoc_clock(struct fab4_ir_data *data)
++{
++	mxc_set_gpio_dataout(data->sclk, 1);
++	udelay(PSOC_CLOCK_UDELAY);
++	mxc_set_gpio_dataout(data->sclk, 0);
++	udelay(PSOC_CLOCK_UDELAY);
++}
++
++static void psoc_write_vector(struct fab4_ir_data *data, u32 vector)
++{
++	int i;
++	u32 mask = 0x200000;
++
++	mxc_set_gpio_direction(data->sdata, 0);
++
++	for (i=0; i<22; i++) {
++		mxc_set_gpio_dataout(data->sdata, vector & mask);
++		mask >>= 1;
++
++		psoc_clock(data);
++	}
++}
++
++static void psoc_write_block(struct fab4_ir_data *data, u8 *block)
++{
++	int addr;
++
++	for (addr=0; addr<64; addr++) {
++		psoc_write_vector(data, 0x240007
++				  | (addr << 11)
++				  | (block[addr] << 3));
++	}
++}
++
++static u8 psoc_read_byte(struct fab4_ir_data *data, u8 addr)
++{
++	int i;
++	u32 cmd, mask = 0x400;
++	u8 val = 0;
++
++	cmd = 0x580 | addr;
++
++	mxc_set_gpio_direction(data->sdata, 0);
++	for (i=0; i<11; i++) {
++		mxc_set_gpio_dataout(data->sdata, cmd & mask);
++		psoc_clock(data);
++
++		mask >>= 1;
++	}
++
++	mxc_set_gpio_direction(data->sdata, 1);
++	psoc_clock(data);
++
++	for (i=0; i<8; i++) {
++		psoc_clock(data);
++
++		val <<= 1;
++		val |= mxc_get_gpio_datain(data->sdata);
++	}
++
++	psoc_clock(data);
++
++	mxc_set_gpio_dataout(data->sdata, 1);
++	mxc_set_gpio_direction(data->sdata, 0);
++	psoc_clock(data);
++
++	return val;
++}
++
++static int psoc_wait_and_poll(struct fab4_ir_data *data)
++{
++	int i;
++
++	/* Clock Z to device */
++	mxc_set_gpio_direction(data->sdata, 1);
++	psoc_clock(data);
++
++	/* Wait for HIGH to LOW transition */
++	i = 0;
++	while (mxc_get_gpio_datain(data->sdata) != 0) {
++		i += PSOC_WAIT_MDELAY;
++		if (i >= PSOC_WAIT_MTIMEOUT) {
++			return -1;
++		}
++
++		msleep(PSOC_WAIT_MDELAY);
++	}
++
++	/* Apply a bit stream of 40 zero bits */
++	mxc_set_gpio_dataout(data->sdata, 0);
++	mxc_set_gpio_direction(data->sdata, 1);
++
++	for (i=0; i<40; i++) {
++		psoc_clock(data);
++	}
++
++	return 0;
++}
++
++static void psoc_send_vectors(struct fab4_ir_data *data, u32 vectors[], size_t len)
++{
++	int i;
++
++	for (i=0; i<len; i++) {
++		if (vectors[i] == WAIT_AND_POLL) {
++			psoc_wait_and_poll(data);
++		}
++		else {
++			psoc_write_vector(data, vectors[i]);
++		}
++	}
++}
++
++static void fab4_prog_firmware(const struct firmware *fw, void *context)
++{
++	struct fab4_ir_data *data = (struct fab4_ir_data *) context;
++	struct i2c_client *client = data->client;
++
++	u16 silicon_id, chksum;
++	int block;
++	unsigned long flags;
++
++	if (fw == NULL) {
++		printk(KERN_ERR "FAB4 IR: fw request failed\n");
++		return;
++	}
++
++	// Disable interrupts as long as mcu is in programming mode.
++	disable_irq(client->irq);
++
++	data->program = kzalloc(64*64, GFP_KERNEL);
++	data->secure = kzalloc(64, GFP_KERNEL);
++	data->chksum = kzalloc(2, GFP_KERNEL);
++
++	if (intel_hex_parse_firmware(data, fw) != 0) {
++		printk(KERN_ERR "FAB4 IR: fw invalid\n");
++		goto done;
++	}
++
++	mxc_set_gpio_direction(data->xres, 0);
++	mxc_set_gpio_direction(data->sclk, 0);
++
++	/* to enter the programming mode the reset and initialize vector
++	 * must be completed in 125us. to ensure the timing we are bad and
++	 * disable irq's here.
++	 */
++
++	/* reset target */
++ 	local_irq_save(flags);
++	psoc_reset(data);
++
++	/* initialize target */
++	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init));
++ 	local_irq_restore(flags);
++
++	/* verify silicon id */
++	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup));
++	silicon_id = psoc_read_byte(data, 0x78) << 8;
++	silicon_id |= psoc_read_byte(data, 0x79);
++
++	if (silicon_id != 0x19 /* CY8C21323 */) {
++		printk(KERN_ERR "FAB4 IR: invalid silicon id: %x\n", silicon_id);
++		goto done;
++	}
++
++	/* checksum */
++	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup));
++	chksum = psoc_read_byte(data, 0x79) << 8;
++	chksum |= psoc_read_byte(data, 0x78);
++
++	if (chksum == ((data->chksum[0] << 8) | data->chksum[1])) {
++		printk(KERN_INFO "FAB4 IR: fw checksum ok %x\n", chksum);
++		goto done;
++	}
++
++	printk(KERN_INFO "FAB4 IR: programming fw (checksum was %x)\n", chksum);
++
++	/* bulk erase */
++	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase));
++
++	/* program */
++	for (block=0; block<64; block++) {
++		psoc_write_block(data, data->program + (block * 64));
++
++		psoc_write_vector(data, 0x27D007 | (block << 3));
++		psoc_send_vectors(data, psoc_program, ARRAY_SIZE(psoc_program));
++	}
++
++	/* secure */
++	psoc_write_block(data, data->secure);
++	psoc_send_vectors(data, psoc_secure, ARRAY_SIZE(psoc_secure));
++
++	/* checksum */
++	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup));
++	chksum = psoc_read_byte(data, 0x79) << 8;
++	chksum |= psoc_read_byte(data, 0x78);
++
++	if (chksum != ((data->chksum[0] << 8) | data->chksum[1])) {
++		printk(KERN_ERR "FAB4 IR: fw checksum failed %x\n", chksum);
++
++		// FIXME retry programming?
++		goto done;
++	}
++
++	printk(KERN_INFO "FAB4 IR: fw programming ok (checksum %x)\n", chksum);
++
++ done:
++	mxc_set_gpio_direction(data->sclk, 1);
++	mxc_set_gpio_direction(data->sdata, 1);
++
++	psoc_reset(data);
++	mxc_set_gpio_direction(data->xres, 1);
++
++	kfree(data->program);
++	kfree(data->secure);
++	kfree(data->chksum);
++
++	// After switching mcu back from programming to regular mode it takes a
++	//  while until it can answer i2c read or write requests again.
++	// Delay enabling interrupts until mcu is ready. 4ms is an empiric value.
++	//  (3ms is too short and results in i2c 'bus busy' error messages.)
++	mdelay(4);
++	enable_irq(client->irq);
++}
++
++
++static void fab4_erase_firmware(struct fab4_ir_data *data)
++{
++	struct i2c_client *client = data->client;
++	u16 silicon_id;
++	unsigned long flags;
++
++	disable_irq(client->irq);
++
++	mxc_set_gpio_direction(data->xres, 0);
++	mxc_set_gpio_direction(data->sclk, 0);
++
++	/* to enter the programming mode the reset and initialize vector
++	 * must be completed in 125us. to ensure the timing we are bad and
++	 * disable irq's here.
++	 */
++
++	/* reset target */
++ 	local_irq_save(flags);
++	psoc_reset(data);
++
++	/* initialize target */
++	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init));
++ 	local_irq_restore(flags);
++
++	/* verify silicon id */
++	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup));
++	silicon_id = psoc_read_byte(data, 0x78) << 8;
++	silicon_id |= psoc_read_byte(data, 0x79);
++
++	if (silicon_id != 0x19 /* CY8C21323 */) {
++		printk(KERN_ERR "FAB4 IR: invalid silicon id: %x\n", silicon_id);
++		goto done;
++	}
++
++	/* bulk erase */
++	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase));
++
++	printk(KERN_INFO "FAB4 IR: fw erase ok\n");
++
++ done:
++	mxc_set_gpio_direction(data->sclk, 1);
++	mxc_set_gpio_direction(data->sdata, 1);
++	mxc_set_gpio_direction(data->xres, 1);
++
++	enable_irq(client->irq);
++}
++
++
++static ssize_t fab4_ir_flash(struct device  *dev,
++			     struct device_attribute *attr,
++			     const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++
++	if (strncmp(buf, "erase", 5) == 0) {
++		fab4_erase_firmware(data);
++	}
++	else if (strncmp(buf, "program", 7) == 0) {
++		request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
++					"ir_controller_21323.hex", &client->dev,
++					data, fab4_prog_firmware);
++	}
++
++	return count;
++}
++
++static DEVICE_ATTR(flash, S_IWUSR, NULL, fab4_ir_flash);
++
++
++#define irq_work_to_data(_w) container_of(_w, struct fab4_ir_data, irq_work)
++
++static void fab4_ir_work(struct work_struct *work)
++{
++	struct fab4_ir_data *data = irq_work_to_data(work);
++	struct i2c_client *client = data->client;
++	u32 code;
++	u8 values[6];
++
++	mutex_lock(&data->lock);
++
++	i2c_smbus_read_i2c_block_data(client, 0x00, 0x06, values);
++
++	mutex_unlock(&data->lock);
++
++	// If bit 0 is set a new RC code is available
++	if (values[0] & 0x01) {
++		code = (values[1] << 24) | (values[2] << 16) |
++			(values[3] << 8) | (values[4]);
++
++//		printk("fab4 ir: new RC code received: 0x%X\n", code);
++
++		input_event(data->input_dev, EV_MSC, MSC_RAW, code);
++		input_sync(data->input_dev);
++	}
++
++	// Check if we either have a remoteness transition (user moved away) or proximity detected
++	// Always send out this event even if it most likly was only an IR remote command
++	if ( ((values[0] & 0x02) || (values[0] & 0x04)) /* && (values[0] & 0x01) == 0 */) {
++		/*
++		RJ: Is a more complex version required? ie. more data in the actual code sent?
++		code = ((values[0]&0x10) >> 4) | // proximity(0x10,4) to bit 0
++			((values[0]&0x04) >> 2) | // remoteness trans (0x04,3) to bit 1
++			((values[0]&0x02) << 1); // proximity trans (0x02,1) to bit 2
++		*/
++
++		code = (values[0]&0x10) >> 4;
++
++		input_event(data->input_dev, EV_SW, SW_TABLET_MODE, code);
++		input_sync(data->input_dev);
++	}
++
++#ifndef USE_TIMER
++	enable_irq(client->irq);
++#endif
++}
++
++
++#ifdef USE_TIMER
++static void fab4_ir_timer(unsigned long ptr)
++{
++	struct fab4_ir_data *data = (struct fab4_ir_data *) ptr;
++
++	schedule_work(&data->irq_work);
++
++	data->timer.expires = jiffies + TIMER_INTERVAL;
++	add_timer(&data->timer);
++}
++#else
++static irqreturn_t fab4_ir_irq(int irq, void *dev_id)
++{
++	struct fab4_ir_data *data = dev_id;
++
++	schedule_work(&data->irq_work);
++	disable_irq(irq);
++
++	return IRQ_HANDLED;
++}
++#endif
++
++
++static struct attribute *fab4_ir_attributes[] = {
++	&dev_attr_proximity_control.attr,
++	&dev_attr_proximity_duty_cycle.attr,
++	&dev_attr_proximity_density.attr,
++
++	&dev_attr_fw_rev.attr,
++	&dev_attr_flash.attr,
++
++	&dev_attr_ir_blaster.attr,
++
++	NULL
++};
++
++static const struct attribute_group fab4_ir_attr_group = {
++	.attrs = fab4_ir_attributes,
++};
++
++
++int fab4_ir_probe(struct i2c_client *client, const struct i2c_device_id *dev_id)
++{
++	struct fab4_ir_data *data;
++	struct input_dev *input_dev;
++	struct resource *res = client->dev.platform_data;
++	int err = 0;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
++		dev_err(&client->dev, "No SMBUS byte data capability\n");
++		goto error0;
++	}
++
++	if (!(data = kzalloc(sizeof(struct fab4_ir_data), GFP_KERNEL))) {
++		dev_err(&client->dev, "No space for state\n");
++		err = -ENOMEM;
++		goto error0;
++	}
++
++	i2c_set_clientdata(client, data);
++	data->client = client;
++	data->xres = res[0].start;
++	data->sdata = res[1].start;
++	data->sclk = res[2].start;
++
++	if (mxc_request_gpio(data->xres) != 0 ||
++	    mxc_request_gpio(data->sdata) != 0 ||
++	    mxc_request_gpio(data->sclk) != 0) {
++		printk(KERN_ERR "Failed to cliam XRES, SDATA or SCLK\n");
++	}
++
++
++	mutex_init(&data->lock);
++
++	INIT_WORK(&data->irq_work, fab4_ir_work);
++
++	input_dev = input_allocate_device();
++	if (input_dev == NULL) {
++		dev_err(&client->dev, "Could not allocate input device\n");
++		goto error1;
++	}
++
++	input_dev->name = "FAB4 IR";
++	input_dev->dev.parent = &client->dev;
++
++	input_set_capability(input_dev, EV_MSC, MSC_RAW);
++
++	//RJ: Adding EV_SW, SW_TABLET_MODE (Proximity) to capabilities
++	input_set_capability(input_dev, EV_SW, SW_TABLET_MODE);
++
++	data->input_dev = input_dev;
++
++	err = input_register_device(input_dev);
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register input device\n");
++		input_free_device(input_dev);
++		goto error1;
++	}
++
++#ifndef USE_TIMER
++	err = request_irq(client->irq, fab4_ir_irq,
++			  IRQF_TRIGGER_LOW | IRQF_SAMPLE_RANDOM,
++			  client->dev.bus_id, data);
++
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register IRQ %d\n",
++			client->irq);
++		goto error2;
++	}
++#else
++	init_timer(&data->timer);
++
++	data->timer.expires = jiffies + TIMER_INTERVAL;
++	data->timer.function = fab4_ir_timer;
++	data->timer.data = (unsigned long) data;
++	add_timer(&data->timer);
++#endif
++
++	/* verify PSoC firmware */
++	request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
++				"ir_controller_21323.hex", &client->dev,
++				data, fab4_prog_firmware);
++
++	/* Init proximity */
++	data->proximity_control = 0x03;
++	data->proximity_duty_cycle = 0x04;
++
++	/* Register sysfs hooks */
++	err = sysfs_create_group(&client->dev.kobj, &fab4_ir_attr_group);
++	if (err)
++		goto error1;
++
++	return 0;
++
++#ifdef USE_TIMER
++	del_timer(&data->timer);
++#else
++	free_irq(client->irq, data);
++#endif
++ error2:
++	input_unregister_device(input_dev);
++ error1:
++	kfree(data);
++ error0:
++	return err;
++}
++
++
++int fab4_ir_remove(struct i2c_client *client)
++{
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int err;
++
++	sysfs_remove_group(&client->dev.kobj, &fab4_ir_attr_group);
++
++#ifdef USE_TIMER
++	del_timer(&data->timer);
++#else
++	free_irq(client->irq, data);
++#endif
++
++	input_unregister_device(data->input_dev);
++
++	/* Try to detach the client from i2c space */
++	if ((err = i2c_detach_client(client))) {
++		dev_err(&client->dev,
++			"Client deregistration failed, not detached.\n");
++		return err;
++	}
++
++	kfree(client);
++
++	return 0;
++}
++
++static struct i2c_device_id fab4_ir_ids[] = {
++	{ "fab4-ir", 0 },
++	{ }
++};
++
++MODULE_DEVICE_TABLE(i2c, fab4_ir_ids);
++
++static struct i2c_driver fab4_ir_driver = {
++	.driver		= {
++		.owner		= THIS_MODULE,
++		.name		= "fab4-ir",
++	},
++	.probe	= fab4_ir_probe,
++	.remove	= fab4_ir_remove,
++	.id_table = fab4_ir_ids,
++};
++
++
++static int __init fab4_ir_init(void)
++{
++	return i2c_add_driver(&fab4_ir_driver);
++}
++
++
++static void __exit fab4_ir_exit(void)
++{
++	i2c_del_driver(&fab4_ir_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("FAB4 IR driver");
++
++module_init(fab4_ir_init)
++module_exit(fab4_ir_exit)
+Index: linux-2.6.26/drivers/mxc/fab4/psoc.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/fab4/psoc.h	2009-05-01 13:07:58.000000000 +0100
+@@ -0,0 +1,201 @@
++/* drivers/mxc/fab4/psoc.h
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#define PSOC_WAIT_MDELAY 10
++#define PSOC_WAIT_MTIMEOUT 10000
++#define PSOC_CLOCK_UDELAY 2
++
++#define WAIT_AND_POLL 0x800000
++
++static u32 psoc_init[] = {
++	/* init1 */
++	0x328000, /* 1100101000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x37804f, /* 1101111000000001001111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++
++	/* init2 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x27d00f, /* 1001111101000000001111 */
++	0x378037, /* 1101111000000000110111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++
++	/* init3 3.3 V */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c28f, /* 1101111100001010001111 */
++	0x37cfc7, /* 1101111100111111000111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c307, /* 1101111100001100000111 */
++	0x37cf57, /* 1101111100111101010111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37b887, /* 1101111011100010000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c28f, /* 1101111100001010001111 */
++	0x37cfcf, /* 1101111100111111001111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c307, /* 1101111100001100000111 */
++	0x37cf47, /* 1101111100111101000111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37b887, /* 1101111011100010000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++};
++
++static u32 psoc_id_setup[] = {
++	0x37b887, /* 1101111011100010000111 */
++	0x370017, /* 1101110000000000010111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x27d007, /* 1001111101000000000111 */
++	0x378037, /* 1101111000000000110111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_bluk_erase[] = {
++	0x27e0af, /* 1001111110000010101111 */
++	0x27f2b7, /* 1001111111001010110111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x37802f, /* 1101111000000000101111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_checksum_setup[] = {
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x27d207, /* 1001111101001000000111 */
++	0x37803f, /* 1101111000000000111111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_program[] = {
++	0x27e2a7, /* 1001111110001010100111 */
++	0x27f2b7, /* 1001111111001010110111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x378017, /* 1101111000000000010111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_secure[] = {
++	0x27e2a7, /* 1001111110001010100111 */
++	0x27f2b7, /* 1001111111001010110111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x378027, /* 1101111000000000100111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
+Index: linux-2.6.26/include/asm-arm/arch-mxc/mx35_fab4.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/include/asm-arm/arch-mxc/mx35_fab4.h	2009-04-29 13:54:00.000000000 +0100
+@@ -0,0 +1,20 @@
++/*
++ * Copyright 2008 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++struct mxc_fab4_gpio_pins {
++	int gpio;
++	char *name;
++	struct device_attribute *attr;
++};
++
++struct mxc_fab4_gpio_platform_data {
++	int nr_pins;
++	struct mxc_fab4_gpio_pins *pins;
++};

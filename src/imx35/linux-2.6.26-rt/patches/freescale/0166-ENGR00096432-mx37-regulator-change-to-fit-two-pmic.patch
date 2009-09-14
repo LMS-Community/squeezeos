@@ -1,0 +1,198 @@
+From fca80c9a2659126c0b8d0ccee90ace07d8c6c74f Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 23 Oct 2008 18:30:55 +0800
+Subject: [PATCH] ENGR00096432 mx37:regulator change to fit two pmic
+
+regulator change to fit two pmic: v2.0 cpu board
+APLite and v1.x wm8350.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx37/cpufreq.c     |   12 ++++++++++--
+ arch/arm/mach-mx37/lpmodes.c     |   30 ++++++++++++++++++++++++------
+ arch/arm/mach-mx37/mx37_3stack.c |   21 ++++++++++++++-------
+ arch/arm/plat-mxc/utmixc.c       |    5 ++++-
+ 4 files changed, 52 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/cpufreq.c b/arch/arm/mach-mx37/cpufreq.c
+index 9851ef4..c080eba 100644
+--- a/arch/arm/mach-mx37/cpufreq.c
++++ b/arch/arm/mach-mx37/cpufreq.c
+@@ -419,14 +419,22 @@ static int __init mx37_cpufreq_driver_init(struct cpufreq_policy *policy)
+ 		return PTR_ERR(osc);
+ 	}
+ 
+-	gp_regulator = regulator_get(NULL, "DCDC1");
++	if (!board_is_mx37(BOARD_REV_2))
++		gp_regulator = regulator_get(NULL, "DCDC1");
++	else
++		gp_regulator = regulator_get(NULL, "SW1");
++
+ 	if (IS_ERR(gp_regulator)) {
+ 		clk_put(cpu_clk);
+ 		printk(KERN_ERR "%s: failed to get gp regulator\n", __func__);
+ 		return PTR_ERR(gp_regulator);
+ 	}
+ 
+-	lp_regulator = regulator_get(NULL, "DCDC4");
++	if (!board_is_mx37(BOARD_REV_2))
++		lp_regulator = regulator_get(NULL, "DCDC4");
++	else
++		lp_regulator = regulator_get(NULL, "SW2");
++
+ 	if (IS_ERR(lp_regulator)) {
+ 		clk_put(ahb_clk);
+ 		printk(KERN_ERR "%s: failed to get lp regulator\n", __func__);
+diff --git a/arch/arm/mach-mx37/lpmodes.c b/arch/arm/mach-mx37/lpmodes.c
+index e48819a..b4f050b 100644
+--- a/arch/arm/mach-mx37/lpmodes.c
++++ b/arch/arm/mach-mx37/lpmodes.c
+@@ -107,7 +107,10 @@ void enter_lp_video_mode(void)
+ 
+ 	/* Set the voltage to 0.8v for the GP domain. */
+ 
+-	gp_core = regulator_get(NULL, "DCDC1");
++	if (!board_is_mx37(BOARD_REV_2))
++		gp_core = regulator_get(NULL, "DCDC1");
++	else
++		gp_core = regulator_get(NULL, "SW1");
+ 
+ 	ret = regulator_set_voltage(gp_core, GP_LPM_VOLTAGE);
+ 	if (ret < 0)
+@@ -123,7 +126,10 @@ void exit_lp_video_mode(void)
+ 	struct regulator *gp_core;
+ 
+ 	/*Set the voltage to 0.8v for the GP domain. */
+-	gp_core = regulator_get(NULL, "DCDC1");
++	if (!board_is_mx37(BOARD_REV_2))
++		gp_core = regulator_get(NULL, "DCDC1");
++	else
++		gp_core = regulator_get(NULL, "SW1");
+ 
+ 	ret = regulator_set_voltage(gp_core, GP_NORMAL_VOLTAGE);
+ 	if (ret < 0)
+@@ -209,7 +215,10 @@ void enter_lp_audio_mode(void)
+ 		clk_disable(tclk);
+ 
+ 	/* Set the voltage to 1.0v for the LP domain. */
+-	lp_core = regulator_get(NULL, "DCDC4");
++	if (!board_is_mx37(BOARD_REV_2))
++		lp_core = regulator_get(NULL, "DCDC4");
++	else
++		lp_core = regulator_get(NULL, "SW2");
+ 
+ 	if (lp_core != NULL) {
+ 		ret = regulator_set_voltage(lp_core, LP_LPM_VOLTAGE);
+@@ -225,7 +234,10 @@ void enter_lp_audio_mode(void)
+ 		printk(KERN_DEBUG "cannot set CPU clock rate\n");
+ 
+ 	/* Set the voltage to 0.8v for the GP domain. */
+-	gp_core = regulator_get(NULL, "DCDC1");
++	if (!board_is_mx37(BOARD_REV_2))
++		gp_core = regulator_get(NULL, "DCDC1");
++	else
++		gp_core = regulator_get(NULL, "SW1");
+ 
+ 	if (gp_core != NULL) {
+ 		ret = regulator_set_voltage(gp_core, GP_LPM_VOLTAGE);
+@@ -246,7 +258,10 @@ void exit_lp_audio_mode(void)
+ 
+ 	lp_audio_mode = 0;
+ 	/* Set the voltage to 1.2v for the LP domain. */
+-	lp_core = regulator_get(NULL, "DCDC4");
++	if (!board_is_mx37(BOARD_REV_2))
++		lp_core = regulator_get(NULL, "DCDC4");
++	else
++		lp_core = regulator_get(NULL, "SW2");
+ 
+ 	if (lp_core != NULL) {
+ 		ret = regulator_set_voltage(lp_core, LP_NORMAL_VOLTAGE);
+@@ -255,7 +270,10 @@ void exit_lp_audio_mode(void)
+ 	}
+ 
+ 	/* Set the voltage to 1.0v for the GP domain. */
+-	gp_core = regulator_get(NULL, "DCDC1");
++	if (!board_is_mx37(BOARD_REV_2))
++		gp_core = regulator_get(NULL, "DCDC1");
++	else
++		gp_core = regulator_get(NULL, "SW1");
+ 
+ 	ret = regulator_set_voltage(gp_core, GP_NORMAL_VOLTAGE);
+ 	if (ret < 0)
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index f7b6192..769aa44 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -241,14 +241,14 @@ static void lcd_reset(void)
+ }
+ 
+ static struct mxc_lcd_platform_data lcd_data = {
+-	.core_reg = "LDO1",
+-	.io_reg = "DCDC6",
++	.core_reg = "WIDEO",
++	.io_reg = "SW4",
+ 	.reset = lcd_reset,
+ };
+ 
+ static struct mxc_dvfs_platform_data dvfs_data = {
+-	.vddgp_reg = "DCDC1",
+-	.vcclp_reg = "DCDC4",
++	.vddgp_reg = "SW1",
++	.vcclp_reg = "SW2",
+ };
+ 
+ #if defined(CONFIG_KEYBOARD_MPR084) || defined(CONFIG_KEYBOARD_MPR084_MODULE)
+@@ -272,7 +272,7 @@ static struct mxc_keyp_platform_data keypad_data = {
+ 	.inactive = gpio_keypad_inactive,
+ };
+ static struct mxc_lightsensor_platform_data ls_data = {
+-	.vdd_reg = "DCDC3",
++	.vdd_reg = "VGEN2",
+ 	.rext = 100,
+ };
+ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+@@ -587,9 +587,9 @@ static void bt_reset(void)
+ }
+ 
+ static struct mxc_bt_platform_data mxc_bt_data = {
+-	.bt_vdd = "DCDC3",
++	.bt_vdd = "VGEN2",
+ 	.bt_vdd_parent = NULL,
+-	.bt_vusb = "DCDC6",
++	.bt_vusb = "SW4",
+ 	.bt_vusb_parent = NULL,
+ 	.bt_reset = bt_reset,
+ };
+@@ -614,6 +614,13 @@ static void mxc_init_bluetooth(void)
+  */
+ static void mx37_3stack_fixup_for_board_v1(void)
+ {
++	lcd_data.core_reg = "LDO1";
++	lcd_data.io_reg = "DCDC6";
++	dvfs_data.vddgp_reg = "DCDC1";
++	dvfs_data.vcclp_reg = "DCDC4";
++	ls_data.vdd_reg = "DCDC3";
++	mxc_bt_data.bt_vdd = "DCDC3";
++	mxc_bt_data.bt_vusb = "DCDC6";
+ }
+ 
+ 
+diff --git a/arch/arm/plat-mxc/utmixc.c b/arch/arm/plat-mxc/utmixc.c
+index c0626f5..409aa75 100644
+--- a/arch/arm/plat-mxc/utmixc.c
++++ b/arch/arm/plat-mxc/utmixc.c
+@@ -48,7 +48,10 @@ static void set_power(struct fsl_xcvr_ops *this,
+ 
+ 	pr_debug("real %s(on=%d) pdata=0x%p\n", __func__, on, pdata);
+ 	if (machine_is_mx37_3ds()) {
+-		usbotg_regux = regulator_get(dev, "DCDC2");
++		if (!board_is_mx37(BOARD_REV_2))
++			usbotg_regux = regulator_get(dev, "DCDC2");
++		else
++			usbotg_regux = regulator_get(dev, "SWBST");
+ 		if (on) {
+ 			regulator_enable(usbotg_regux);
+ 		} else {
+-- 
+1.5.4.4
+

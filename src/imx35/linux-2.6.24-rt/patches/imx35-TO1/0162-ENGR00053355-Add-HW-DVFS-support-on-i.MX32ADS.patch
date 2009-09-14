@@ -1,0 +1,41 @@
+From 636c6e46a2c6ce4593e07f0642d1214be0f17643 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Wed, 14 May 2008 14:56:16 -0500
+Subject: [PATCH] ENGR00053355 Add HW DVFS support on i.MX32ADS
+
+When enabling HW DVFS, the voltage and freq remain unchanged.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx3/clock.c |   15 ++++++++++-----
+ 1 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/clock.c b/arch/arm/mach-mx3/clock.c
+index 7981d8d..4d333a4 100644
+--- a/arch/arm/mach-mx3/clock.c
++++ b/arch/arm/mach-mx3/clock.c
+@@ -1167,11 +1167,16 @@ int __init mxc_clocks_init(void)
+ 	__raw_writel(MXC_CCM_CGR0_GPT_MASK, MXC_CCM_CGR0);
+ 	__raw_writel(0, MXC_CCM_CGR1);
+ 
+-	__raw_writel(MXC_CCM_CGR2_EMI_MASK | MXC_CCM_CGR2_IPMUX1_MASK | MXC_CCM_CGR2_IPMUX2_MASK | MXC_CCM_CGR2_MXCCLKENSEL_MASK |	/*For MX32 */
+-		     MXC_CCM_CGR2_CHIKCAMPEN_MASK |	/*For MX32 */
+-		     MXC_CCM_CGR2_OVRVPUBUSY_MASK |	/*For MX32 */
+-		     1 << 27 |	/*Bit 27 and 28 are not defined for MX32, but still requires to be set */
+-		     1 << 28, MXC_CCM_CGR2);
++	reg = MXC_CCM_CGR2_EMI_MASK |	/*For MX32 */
++	    MXC_CCM_CGR2_IPMUX1_MASK |	/*For MX32 */
++	    MXC_CCM_CGR2_IPMUX2_MASK |	/*For MX32 */
++	    MXC_CCM_CGR2_MXCCLKENSEL_MASK |	/*For MX32 */
++	    MXC_CCM_CGR2_CHIKCAMPEN_MASK |	/*For MX32 */
++	    MXC_CCM_CGR2_OVRVPUBUSY_MASK |	/*For MX32 */
++	    0x3 << 27 |		/*Bit 27 and 28 are not defined for MX32,
++				   but still requires to be set */
++	    MXC_CCM_CGR2_APMSYSCLKSEL_MASK | MXC_CCM_CGR2_AOMENA_MASK;
++	__raw_writel(reg, MXC_CCM_CGR2);
+ 
+ 	cko1_clk.disable(&cko1_clk);
+ 	usb_pll_clk.disable(&usb_pll_clk);
+-- 
+1.5.4.4
+

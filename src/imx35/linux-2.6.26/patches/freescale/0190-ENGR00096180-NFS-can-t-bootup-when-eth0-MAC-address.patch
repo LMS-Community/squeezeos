@@ -1,0 +1,31 @@
+From 0aa0aa683133c5e53099cb94e2bdeddf1e7ccd8e Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Fri, 31 Oct 2008 16:57:23 +0800
+Subject: [PATCH] ENGR00096180  NFS can't bootup when eth0 MAC address is enabled.
+
+If bootloader writes customized MAC address into MAC address register, This
+driver will not work. The root cause is open function resets LAN9217 chip.
+The mac address should be set again. Otherwise, LAN9217 will use the mac
+address in EEPROM.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ drivers/net/smsc911x.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/smsc911x.c b/drivers/net/smsc911x.c
+index a6b680c..e416066 100644
+--- a/drivers/net/smsc911x.c
++++ b/drivers/net/smsc911x.c
+@@ -1246,6 +1246,8 @@ static int smsc911x_open(struct net_device *dev)
+ 		return -ENODEV;
+ 	}
+ 
++	smsc911x_set_mac_address(pdata, dev->dev_addr);
++
+ 	temp = smsc911x_reg_read(pdata, HW_CFG);
+ 	temp &= HW_CFG_TX_FIF_SZ_;
+ 	temp |= HW_CFG_SF_;
+-- 
+1.5.4.4
+

@@ -1,0 +1,260 @@
+From 6b52e6b03c1d764342026b01f307a87ffcb5204a Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 18 Dec 2008 14:06:51 +0200
+Subject: [PATCH] UBIFS: use nicer 64-bit math
+
+Instead of using do_div(), use better primitives from
+linux/math64.h.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |   25 +++++++++++--------------
+ fs/ubifs/debug.c  |    1 +
+ fs/ubifs/lpt.c    |   15 ++++++---------
+ fs/ubifs/sb.c     |   10 +++++-----
+ fs/ubifs/super.c  |   12 ++++++------
+ fs/ubifs/ubifs.h  |    2 +-
+ 6 files changed, 30 insertions(+), 35 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index e423425..0bcb803 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -32,7 +32,7 @@
+ 
+ #include "ubifs.h"
+ #include <linux/writeback.h>
+-#include <asm/div64.h>
++#include <linux/math64.h>
+ 
+ /*
+  * When pessimistic budget calculations say that there is no enough space,
+@@ -258,8 +258,8 @@ static int make_free_space(struct ubifs_info *c, struct retries_info *ri)
+  */
+ int ubifs_calc_min_idx_lebs(struct ubifs_info *c)
+ {
+-	int ret;
+-	uint64_t idx_size;
++	int idx_lebs, eff_leb_size = c->leb_size - c->max_idx_node_sz;
++	long long idx_size;
+ 
+ 	idx_size = c->old_idx_sz + c->budg_idx_growth + c->budg_uncommitted_idx;
+ 
+@@ -271,18 +271,16 @@ int ubifs_calc_min_idx_lebs(struct ubifs_info *c)
+ 	 * pair, nor similarly the two variables for the new index size, so we
+ 	 * have to do this costly 64-bit division on fast-path.
+ 	 */
+-	if (do_div(idx_size, c->leb_size - c->max_idx_node_sz))
+-		ret = idx_size + 1;
+-	else
+-		ret = idx_size;
++	idx_size += eff_leb_size - 1;
++	idx_lebs = div_u64(idx_size, eff_leb_size);
+ 	/*
+ 	 * The index head is not available for the in-the-gaps method, so add an
+ 	 * extra LEB to compensate.
+ 	 */
+-	ret += 1;
+-	if (ret < MIN_INDEX_LEBS)
+-		ret = MIN_INDEX_LEBS;
+-	return ret;
++	idx_lebs += 1;
++	if (idx_lebs < MIN_INDEX_LEBS)
++		idx_lebs = MIN_INDEX_LEBS;
++	return idx_lebs;
+ }
+ 
+ /**
+@@ -718,7 +716,7 @@ void ubifs_release_dirty_inode_budget(struct ubifs_info *c,
+  * Note, the calculation is pessimistic, which means that most of the time
+  * UBIFS reports less space than it actually has.
+  */
+-long long ubifs_reported_space(const struct ubifs_info *c, uint64_t free)
++long long ubifs_reported_space(const struct ubifs_info *c, long long free)
+ {
+ 	int divisor, factor, f;
+ 
+@@ -740,8 +738,7 @@ long long ubifs_reported_space(const struct ubifs_info *c, uint64_t free)
+ 	divisor = UBIFS_MAX_DATA_NODE_SZ;
+ 	divisor += (c->max_idx_node_sz * 3) / (f - 1);
+ 	free *= factor;
+-	do_div(free, divisor);
+-	return free;
++	return div_u64(free, divisor);
+ }
+ 
+ /**
+diff --git a/fs/ubifs/debug.c b/fs/ubifs/debug.c
+index d604a19..3377b94 100644
+--- a/fs/ubifs/debug.c
++++ b/fs/ubifs/debug.c
+@@ -33,6 +33,7 @@
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/debugfs.h>
++#include <linux/math64.h>
+ 
+ #ifdef CONFIG_UBIFS_FS_DEBUG
+ 
+diff --git a/fs/ubifs/lpt.c b/fs/ubifs/lpt.c
+index 6d91416..b2792e8 100644
+--- a/fs/ubifs/lpt.c
++++ b/fs/ubifs/lpt.c
+@@ -43,8 +43,9 @@
+  * mounted.
+  */
+ 
+-#include <linux/crc16.h>
+ #include "ubifs.h"
++#include <linux/crc16.h>
++#include <linux/math64.h>
+ 
+ /**
+  * do_calc_lpt_geom - calculate sizes for the LPT area.
+@@ -135,15 +136,13 @@ static void do_calc_lpt_geom(struct ubifs_info *c)
+ int ubifs_calc_lpt_geom(struct ubifs_info *c)
+ {
+ 	int lebs_needed;
+-	uint64_t sz;
++	long long sz;
+ 
+ 	do_calc_lpt_geom(c);
+ 
+ 	/* Verify that lpt_lebs is big enough */
+ 	sz = c->lpt_sz * 2; /* Must have at least 2 times the size */
+-	sz += c->leb_size - 1;
+-	do_div(sz, c->leb_size);
+-	lebs_needed = sz;
++	lebs_needed = div_u64(sz + c->leb_size - 1, c->leb_size);
+ 	if (lebs_needed > c->lpt_lebs) {
+ 		ubifs_err("too few LPT LEBs");
+ 		return -EINVAL;
+@@ -175,7 +174,7 @@ static int calc_dflt_lpt_geom(struct ubifs_info *c, int *main_lebs,
+ 			      int *big_lpt)
+ {
+ 	int i, lebs_needed;
+-	uint64_t sz;
++	long long sz;
+ 
+ 	/* Start by assuming the minimum number of LPT LEBs */
+ 	c->lpt_lebs = UBIFS_MIN_LPT_LEBS;
+@@ -202,9 +201,7 @@ static int calc_dflt_lpt_geom(struct ubifs_info *c, int *main_lebs,
+ 	/* Now check there are enough LPT LEBs */
+ 	for (i = 0; i < 64 ; i++) {
+ 		sz = c->lpt_sz * 4; /* Allow 4 times the size */
+-		sz += c->leb_size - 1;
+-		do_div(sz, c->leb_size);
+-		lebs_needed = sz;
++		lebs_needed = div_u64(sz + c->leb_size - 1, c->leb_size);
+ 		if (lebs_needed > c->lpt_lebs) {
+ 			/* Not enough LPT LEBs so try again with more */
+ 			c->lpt_lebs = lebs_needed;
+diff --git a/fs/ubifs/sb.c b/fs/ubifs/sb.c
+index c5da201..e070c64 100644
+--- a/fs/ubifs/sb.c
++++ b/fs/ubifs/sb.c
+@@ -28,6 +28,7 @@
+ 
+ #include "ubifs.h"
+ #include <linux/random.h>
++#include <linux/math64.h>
+ 
+ /*
+  * Default journal size in logical eraseblocks as a percent of total
+@@ -80,7 +81,7 @@ static int create_default_filesystem(struct ubifs_info *c)
+ 	int err, tmp, jnl_lebs, log_lebs, max_buds, main_lebs, main_first;
+ 	int lpt_lebs, lpt_first, orph_lebs, big_lpt, ino_waste, sup_flags = 0;
+ 	int min_leb_cnt = UBIFS_MIN_LEB_CNT;
+-	uint64_t tmp64, main_bytes;
++	long long tmp64, main_bytes;
+ 	__le64 tmp_le64;
+ 
+ 	/* Some functions called from here depend on the @c->key_len filed */
+@@ -160,7 +161,7 @@ static int create_default_filesystem(struct ubifs_info *c)
+ 	if (!sup)
+ 		return -ENOMEM;
+ 
+-	tmp64 = (uint64_t)max_buds * c->leb_size;
++	tmp64 = (long long)max_buds * c->leb_size;
+ 	if (big_lpt)
+ 		sup_flags |= UBIFS_FLG_BIGLPT;
+ 
+@@ -187,9 +188,8 @@ static int create_default_filesystem(struct ubifs_info *c)
+ 
+ 	generate_random_uuid(sup->uuid);
+ 
+-	main_bytes = (uint64_t)main_lebs * c->leb_size;
+-	tmp64 = main_bytes * DEFAULT_RP_PERCENT;
+-	do_div(tmp64, 100);
++	main_bytes = (long long)main_lebs * c->leb_size;
++	tmp64 = div_u64(main_bytes * DEFAULT_RP_PERCENT, 100);
+ 	if (tmp64 > DEFAULT_MAX_RP_SIZE)
+ 		tmp64 = DEFAULT_MAX_RP_SIZE;
+ 	sup->rp_size = cpu_to_le64(tmp64);
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index e3797cd..50326cf 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -34,6 +34,7 @@
+ #include <linux/parser.h>
+ #include <linux/seq_file.h>
+ #include <linux/mount.h>
++#include <linux/math64.h>
+ #include "ubifs.h"
+ 
+ /*
+@@ -610,7 +611,7 @@ static int bud_wbuf_callback(struct ubifs_info *c, int lnum, int free, int pad)
+ static int init_constants_late(struct ubifs_info *c)
+ {
+ 	int tmp, err;
+-	uint64_t tmp64;
++	long long tmp64;
+ 
+ 	c->main_bytes = (long long)c->main_lebs * c->leb_size;
+ 	c->max_znode_sz = sizeof(struct ubifs_znode) +
+@@ -637,9 +638,8 @@ static int init_constants_late(struct ubifs_info *c)
+ 	 * Make sure that the log is large enough to fit reference nodes for
+ 	 * all buds plus one reserved LEB.
+ 	 */
+-	tmp64 = c->max_bud_bytes;
+-	tmp = do_div(tmp64, c->leb_size);
+-	c->max_bud_cnt = tmp64 + !!tmp;
++	tmp64 = c->max_bud_bytes + c->leb_size - 1;
++	c->max_bud_cnt = div_u64(tmp64, c->leb_size);
+ 	tmp = (c->ref_node_alsz * c->max_bud_cnt + c->leb_size - 1);
+ 	tmp /= c->leb_size;
+ 	tmp += 1;
+@@ -675,7 +675,7 @@ static int init_constants_late(struct ubifs_info *c)
+ 	 * Consequently, if the journal is too small, UBIFS will treat it as
+ 	 * always full.
+ 	 */
+-	tmp64 = (uint64_t)(c->jhead_cnt + 1) * c->leb_size + 1;
++	tmp64 = (long long)(c->jhead_cnt + 1) * c->leb_size + 1;
+ 	if (c->bg_bud_bytes < tmp64)
+ 		c->bg_bud_bytes = tmp64;
+ 	if (c->max_bud_bytes < tmp64 + c->leb_size)
+@@ -697,7 +697,7 @@ static int init_constants_late(struct ubifs_info *c)
+ 	 * head is available.
+ 	 */
+ 	tmp64 = c->main_lebs - 1 - 1 - MIN_INDEX_LEBS - c->jhead_cnt + 1;
+-	tmp64 *= (uint64_t)c->leb_size - c->leb_overhead;
++	tmp64 *= (long long)c->leb_size - c->leb_overhead;
+ 	tmp64 = ubifs_reported_space(c, tmp64);
+ 	c->block_cnt = tmp64 >> UBIFS_BLOCK_SHIFT;
+ 
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 1c68a36..ead6c2b 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1493,7 +1493,7 @@ void ubifs_cancel_ino_op(struct ubifs_info *c, struct inode *inode,
+ long long ubifs_get_free_space(struct ubifs_info *c);
+ int ubifs_calc_min_idx_lebs(struct ubifs_info *c);
+ void ubifs_convert_page_budget(struct ubifs_info *c);
+-long long ubifs_reported_space(const struct ubifs_info *c, uint64_t free);
++long long ubifs_reported_space(const struct ubifs_info *c, long long free);
+ long long ubifs_calc_available(const struct ubifs_info *c, int min_idx_lebs);
+ 
+ /* find.c */
+-- 
+1.5.4.3
+

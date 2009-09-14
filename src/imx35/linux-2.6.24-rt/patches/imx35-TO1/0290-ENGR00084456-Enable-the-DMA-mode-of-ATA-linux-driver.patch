@@ -1,0 +1,379 @@
+From ecf4a301f6773fa49edacdba042f1d91ab70fa6f Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 24 Jul 2008 17:53:28 +0800
+Subject: [PATCH] ENGR00084456 Enable the DMA mode of ATA linux driver.
+
+Enable the ADMA mode on the libata linux driver on
+MX35 3DS platform.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c |   10 ++-
+ drivers/ata/pata_fsl.c           |  207 +++++++++++++++++++++++++++++++++----
+ 2 files changed, 191 insertions(+), 26 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 90f49a1..0fa849f 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -552,9 +552,13 @@ static void ata_exit(void)
+ }
+ 
+ static struct fsl_ata_platform_data ata_data = {
+-	.adma_flag = 1,
+-	.udma_mask = 0x0,
+-	.mwdma_mask = 0x0,
++	.adma_flag = 1,		/* 0:smart dma, 1:ADMA */
++#if defined(CONFIG_BLK_DEV_SR)
++	.udma_mask = 0xF,
++#else
++	.udma_mask = 0x3F,
++#endif
++	.mwdma_mask = 0x1F,
+ 	.pio_mask = ATA_PIO4,
+ 	.fifo_alarm = MXC_IDE_DMA_WATERMARK / 2,
+ 	.max_sg = MXC_IDE_DMA_BD_NR,
+diff --git a/drivers/ata/pata_fsl.c b/drivers/ata/pata_fsl.c
+index 2f5fd2a..a605c6e 100644
+--- a/drivers/ata/pata_fsl.c
++++ b/drivers/ata/pata_fsl.c
+@@ -30,6 +30,7 @@
+ 
+ #define DRV_NAME "pata_fsl"
+ 
++static unsigned int *adma_des_table;
+ static struct regulator *io_reg;
+ static struct regulator *core_reg;
+ 
+@@ -41,6 +42,7 @@ struct pata_fsl_priv {
+ 	int dma_wchan;
+ 	int dma_done;
+ 	int dma_dir;
++	unsigned int adma_des_tp;
+ };
+ 
+ enum {
+@@ -65,6 +67,11 @@ enum {
+ 	FSL_ATA_DRIVE_CONTROL = 0xD8,
+ 
+ 	/* bits within FSL_ATA_CONTROL */
++	FSL_ATA_CTRL_DMA_SRST = 0x1000,
++	FSL_ATA_CTRL_DMA_64ADMA = 0x800,
++	FSL_ATA_CTRL_DMA_32ADMA = 0x400,
++	FSL_ATA_CTRL_DMA_STAT_STOP = 0x200,
++	FSL_ATA_CTRL_DMA_ENABLE = 0x100,
+ 	FSL_ATA_CTRL_FIFO_RST_B = 0x80,
+ 	FSL_ATA_CTRL_ATA_RST_B = 0x40,
+ 	FSL_ATA_CTRL_FIFO_TX_EN = 0x20,
+@@ -80,6 +87,16 @@ enum {
+ 	FSL_ATA_INTR_FIFO_OVERFLOW = 0x20,
+ 	FSL_ATA_INTR_CTRL_IDLE = 0x10,
+ 	FSL_ATA_INTR_ATA_INTRQ2 = 0x08,
++	FSL_ATA_INTR_DMA_ERR = 0x04,
++	FSL_ATA_INTR_DMA_TRANS_OVER = 0x02,
++
++	/* ADMA Addr Descriptor Attribute Filed */
++	FSL_ADMA_DES_ATTR_VALID = 0x01,
++	FSL_ADMA_DES_ATTR_END = 0x02,
++	FSL_ADMA_DES_ATTR_INT = 0x04,
++	FSL_ADMA_DES_ATTR_SET = 0x10,
++	FSL_ADMA_DES_ATTR_TRAN = 0x20,
++	FSL_ADMA_DES_ATTR_LINK = 0x30,
+ };
+ 
+ /*
+@@ -311,12 +328,59 @@ static void dma_callback(void *arg, int error_status, unsigned int count)
+ 	__raw_writel(FSL_ATA_INTR_ATA_INTRQ2, ata_regs + FSL_ATA_INT_EN);
+ }
+ 
++static irqreturn_t pata_fsl_adma_intr(int irq, void *dev_instance)
++{
++	struct ata_host *host = dev_instance;
++	struct pata_fsl_priv *priv = host->private_data;
++	u8 *ata_regs = priv->fsl_ata_regs;
++	unsigned int handled = 0;
++	unsigned int i;
++	unsigned long flags;
++	unsigned int pending = __raw_readl(ata_regs + FSL_ATA_INT_PEND);
++
++	if (FSL_ATA_INTR_DMA_TRANS_OVER & pending) {
++		priv->dma_done = 1;
++		__raw_writel(pending, ata_regs + FSL_ATA_INT_CLEAR);
++		handled = 1;
++	} else if (FSL_ATA_INTR_DMA_ERR & pending) {
++		printk(KERN_ERR "dma err status 0x%x ...\n",
++		       __raw_readl(ata_regs + FSL_ATA_ADMA_ERROR_STATUS));
++		__raw_writel(pending, ata_regs + FSL_ATA_INT_CLEAR);
++		handled = 1;
++		i = __raw_readl(ata_regs + FSL_ATA_CONTROL) && 0xFF;
++		i |= FSL_ATA_CTRL_DMA_SRST | FSL_ATA_CTRL_DMA_32ADMA |
++		    FSL_ATA_CTRL_DMA_ENABLE;
++		__raw_writel(i, ata_regs + FSL_ATA_CONTROL);
++	}
++
++	/* TODO: make _irqsave conditional on x86 PCI IDE legacy mode */
++	spin_lock_irqsave(&host->lock, flags);
++
++	for (i = 0; i < host->n_ports; i++) {
++		struct ata_port *ap;
++
++		ap = host->ports[i];
++		if (ap && !(ap->flags & ATA_FLAG_DISABLED)) {
++			struct ata_queued_cmd *qc;
++
++			qc = ata_qc_from_tag(ap, ap->link.active_tag);
++			if (qc && (!(qc->tf.flags & ATA_TFLAG_POLLING)) &&
++			    (qc->flags & ATA_QCFLAG_ACTIVE))
++				handled |= ata_host_intr(ap, qc);
++		}
++	}
++
++	spin_unlock_irqrestore(&host->lock, flags);
++
++	return IRQ_RETVAL(handled);
++}
++
+ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ {
+ 	int nr_sg = 0;
+-	int chan;
++	int chan, i;
+ 	int dma_mode = 0, dma_ultra;
+-	u8 ata_control;
++	u32 ata_control;
+ 	struct ata_port *ap = qc->ap;
+ 	struct pata_fsl_priv *priv = ap->host->private_data;
+ 	u8 *ata_regs = priv->fsl_ata_regs;
+@@ -333,6 +397,9 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 
+ 	ata_control = FSL_ATA_CTRL_FIFO_RST_B |
+ 	    FSL_ATA_CTRL_ATA_RST_B | FSL_ATA_CTRL_DMA_PENDING | dma_ultra;
++	if (1 == plat->adma_flag)
++		ata_control |= FSL_ATA_CTRL_DMA_32ADMA |
++		    FSL_ATA_CTRL_DMA_ENABLE;
+ 
+ 	if (qc->dma_dir == DMA_TO_DEVICE) {
+ 		chan = priv->dma_wchan;
+@@ -346,12 +413,19 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 
+ 	__raw_writel(ata_control, ata_regs + FSL_ATA_CONTROL);
+ 	__raw_writel(plat->fifo_alarm, ata_regs + FSL_ATA_FIFO_ALARM);
+-	__raw_writel(FSL_ATA_INTR_ATA_INTRQ1, ata_regs + FSL_ATA_INT_EN);
+ 
+-	/*
+-	 * Set up the DMA completion callback.
+-	 */
+-	mxc_dma_callback_set(chan, dma_callback, (void *)ap);
++	if (1 == plat->adma_flag) {
++		i = FSL_ATA_INTR_DMA_TRANS_OVER | FSL_ATA_INTR_DMA_ERR;
++		__raw_writel(FSL_ATA_INTR_ATA_INTRQ2 | i,
++			     ata_regs + FSL_ATA_INT_EN);
++	} else {
++		__raw_writel(FSL_ATA_INTR_ATA_INTRQ1,
++			     ata_regs + FSL_ATA_INT_EN);
++		/*
++		 * Set up the DMA completion callback.
++		 */
++		mxc_dma_callback_set(chan, dma_callback, (void *)ap);
++	}
+ 
+ 	/*
+ 	 * Copy the sg list to an array.
+@@ -363,9 +437,41 @@ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ 		nr_sg++;
+ 	}
+ 
+-	err = mxc_dma_sg_config(chan, tmp, nr_sg, 0, dma_mode);
+-	if (err)
+-		printk(KERN_ERR "pata_fsl_bmdma_setup: error %d\n", err);
++	if (1 == plat->adma_flag) {
++		tsg = tmp;
++		/*
++		 * The ADMA mode is used setup the ADMA descriptor table
++		 */
++		for (i = 0; i < nr_sg; i++) {
++			if (tsg->dma_address & 0xFFF)
++				printk(KERN_ERR "ADMA addr isn't 4K aligned\n");
++			adma_des_table[2 * i] = tsg->length << 12;
++			adma_des_table[2 * i] |= FSL_ADMA_DES_ATTR_SET;
++			adma_des_table[2 * i] |= FSL_ADMA_DES_ATTR_VALID;
++			adma_des_table[2 * i + 1] = tsg->dma_address;
++			adma_des_table[2 * i + 1] |= FSL_ADMA_DES_ATTR_TRAN;
++			adma_des_table[2 * i + 1] |= FSL_ADMA_DES_ATTR_VALID;
++			if (nr_sg == (i + 1))
++				adma_des_table[2 * i + 1] |=
++				    FSL_ADMA_DES_ATTR_END;
++			tsg++;
++		}
++
++		/*
++		 * The ADMA mode is used, set the ADMA Sysetem Address
++		 * burst length, block cnt.
++		 */
++		__raw_writel((qc->nbytes / qc->sect_size), ata_regs +
++			     FSL_ATA_BLOCK_COUNT);
++		__raw_writel(plat->fifo_alarm, ata_regs + FSL_ATA_BURST_LENGTH);
++		__raw_writel(priv->adma_des_tp,
++			     ata_regs + FSL_ATA_ADMA_SYS_ADDR);
++	} else {
++		err = mxc_dma_sg_config(chan, tmp, nr_sg, 0, dma_mode);
++		if (err)
++			printk(KERN_ERR "pata_fsl_bmdma_setup: error %d\n",
++			       err);
++	}
+ 
+ }
+ 
+@@ -373,26 +479,50 @@ static void pata_fsl_bmdma_start(struct ata_queued_cmd *qc)
+ {
+ 	struct ata_port *ap = qc->ap;
+ 	struct pata_fsl_priv *priv = ap->host->private_data;
++	u8 *ata_regs = priv->fsl_ata_regs;
++	struct fsl_ata_platform_data *plat = ap->dev->platform_data;
+ 	int chan;
+ 	int err;
+-
+-	/*
+-	 * Start the channel.
+-	 */
+-	chan = qc->dma_dir == DMA_TO_DEVICE ? priv->dma_wchan : priv->dma_rchan;
++	unsigned i;
++
++	if (1 == plat->adma_flag) {
++		i = FSL_ATA_CTRL_DMA_32ADMA | FSL_ATA_CTRL_DMA_ENABLE;
++		/* The adma mode is used, set dma_start_stop to 1 */
++		__raw_writel(i | __raw_readl(ata_regs + FSL_ATA_CONTROL) |
++			     FSL_ATA_CTRL_DMA_STAT_STOP,
++			     ata_regs + FSL_ATA_CONTROL);
++	} else {
++		/*
++		 * Start the channel.
++		 */
++		chan = qc->dma_dir == DMA_TO_DEVICE ? priv->dma_wchan :
++		    priv->dma_rchan;
++
++		err = mxc_dma_enable(chan);
++		if (err)
++			printk(KERN_ERR "%s: : error %d\n", __func__, err);
++	}
+ 
+ 	priv->dma_done = 0;
+ 
+-	err = mxc_dma_enable(chan);
+-	if (err)
+-		printk(KERN_ERR "%s: : error %d\n", __func__, err);
+-
+ 	ap->ops->exec_command(ap, &qc->tf);
+ }
+ 
+ static void pata_fsl_bmdma_stop(struct ata_queued_cmd *qc)
+ {
+ 	struct ata_port *ap = qc->ap;
++	struct pata_fsl_priv *priv = ap->host->private_data;
++	u8 *ata_regs = priv->fsl_ata_regs;
++	struct fsl_ata_platform_data *plat = ap->dev->platform_data;
++	unsigned i;
++
++	if (1 == plat->adma_flag) {
++		/* The adma mode is used, set dma_start_stop to 0 */
++		i = FSL_ATA_CTRL_DMA_32ADMA | FSL_ATA_CTRL_DMA_ENABLE;
++		__raw_writel((i | __raw_readl(ata_regs + FSL_ATA_CONTROL)) &
++			     (~FSL_ATA_CTRL_DMA_STAT_STOP),
++			     ata_regs + FSL_ATA_CONTROL);
++	}
+ 
+ 	/* do a dummy read as in ata_bmdma_stop */
+ 	ata_altstatus(ap);
+@@ -544,6 +674,7 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 	    pdev->dev.platform_data;
+ 	struct pata_fsl_priv *priv;
+ 	u8 *ata_regs;
++	unsigned int int_enable;
+ 
+ 	/*
+ 	 * Set up resources
+@@ -588,6 +719,15 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 
+ 	fsl_setup_port(&ap->ioaddr);
+ 
++	if (1 == plat->adma_flag) {
++		adma_des_table = kcalloc((2 * MXC_IDE_DMA_BD_NR + 1),
++					 sizeof(unsigned int), GFP_DMA);
++		if (adma_des_table == NULL) {
++			ret = -ENOMEM;
++			goto err1;
++		}
++		priv->adma_des_tp = virt_to_phys(adma_des_table);
++	}
+ 	/*
+ 	 * Do platform-specific initialization (e.g. allocate pins,
+ 	 * turn on clock).  After this call it is assumed that
+@@ -636,11 +776,21 @@ static int __devinit pata_fsl_probe(struct platform_device *pdev)
+ 	 * only allow the CPU to see it (INTRQ2) at this point.
+ 	 * INTRQ1, which goes to the DMA, will be enabled later.
+ 	 */
+-	__raw_writel(FSL_ATA_INTR_ATA_INTRQ2, ata_regs + FSL_ATA_INT_EN);
++	int_enable = FSL_ATA_INTR_DMA_TRANS_OVER | FSL_ATA_INTR_DMA_ERR |
++	    FSL_ATA_INTR_ATA_INTRQ2;
++	if (1 == plat->adma_flag)
++		__raw_writel(int_enable, ata_regs + FSL_ATA_INT_EN);
++	else
++		__raw_writel(FSL_ATA_INTR_ATA_INTRQ2,
++			     ata_regs + FSL_ATA_INT_EN);
+ 
+ 	/* activate */
+-	ret = ata_host_activate(host, platform_get_irq(pdev, 0), ata_interrupt,
+-				0, &pata_fsl_sht);
++	if (1 == plat->adma_flag)
++		ret = ata_host_activate(host, platform_get_irq(pdev, 0),
++					pata_fsl_adma_intr, 0, &pata_fsl_sht);
++	else
++		ret = ata_host_activate(host, platform_get_irq(pdev, 0),
++					ata_interrupt, 0, &pata_fsl_sht);
+ 
+ 	if (ret < 0)
+ 		goto err2;
+@@ -651,6 +801,8 @@ err2:
+ 	clk_disable(priv->clk);
+ 	regulator_disable(core_reg);
+ 	regulator_disable(io_reg);
++	if (1 == plat->adma_flag)
++		kfree(adma_des_table);
+ err1:
+ 	iounmap(ata_regs);
+ 	kfree(priv);
+@@ -697,6 +849,8 @@ static int __devexit pata_fsl_remove(struct platform_device *pdev)
+ 	if (plat->exit)
+ 		plat->exit();
+ 
++	if (1 == plat->adma_flag)
++		kfree(adma_des_table);
+ 	iounmap(ata_regs);
+ 
+ 	kfree(priv);
+@@ -731,6 +885,7 @@ static int pata_fsl_resume(struct platform_device *pdev)
+ 	struct fsl_ata_platform_data *plat = (struct fsl_ata_platform_data *)
+ 	    pdev->dev.platform_data;
+ 	u8 *ata_regs = priv->fsl_ata_regs;
++	unsigned char int_enable;
+ 
+ 	if (plat->init && plat->init(pdev))
+ 		return -ENODEV;
+@@ -746,7 +901,13 @@ static int pata_fsl_resume(struct platform_device *pdev)
+ 	/*
+ 	 * Enable hardware interrupts.
+ 	 */
+-	__raw_writel(FSL_ATA_INTR_ATA_INTRQ2, ata_regs + FSL_ATA_INT_EN);
++	int_enable = FSL_ATA_INTR_DMA_TRANS_OVER | FSL_ATA_INTR_DMA_ERR |
++	    FSL_ATA_INTR_ATA_INTRQ2;
++	if (1 == plat->adma_flag)
++		__raw_writel(int_enable, ata_regs + FSL_ATA_INT_EN);
++	else
++		__raw_writel(FSL_ATA_INTR_ATA_INTRQ2,
++			     ata_regs + FSL_ATA_INT_EN);
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

@@ -1,0 +1,35 @@
+From 2cd61ca303370b148d7196c13fd2f06bb70c7be8 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 28 May 2007 19:21:21 -0400
+Subject: [PATCH] bug fix: don't warn if trying to mntput a "negative" union object
+
+In unionfs_d_release, we may get negative dentries which don't have a lower
+mnt.  In that case, don't print a warning message from unionfs_mntput about
+trying to put a NULL mnt.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 1653267..c9ff886 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -325,9 +325,11 @@ static void unionfs_d_release(struct dentry *dentry)
+ 	bend = dbend(dentry);
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		dput(unionfs_lower_dentry_idx(dentry, bindex));
+-		unionfs_mntput(dentry, bindex);
+-
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
++		/* NULL lower mnt is ok if this is a negative dentry */
++		if (!dentry->d_inode && !unionfs_lower_mnt_idx(dentry,bindex))
++			continue;
++		unionfs_mntput(dentry, bindex);
+ 		unionfs_set_lower_mnt_idx(dentry, bindex, NULL);
+ 	}
+ 	/* free private data (unionfs_dentry_info) here */
+-- 
+1.5.4.3
+

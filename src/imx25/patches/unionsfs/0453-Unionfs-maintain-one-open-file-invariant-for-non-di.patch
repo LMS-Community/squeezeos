@@ -1,0 +1,47 @@
+From 066934ee0fe127dfa53ad4d9f5926be55e613930 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 23 Apr 2008 19:09:11 -0400
+Subject: [PATCH] Unionfs: maintain one-open-file invariant for non-directories
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    9 ++++++++-
+ 1 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 2706194..82b0eea 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -320,7 +320,9 @@ static int __unionfs_file_revalidate(struct file *file, struct dentry *dentry,
+ 	 * to refresh things.
+ 	 */
+ 	if (d_deleted(dentry) ||
+-	    (sbgen <= fgen && dbstart(dentry) == fbstart(file)))
++	    (sbgen <= fgen &&
++	     dbstart(dentry) == fbstart(file) &&
++	     unionfs_lower_file(file)))
+ 		goto out_may_copyup;
+ 
+ 	/* save orig branch ID */
+@@ -369,6 +371,8 @@ static int __unionfs_file_revalidate(struct file *file, struct dentry *dentry,
+ 			unionfs_mntput(sb->s_root,
+ 				       branch_id_to_idx(sb, orig_brid));
+ 		}
++		/* regular files have only one open lower file */
++		fbend(file) = fbstart(file);
+ 	}
+ 	atomic_set(&UNIONFS_F(file)->generation,
+ 		   atomic_read(&UNIONFS_I(dentry->d_inode)->generation));
+@@ -381,6 +385,9 @@ out_may_copyup:
+ 		pr_debug("unionfs: do delay copyup of \"%s\"\n",
+ 			 dentry->d_name.name);
+ 		err = do_delayed_copyup(file);
++		/* regular files have only one open lower file */
++		if (!err && !S_ISDIR(dentry->d_inode->i_mode))
++			fbend(file) = fbstart(file);
+ 	}
+ 
+ out:
+-- 
+1.5.4.3
+

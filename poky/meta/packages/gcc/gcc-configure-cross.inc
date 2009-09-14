@@ -7,10 +7,6 @@ EXTRA_OECONF_PATHS = "--with-local-prefix=${STAGING_DIR_TARGET}${layout_prefix} 
                       --with-sysroot=${STAGING_DIR_TARGET} \
                       --with-build-sysroot=${STAGING_DIR_TARGET}"
 
-do_configure_prepend () {
-	rm -f ${CROSS_DIR}/lib/gcc/${TARGET_SYS}/${BINV}/libgcc_eh.a
-}
-
 do_compile_prepend () {
 	export CC="${BUILD_CC}"
 	export AR_FOR_TARGET="${TARGET_SYS}-ar"
@@ -27,13 +23,6 @@ do_stage_append () {
 	for d in info man share/doc share/locale ; do
 		rm -rf ${CROSS_DIR}/$d
 	done
-
-	# Fix a few include links so cross builds are happier
-	if [ ! -e ${STAGING_INCDIR}/c++ ]; then
-		mkdir -p ${STAGING_INCDIR}
-		ln -sf ${CROSS_DIR}/${TARGET_SYS}/include/c++ \
-			${STAGING_INCDIR}/
-	fi
 
 	# We use libiberty from binutils
 	rm -f ${CROSS_DIR}/lib/libiberty.a

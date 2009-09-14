@@ -1,0 +1,237 @@
+From 0ba5445c94d23429b844cefcb4e9e0cb21f3cd21 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 8 Sep 2008 14:57:13 -0500
+Subject: [PATCH] ENGR00088321-1 mc13892: add led driver
+
+support mc13892 led driver
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ drivers/leds/Kconfig                  |    4 +
+ drivers/leds/Makefile                 |    1 +
+ drivers/leds/leds-mc13892.c           |  153 +++++++++++++++++++++++++++++++++
+ drivers/mxc/pmic/core/pmic_core_i2c.c |   15 +++
+ 4 files changed, 173 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+index 86a369b..aa7e31f 100644
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -24,6 +24,10 @@ config LEDS_ATMEL_PWM
+ 	  This option enables support for LEDs driven using outputs
+ 	  of the dedicated PWM controller found on newer Atmel SOCs.
+ 
++config LEDS_MC13892
++	tristate "LED Support for mc13892 pmic"
++	depends on LEDS_CLASS && MXC_MC13892_LIGHT
++
+ config LEDS_CORGI
+ 	tristate "LED Support for the Sharp SL-C7x0 series"
+ 	depends on LEDS_CLASS && PXA_SHARP_C7xx
+diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
+index 973d626..5a5b95f 100644
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -6,6 +6,7 @@ obj-$(CONFIG_LEDS_TRIGGERS)		+= led-triggers.o
+ 
+ # LED Platform Drivers
+ obj-$(CONFIG_LEDS_ATMEL_PWM)		+= leds-atmel-pwm.o
++obj-$(CONFIG_LEDS_MC13892)		+= leds-mc13892.o
+ obj-$(CONFIG_LEDS_CORGI)		+= leds-corgi.o
+ obj-$(CONFIG_LEDS_LOCOMO)		+= leds-locomo.o
+ obj-$(CONFIG_LEDS_SPITZ)		+= leds-spitz.o
+diff --git a/drivers/leds/leds-mc13892.c b/drivers/leds/leds-mc13892.c
+new file mode 100644
+index 0000000..c277f1f
+--- /dev/null
++++ b/drivers/leds/leds-mc13892.c
+@@ -0,0 +1,153 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/leds.h>
++
++#include <asm/arch/pmic_light.h>
++
++static void mc13892_led_set(struct led_classdev *led_cdev,
++			    enum led_brightness value)
++{
++	struct platform_device *dev = to_platform_device(led_cdev->dev->parent);
++	int led_ch;
++
++	switch (dev->id) {
++	case 'r':
++		led_ch = LIT_RED;
++		break;
++	case 'g':
++		led_ch = LIT_GREEN;
++		break;
++	case 'b':
++		led_ch = LIT_BLUE;
++		break;
++	default:
++		return;
++	}
++
++	/* set current with medium value, in case current is too large */
++	mc13892_bklit_set_current(led_ch, LIT_CURR_12);
++	/* max duty cycle is 63, brightness needs to be divided by 4 */
++	mc13892_bklit_set_dutycycle(led_ch, value / 4);
++
++}
++
++static int mc13892_led_remove(struct platform_device *dev)
++{
++	struct led_classdev *led_cdev = platform_get_drvdata(dev);
++
++	led_classdev_unregister(led_cdev);
++	kfree(led_cdev->name);
++	kfree(led_cdev);
++
++	return 0;
++}
++
++#define LED_NAME_LEN	16
++
++static int mc13892_led_probe(struct platform_device *dev)
++{
++	int ret;
++	struct led_classdev *led_cdev;
++	char *name;
++
++	led_cdev = kzalloc(sizeof(struct led_classdev), GFP_KERNEL);
++	if (led_cdev == NULL) {
++		dev_err(&dev->dev, "No memory for device\n");
++		return -ENOMEM;
++	}
++	name = kzalloc(LED_NAME_LEN, GFP_KERNEL);
++	if (name == NULL) {
++		dev_err(&dev->dev, "No memory for device\n");
++		ret = -ENOMEM;
++		goto exit_err;
++	}
++
++	strcpy(name, dev->name);
++	ret = strlen(dev->name);
++	if (ret > LED_NAME_LEN - 2) {
++		dev_err(&dev->dev, "led name is too long\n");
++		goto exit_err1;
++	}
++	name[ret] = dev->id;
++	name[ret + 1] = '\0';
++	led_cdev->name = name;
++	led_cdev->brightness_set = mc13892_led_set;
++
++	ret = led_classdev_register(&dev->dev, led_cdev);
++	if (ret < 0) {
++		dev_err(&dev->dev, "led_classdev_register failed\n");
++		goto exit_err1;
++	}
++
++	platform_set_drvdata(dev, led_cdev);
++
++	return 0;
++      exit_err1:
++	kfree(led_cdev->name);
++      exit_err:
++	kfree(led_cdev);
++	return ret;
++}
++
++#ifdef CONFIG_PM
++static int mc13892_led_suspend(struct platform_device *dev, pm_message_t state)
++{
++	struct led_classdev *led_cdev = platform_get_drvdata(dev);
++
++	led_classdev_suspend(led_cdev);
++	return 0;
++}
++
++static int mc13892_led_resume(struct platform_device *dev)
++{
++	struct led_classdev *led_cdev = platform_get_drvdata(dev);
++
++	led_classdev_resume(led_cdev);
++	return 0;
++}
++#else
++#define mc13892_led_suspend NULL
++#define mc13892_led_resume NULL
++#endif
++
++static struct platform_driver mc13892_led_driver = {
++	.probe = mc13892_led_probe,
++	.remove = mc13892_led_remove,
++	.suspend = mc13892_led_suspend,
++	.resume = mc13892_led_resume,
++	.driver = {
++		   .name = "pmic_leds",
++		   .owner = THIS_MODULE,
++		   },
++};
++
++static int __init mc13892_led_init(void)
++{
++	return platform_driver_register(&mc13892_led_driver);
++}
++
++static void __exit mc13892_led_exit(void)
++{
++	platform_driver_unregister(&mc13892_led_driver);
++}
++
++module_init(mc13892_led_init);
++module_exit(mc13892_led_exit);
++
++MODULE_DESCRIPTION("Led driver for PMIC mc13892");
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mxc/pmic/core/pmic_core_i2c.c b/drivers/mxc/pmic/core/pmic_core_i2c.c
+index ddc5db2..b8520af 100644
+--- a/drivers/mxc/pmic/core/pmic_core_i2c.c
++++ b/drivers/mxc/pmic/core/pmic_core_i2c.c
+@@ -78,6 +78,18 @@ static struct platform_device light_ldm = {
+ 	.name = "pmic_light",
+ 	.id = 1,
+ };
++static struct platform_device rleds_ldm = {
++	.name = "pmic_leds",
++	.id = 'r',
++};
++static struct platform_device gleds_ldm = {
++	.name = "pmic_leds",
++	.id = 'g',
++};
++static struct platform_device bleds_ldm = {
++	.name = "pmic_leds",
++	.id = 'b',
++};
+ 
+ static void pmic_pdev_register(void)
+ {
+@@ -86,6 +98,9 @@ static void pmic_pdev_register(void)
+ 	platform_device_register(&rtc_ldm);
+ 	platform_device_register(&power_ldm);
+ 	platform_device_register(&light_ldm);
++	platform_device_register(&rleds_ldm);
++	platform_device_register(&gleds_ldm);
++	platform_device_register(&bleds_ldm);
+ 	reg_mc13783_probe();
+ }
+ 
+-- 
+1.5.4.4
+

@@ -1,0 +1,288 @@
+From 2dea102674c8549bff661d99029b55da4c0b75d9 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 24 May 2009 14:13:34 +0300
+Subject: [PATCH] UBI: do not switch to R/O mode on read errors
+
+This patch improves UBI errors handling. ATM UBI switches to
+R/O mode when the WL worker fails to read the source PEB.
+This means that the upper layers (e.g., UBIFS) has no
+chances to unmap the erroneous PEB and fix the error.
+This patch changes this behaviour and makes UBI put PEBs
+like this into a separate RB-tree, thus preventing the
+WL worker from hitting the same read errors again and
+again.
+
+But there is a 10% limit on a maximum amount of PEBs like this.
+If there are too much of them, UBI switches to R/O mode.
+
+Additionally, this patch teaches UBI not to panic and
+switch to R/O mode if after a PEB has been copied, the
+target LEB cannot be read back. Instead, now UBI cancels
+the operation and schedules the target PEB for torturing.
+
+The error paths has been tested by ingecting errors
+into 'ubi_eba_copy_leb()'.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    9 +++++++++
+ drivers/mtd/ubi/eba.c   |   19 +++++++++++++------
+ drivers/mtd/ubi/ubi.h   |   16 ++++++++++++++--
+ drivers/mtd/ubi/wl.c    |   45 ++++++++++++++++++++++++++++++++++++++-------
+ 4 files changed, 74 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 84c23e1..b348966 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -633,6 +633,15 @@ static int io_init(struct ubi_device *ubi)
+ 	}
+ 
+ 	/*
++	 * Set maximum amount of physical erroneous eraseblocks to be 10%.
++	 * Erroneous PEB are those which have read errors.
++	 */
++	ubi->max_erroneous = ubi->peb_count / 10;
++	if (ubi->max_erroneous < 16)
++		ubi->max_erroneous = 16;
++	dbg_msg("max_erroneous    %d", ubi->max_erroneous);
++
++	/*
+ 	 * It may happen that EC and VID headers are situated in one minimal
+ 	 * I/O unit. In this case we can only accept this UBI image in
+ 	 * read-only mode.
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 5501d32..e56a6a1 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -419,8 +419,9 @@ retry:
+ 				 * not implemented.
+ 				 */
+ 				if (err == UBI_IO_BAD_VID_HDR) {
+-					ubi_warn("bad VID header at PEB %d, LEB"
+-						 "%d:%d", pnum, vol_id, lnum);
++					ubi_warn("corrupted VID header at PEB "
++						 "%d, LEB %d:%d", pnum, vol_id,
++						 lnum);
+ 					err = -EBADMSG;
+ 				} else
+ 					ubi_ro_mode(ubi);
+@@ -1032,6 +1033,8 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	if (err && err != UBI_IO_BITFLIPS) {
+ 		ubi_warn("error %d while reading data from PEB %d",
+ 			 err, from);
++		if (err == -EIO)
++			err = MOVE_SOURCE_RD_ERR;
+ 		goto out_unlock_buf;
+ 	}
+ 
+@@ -1078,9 +1081,11 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	/* Read the VID header back and check if it was written correctly */
+ 	err = ubi_io_read_vid_hdr(ubi, to, vid_hdr, 1);
+ 	if (err) {
+-		if (err != UBI_IO_BITFLIPS)
++		if (err != UBI_IO_BITFLIPS) {
+ 			ubi_warn("cannot read VID header back from PEB %d", to);
+-		else
++			if (err == -EIO)
++				err = MOVE_TARGET_RD_ERR;
++		} else
+ 			err = MOVE_CANCEL_BITFLIPS;
+ 		goto out_unlock_buf;
+ 	}
+@@ -1102,10 +1107,12 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 
+ 		err = ubi_io_read_data(ubi, ubi->peb_buf2, to, 0, aldata_size);
+ 		if (err) {
+-			if (err != UBI_IO_BITFLIPS)
++			if (err != UBI_IO_BITFLIPS) {
+ 				ubi_warn("cannot read data back from PEB %d",
+ 					 to);
+-			else
++				if (err == -EIO)
++					err = MOVE_TARGET_RD_ERR;
++			} else
+ 				err = MOVE_CANCEL_BITFLIPS;
+ 			goto out_unlock_buf;
+ 		}
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index fd9b20d..6d92932 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -105,6 +105,10 @@ enum {
+  *
+  * MOVE_CANCEL_RACE: canceled because the volume is being deleted, the source
+  *                   PEB was put meanwhile, or there is I/O on the source PEB
++ * MOVE_SOURCE_RD_ERR: canceled because there was a read error from the source
++ *                     PEB
++ * MOVE_TARGET_RD_ERR: canceled because there was a read error from the target
++ *                     PEB
+  * MOVE_TARGET_WR_ERR: canceled because there was a write error to the target
+  *                     PEB
+  * MOVE_CANCEL_BITFLIPS: canceled because a bit-flip was detected in the
+@@ -112,6 +116,8 @@ enum {
+  */
+ enum {
+ 	MOVE_CANCEL_RACE = 1,
++	MOVE_SOURCE_RD_ERR,
++	MOVE_TARGET_RD_ERR,
+ 	MOVE_TARGET_WR_ERR,
+ 	MOVE_CANCEL_BITFLIPS,
+ };
+@@ -334,14 +340,15 @@ struct ubi_wl_entry;
+  * @alc_mutex: serializes "atomic LEB change" operations
+  *
+  * @used: RB-tree of used physical eraseblocks
++ * @erroneous: RB-tree of erroneous used physical eraseblocks
+  * @free: RB-tree of free physical eraseblocks
+  * @scrub: RB-tree of physical eraseblocks which need scrubbing
+  * @pq: protection queue (contain physical eraseblocks which are temporarily
+  *      protected from the wear-leveling worker)
+  * @pq_head: protection queue head
+  * @wl_lock: protects the @used, @free, @pq, @pq_head, @lookuptbl, @move_from,
+- * 	     @move_to, @move_to_put @erase_pending, @wl_scheduled and @works
+- * 	     fields
++ * 	     @move_to, @move_to_put @erase_pending, @wl_scheduled, @works and
++ * 	     @erroneous_peb_count fields
+  * @move_mutex: serializes eraseblock moves
+  * @work_sem: synchronizes the WL worker with use tasks
+  * @wl_scheduled: non-zero if the wear-leveling was scheduled
+@@ -361,6 +368,8 @@ struct ubi_wl_entry;
+  * @peb_size: physical eraseblock size
+  * @bad_peb_count: count of bad physical eraseblocks
+  * @good_peb_count: count of good physical eraseblocks
++ * @erroneous_peb_count: count of erroneous physical eraseblocks in @erroneous
++ * @max_erroneous: maximum allowed amount of erroneous physical eraseblocks
+  * @min_io_size: minimal input/output unit size of the underlying MTD device
+  * @hdrs_min_io_size: minimal I/O unit size used for VID and EC headers
+  * @ro_mode: if the UBI device is in read-only mode
+@@ -418,6 +427,7 @@ struct ubi_device {
+ 
+ 	/* Wear-leveling sub-system's stuff */
+ 	struct rb_root used;
++	struct rb_root erroneous;
+ 	struct rb_root free;
+ 	struct rb_root scrub;
+ 	struct list_head pq[UBI_PROT_QUEUE_LEN];
+@@ -442,6 +452,8 @@ struct ubi_device {
+ 	int peb_size;
+ 	int bad_peb_count;
+ 	int good_peb_count;
++	int erroneous_peb_count;
++	int max_erroneous;
+ 	int min_io_size;
+ 	int hdrs_min_io_size;
+ 	int ro_mode;
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 088e630..97c2db4 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -55,8 +55,8 @@
+  *
+  * As it was said, for the UBI sub-system all physical eraseblocks are either
+  * "free" or "used". Free eraseblock are kept in the @wl->free RB-tree, while
+- * used eraseblocks are kept in @wl->used or @wl->scrub RB-trees, or
+- * (temporarily) in the @wl->pq queue.
++ * used eraseblocks are kept in @wl->used, @wl->erroneous, or @wl->scrub
++ * RB-trees, as well as (temporarily) in the @wl->pq queue.
+  *
+  * When the WL sub-system returns a physical eraseblock, the physical
+  * eraseblock is protected from being moved for some "time". For this reason,
+@@ -83,6 +83,8 @@
+  * used. The former state corresponds to the @wl->free tree. The latter state
+  * is split up on several sub-states:
+  * o the WL movement is allowed (@wl->used tree);
++ * o the WL movement is disallowed (@wl->erroneous) becouse the PEB is
++ *   erroneous - e.g., there was a read error;
+  * o the WL movement is temporarily prohibited (@wl->pq queue);
+  * o scrubbing is needed (@wl->scrub tree).
+  *
+@@ -653,7 +655,7 @@ static int schedule_erase(struct ubi_device *ubi, struct ubi_wl_entry *e,
+ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 				int cancel)
+ {
+-	int err, scrubbing = 0, torture = 0, protect = 0;
++	int err, scrubbing = 0, torture = 0, protect = 0, erroneous = 0;
+ 	struct ubi_wl_entry *e1, *e2;
+ 	struct ubi_vid_hdr *vid_hdr;
+ 
+@@ -769,13 +771,31 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 			goto out_not_moved;
+ 		}
+ 
+-		if (err == MOVE_CANCEL_BITFLIPS ||
+-		    err == MOVE_TARGET_WR_ERR) {
++		if (err == MOVE_CANCEL_BITFLIPS || err == MOVE_TARGET_WR_ERR ||
++		    err == MOVE_TARGET_RD_ERR) {
+ 			/* Target PEB bit-flips or write error, torture it */
+ 			torture = 1;
+ 			goto out_not_moved;
+ 		}
+ 
++		if (err == MOVE_SOURCE_RD_ERR) {
++			/*
++			 * An error happened while reading the source PEB. Do
++			 * not switch to R/O mode in this case, and give the
++			 * upper layers a possibility to recover from this,
++			 * e.g. by unmapping corresponding LEB. Instead, just
++			 * put thie PEB to the @ubi->erroneus list to prevent
++			 * UBI from trying to move the over and over again.
++			 */
++			if (ubi->erroneous_peb_count > ubi->max_erroneous) {
++				ubi_err("too many erroneous eraseblocks (%d)",
++					ubi->erroneous_peb_count);
++				goto out_error;
++			}
++			erroneous = 1;
++			goto out_not_moved;
++		}
++
+ 		if (err < 0)
+ 			goto out_error;
+ 
+@@ -832,7 +852,10 @@ out_not_moved:
+ 	spin_lock(&ubi->wl_lock);
+ 	if (protect)
+ 		prot_queue_add(ubi, e1);
+-	else if (scrubbing)
++	else if (erroneous) {
++		wl_tree_add(e1, &ubi->erroneous);
++		ubi->erroneous_peb_count += 1;
++	} else if (scrubbing)
+ 		wl_tree_add(e1, &ubi->scrub);
+ 	else
+ 		wl_tree_add(e1, &ubi->used);
+@@ -1116,6 +1139,13 @@ retry:
+ 		} else if (in_wl_tree(e, &ubi->scrub)) {
+ 			paranoid_check_in_wl_tree(e, &ubi->scrub);
+ 			rb_erase(&e->u.rb, &ubi->scrub);
++		} else if (in_wl_tree(e, &ubi->erroneous)) {
++			paranoid_check_in_wl_tree(e, &ubi->erroneous);
++			rb_erase(&e->u.rb, &ubi->erroneous);
++			ubi->erroneous_peb_count -= 1;
++			ubi_assert(ubi->erroneous_peb_count >= 0);
++			/* Erronious PEBs should be tortured */
++			torture = 1;
+ 		} else {
+ 			err = prot_queue_del(ubi, e->pnum);
+ 			if (err) {
+@@ -1364,7 +1394,7 @@ int ubi_wl_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 	struct ubi_scan_leb *seb, *tmp;
+ 	struct ubi_wl_entry *e;
+ 
+-	ubi->used = ubi->free = ubi->scrub = RB_ROOT;
++	ubi->used = ubi->erroneous = ubi->free = ubi->scrub = RB_ROOT;
+ 	spin_lock_init(&ubi->wl_lock);
+ 	mutex_init(&ubi->move_mutex);
+ 	init_rwsem(&ubi->work_sem);
+@@ -1502,6 +1532,7 @@ void ubi_wl_close(struct ubi_device *ubi)
+ 	cancel_pending(ubi);
+ 	protection_queue_destroy(ubi);
+ 	tree_destroy(&ubi->used);
++	tree_destroy(&ubi->erroneous);
+ 	tree_destroy(&ubi->free);
+ 	tree_destroy(&ubi->scrub);
+ 	kfree(ubi->lookuptbl);
+-- 
+1.5.4.3
+

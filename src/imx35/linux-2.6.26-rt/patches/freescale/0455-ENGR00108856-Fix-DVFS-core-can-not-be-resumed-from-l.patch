@@ -1,0 +1,150 @@
+From 508c63aa7d87e48ba4d5539ffe5c5993f1065859 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Tue, 3 Mar 2009 16:53:47 -0600
+Subject: [PATCH] ENGR00108856 Fix DVFS core can not be resumed from low power mode
+
+Fix DVFS core can not be resumed from low power mode.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+(cherry picked from commit 1c80b30f83803678ae3279dfdec76e21d4c88a0e)
+---
+ arch/arm/plat-mxc/dvfs_core.c |   38 ++++++++++++++++++++++++--------------
+ 1 files changed, 24 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index 854b4de..0e39b04 100644
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -91,6 +91,7 @@ static struct delayed_work dvfs_core_work;
+ static struct mxc_dvfs_platform_data *dvfs_data;
+ static struct device *dvfs_dev;
+ static struct cpu_wp *cpu_wp_tbl;
++int dvfs_core_resume;
+ int curr_wp;
+ int dvfs_core_is_active;
+ 
+@@ -210,7 +211,7 @@ static irqreturn_t dvfs_irq(int irq, void *dev_id)
+ 
+ 	/* Check if DVFS0 (ARM) id requesting for freqency/voltage update */
+ 	if ((__raw_readl(dvfs_data->gpc_cntr_reg_addr) & MXC_GPCCNTR_DVFS0CR) ==
+-		0)
++	    0)
+ 		return IRQ_NONE;
+ 
+ 	/* Mask DVFS irq */
+@@ -312,7 +313,8 @@ static void dvfs_core_workqueue_handler(struct work_struct *work)
+ 			__raw_writel(reg, dvfs_data->gpc_vcr_reg_addr);
+ 
+ 			ret = regulator_set_voltage(core_regulator,
+-										cpu_wp_tbl[curr_wp].cpu_voltage);
++						    cpu_wp_tbl[curr_wp].
++						    cpu_voltage);
+ 			if (ret < 0) {
+ 				printk(KERN_DEBUG
+ 				       "COULD NOT SET CORE VOLTAGE!!!!\n");
+@@ -320,7 +322,8 @@ static void dvfs_core_workqueue_handler(struct work_struct *work)
+ 			}
+ 			udelay(dvfs_data->delay_time);
+ 
+-			ret = clk_set_rate(cpu_clk, cpu_wp_tbl[curr_wp].cpu_rate);
++			ret =
++			    clk_set_rate(cpu_clk, cpu_wp_tbl[curr_wp].cpu_rate);
+ 			if (ret != 0)
+ 				printk(KERN_DEBUG
+ 				       "cannot set CPU clock rate\n");
+@@ -334,7 +337,7 @@ END:			/* Set MAXF, MINF */
+ 	reg |= maxf << MXC_DVFSCNTR_MAXF_OFFSET;
+ 	reg |= minf << MXC_DVFSCNTR_MINF_OFFSET;
+ 
+-	/* Enable FVFS interrupt */
++	/* Enable DVFS interrupt */
+ 	/* FSVAIM=0 */
+ 	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
+ 	/* LBFL=1 */
+@@ -369,8 +372,10 @@ static void stop_dvfs(void)
+ 		curr_cpu = clk_get_rate(cpu_clk);
+ 		if (curr_cpu != cpu_wp_tbl[curr_wp].cpu_rate) {
+ 			if (regulator_set_voltage(core_regulator,
+-									  cpu_wp_tbl[curr_wp].cpu_voltage) == 0)
+-				clk_set_rate(cpu_clk, cpu_wp_tbl[curr_wp].cpu_rate);
++						  cpu_wp_tbl[curr_wp].
++						  cpu_voltage) == 0)
++				clk_set_rate(cpu_clk,
++					     cpu_wp_tbl[curr_wp].cpu_rate);
+ 		}
+ 
+ 		clk_disable(dvfs_clk);
+@@ -380,7 +385,7 @@ static void stop_dvfs(void)
+ }
+ 
+ static ssize_t dvfs_enable_show(struct device *dev,
+-								struct device_attribute *attr, char *buf)
++				     struct device_attribute *attr, char *buf)
+ {
+ 	if (dvfs_core_is_active)
+ 		return sprintf(buf, "DVFS is enabled\n");
+@@ -390,8 +395,8 @@ static ssize_t dvfs_enable_show(struct device *dev,
+ 
+ 
+ static ssize_t dvfs_enable_store(struct device *dev,
+-								 struct device_attribute *attr,
+-								 const char *buf, size_t size)
++				     struct device_attribute *attr,
++				     const char *buf, size_t size)
+ {
+ 	if (strstr(buf, "1") != NULL) {
+ 		if (start_dvfs() != 0)
+@@ -484,6 +489,7 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 	/* Set the current working point. */
+ 	cpu_wp_tbl = get_cpu_wp(&cpu_wp_nr);
+ 	curr_wp = 0;
++	dvfs_core_resume = 0;
+ 
+ 	return err;
+ 
+@@ -493,7 +499,7 @@ err1:
+ }
+ 
+ /*!
+- * This function is called to put DPTC in a low power state.
++ * This function is called to put DVFS in a low power state.
+  *
+  * @param   pdev  the device structure
+  * @param   state the power state the device is entering
+@@ -501,10 +507,12 @@ err1:
+  * @return  The function always returns 0.
+  */
+ static int mxc_dvfs_core_suspend(struct platform_device *pdev,
+-								 pm_message_t state)
++					pm_message_t state)
+ {
+-	if (dvfs_core_is_active)
++	if (dvfs_core_is_active) {
++		dvfs_core_resume = 1;
+ 		stop_dvfs();
++	}
+ 
+ 	return 0;
+ }
+@@ -520,8 +528,10 @@ static int mxc_dvfs_core_suspend(struct platform_device *pdev,
+  */
+ static int mxc_dvfs_core_resume(struct platform_device *pdev)
+ {
+-	if (dvfs_core_is_active)
++	if (dvfs_core_resume) {
++		dvfs_core_resume = 0;
+ 		start_dvfs();
++	}
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

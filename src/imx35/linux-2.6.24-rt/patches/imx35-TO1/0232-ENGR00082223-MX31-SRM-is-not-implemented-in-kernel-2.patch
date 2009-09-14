@@ -1,0 +1,62 @@
+From 6821194bded927b62cd71eb9308963f688533038 Mon Sep 17 00:00:00 2001
+From: Yves vandervennet <r55763@freescale.com>
+Date: Fri, 27 Jun 2008 07:08:37 -0500
+Subject: [PATCH] ENGR00082223 MX31 SRM is not implemented in kernel 2.6.24
+
+set up code added to mxc_pm_lowpower()
+
+Signed-off-by: Yves vandervennet <r55763@freescale.com>
+---
+ arch/arm/mach-mx3/mxc_pm.c |   19 +++++++++++++++++--
+ 1 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mxc_pm.c b/arch/arm/mach-mx3/mxc_pm.c
+index ea21f6c..3a6bd36 100644
+--- a/arch/arm/mach-mx3/mxc_pm.c
++++ b/arch/arm/mach-mx3/mxc_pm.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -303,6 +303,19 @@ void mxc_pm_lowpower(int mode)
+ 		/* Disable timer interrupt */
+ 		disable_irq(MXC_INT_GPT);
+ 		enable_flag = 1;
++
++		/* Enable Well Bias and set VSTBY
++		  * VSTBY pin will be asserted during SR mode. This asks the
++		  * PM IC to set the core voltage to the standby voltage
++		  * Must clear the MXC_CCM_CCMR_SBYCS bit as well  */
++		mxc_ccm_modify_reg(MXC_CCM_CCMR,
++				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY |
++					MXC_CCM_CCMR_SBYCS,
++				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY);
++
++		mxc_ccm_modify_reg(MXC_CCM_CCMR,
++				   MXC_CCM_CCMR_LPM_MASK,
++				   lpm << MXC_CCM_CCMR_LPM_OFFSET);
+ 		break;
+ 
+ 	case DSM_MODE:
+@@ -324,12 +337,14 @@ void mxc_pm_lowpower(int mode)
+ 		lpm = 0;
+ 		break;
+ 	}
++
+ 	reg = __raw_readl(MXC_CCM_CCMR);
+ 	reg = (reg & (~MXC_CCM_CCMR_LPM_MASK)) | lpm << MXC_CCM_CCMR_LPM_OFFSET;
+ 	__raw_writel(reg, MXC_CCM_CCMR);
+ 	/* Executing CP15 (Wait-for-Interrupt) Instruction */
+ 	/* wait for interrupt */
+-	__asm__ __volatile__("mcr	p15, 0, r1, c7, c0, 4\n"
++	__asm__ __volatile__("mov r1, #0x0\n"
++				"mcr	p15, 0, r1, c7, c0, 4\n"
+ 			     "nop\n" "nop\n" "nop\n" "nop\n" "nop\n"::);
+ 
+ 	if (enable_flag) {
+-- 
+1.5.4.4
+

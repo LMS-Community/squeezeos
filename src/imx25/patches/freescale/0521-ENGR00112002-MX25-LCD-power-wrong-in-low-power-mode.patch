@@ -1,0 +1,81 @@
+From 90ed5ff9c9c2702ce0bef41c5628b729eb6e737f Mon Sep 17 00:00:00 2001
+From: Xie xiaobo <X.Xie@freescale.com>
+Date: Thu, 30 Apr 2009 21:38:14 +0800
+Subject: [PATCH] ENGR00112002 MX25: LCD power wrong in low power mode
+
+When the system enter into low power mode, the LCD panel power on/off randomly.
+
+Signed-off-by: Xie Xiaobo <X.Xie@freescale.com>
+---
+ arch/arm/mach-mx25/board-mx25_3stack.h |    4 ++++
+ arch/arm/mach-mx25/mx25_3stack.c       |   12 ++++++++++++
+ arch/arm/mach-mx25/mx25_3stack_gpio.c  |    8 --------
+ 3 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx25/board-mx25_3stack.h b/arch/arm/mach-mx25/board-mx25_3stack.h
+index 125876b..dded492 100644
+--- a/arch/arm/mach-mx25/board-mx25_3stack.h
++++ b/arch/arm/mach-mx25/board-mx25_3stack.h
+@@ -153,6 +153,9 @@ extern unsigned int mx25_3stack_board_io;
+ #define MXC_BD_LED_ON(led)
+ #define MXC_BD_LED_OFF(led)
+ 
++#define MXC_DEFAULT_INTENSITY	127
++#define MXC_INTENSITY_OFF	0
++
+ /*! @} */
+ 
+ extern void mxc_map_io(void);
+@@ -170,6 +173,7 @@ extern int sdhc_write_protect(struct device *dev);
+ extern void gpio_can_active(int id);
+ extern void gpio_can_inactive(int id);
+ extern struct flexcan_platform_data flexcan_data[];
++extern void mx2fb_set_brightness(uint8_t);
+ 
+ #endif				/* CONFIG_MACH_MX25_3DS */
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX25_3STACK_H__ */
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index bab78f8..d0a010a 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -201,6 +201,18 @@ static struct platform_device mxc_fb_device = {
+ 		},
+ };
+ 
++/*
++ * Power on/off CPT VGA panel.
++ */
++void board_power_lcd(int on)
++{
++	if (on)
++		mx2fb_set_brightness(MXC_DEFAULT_INTENSITY);
++	else
++		mx2fb_set_brightness(MXC_INTENSITY_OFF);
++}
++EXPORT_SYMBOL(board_power_lcd);
++
+ static void mxc_init_fb(void)
+ {
+ 	(void)platform_device_register(&mxc_fb_device);
+diff --git a/arch/arm/mach-mx25/mx25_3stack_gpio.c b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+index 12d9753..eee3432 100644
+--- a/arch/arm/mach-mx25/mx25_3stack_gpio.c
++++ b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+@@ -757,14 +757,6 @@ void gpio_lcdc_inactive(void)
+ }
+ EXPORT_SYMBOL(gpio_lcdc_inactive);
+ 
+-/*
+- * Power on/off CPT VGA panel.
+- */
+-void board_power_lcd(int on)
+-{
+-}
+-EXPORT_SYMBOL(board_power_lcd);
+-
+ /*!
+  * Activate SDHC
+  *
+-- 
+1.5.4.4
+

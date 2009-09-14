@@ -1,0 +1,2472 @@
+---
+ drivers/mxc/baby/Kconfig                         |    1 
+ drivers/mxc/baby/Makefile                        |    1 
+ drivers/mxc/baby/msp430/Devices.c                |  149 ++++
+ drivers/mxc/baby/msp430/Devices.h                |   55 +
+ drivers/mxc/baby/msp430/JTAGfuncSBW.c            |  776 +++++++++++++++++++++++
+ drivers/mxc/baby/msp430/JTAGfuncSBW.h            |  105 +++
+ drivers/mxc/baby/msp430/Kconfig                  |   15 
+ drivers/mxc/baby/msp430/LowLevelFuncSBW.c        |  274 ++++++++
+ drivers/mxc/baby/msp430/LowLevelFuncSBW.h        |  120 +++
+ drivers/mxc/baby/msp430/LowLevelImplementation.h |   36 +
+ drivers/mxc/baby/msp430/Makefile                 |    4 
+ drivers/mxc/baby/msp430/msp430.h                 |   69 ++
+ drivers/mxc/baby/msp430/msp430_i2c.c             |  356 ++++++++++
+ drivers/mxc/baby/msp430/msp430_programmer.c      |  417 ++++++++++++
+ 14 files changed, 2378 insertions(+)
+
+Index: linux-2.6.26/drivers/mxc/baby/Kconfig
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/Kconfig	2009-07-28 17:38:23.000000000 +0200
++++ linux-2.6.26/drivers/mxc/baby/Kconfig	2009-07-28 17:38:24.000000000 +0200
+@@ -18,4 +18,5 @@ config MXC_BABY_BUTTONS
+ 	---help---
+ 	This driver adds support the the GPIO buttons on baby.
+ 
++source "drivers/mxc/baby/msp430/Kconfig"
+ endmenu
+Index: linux-2.6.26/drivers/mxc/baby/msp430/Devices.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/Devices.c	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,149 @@
++/*==========================================================================*\
++|                                                                            |
++| Devices.c                                                                  |
++|                                                                            |
++| The file contains functions to distinguish MSP430 devices concerning       |
++| FLASH programming.                                                         |
++|----------------------------------------------------------------------------|
++| Project:              MSP430 Replicator                                    |
++| Developed using:      IAR Embedded Workbench 3.40B [Kickstart]             |
++|             and:      Code Composer Eessentials 2.0                        |
++|----------------------------------------------------------------------------|
++| Author:               STO                                                  |
++| Version:              1.1                                                  |
++| Initial Version:      02-09-06                                             |
++| Last Change:          04-25-07                                             |
++|----------------------------------------------------------------------------|
++| Version history:                                                           |
++| 1.0 02/06 STO         Initial version.                                     |
++| 1.1 04/07 WLUT        Enhanced with adress ranges for all actual silica    |
++| 1.2 01/08 WLUT        Updated device feature list with new devices         |
++|----------------------------------------------------------------------------|
++| Designed 2005 by Texas Instruments Germany                                 |
++\*==========================================================================*/
++
++#include "Devices.h"
++
++static word DeviceIdx = 0;              // This  variable that holds the device
++                                        // index used to determine family & part
++                                        // number. The ID of device is at memory
++                                        // location 0x0FF0h on all MSP430 flash devices.
++                                        // In this application, the device ID is
++                                        // used to determine the JTAG pin
++                                        // configuration (dedicated vs. shared)
++                                        // of the target device.
++
++struct tsDeviceFeatures {
++    word Id;
++    unsigned char TestPin;
++    unsigned char CpuX;
++    unsigned char DataQuick;
++    unsigned char FastFlash;
++    unsigned char EnhVerify;
++    unsigned char JTAG;
++    unsigned char SpyBiWire;
++    word RamStart;
++    word RamEnd;
++    word MainStart;
++};
++
++static const struct tsDeviceFeatures sDeviceFeatures[] =
++{
++//                      TestPin      DataQuick      EnhVerify     SpyBiWire        RamEnd
++//                Id       |    CpuX     |  FastFlash  |    JTAG     |    RamStart    |   MainStart
++//                 |       |      |      |      |      |     |       |        |       |       |
++/* F11x(1)(A)*/ { 0xF112, TRUE,  FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xF000 }, // MSP430F1121A
++/* F11x2 */     { 0x1132, TRUE,  FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }, // MSP430F1132
++/* F12x(A) */   { 0xF123, TRUE,  FALSE, FALSE, FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }, // MSP430F123
++/* F12x2 */     { 0x1232, TRUE,  FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }, // MSP430F1232
++/* F13x
++   F14x  */     { 0xF149, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x09FF, 0x1100 }, // MSP430F149
++/* F15x
++   F16x  */     { 0xF169, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x09FF, 0x1100 }, // MSP430F169
++/* F161x */     { 0xF16C, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x1100, 0x24FF, 0x8000 }, // MSP430F1610
++/* F20xx */     { 0xF201, TRUE,  FALSE, TRUE , TRUE,  FALSE, TRUE , TRUE  , 0x0200, 0x027F, 0xF800 }, // MSP430F2013
++/* F21x1
++   F21x2 */     { 0xF213, TRUE,  FALSE, TRUE , TRUE,  FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }, // MSP430F2131
++/* F22x2
++   F22x4 */     { 0xF227, TRUE,  FALSE, TRUE , TRUE,  TRUE,  TRUE , TRUE  , 0x0200, 0x05FF, 0x8000 }, // MSP430F2274
++/* F23x0 */     { 0xF237, TRUE,  FALSE, TRUE , TRUE,  TRUE,  TRUE , FALSE , 0x0200, 0x09FF, 0x8000 }, // MSP430F2370
++/* F23x
++   F24x
++   F24x1
++   F2410 */     { 0xF249, FALSE, FALSE, TRUE , TRUE,  TRUE,  TRUE , FALSE , 0x0200, 0x09FF, 0x1100 }, // MSP430F249
++/* F241x
++   F261x */     { 0xF26F, FALSE, TRUE,  TRUE , TRUE,  TRUE,  TRUE , FALSE , 0x1100, 0x20FF, 0x2100 }, // MSP430F2619
++/* F41x */      { 0xF413, FALSE, FALSE, FALSE, FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }, // MSP430F413
++/* F42x(x) */   { 0xF427, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }, // MSP430FW427
++/* F43x 80p */  { 0xF437, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x05FF, 0xA000 }, // MSP430F437
++/* FG43x */     { 0xF439, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x09FF, 0x1100 }, // MSP430FG439
++/* F44x
++   F43x 100p */ { 0xF449, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x09FF, 0x1100 }, // MSP430F449
++/* FG461x */    { 0xF46F, FALSE, TRUE,  TRUE , TRUE,  TRUE,  TRUE , FALSE , 0x1100, 0x20FF, 0x2100 }, // MSP430FG4619
++/* GENERIC */   { 0xFFFF, FALSE, FALSE, TRUE , FALSE, FALSE, TRUE , FALSE , 0x0200, 0x02FF, 0xE000 }
++};
++
++void SetDevice (word wDeviceId)
++{
++    for(DeviceIdx = 0; DeviceIdx < (sizeof(sDeviceFeatures)/sizeof(*sDeviceFeatures)); DeviceIdx++)
++    {
++        if(sDeviceFeatures[DeviceIdx].Id == wDeviceId)
++        {
++              break;
++        }
++    }
++}
++
++unsigned char DeviceHas_TestPin(void)
++{
++    return (sDeviceFeatures[DeviceIdx].TestPin);
++}
++
++unsigned char  DeviceHas_CpuX(void)
++{
++    return (sDeviceFeatures[DeviceIdx].CpuX);
++}
++
++unsigned char  DeviceHas_DataQuick(void)
++{
++    return (sDeviceFeatures[DeviceIdx].DataQuick);
++}
++
++unsigned char  DeviceHas_FastFlash(void)
++{
++    return (sDeviceFeatures[DeviceIdx].FastFlash);
++}
++
++unsigned char  DeviceHas_EnhVerify(void)
++{
++    return (sDeviceFeatures[DeviceIdx].EnhVerify);
++}
++
++unsigned char  DeviceHas_JTAG(void)
++{
++    return (sDeviceFeatures[DeviceIdx].JTAG);
++}
++
++unsigned char  DeviceHas_SpyBiWire(void)
++{
++    return (sDeviceFeatures[DeviceIdx].SpyBiWire);
++}
++
++word Device_RamStart(void)
++{
++    return (sDeviceFeatures[DeviceIdx].RamStart);
++}
++
++word Device_RamEnd(void)
++{
++    return (sDeviceFeatures[DeviceIdx].RamEnd);
++}
++
++word Device_MainStart(void)
++{
++    return (sDeviceFeatures[DeviceIdx].MainStart);
++}
++
++/****************************************************************************/
++/*                         END OF SOURCE FILE                               */
++/****************************************************************************/
+Index: linux-2.6.26/drivers/mxc/baby/msp430/Devices.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/Devices.h	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,55 @@
++/*==========================================================================*\
++|                                                                            |
++| Devices.h                                                                  |
++|                                                                            |
++| Device Function Prototypes and Definitions                                 |
++| FLASH programming.                                                         |
++|----------------------------------------------------------------------------|
++| Project:              MSP430 Replicator                                    |
++| Developed using:      IAR Embedded Workbench 3.40B [Kickstart]             |
++|             and:      Code Composer Eessentials 2.0                        |
++|----------------------------------------------------------------------------|
++| Author:               LUT                                                  |
++| Version:              1.1                                                  |
++| Initial Version:      02-08-06                                             |
++| Last Change:          04-25-07                                             |
++|----------------------------------------------------------------------------|
++| Version history:                                                           |
++| 1.0 02/06 LUT         Initial version.                                     |
++| 1.1 04/07 WLUT        Enhanced with adress ranges for all actual silica    |
++|----------------------------------------------------------------------------|
++| Designed 2005 by Texas Instruments Germany                                 |
++\*==========================================================================*/
++
++#ifndef _DEVICES_H_
++#define _DEVICES_H_
++
++#ifndef __BYTEWORD__
++#define __BYTEWORD__
++typedef unsigned short int  word;
++typedef unsigned       char byte;
++#endif
++
++#define TRUE          1
++#define FALSE         0
++
++void SetDevice(word wDeviceId);
++unsigned char DeviceHas_TestPin(void);
++unsigned char DeviceHas_CpuX(void);
++unsigned char DeviceHas_DataQuick(void);
++unsigned char DeviceHas_FastFlash(void);
++unsigned char DeviceHas_EnhVerify(void);
++unsigned char DeviceHas_JTAG(void);
++unsigned char DeviceHas_SpyBiWire(void);
++word Device_RamStart(void);
++word Device_RamEnd(void);
++word Device_MainStart(void);
++
++// Constants for flash erasing modes
++#define ERASE_GLOB                 0xA50E // main & info of ALL      mem arrays
++#define ERASE_ALLMAIN              0xA50C // main        of ALL      mem arrays
++#define ERASE_MASS                 0xA506 // main & info of SELECTED mem arrays
++#define ERASE_MAIN                 0xA504 // main        of SELECTED mem arrays
++#define ERASE_SGMT                 0xA502 // SELECTED segment
++
++#endif
+Index: linux-2.6.26/drivers/mxc/baby/msp430/JTAGfuncSBW.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/JTAGfuncSBW.c	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,776 @@
++/*==========================================================================*\
++|                                                                            |
++| JTAGfunc.c                                                                 |
++|                                                                            |
++| JTAG Control Sequences for Erasing / Programming / Fuse Burning            |
++|----------------------------------------------------------------------------|
++| Project:              JTAG Functions                                       |
++| Developed using:      IAR Embedded Workbench 3.40B                         |
++|             and:      Code Composer Eessentials 2.0                        |
++|----------------------------------------------------------------------------|
++| Author:               STO                                                  |
++| Version:              1.7                                                  |
++| Initial Version:      04-17-02                                             |
++| Last Change:          04-25-07                                             |
++|----------------------------------------------------------------------------|
++| Version history:                                                           |
++| 1.0 04/02 FRGR        Initial version.                                     |
++| 1.1 04/02 ALB2        Formatting changes, added comments.                  |
++| 1.2 08/02 ALB2        Initial code release with Lit# SLAA149.              |
++| 1.3 09/05 JDI         'ResetTAP': added SetTDI for fuse check              |
++|                       search for F2xxx to find respective modifications in |
++|                       'SetPC', 'HaltCPU', 'VerifyPSA', 'EraseFLASH'        |
++|                       'WriteFLASH'                                         |
++|           SUN1        Software delays redesigned to use TimerA harware;    |
++|                       see MsDelay() routine.                               |
++| 1.4 12/05 STO         Adapted for SpyBiWire JTAG mode                      |
++| NOTE:                                                                      |
++|    For security fuse blow please use new hardware schematic rev. 1.3.      |
++|    Othewise the target CPU can be demaged                                  |
++| 1.5 03/06 STO         BlowFuse() make correct fuse check after blowing.    |
++| 1.6 07/06 STO         Loop in WriteFLASH() changed.                        |
++| 1.7 04/07 WLUT        'VerifyPSA', 'ReadMemQuick' changed to TCLK high.    |
++|                       WriteFLASHallSections changed due to spec of srec_cat|
++|                       Renamed 'ExecutePUC' to 'ExecutePOR'                 |
++|----------------------------------------------------------------------------|
++| Designed 2002 by Texas Instruments Germany                                 |
++\*==========================================================================*/
++
++#include <linux/delay.h>
++
++#include "JTAGfuncSBW.h"
++#include "LowLevelFuncSBW.h"
++#include "Devices.h"
++
++/****************************************************************************/
++/* Low level routines for accessing the target device via JTAG:             */
++/****************************************************************************/
++
++//----------------------------------------------------------------------------
++/* Function for shifting a given 16-bit word into the JTAG data register.
++   Arguments: word data (16-bit data, MSB first)
++   Result:    word (TDO value is shifted out)
++*/
++word DR_Shift16_sbw(word data)
++{
++    // JTAG FSM state = Run-Test/Idle
++    if (TCLK_saved & SBWTDIO_GET)
++    {
++        TMSH_TDIH();
++    }
++    else
++    {
++        TMSH_TDIL();
++    }
++    // JTAG FSM state = Select DR-Scan
++    TMSL_TDIH();
++    // JTAG FSM state = Capture-DR
++    TMSL_TDIH();
++
++    // JTAG FSM state = Shift-DR, Shiftin TDI (16 bit)
++    return(Shift_sbw(F_WORD, data));
++    // JTAG FSM state = Run-Test/Idle
++}
++
++//----------------------------------------------------------------------------
++/* Function for shifting a new instruction into the JTAG instruction
++   register (MSB first, but with interchanged MSB - LSB, to
++   simply use the same shifting function, Shift_sbw(), as used in DR_Shift16_sbw).
++   Arguments: byte Instruction (8bit JTAG instruction, MSB first)
++   Result:    word TDO valuse shifted out (TDO = JTAG ID)
++*/
++word IR_Shift_sbw(byte instruction)
++{
++    // JTAG FSM state = Run-Test/Idle
++    if (TCLK_saved & SBWTDIO_GET)
++    {
++        TMSH_TDIH();
++    }
++    else
++    {
++        TMSH_TDIL();
++    }
++    // JTAG FSM state = Select DR-Scan
++    TMSH_TDIH();
++
++    // JTAG FSM state = Select IR-Scan
++    TMSL_TDIH();
++    // JTAG FSM state = Capture-IR
++    TMSL_TDIH();
++
++    // JTAG FSM state = Shift-IR, Shiftin TDI (8 bit)
++    return(Shift_sbw(F_BYTE, instruction));     // JTAG FSM state = Run-Test/Idle
++}
++
++//----------------------------------------------------------------------------
++/* Reset target JTAG interface and perform fuse-HW check.
++   Arguments: None
++   Result:    None
++*/
++void ResetTAP_sbw(void)
++{
++    word i;
++
++    // Now fuse is checked, Reset JTAG FSM
++    for (i = 6; i > 0; i--)      // 6 is nominal
++    {
++        TMSH_TDIH();
++    }
++
++    // JTAG FSM is now in Test-Logic-Reset
++    TMSL_TDIH();                 // now in Run/Test Idle
++
++    // Fuse check
++    TMSH_TDIH();
++    TMSL_TDIH();
++    TMSH_TDIH();
++    TMSL_TDIH();
++    TMSH_TDIH();
++    // In every TDI slot a TCK for the JTAG machine is generated.
++    // Thus we need to get TAP in Run/Test Idle state back again.
++    TMSH_TDIH();
++    TMSL_TDIH();
++}
++
++//----------------------------------------------------------------------------
++/* Function to execute a Power-On Reset (POR) using JTAG CNTRL SIG register
++   Arguments: None
++   Result:    word (STATUS_OK if JTAG ID is valid, STATUS_ERROR otherwise)
++*/
++word ExecutePOR(void)
++{
++    word JtagVersion;
++
++    // Perform Reset
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2C01);                 // Apply Reset
++    DR_Shift16(0x2401);                 // Remove Reset
++    ClrTCLK();
++    SetTCLK();
++    ClrTCLK();
++    SetTCLK();
++    ClrTCLK();
++    JtagVersion = IR_Shift(IR_ADDR_CAPTURE); // read JTAG ID, checked at function end
++    SetTCLK();
++
++    WriteMem(F_WORD, 0x0120, 0x5A80);   // Disable Watchdog on target device
++
++    if (JtagVersion != JTAG_ID)
++    {
++        return(STATUS_ERROR);
++    }
++    return(STATUS_OK);
++}
++
++//----------------------------------------------------------------------------
++/* Function to set target CPU JTAG FSM into the instruction fetch state
++   Argument: None
++   Result:   word (STATUS_OK if instr. fetch was set, STATUS_ERROR otherwise)
++*/
++word SetInstrFetch(void)
++{
++    word i;
++
++    IR_Shift(IR_CNTRL_SIG_CAPTURE);
++
++    // Wait until CPU is in instr. fetch state, timeout after limited attempts
++    for (i = 50; i > 0; i--)
++    {
++        if (DR_Shift16(0x0000) & 0x0080)
++        {
++            return(STATUS_OK);
++        }
++        ClrTCLK();
++        SetTCLK();
++    }
++    return(STATUS_ERROR);
++}
++
++//----------------------------------------------------------------------------
++/* Load a given address into the target CPU's program counter (PC).
++   Argument: word Addr (destination address)
++   Result:   None
++*/
++ void SetPC(word Addr)
++{
++    SetInstrFetch();              // Set CPU into instruction fetch mode, TCLK=1
++
++    // Load PC with address
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x3401);           // CPU has control of RW & BYTE.
++    IR_Shift(IR_DATA_16BIT);
++    DR_Shift16(0x4030);           // "mov #addr,PC" instruction
++    ClrTCLK();
++    SetTCLK();                    // F2xxx
++    DR_Shift16(Addr);             // "mov #addr,PC" instruction
++    ClrTCLK();
++    IR_Shift(IR_ADDR_CAPTURE);
++    SetTCLK();
++    ClrTCLK();                    // Now the PC should be on Addr
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2401);           // JTAG has control of RW & BYTE.
++}
++
++//----------------------------------------------------------------------------
++/* Function to set the CPU into a controlled stop state
++*/
++ void HaltCPU(void)
++{
++    SetInstrFetch();              // Set CPU into instruction fetch mode
++
++    IR_Shift(IR_DATA_16BIT);
++    DR_Shift16(0x3FFF);           // Send JMP $ instruction
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2409);           // Set JTAG_HALT bit
++    SetTCLK();
++}
++
++//----------------------------------------------------------------------------
++/* Function to release the target CPU from the controlled stop state
++*/
++ void ReleaseCPU(void)
++{
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2401);           // Clear the HALT_JTAG bit
++    IR_Shift(IR_ADDR_CAPTURE);
++    SetTCLK();
++}
++
++//----------------------------------------------------------------------------
++/* This function compares the computed PSA (Pseudo Signature Analysis) value
++   to the PSA value shifted out from the target device.
++   It is used for very fast data block write or erasure verification.
++   Arguments: word StartAddr (Start address of data block to be checked)
++              word Length (Number of words within data block)
++              word *DataArray (Pointer to array with the data, 0 for Erase Check)
++   Result:    word (STATUS_OK if comparison was successful, STATUS_ERROR otherwise)
++*/
++ word VerifyPSA_sbw(word StartAddr, word Length, word *DataArray)
++{
++    word TDOword, i;
++    word POLY = 0x0805;           // Polynom value for PSA calculation
++    word PSA_CRC = StartAddr-2;   // Start value for PSA calculation
++
++    ExecutePOR();
++
++    if(DeviceHas_EnhVerify())
++    {
++        SetPC(StartAddr-4);
++        HaltCPU();
++        ClrTCLK();
++        IR_Shift(IR_DATA_16BIT);
++        DR_Shift16(StartAddr-2);
++    }
++    else
++    {
++        SetPC(StartAddr-2);
++        SetTCLK();
++        ClrTCLK();
++    }
++    IR_Shift(IR_DATA_PSA);
++
++    for (i = 0; i < Length; i++)
++    {
++        // Calculate the PSA (Pseudo Signature Analysis) value
++        if ((PSA_CRC & 0x8000) == 0x8000)
++        {
++            PSA_CRC ^= POLY;
++            PSA_CRC <<= 1;
++            PSA_CRC |= 0x0001;
++        }
++        else
++        {
++            PSA_CRC <<= 1;
++        }
++        // if pointer is 0 then use erase check mask, otherwise data
++        if (DataArray == 0)
++        {
++            PSA_CRC ^= 0xFFFF;
++        }
++        else
++        {
++            PSA_CRC ^= DataArray[i];
++        }
++
++        // Clock through the PSA
++        SetTCLK();
++
++        TMSH_TDIH();
++        TMSL_TDIH();
++        TMSL_TDIH();
++        TMSH_TDIH();
++        TMSH_TDIH();
++        TMSL_TDIH();
++
++        ClrTCLK();
++    }
++    IR_Shift(IR_SHIFT_OUT_PSA);
++    TDOword = DR_Shift16(0x0000);   // Read out the PSA value
++    SetTCLK();
++
++    if(DeviceHas_EnhVerify())
++    {
++       ReleaseCPU();
++    }
++
++    ExecutePOR();
++
++    return((TDOword == PSA_CRC) ? STATUS_OK : STATUS_ERROR);
++}
++
++/****************************************************************************/
++/* High level routines for accessing the target device via JTAG:            */
++/*                                                                          */
++/* From the following, the user is relieved from coding anything.           */
++/* To provide better understanding and clearness, some functionality is     */
++/* coded generously. (Code and speed optimization enhancements may          */
++/* be desired)                                                              */
++/****************************************************************************/
++
++//----------------------------------------------------------------------------
++/* Function to take target device under JTAG control. Disables the target
++   watchdog. Sets the global DEVICE variable as read from the target device.
++   Arguments: None
++   Result:    word (STATUS_ERROR if fuse is blown, incorrect JTAG ID or
++                    synchronizing time-out; STATUS_OK otherwise)
++*/
++word GetDevice_sbw(void)
++{
++    word i;
++
++    // Reset Test logic
++    SBWTDIO_CLR;                   // put device in normal operation: Reset = 0
++    SBWTCK_CLR;                    // TEST pin = 0
++    MsDelay(1);                     // wait 1ms (minimum: 100us)
++
++    // SpyBiWire entry sequence
++    SBWTDIO_SET;                   // Reset = 1
++    SBWTCK_SET;                    // TEST pin = 1
++                                    // initial 1 SBWCLKs to enter sbw-mode
++    SBWTCK_CLR;
++    SBWTCK_SET;
++    // SpyBiWire mode is active now
++
++    ResetTAP_sbw();                 // Reset JTAG state machine, check fuse HW
++
++    if (IsFuseBlown())              // Stop here if fuse is already blown
++    {
++        return(STATUS_FUSEBLOWN);
++    }
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2401);                  // Set device into JTAG mode + read
++    if (IR_Shift(IR_CNTRL_SIG_CAPTURE) != JTAG_ID)
++    {
++        return(STATUS_ERROR);
++    }
++
++    // Wait until CPU is synchronized, timeout after a limited # of attempts
++    for (i = 50; i > 0; i--)
++    {
++        if (DR_Shift16(0x0000) & 0x0200)
++        {
++            word DeviceId;
++            DeviceId = ReadMem(F_WORD, 0x0FF0);// Get target device type
++                                               //(bytes are interchanged)
++            DeviceId = (DeviceId << 8) + (DeviceId >> 8); // swop bytes
++            //Set Device index, which is used by functions in Device.c
++            SetDevice(DeviceId);
++            break;
++        }
++        else
++        {
++            if (i == 1)
++            {
++                return(STATUS_ERROR);      // Timeout reached, return false
++            }
++        }
++    }
++    if (!ExecutePOR())                     // Perform PUC, Includes
++    {                                      // target Watchdog disable.
++        return(STATUS_ERROR);
++    }
++    return(STATUS_OK);
++}
++
++//----------------------------------------------------------------------------
++/* Function to release the target device from JTAG control
++   Argument: word Addr (0xFFFE: Perform Reset, means Load Reset Vector into PC,
++                        otherwise: Load Addr into PC)
++   Result:   None
++*/
++void ReleaseDevice(word Addr)
++{
++    if (Addr == V_RESET)
++    {
++        IR_Shift(IR_CNTRL_SIG_16BIT);
++        DR_Shift16(0x2C01);         // Perform a reset
++        DR_Shift16(0x2401);
++    }
++    else
++    {
++        SetPC(Addr);                // Set target CPU's PC
++    }
++    IR_Shift(IR_CNTRL_SIG_RELEASE);
++}
++
++//----------------------------------------------------------------------------
++/* This function writes one byte/word at a given address ( <0xA00)
++   Arguments: word Format (F_BYTE or F_WORD)
++              word Addr (Address of data to be written)
++              word Data (shifted data)
++   Result:    None
++*/
++void WriteMem(word Format, word Addr, word Data)
++{
++    HaltCPU();
++
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    if  (Format == F_WORD)
++    {
++        DR_Shift16(0x2408);     // Set word write
++    }
++    else
++    {
++        DR_Shift16(0x2418);     // Set byte write
++    }
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(Addr);           // Set addr
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(Data);           // Shift in 16 bits
++    SetTCLK();
++
++    ReleaseCPU();
++}
++
++//----------------------------------------------------------------------------
++/* This function writes an array of words into the target memory.
++   Arguments: word StartAddr (Start address of target memory)
++              word Length (Number of words to be programmed)
++              word *DataArray (Pointer to array with the data)
++   Result:    None
++*/
++void WriteMemQuick(word StartAddr, word Length, word *DataArray)
++{
++    word i;
++
++    // Initialize writing:
++    SetPC((word)(StartAddr-4));
++    HaltCPU();
++
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2408);             // Set RW to write
++    IR_Shift(IR_DATA_QUICK);
++    for (i = 0; i < Length; i++)
++    {
++        DR_Shift16(DataArray[i]);   // Shift in the write data
++        SetTCLK();
++        ClrTCLK();                  // Increment PC by 2
++    }
++    ReleaseCPU();
++}
++
++//----------------------------------------------------------------------------
++/* This function programs/verifies an array of words into an FLASH by
++   using the FLASH controller.
++   Arguments: word StartAddr (Start address of FLASH memory)
++              word Length (Number of words to be programmed)
++              word *DataArray (Pointer to array with the data)
++   Result:    None
++*/
++void WriteFLASH(word StartAddr, word Length, word *DataArray)
++{
++    word i;                     // Loop counter
++    word addr = StartAddr;      // Address counter
++    word FCTL3_val = 0xA500;    // ok for all devices; if Info-Seg. A on F2xxx should not be programmed
++//  word FCTL3_val = 0xA540;    // only if Info-Seg. A on F2xxx should be programmed
++
++    HaltCPU();
++
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2408);         // Set RW to write
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(0x0128);         // FCTL1 register
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(0xA540);         // Enable FLASH write
++    SetTCLK();
++
++    ClrTCLK();
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(0x012A);         // FCTL2 register
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(0xA540);         // Select MCLK as source, DIV=1
++    SetTCLK();
++
++    ClrTCLK();
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(0x012C);         // FCTL3 register
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(FCTL3_val);      // Clear FCTL3; F2xxx: Unlock Info-Seg.
++                                // A by toggling LOCKA-Bit if required,
++    SetTCLK();
++
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++
++    for (i = 0; i < Length; i++, addr += 2)
++    {
++        DR_Shift16(0x2408);             // Set RW to write
++        IR_Shift(IR_ADDR_16BIT);
++        DR_Shift16(addr);               // Set address
++        IR_Shift(IR_DATA_TO_ADDR);
++        DR_Shift16(DataArray[i]);       // Set data
++        SetTCLK();
++        ClrTCLK();
++        IR_Shift(IR_CNTRL_SIG_16BIT);
++        DR_Shift16(0x2409);             // Set RW to read
++
++        TCLKstrobes(35);        // Provide TCLKs, min. 33 for F149 and F449
++                                // F2xxx: 29 are ok
++    }
++
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2408);         // Set RW to write
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(0x0128);         // FCTL1 register
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(0xA500);         // Disable FLASH write
++    SetTCLK();
++
++    // set LOCK-Bits again
++    ClrTCLK();
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(0x012C);         // FCTL3 address
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(FCTL3_val);      // Lock Inf-Seg. A by toggling LOCKA and set LOCK again
++    SetTCLK();
++
++    ReleaseCPU();
++}
++
++//----------------------------------------------------------------------------
++/* This function programs/verifies a set of data arrays of words into a FLASH
++   memory by using the "WriteFLASH()" function. It conforms with the
++   "CodeArray" structure convention of file "Target_Code.s43" or "Target_Code.h".
++   Arguments: 	const unsigned int  *DataArray (Pointer to array with the data)
++		const unsigned long *address (Pointer to array with the startaddresses)
++		const unsigned long *length_of_sections (Pointer to array with the number of words counting from startaddress)
++		const unsigned long sections (Number of sections in code file)
++   Result:      word (STATUS_OK if verification was successful,
++                    STATUS_ERROR otherwise)
++*/
++word WriteFLASHallSections(const unsigned int *data, const unsigned long *address, const unsigned long *length_of_sections, const unsigned long sections)
++{
++    int i, init = 1;
++
++    for(i = 0; i < sections; i++)
++    {
++        // Write/Verify(PSA) one FLASH section
++        WriteFLASH(address[i], length_of_sections[i], (word*)&data[init-1]);
++        if (!VerifyMem(address[i], length_of_sections[i], (word*)&data[init-1]))
++        {
++            return(STATUS_ERROR);
++        }
++        init += length_of_sections[i];
++    }
++
++    return(STATUS_OK);
++}
++
++//----------------------------------------------------------------------------
++/* This function reads one byte/word from a given address in memory
++   Arguments: word Format (F_BYTE or F_WORD)
++              word Addr (address of memory)
++   Result:    word (content of the addressed memory location)
++*/
++word ReadMem(word Format, word Addr)
++{
++    word TDOword;
++
++    HaltCPU();
++
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    if  (Format == F_WORD)
++    {
++        DR_Shift16(0x2409);         // Set word read
++    }
++    else
++    {
++        DR_Shift16(0x2419);         // Set byte read
++    }
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(Addr);               // Set address
++    IR_Shift(IR_DATA_TO_ADDR);
++    SetTCLK();
++
++    ClrTCLK();
++    TDOword = DR_Shift16(0x0000);   // Shift out 16 bits
++
++    ReleaseCPU();
++    return(Format == F_WORD ? TDOword : TDOword & 0x00FF);
++}
++
++//----------------------------------------------------------------------------
++/* This function reads an array of words from a memory.
++   Arguments: word StartAddr (Start address of memory to be read)
++              word Length (Number of words to be read)
++              word *DataArray (Pointer to array for the data)
++   Result:    None
++*/
++void ReadMemQuick(word StartAddr, word Length, word *DataArray)
++{
++    word i;
++
++    // Initialize reading:
++    SetPC(StartAddr-4);
++    HaltCPU();
++
++    ClrTCLK();
++    IR_Shift(IR_CNTRL_SIG_16BIT);
++    DR_Shift16(0x2409);                    // Set RW to read
++    IR_Shift(IR_DATA_QUICK);
++
++    for (i = 0; i < Length; i++)
++    {
++        SetTCLK();
++        DataArray[i] = DR_Shift16(0x0000); // Shift out the data
++                                           // from the target.
++        ClrTCLK();
++    }
++    ReleaseCPU();
++}
++
++//----------------------------------------------------------------------------
++/* This function performs a mass erase (with and w/o info memory) or a segment
++   erase of a FLASH module specified by the given mode and address.
++   Large memory devices get additional mass erase operations to meet the spec.
++   Arguments: word Mode (could be ERASE_MASS or ERASE_MAIN or ERASE_SGMT)
++              word Addr (any address within the selected segment)
++   Result:    None
++   Remark:    Could be extended with erase check via PSA.
++*/
++void EraseFLASH(word EraseMode, word EraseAddr)
++{
++    word StrobeAmount = 4820;       // default for Segment Erase
++    word i, loopcount = 1;          // erase cycle repeating for Mass Erase
++    word FCTL3_val = 0xA500;        // ok for all devices; if Info-Seg. A on F2xxx should not be erased
++//  word FCTL3_val = 0xA540;        // only if Info-Seg. A on F2xxx should be erased
++
++    if ((EraseMode == ERASE_MASS) || (EraseMode == ERASE_MAIN))
++    {
++        if(DeviceHas_FastFlash())
++        {
++            StrobeAmount = 10600;        // Larger Flash memories require
++        }
++        else
++        {
++            StrobeAmount = 5300;        // Larger Flash memories require
++            loopcount = 19;             // additional cycles for erase.
++        }
++    }
++    HaltCPU();
++    for (i = loopcount; i > 0; i--)
++    {
++        ClrTCLK();
++        IR_Shift(IR_CNTRL_SIG_16BIT);
++        DR_Shift16(0x2408);         // set RW to write
++        IR_Shift(IR_ADDR_16BIT);
++        DR_Shift16(0x0128);         // FCTL1 address
++        IR_Shift(IR_DATA_TO_ADDR);
++        DR_Shift16(EraseMode);      // Enable erase mode
++        SetTCLK();
++
++        ClrTCLK();
++        IR_Shift(IR_ADDR_16BIT);
++        DR_Shift16(0x012A);         // FCTL2 address
++        IR_Shift(IR_DATA_TO_ADDR);
++        DR_Shift16(0xA540);         // MCLK is source, DIV=1
++        SetTCLK();
++
++        ClrTCLK();
++        IR_Shift(IR_ADDR_16BIT);
++        DR_Shift16(0x012C);         // FCTL3 address
++        IR_Shift(IR_DATA_TO_ADDR);
++        DR_Shift16(FCTL3_val);      // Clear FCTL3; F2xxx: Unlock Info-Seg. A by toggling LOCKA-Bit if required,
++        SetTCLK();
++
++        ClrTCLK();
++        IR_Shift(IR_ADDR_16BIT);
++        DR_Shift16(EraseAddr);      // Set erase address
++        IR_Shift(IR_DATA_TO_ADDR);
++        DR_Shift16(0x55AA);         // Dummy write to start erase
++        SetTCLK();
++
++        ClrTCLK();
++        IR_Shift(IR_CNTRL_SIG_16BIT);
++        DR_Shift16(0x2409);         // Set RW to read
++        TCLKstrobes(StrobeAmount);  // Provide TCLKs
++        IR_Shift(IR_CNTRL_SIG_16BIT);
++        DR_Shift16(0x2408);         // Set RW to write
++        IR_Shift(IR_ADDR_16BIT);
++        DR_Shift16(0x0128);         // FCTL1 address
++        IR_Shift(IR_DATA_TO_ADDR);
++        DR_Shift16(0xA500);         // Disable erase
++        SetTCLK();
++    }
++    // set LOCK-Bits again
++    ClrTCLK();
++    IR_Shift(IR_ADDR_16BIT);
++    DR_Shift16(0x012C);         // FCTL3 address
++    IR_Shift(IR_DATA_TO_ADDR);
++    DR_Shift16(FCTL3_val);      // Lock Inf-Seg. A by toggling LOCKA (F2xxx) and set LOCK again
++    SetTCLK();
++
++    ReleaseCPU();
++}
++
++//----------------------------------------------------------------------------
++/* This function performs an Erase Check over the given memory range
++   Arguments: word StartAddr (Start address of memory to be checked)
++              word Length (Number of words to be checked)
++   Result:    word (STATUS_OK if erase check was successful, STATUS_ERROR otherwise)
++*/
++word EraseCheck(word StartAddr, word Length)
++{
++    return (VerifyPSA(StartAddr, Length, 0));
++}
++
++//----------------------------------------------------------------------------
++/* This function performs a Verification over the given memory range
++   Arguments: word StartAddr (Start address of memory to be verified)
++              word Length (Number of words to be verified)
++              word *DataArray (Pointer to array with the data)
++   Result:    word (STATUS_OK if verification was successful, STATUS_ERROR otherwise)
++*/
++word VerifyMem(word StartAddr, word Length, word *DataArray)
++{
++    return (VerifyPSA(StartAddr, Length, DataArray));
++}
++
++
++//------------------------------------------------------------------------
++/* This function checks if the JTAG access security fuse is blown.
++   Arguments: None
++   Result:    word (STATUS_OK if fuse is blown, STATUS_ERROR otherwise)
++*/
++word IsFuseBlown(void)
++{
++  word i;
++  for (i = 3; i > 0; i--)   //  First trial could be wrong
++  {
++     IR_Shift(IR_CNTRL_SIG_CAPTURE);
++     if (DR_Shift16_sbw(0xAAAA) == 0x5555)
++        return(STATUS_OK);  // Fuse is blown
++  }
++  return(STATUS_ERROR);     // fuse is not blown
++}
++
++
++/****************************************************************************/
++/*                         END OF SOURCE FILE                               */
++/****************************************************************************/
+Index: linux-2.6.26/drivers/mxc/baby/msp430/JTAGfuncSBW.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/JTAGfuncSBW.h	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,105 @@
++/*==========================================================================*\
++|                                                                            |
++| JTAGfuncSBW.h                                                                 |
++|                                                                            |
++| JTAG Function Prototypes and Definitions                                   |
++|----------------------------------------------------------------------------|
++| Project:              JTAG Functions                                       |
++| Developed using:      IAR Embedded Workbench 3.40B [Kickstart]             |
++|             and:      Code Composer Eessentials 2.0                        |
++|----------------------------------------------------------------------------|
++| Author:               STO                                                  |
++| Version:              1.5                                                  |
++| Initial Version:      04-17-02                                             |
++| Last Change:          04-25-07                                             |
++|----------------------------------------------------------------------------|
++| Version history:                                                           |
++| 1.0 04/02 FRGR        Initial version.                                     |
++| 1.1 06/02 ALB2        Formatting changes, added comments.                  |
++| 1.2 08/02 ALB2        Initial code release with Lit# SLAA149.              |
++| 1.3 01/06 STO         Minor cosmetic changes                               |
++| 1.4 02/06 STO         renamed from JTAGfunc.h                              |
++| 1.5 04/07 WLUT        WriteFLASHallSections changed due to function spec   |
++|----------------------------------------------------------------------------|
++| Designed 2002 by Texas Instruments Germany                                 |
++\*==========================================================================*/
++
++#ifndef __BYTEWORD__
++#define __BYTEWORD__
++typedef unsigned short word;
++typedef unsigned char byte;
++#endif
++
++/****************************************************************************/
++/* Define section for constants                                             */
++/****************************************************************************/
++
++// Constants for the JTAG instruction register (IR, requires LSB first).
++// The MSB has been interchanged with LSB due to use of the same shifting
++// function as used for the JTAG data register (DR, requires MSB first).
++
++// Instructions for the JTAG control signal register
++#define IR_CNTRL_SIG_16BIT         0xC8   // 0x13 original values
++#define IR_CNTRL_SIG_CAPTURE       0x28   // 0x14
++#define IR_CNTRL_SIG_RELEASE       0xA8   // 0x15
++// Instructions for the JTAG Fuse
++#define IR_PREPARE_BLOW            0x44   // 0x22
++#define IR_EX_BLOW                 0x24   // 0x24
++// Instructions for the JTAG data register
++#define IR_DATA_16BIT              0x82   // 0x41
++#define IR_DATA_QUICK              0xC2   // 0x43
++// Instructions for the JTAG PSA mode
++#define IR_DATA_PSA                0x22   // 0x44
++#define IR_SHIFT_OUT_PSA           0x62   // 0x46
++// Instructions for the JTAG address register
++#define IR_ADDR_16BIT              0xC1   // 0x83
++#define IR_ADDR_CAPTURE            0x21   // 0x84
++#define IR_DATA_TO_ADDR            0xA1   // 0x85
++// Bypass instruction
++#define IR_BYPASS                  0xFF   // 0xFF
++
++// JTAG identification value for all existing Flash-based MSP430 devices
++#define JTAG_ID                    0x89
++
++// Constants for data formats, dedicated addresses
++#define F_BYTE                     8
++#define F_WORD                     16
++#define V_RESET                    0xFFFE
++
++// Constants for VPP connection at Blow-Fuse
++#define VPP_ON_TDI                 0
++#define VPP_ON_TEST                1
++
++/****************************************************************************/
++/* Function prototypes                                                      */
++/****************************************************************************/
++
++// Low level JTAG functions
++word DR_Shift16_sbw(word Data);
++#define DR_Shift16   DR_Shift16_sbw
++word IR_Shift_sbw(byte Instruction);
++#define IR_Shift     IR_Shift_sbw
++void ResetTAP_sbw(void);
++word ExecutePOR(void);
++word SetInstrFetch(void);
++void SetPC(word Addr);
++void HaltCPU(void);
++word VerifyPSA_sbw(word StartAddr, word Length, word *DataArray);
++#define VerifyPSA       VerifyPSA_sbw
++
++// High level JTAG functions
++word GetDevice_sbw(void);
++#define GetDevice GetDevice_sbw
++void ReleaseDevice(word Addr);
++void WriteMem(word Format, word Addr, word Data);
++void WriteMemQuick(word StartAddr, word Length, word *DataArray);
++void WriteFLASH(word StartAddr, word Length, word *DataArray);
++word WriteFLASHallSections(const unsigned int *data, const unsigned long *address, const unsigned long *length_of_sections, const unsigned long sections);
++word ReadMem(word Format, word Addr);
++void ReadMemQuick(word StartAddr, word Length, word *DataArray);
++void EraseFLASH(word EraseMode, word EraseAddr);
++word EraseCheck(word StartAddr, word Length);
++word VerifyMem(word StartAddr, word Length, word *DataArray);
++word BlowFuse(void);
++word IsFuseBlown(void);
++
+Index: linux-2.6.26/drivers/mxc/baby/msp430/Kconfig
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/Kconfig	2009-07-28 18:13:10.000000000 +0200
+@@ -0,0 +1,15 @@
++#
++# baby msp430 device driver configuration
++#
++
++menu "Baby MSP430 support"
++
++config BABY_MSP430_PROGRAMMER
++       tristate "Baby MSP430 Spy-bi-wire programmer"
++       depends on MACH_MX25_BABY && I2C
++       default m
++       ---help---
++       This driver allows programming of the Texas Instruments MSP430
++       via the Spy-Bi-Wire interface.
++
++endmenu
+Index: linux-2.6.26/drivers/mxc/baby/msp430/LowLevelFuncSBW.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/LowLevelFuncSBW.c	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,274 @@
++/*==========================================================================*\
++|                                                                            |
++| LowLevelFunc.c                                                             |
++|                                                                            |
++| Low Level Functions regarding user's Hardware                              |
++|----------------------------------------------------------------------------|
++| Project:              MSP430 Replicator                                    |
++| Developed using:      IAR Embedded Workbench 3.30B                         |
++|             and:      Code Composer Eessentials 2.0                        |
++|----------------------------------------------------------------------------|
++| Author:               STO                                                  |
++| Version:              1.5                                                  |
++| Initial Version:      04-17-02                                             |
++| Last Change:          12-16-05                                             |
++|----------------------------------------------------------------------------|
++| Version history:                                                           |
++| 1.0 04/02 FRGR        Initial version.                                     |
++| 1.1 04/02 FRGR        Included SPI mode to speed up shifting function by 2.|
++| 1.2 06/02 ALB2        Formatting changes, added comments.                  |
++| 1.3 08/02 ALB2        Initial code release with Lit# SLAA149.              |
++| 1.4 09/05 SUN1        Software delays redesigned to use TimerA harware;    |
++|                       see MsDelay() routine. Added TA setup                |
++| 1.5 12/05 STO         Adapted for SpyBiWire JTAG mode                      |
++|----------------------------------------------------------------------------|
++| Designed 2002 by Texas Instruments Germany                                 |
++\*==========================================================================*/
++#include <linux/delay.h>
++#include "LowLevelFuncSBW.h"
++
++
++char tdo_bit;               //holds the value of TDO-bit
++byte TCLK_saved = 1;       // holds the last value of TCLK before entering a JTAG sequence
++
++/****************************************************************************/
++/* Function declarations which have to be programmed by the user for use    */
++/* with hosts other than the MSP430F149.                                    */
++/*                                                                          */
++/* The following MSP430F149-specific code can be used as a reference as to  */
++/* how to implement the required JTAG communication on additional hosts.    */
++/****************************************************************************/
++
++
++//-------------------------------
++//  combinations of sbw-cycles (TMS, TDI, TDO)
++void TMSL_TDIL(void)
++{
++    TMSL  TDIL  TDOsbw
++}
++//---------------------------------
++void TMSH_TDIL(void)
++{
++    TMSH  TDIL  TDOsbw
++}
++//------------------------------------
++void TMSL_TDIH(void)
++{
++	TMSL;
++	TDIH;
++	TDOsbw;
++}
++//-------------------------------------
++void TMSH_TDIH(void)
++{
++	TMSH;
++	TDIH;
++	TDOsbw;
++}
++//------------------------------------
++void TMSL_TDIH_TDOrd(void)
++{
++	TMSL;
++	TDIH;
++	TDO_RD;
++}
++//------------------------------------
++void TMSL_TDIL_TDOrd(void)
++{
++	TMSL;
++	TDIL;
++	TDO_RD;
++}
++//------------------------------------
++void TMSH_TDIH_TDOrd(void)
++{
++	TMSH;
++	TDIH;
++	TDO_RD;
++}
++//------------------------------------
++void TMSH_TDIL_TDOrd(void)
++{
++	TMSH;
++	TDIL;
++	TDO_RD;
++}
++
++//----------------------------------------------
++// enters with TCLK_saved and exits with TCLK = 0
++void ClrTCLK_sbw(void)
++{
++	if (TCLK_saved & SBWTDIO_GET)
++	{
++		TMSLDH;
++	}
++	else
++	{
++		TMSL;
++	}
++
++	SBWTDIO_CLR;
++
++	TDIL;
++	TDOsbw;//ExitTCLK
++	TCLK_saved = 0;
++}
++
++//----------------------------------------------
++// enters with TCLK_saved and exits with TCLK = 1
++void SetTCLK_sbw(void)
++{
++   if (TCLK_saved & SBWTDIO_GET)
++   {
++        TMSLDH
++   }
++   else
++   {
++        TMSL
++   }
++
++   SBWTDIO_SET;
++
++   TDIH TDOsbw    //ExitTCLK
++   TCLK_saved = 1;
++}
++
++/*----------------------------------------------------------------------------
++   Initialization of the Controller Board (Master or Host)
++*/
++void InitController(void)
++{
++	volatile byte i;
++	i++; i++;
++
++}
++
++/*----------------------------------------------------------------------------
++   This function switches TDO to Input, used for fuse blowing
++*/
++/*void TDOisInput(void)
++{
++	JTAGOUT &= ~TDICTRL1;	    // Release TDI pin on target
++	MsDelay(5);				    // Settle MOS relay
++	JTAGOUT |=  TDICTRL2;		// Switch TDI --> TDO
++	MsDelay(5);				    // Settle MOS relay
++}*/
++
++/*----------------------------------------------------------------------------
++   Initialization of the Target Board (switch voltages on, preset JTAG pins)
++*/
++void InitTarget(void)
++{
++	// Set up pins:
++	MsDelay(50);				        // Settle MOS relays, target capacitor
++}
++
++/*----------------------------------------------------------------------------
++   Release Target Board (switch voltages off, JTAG pins are HI-Z)
++*/
++void ReleaseTarget(void)
++{
++	MsDelay(5);				// Settle MOS relays
++	// put pins back to input.
++	MsDelay(5);				// Settle MOS relays
++}
++
++//----------------------------------------------------------------------------
++/*  Shift a value into TDI (MSB first) and simultaneously shift out a value
++    from TDO (MSB first).
++    Arguments: word Format (number of bits shifted, 8 (F_BYTE) or 16 (F_WORD))
++               word Data (data to be shifted into TDI)
++    Result:    word (scanned TDO value)
++*/
++word Shift_sbw(word Format, word Data)
++{
++   word TDOword = 0x0000;
++   word MSB = 0x0000;
++   word i;
++
++   (Format == F_WORD) ? (MSB = 0x8000) : (MSB = 0x80);
++   for (i = Format; i > 0; i--)
++   {
++        if (i == 1)                     // last bit requires TMS=1; TDO one bit before TDI
++        {
++          ((Data & MSB) == 0) ? TMSH_TDIL_TDOrd() : TMSH_TDIH_TDOrd();
++        }
++        else
++        {
++          ((Data & MSB) == 0) ? TMSL_TDIL_TDOrd() : TMSL_TDIH_TDOrd();
++        }
++        Data <<= 1;
++        if (tdo_bit & SBWTDIO_GET)
++            TDOword++;
++        if (i > 1)
++            TDOword <<= 1;               // TDO could be any port pin
++   }
++   TMSH_TDIH();                         // update IR
++   if (TCLK_saved & SBWTDIO_GET)
++   {
++        TMSL_TDIH();
++   }
++   else
++   {
++        TMSL_TDIL();
++   }
++   return(TDOword);
++}
++
++
++/*---------------------------------------------------------------------------
++   Delay function (resolution is 1 ms)
++   Arguments: word millisec (number of ms, max number is 0xFFFF)
++*/
++void MsDelay(word milliseconds)
++{
++	int i;
++	for (i = 0; i < milliseconds; i++) {
++		udelay(1000);
++	}
++}
++
++/*---------------------------------------------------------------------------
++   This function generates Amount strobes with the Flash Timing Generator
++   Frequency fFTG = 257..476kHz (t = 3.9..2.1us).
++   User knows target frequency, instruction cycles, C implementation.
++   Arguments: word Amount (number of strobes to be generated)
++*/
++void TCLKstrobes_sbw(word Amount)       // enters with TCLK_saved and exits with TCLK = 1
++{
++   word i;
++
++   if (TCLK_saved & SBWTDIO_GET)
++   {
++        TMSLDH
++   }                         // TDI = 1 with rising sbwclk
++   else
++   {
++        TMSL
++   }
++   for (i = Amount; i > 0; i--)
++   {
++        SBWTDIO_CLR;
++        DELAY_A_SMIDGE;
++        SBWTDIO_SET;
++   }
++   TDIH TDOsbw    //ExitTCLK
++   TCLK_saved = SBWTDIO_GET;
++}
++
++#ifdef DEBUG
++void TriggerPulse(word mode)
++{
++	switch (mode)
++	{
++		case 1:	LEDOUT  |=  TRIGGER;	// mode = 1: set trigger
++				break;
++		case 2:	LEDOUT  |=  TRIGGER;	// mode = 2: set/reset trigger
++		case 0:	LEDOUT  &= ~TRIGGER;	// mode = 0: reset trigger
++	}
++}
++#endif
++
++/****************************************************************************/
++/*                         END OF SOURCE FILE                               */
++/****************************************************************************/
+Index: linux-2.6.26/drivers/mxc/baby/msp430/LowLevelFuncSBW.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/LowLevelFuncSBW.h	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,120 @@
++/*==========================================================================*\
++|                                                                            |
++| LowLevelFunc.h                                                             |
++|                                                                            |
++| Low Level function prototypes, macros, and pin-to-signal assignments       |
++| regarding to user's hardware                                               |
++|----------------------------------------------------------------------------|
++| Project:              MSP430 Replicator                                    |
++| Developed using:      IAR Embedded Workbench 3.40B                         |
++|             and:      Code Composer Eessentials 2.0                        |
++|----------------------------------------------------------------------------|
++| Author:               STO                                                  |
++| Version:              1.5                                                  |
++| Initial Version:      04-17-02                                             |
++| Last Change:          01-21-05                                             |
++|----------------------------------------------------------------------------|
++| Version history:                                                           |
++| 1.0 04/02 FRGR        Initial version.                                     |
++| 1.1 04/02 FRGR        Included SPI mode to speed up shifting function by 2.|
++|                       (JTAG control now on Port5)                          |
++| 1.2 06/02 ALB2        Formatting changes, added comments. Removed code used|
++|                       for debug purposes during development.               |
++| 1.3 08/02 ALB2        Initial code release with Lit# SLAA149.              |
++| 1.4 09/05 SUN1        Software delays redesigned to use TimerA harware;    |
++|                       see MsDelay() routine. Added TA constant.            |
++| 1.5 01/05 STO			Adapted for SpyBiWire       						 |
++|----------------------------------------------------------------------------|
++| Designed 2002 by Texas Instruments Germany                                 |
++\*==========================================================================*/
++
++/****************************************************************************/
++/* Macros and Pin-to-Signal assignments which have to be programmed         */
++/* by the user. This implementation assumes use of an MSP430F149 as the host*/
++/* controller and the corresponding hardware given in the application       */
++/* report TBD Appendix A.                                                   */
++/*                                                                          */
++/* The following MSP430 example acts as a hint of how to generally          */
++/* implement a micro-controller programmer solution for the MSP430 flash-   */
++/* based devices.                                                           */
++/****************************************************************************/
++
++#include "LowLevelImplementation.h"
++#include "JTAGfuncSBW.h"
++
++#ifndef __BYTEWORD__
++#define __BYTEWORD__
++typedef unsigned int   word;
++typedef unsigned char   byte;
++#endif
++
++// Constants for runoff status
++#define STATUS_ERROR     0      // false
++#define STATUS_OK        1      // true
++#define STATUS_FUSEBLOWN 2      // GetDevice returns if the security fuse is blown
++
++#define STATUS_ACTIVE    2
++#define STATUS_IDLE      3
++
++
++/****************************************************************************/
++/* Define section for user, related to the controller used (here MSP430F149)*/
++/****************************************************************************/
++
++#define FREQUENCY   8000        // CPU frequency in kHz
++
++
++//----------------------------------------------------------------------------
++// Pin-to-Signal Assignments
++//----------------------------------------------------------------------------
++
++
++
++/*----------------------------------------------------------------------------
++    Macros to control spy-by-wire-IF
++*/
++#define   TMSH    SBWTDIO_SET;   SBWTCK_CLR;              SBWTCK_SET;     /* TMS = 1                                   */
++#define   TMSL    SBWTDIO_CLR;   SBWTCK_CLR;              SBWTCK_SET;     /* TMS = 0				       */
++#define   TMSLDH  SBWTDIO_CLR;   SBWTCK_CLR; SBWTDIO_SET; SBWTCK_SET;     /* TMS = 0, then TCLK(TDI) immediately = 1   */
++#define   TDIH    SBWTDIO_SET;   SBWTCK_CLR;              SBWTCK_SET;     /* TDI = 1				       */
++#define   TDIL    SBWTDIO_CLR;   SBWTCK_CLR;              SBWTCK_SET;     /* TDI = 0				       */
++#define   TDOsbw  SBWTDIO_INPUT; SBWTCK_CLR; SBWTCK_SET;  SBWTDIO_OUTPUT; /* TDO cycle without reading TDO             */
++// #define   TDO_RD  SBWTDIO_INPUT; SBWTCK_CLR; DELAY_A_SMIDGE;  tdo_bit = SBWTDIO_GET; SBWTCK_SET; SBWTDIO_OUTPUT; /* TDO cycle with TDO read */
++#define   TDO_RD  SBWTDIO_INPUT; SBWTCK_CLR; DELAY_A_SMIDGE; tdo_bit = SBWTDIO_GET; SBWTCK_SET; SBWTDIO_OUTPUT; /* TDO cycle with TDO read */
++
++#define   SetSBWTCK()     (JTAGOUT |=   SBWCLK)
++#define   ClrSBWTCK()     (JTAGOUT &=  ~SBWCLK)
++#define   SetSBWTDIO()    (JTAGOUT |=   SBWDATO)
++#define   ClrSBWTDIO()    (JTAGOUT &=  ~SBWDATO)
++
++/*----------------------------------------------------------------------------
++   Definition of global variables
++*/
++extern byte TCLK_saved;      // holds the last value of TCLK before entering a JTAG sequence
++
++/*----------------------------------------------------------------------------
++   Low Level function prototypes
++*/
++void TMSL_TDIL(void);
++void TMSH_TDIL(void);
++void TMSL_TDIH(void);
++void TMSH_TDIH(void);
++void TMSL_TDIH_TDOrd(void);
++void TMSL_TDIL_TDOrd(void);
++void TMSH_TDIH_TDOrd(void);
++void TMSH_TDIL_TDOrd(void);
++void TCLKs_sbw(word clks);
++void ClrTCLK_sbw(void);
++#define ClrTCLK()       ClrTCLK_sbw()
++void SetTCLK_sbw(void);
++#define SetTCLK()       SetTCLK_sbw()
++void TCLKstrobes_sbw(word Amount);
++#define TCLKstrobes(n)  TCLKstrobes_sbw(n)
++void MsDelay(word milliseconds);      	// millisecond delay loop, uses Timer_A
++void InitController(void);
++void InitTarget(void);
++void ReleaseTarget(void);
++word Shift_sbw(word Format, word Data); // used for IR- as well as DR-shift
++//void TDOisInput(void);
++void ShowStatus(word Status, word Index);
++void TriggerPulse(word Mode);         	// optional for test
+Index: linux-2.6.26/drivers/mxc/baby/msp430/LowLevelImplementation.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/LowLevelImplementation.h	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,36 @@
++#ifndef __LOWLEVELIMPLEMENTATION_H__
++#define __LOWLEVELIMPLEMENTATION_H__
++
++#include <asm/arch/gpio.h>
++
++typedef struct
++{
++	unsigned int sbwtck_res;
++	unsigned int sbwtdio_res;
++	unsigned int pump_res;
++} msp430_programmer_t;
++
++extern msp430_programmer_t *msp430_programmer_state;
++
++/* return value on the SBWTDIO pin */
++#define    SBWTDIO_GET    mxc_get_gpio_datain(msp430_programmer_state->sbwtdio_res)
++/* return value on the SBWTCK pin */
++#define    SBWTCK_GET     mxc_get_gpio_datain(msp430_programmer_state->sbwtck_res)
++/* clear the SBWTDIO pin */
++#define    SBWTDIO_CLR    mxc_set_gpio_dataout(msp430_programmer_state->sbwtdio_res, 0)
++/* set the SBWTDIO pin */
++#define    SBWTDIO_SET    mxc_set_gpio_dataout(msp430_programmer_state->sbwtdio_res, 1); DELAY_A_SMIDGE;
++/* set the SBWTDIO to output */
++#define    SBWTDIO_OUTPUT mxc_set_gpio_direction(msp430_programmer_state->sbwtdio_res, 0)
++/* set the SBWTDIO to output */
++#define    SBWTDIO_INPUT  mxc_set_gpio_direction(msp430_programmer_state->sbwtdio_res, 1)
++/* set the SBWTCK pin */
++#define    SBWTCK_SET     mxc_set_gpio_dataout(msp430_programmer_state->sbwtck_res, 1)
++/* Clear the SBWTCK pin */
++#define    SBWTCK_CLR     mxc_set_gpio_dataout(msp430_programmer_state->sbwtck_res, 0)
++/* Delay a cycle or few.  This was a _NOP() cycle on the original msp430 implementation. */
++#define    DELAY_A_SMIDGE \
++	mxc_set_gpio_dataout(msp430_programmer_state->pump_res,		\
++  			     !mxc_get_gpio_datain(msp430_programmer_state->pump_res)); \
++
++#endif //__LOWLEVELIMPLEMENTATION_H__
+Index: linux-2.6.26/drivers/mxc/baby/msp430/Makefile
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/Makefile	2009-07-28 17:38:24.000000000 +0200
+@@ -0,0 +1,4 @@
++
++obj-$(CONFIG_BABY_MSP430_PROGRAMMER)   += msp430.o
++
++msp430-objs := Devices.o JTAGfuncSBW.o LowLevelFuncSBW.o msp430_programmer.o msp430_i2c.o
+Index: linux-2.6.26/drivers/mxc/baby/Makefile
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/Makefile	2009-07-28 17:38:23.000000000 +0200
++++ linux-2.6.26/drivers/mxc/baby/Makefile	2009-07-28 17:38:24.000000000 +0200
+@@ -4,3 +4,4 @@
+ 
+ obj-$(CONFIG_MXC_BABY_DEBUG_GPIO)       += baby_gpio.o
+ obj-$(CONFIG_MXC_BABY_BUTTONS)          += baby_buttons.o
++obj-y                                   += msp430/
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c	2009-07-28 18:13:19.000000000 +0200
+@@ -0,0 +1,417 @@
++/*
++ * Copyright 2009 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/input.h>
++#include <linux/irq.h>
++#include <linux/firmware.h>
++#include <linux/ctype.h>
++#include <linux/i2c.h>
++
++#include <asm/arch/gpio.h>
++
++#include "msp430.h"
++#include "Devices.h"
++#include "LowLevelFuncSBW.h"
++#include "JTAGfuncSBW.h"
++
++
++msp430_programmer_t *msp430_programmer_state = NULL;
++
++
++static void msp430_request_gpio(void)
++{
++	/* set to output */
++	mxc_set_gpio_direction(msp430_programmer_state->pump_res,    0);
++	mxc_set_gpio_direction(msp430_programmer_state->sbwtdio_res, 0);
++	mxc_set_gpio_direction(msp430_programmer_state->sbwtck_res,  0);
++
++	mxc_set_gpio_dataout  (msp430_programmer_state->sbwtck_res,  1);
++	mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 1);
++}
++
++
++static void msp430_release_gpio(void)
++{
++	/* set to input */
++	mxc_set_gpio_direction(msp430_programmer_state->pump_res,    1);
++	mxc_set_gpio_direction(msp430_programmer_state->sbwtdio_res, 1);
++	mxc_set_gpio_direction(msp430_programmer_state->sbwtck_res,  1);
++}
++
++
++static void msp430_start_charge_pump(void)
++{
++ 	int i;
++
++	for (i = 0 ; i < 100000; i++) {
++		mxc_set_gpio_dataout(msp430_programmer_state->pump_res, 0);
++		mxc_set_gpio_dataout(msp430_programmer_state->pump_res, 1);
++ 	}
++}
++
++
++static void msp430_programmer_erase(struct i2c_client *client)
++{
++ 	unsigned long flags;
++
++	msp430_request_gpio();
++
++	msp430_start_charge_pump();
++
++	/* First, turn off all interrupts */
++ 	local_irq_save(flags);
++
++ 	if (GetDevice() != STATUS_OK) {
++		local_irq_restore(flags);
++
++ 		printk(KERN_ERR "msp430: couldn't GetDevice()\n");
++ 		return;
++	}
++
++	EraseFLASH(ERASE_MASS, 0xFFFF);
++
++	if (!EraseCheck(0xE000, 0x2000)) {
++		local_irq_restore(flags);
++
++		printk(KERN_ERR "msp430: memory was NOT erased!\n");
++		return;
++	}
++
++	local_irq_restore(flags);
++
++	msp430_release_gpio();
++
++	printk(KERN_INFO "msp430: flash erased\n");
++}
++
++
++static void msp430_programmer_read(struct i2c_client *client)
++{
++ 	unsigned long flags;
++	word buf[4];
++	int i, j;
++
++	msp430_request_gpio();
++
++	msp430_start_charge_pump();
++
++	/* First, turn off all interrupts */
++ 	local_irq_save(flags);
++
++ 	if (GetDevice() != STATUS_OK) {
++		local_irq_restore(flags);
++
++ 		printk(KERN_ERR "msp430: couldn't GetDevice()\n");
++ 		return;
++	}
++
++	for (i = 0xE000; i < 0xFFFF; i += 8) {
++		for (j = 0; j < 4; j++) {
++			buf[j] = ReadMem(F_WORD, i + (j * 2));
++		}
++
++		if (buf[0] == 0xFFFF
++		    && buf[1] == 0xFFFF
++		    && buf[2] == 0xFFFF
++		    && buf[3] == 0xFFFF) {
++			continue;
++		}
++
++		printk("%04x: %04x %04x %04x %04x\n", i, buf[0], buf[1], buf[2], buf[3]);
++	}
++
++	msp430_release_gpio();
++
++	local_irq_restore(flags);
++}
++
++
++#define MAX_TXT_SECTIONS 20
++
++struct ti_txt {
++	word address;
++	word length;
++	char *data;
++};
++
++
++static struct ti_txt *parse_ti_txt(const struct firmware *fw, int *version)
++{
++	struct ti_txt *txt;
++	size_t ti_len = 0;
++	u8 *ti_ptr;
++	char *fw_ptr, *fw_end;
++	unsigned long val;
++	int section = -1;
++
++	*version = -1;
++
++	txt = kzalloc((sizeof(struct ti_txt) * MAX_TXT_SECTIONS) + fw->size, GFP_KERNEL);
++	if (!txt) {
++		goto err0;
++	}
++
++	ti_ptr = ((u8 *)txt) + (sizeof(struct ti_txt) * MAX_TXT_SECTIONS);
++
++	fw_ptr = (char *)fw->data;
++	fw_end = fw_ptr + fw->size;
++
++	while (fw_ptr < fw_end) {
++		if (isspace(*fw_ptr)) {
++			fw_ptr++;
++			continue;
++		}
++
++		if (*fw_ptr == 'q') {
++			break;
++		}
++
++		if (*fw_ptr == '@') {
++			if (section >= 0) {
++				txt[section].length = ti_len;
++			}
++
++			section++;
++			if (section >= MAX_TXT_SECTIONS) {
++				goto err1;
++			}
++
++			fw_ptr++; /* skip @ */
++
++			val = simple_strtoul(fw_ptr, &fw_ptr, 16);
++			if (val < 0 || val > 0xFFFF) {
++				goto err1;
++			}
++
++			txt[section].address = val;
++			txt[section].data = ti_ptr;
++			ti_len = 0;
++		}
++		else if (*fw_ptr == '#') {
++			fw_ptr++; /* skip # */
++
++			val = simple_strtoul(fw_ptr, &fw_ptr, 16);
++			if (val < 0 || val > 0xFFFF) {
++				goto err1;
++			}
++
++			*version = val;
++		}
++		else {
++			val = simple_strtoul(fw_ptr, &fw_ptr, 16);
++			if (val < 0 || val > 0xFF) {
++				goto err1;
++			}
++
++			*ti_ptr++ = val;
++			ti_len++;
++		}
++
++		fw_ptr++;
++	}
++
++	if (section >= 0) {
++		txt[section].length = ti_len;
++	}
++
++	return txt;
++
++ err1:
++	kfree(txt);
++ err0:
++	return NULL;
++}
++
++
++static void msp430_programmer_firmware(const struct firmware *fw, void *context)
++{
++        struct i2c_client *client = context;
++        struct msp430_i2c_data *data = i2c_get_clientdata(client);
++	struct ti_txt *txt;
++ 	unsigned long flags;
++	int i, status, txt_version, mcu_version;
++	char val[3];
++
++	if (!fw || !fw->size) {
++		printk(KERN_ERR "msp430: no firmware\n");
++		return;
++	}
++
++	/* parse firmware */
++	txt = parse_ti_txt(fw, &txt_version);
++	if (!txt) {
++		printk(KERN_ERR "msp430: can't parse firmware\n");
++		return;
++	}
++
++	/* check msp430 firmware */
++	if ((i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val) <= 0)
++	    || val[0] != I2C_ID_VALUE) {
++		printk("Couldn't read msp ID register\n");
++		mcu_version = -1;
++	} else if (i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val) > 0) {
++		mcu_version = (val[1] << 8) | val[0];
++	} else {
++		mcu_version = -1;
++	}
++
++	/* is an upgrade needed? */
++	if (mcu_version == txt_version) {
++		printk(KERN_INFO "msp430: firmware ok (%d)\n", mcu_version);
++		return;
++	}
++
++	printk(KERN_INFO "msp430: upgrade (%d to %d)\n", mcu_version, txt_version);
++
++	msp430_request_gpio();
++
++ 	/* First, turn off all interrupts. */
++ 	local_irq_save(flags);
++
++	msp430_start_charge_pump();
++
++ 	status = GetDevice();
++ 	if (status != STATUS_OK) {
++		local_irq_restore(flags);
++
++ 		printk(KERN_ERR "msp430: couldn't GetDevice()\n");
++		goto err;
++	}
++
++	EraseFLASH(ERASE_MASS, 0xFFFF);
++	if (!EraseCheck(0xE000, 0x2000)) {
++		local_irq_restore(flags);
++
++		printk(KERN_ERR "msp430: memory was NOT erased!\n");
++		goto err;
++	}
++
++	for (i=0; txt[i].data; i++) {
++		WriteFLASH(txt[i].address, txt[i].length/2, (word *)txt[i].data);
++	}
++
++#if 0
++	// FIXME: this verifies using ReadMem but not VerifyMem
++	for (i=0; txt[i].data; i++) {
++		if (VerifyMem(txt[i].address, txt[i].length/2, (word *)txt[i].data) != STATUS_OK) {
++			printk(KERN_ERR "msp430: memory was NOT verified!\n");
++		}
++	}
++#endif
++
++	ReleaseDevice(0xFFEE);
++
++ 	local_irq_restore(flags);
++
++	msp430_release_gpio();
++
++	/* verify firmware is running */
++	if (!i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val)
++	    || val[0] != I2C_ID_VALUE) {
++		printk("msp430: firmware programming failed\n");
++		goto err;
++	}
++
++	if (!i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val)) {
++		printk("msp430: firmware programming failed\n");
++		goto err;
++	}
++	mcu_version = (val[1] << 8) | val[0];
++	printk(KERN_INFO "msp430: upgrade complete (%d)\n", mcu_version);
++
++	/* turn on irq if msp430 was locked out */
++	if (data->i2c_failures >= 3) {
++		enable_irq(client->irq);
++	}
++
++	/* fall through */
++ err:
++	kfree(txt);
++	return;
++}
++
++void msp430_programmer_upgrade(struct i2c_client *client)
++{
++        struct msp430_i2c_data *data = i2c_get_clientdata(client);
++
++	snprintf(data->firmware, sizeof(data->firmware), "msp430-%04d.txt", system_rev);
++	printk(KERN_INFO "Requesting msp430 firmware %s\n", data->firmware);
++
++	request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
++				data->firmware, &client->dev,
++				client, msp430_programmer_firmware);
++}
++
++
++static ssize_t msp430_programmer_flash(struct device *dev,
++				       struct device_attribute *attr,
++				       const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++
++	if (strncmp(buf, "read", 4) == 0) {
++		msp430_programmer_read(client);
++	}
++
++	if (strncmp(buf, "erase", 5) == 0) {
++		msp430_programmer_erase(client);
++	}
++
++	else if (strncmp(buf, "program", 7) == 0) {
++		msp430_programmer_upgrade(client);
++	}
++
++	return count;
++}
++
++static DEVICE_ATTR(flash, S_IWUGO, NULL, msp430_programmer_flash);
++
++
++int msp430_programmer_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct resource *res = dev->platform_data;
++
++        msp430_programmer_state = kmalloc(sizeof(msp430_programmer_t), GFP_KERNEL);
++	if (!msp430_programmer_state) {
++ 		goto err0;
++ 	}
++
++	if (device_create_file(dev, &dev_attr_flash)) {
++		goto err1;
++	}
++
++ 	/* Get the pin resources. */
++	msp430_programmer_state->sbwtck_res   = res[0].start;
++	msp430_programmer_state->sbwtdio_res  = res[1].start;
++	msp430_programmer_state->pump_res     = res[2].start;
++
++ 	return 0;
++
++ err1:
++	device_remove_file(dev, &dev_attr_flash);
++ err0:
++ 	return -1;
++}
++
++
++int msp430_programmer_remove(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++
++	device_remove_file(dev, &dev_attr_flash);
++
++	kfree(msp430_programmer_state);
++
++ 	return 0;
++}
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-07-28 18:13:16.000000000 +0200
+@@ -0,0 +1,356 @@
++/*
++ * Copyright 2009 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#include <linux/module.h>
++#include <linux/i2c.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/input.h>
++
++#include "msp430.h"
++
++
++static void msp430_i2c_work(struct work_struct *work)
++{
++        struct msp430_i2c_data *data = irq_work_to_data(work);
++        struct i2c_client *client = data->client;
++	int flags;
++	char val[4];
++
++        mutex_lock(&data->lock);
++
++	flags = i2c_smbus_read_byte_data(client, I2C_FLAGS_REGISTER);
++	if (flags == -1) {
++		if (data->i2c_failures++ >= 3) {
++			printk(KERN_ERR "msp430 i2c bus failed\n");
++
++			mutex_unlock(&data->lock);
++			return;
++		}
++
++		mutex_unlock(&data->lock);
++		enable_irq(client->irq);
++
++		return;
++	}
++	data->i2c_failures = 0;
++
++	/* rotary encoders */
++	if ((flags & (I2C_FLAGS_NAV|I2C_FLAGS_VOL)) != 0) {
++		int nav, vol;
++
++		i2c_smbus_read_i2c_block_data(client, I2C_NAV_ENCODER_REGISTER, 1, val);
++
++		nav = ((signed char)val[0]);
++		input_report_rel(data->input_dev, REL_WHEEL, nav);
++
++		i2c_smbus_read_i2c_block_data(client, I2C_VOL_ENCODER_REGISTER, 1, val);
++
++		vol = ((signed char)val[0]);
++		input_report_rel(data->input_dev, REL_MISC, vol);
++
++		input_sync(data->input_dev);
++	}
++
++	/* ir */
++	if ((flags & I2C_FLAGS_IR) != 0) {
++		unsigned long code;
++
++		i2c_smbus_read_i2c_block_data(client, I2C_IR_REGISTER, 4, val);
++		code = (val[0] << 24) | (val[1] << 16) | (val[2] << 8) | val[3];
++
++		input_event(data->input_dev, EV_MSC, MSC_RAW, code);
++		input_sync(data->input_dev);
++	}
++
++        mutex_unlock(&data->lock);
++        enable_irq(client->irq);
++}
++
++static irqreturn_t msp430_i2c_irq(int irq, void *dev_id)
++{
++        struct msp430_i2c_data *data = dev_id;
++
++	schedule_work(&data->irq_work);
++	disable_irq(irq);
++
++        return IRQ_HANDLED;
++}
++
++
++static ssize_t msp430_i2c_show(struct device *dev, struct device_attribute *attr,
++			       char *buf)
++{
++        struct sensor_device_attribute_2 *sattr = to_sensor_dev_attr_2(attr);
++        struct i2c_client *client = to_i2c_client(dev);
++        struct msp430_i2c_data *data = i2c_get_clientdata(client);
++        int i, ret;
++	long long int val = 0;
++	unsigned char values[8] = { 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef };
++
++        mutex_lock(&data->lock);
++
++        ret = i2c_smbus_read_i2c_block_data(client, sattr->index, sattr->nr, values);
++        if(ret < 0)
++                return ret;
++	for (i=sattr->nr-1; i >= 0; i--) {
++		val = (val << 8) | values[i];
++	}
++        mutex_unlock(&data->lock);
++        return sprintf(buf, "%llu\n", val);
++}
++
++static ssize_t msp430_i2c_store(struct device *dev, struct device_attribute *attr,
++				const char *buf, size_t count)
++{
++        struct sensor_device_attribute_2 *sattr = to_sensor_dev_attr_2(attr);
++        struct i2c_client *client = to_i2c_client(dev);
++        struct msp430_i2c_data *data = i2c_get_clientdata(client);
++        int i, ret;
++	unsigned long long val;
++	unsigned char values[8];
++        if (sscanf(buf, "%lld", &val) != 1)
++                return -EINVAL;
++	if (sattr->nr < 8) {
++		if (val < 0 || val >= (1 << (8*sattr->nr))) {
++			return -ERANGE;
++		}
++	} else {
++		// any longlong value is in range.  as long as it got parsed by sscanf properly.
++	}
++
++        mutex_lock(&data->lock);
++
++	for (i=0; i < sattr->nr; i++) {
++		values[i] = val & 0xFF;
++		val = (val >> 8);
++	}
++	ret = i2c_smbus_write_i2c_block_data(client, sattr->index, sattr->nr, values);
++	if (ret < 0) {
++		return ret;
++	}
++
++        mutex_unlock(&data->lock);
++
++	return count;
++}
++
++
++static SENSOR_DEVICE_ATTR_2(fw, S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_VERSION_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(ir, S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_IR_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(ambient, S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_ALS_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(battery_charge, S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_STATE_OF_CHARGE);
++
++static SENSOR_DEVICE_ATTR_2(battery_capacity, S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_CAPACITY);
++
++static SENSOR_DEVICE_ATTR_2(battery_disable, S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, NULL, 1, I2C_BATT_CHARGE_DISABLE);
++
++static SENSOR_DEVICE_ATTR_2(kill, S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 1, I2C_KILL_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(time, S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 8, I2C_TIME_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(battery_voltage, S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_VOLTAGE_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(sys_voltage,     S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_SYS_POWER_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(vmon1_voltage,   S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_VMON1_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(vmon2_voltage,   S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(wall_voltage,    S_IRUGO,
++			    msp430_i2c_show, NULL, 2, I2C_BATT_DC_JACK_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(test_1,         S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 1, I2C_TEST_1);
++static SENSOR_DEVICE_ATTR_2(test_2,         S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 2, I2C_TEST_2);
++static SENSOR_DEVICE_ATTR_2(test_4,         S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 4, I2C_TEST_4);
++static SENSOR_DEVICE_ATTR_2(test_8,         S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 8, I2C_TEST_8);
++
++static SENSOR_DEVICE_ATTR_2(msp_buffer,      S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 8, I2C_READ_BUFFER);
++
++static SENSOR_DEVICE_ATTR_2(gp_register,      S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 8, I2C_GP_REGISTER);
++
++
++
++static const struct attribute_group msp430_i2c_group = {
++        .attrs = (struct attribute *[]) {
++                &sensor_dev_attr_fw.dev_attr.attr,
++                &sensor_dev_attr_ir.dev_attr.attr,
++                &sensor_dev_attr_ambient.dev_attr.attr,
++                &sensor_dev_attr_battery_charge.dev_attr.attr,
++                &sensor_dev_attr_battery_capacity.dev_attr.attr,
++                &sensor_dev_attr_battery_disable.dev_attr.attr,
++                &sensor_dev_attr_kill.dev_attr.attr,
++                &sensor_dev_attr_time.dev_attr.attr,
++		&sensor_dev_attr_battery_voltage.dev_attr.attr,
++		&sensor_dev_attr_sys_voltage.dev_attr.attr,
++		&sensor_dev_attr_vmon1_voltage.dev_attr.attr,
++		&sensor_dev_attr_vmon2_voltage.dev_attr.attr,
++		&sensor_dev_attr_wall_voltage.dev_attr.attr,
++		&sensor_dev_attr_test_1.dev_attr.attr,
++		&sensor_dev_attr_test_2.dev_attr.attr,
++		&sensor_dev_attr_test_4.dev_attr.attr,
++		&sensor_dev_attr_test_8.dev_attr.attr,
++		&sensor_dev_attr_msp_buffer.dev_attr.attr,
++		&sensor_dev_attr_gp_register.dev_attr.attr,
++                NULL,
++        },
++};
++
++
++int msp430_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
++{
++        struct msp430_i2c_data *data;
++	int err;
++
++        if (!(data = kzalloc(sizeof(struct msp430_i2c_data), GFP_KERNEL))) {
++                dev_err(&client->dev, "No space for state\n");
++                err = -ENOMEM;
++                goto err0;
++        }
++
++        i2c_set_clientdata(client, data);
++	data->client = client;
++
++        mutex_init(&data->lock);
++
++        INIT_WORK(&data->irq_work, msp430_i2c_work);
++
++	data->input_dev = input_allocate_device();
++	if (data->input_dev == NULL) {
++		dev_err(&client->dev, "Could not allocate input device\n");
++		goto err1;
++	}
++
++	data->input_dev->name = "msp430";
++	data->input_dev->dev.parent = &client->dev;
++
++	input_set_capability(data->input_dev, EV_MSC, MSC_RAW);
++	input_set_capability(data->input_dev, EV_REL, REL_WHEEL);
++	input_set_capability(data->input_dev, EV_REL, REL_MISC);
++
++	err = input_register_device(data->input_dev);
++	if (err) {
++		dev_err(&client->dev, "Failed to register input device\n");
++		goto err2;
++	}
++
++	err = request_irq(client->irq, msp430_i2c_irq,
++                          IRQF_TRIGGER_HIGH | IRQF_SAMPLE_RANDOM,
++                          client->dev.bus_id, data);
++
++        if (err != 0) {
++                dev_err(&client->dev, "Failed to register IRQ %d\n", client->irq);
++                goto err3;
++        }
++
++        err = sysfs_create_group(&client->dev.kobj, &msp430_i2c_group);
++        if (err)
++                goto err4;
++
++	/* initialize the programmer */
++	msp430_programmer_probe(client);
++
++	/* request firmware upgrade (if needed) */
++	msp430_programmer_upgrade(client);
++
++	return 0;
++
++ err4:
++	free_irq(client->irq, data);
++ err3:
++	input_unregister_device(data->input_dev);
++ err2:
++	input_free_device(data->input_dev);
++ err1:
++	kfree(data);
++ err0:
++	return 0;
++}
++
++
++int msp430_i2c_remove(struct i2c_client *client)
++{
++	struct msp430_i2c_data *data = i2c_get_clientdata(client);
++
++        sysfs_remove_group(&client->dev.kobj, &msp430_i2c_group);
++
++	free_irq(client->irq, data);
++
++	input_unregister_device(data->input_dev);
++	input_free_device(data->input_dev);
++
++	i2c_detach_client(client);
++
++	kfree(data);
++
++	msp430_programmer_remove(client);
++
++	return 0;
++}
++
++
++static struct i2c_device_id msp430_i2c_ids[] = {
++       { "msp430", 0 },
++       { }
++};
++
++MODULE_DEVICE_TABLE(i2c, fab4_i2c_ids);
++
++static struct i2c_driver msp430_i2c_driver = {
++        .driver         = {
++                .owner          = THIS_MODULE,
++                .name           = "msp430",
++        },
++        .probe  = msp430_i2c_probe,
++        .remove = msp430_i2c_remove,
++	.id_table = msp430_i2c_ids,
++};
++
++
++static int __init msp430_i2c_init(void)
++{
++        return i2c_add_driver(&msp430_i2c_driver);
++}
++
++
++static void __exit msp430_i2c_exit(void)
++{
++        i2c_del_driver(&msp430_i2c_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("MSP430 programmer driver");
++MODULE_LICENSE("GPL");
++
++module_init(msp430_i2c_init)
++module_exit(msp430_i2c_exit)
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430.h	2009-07-28 18:13:16.000000000 +0200
+@@ -0,0 +1,69 @@
++/*
++ * Copyright 2009 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++struct msp430_i2c_data {
++        struct i2c_client       *client;
++        struct input_dev        *input_dev;
++
++        struct mutex            lock;
++        struct work_struct      irq_work;
++
++	int			i2c_failures;
++};
++
++#define irq_work_to_data(_w) container_of(_w, struct msp430_i2c_data, irq_work)
++
++
++int msp430_programmer_probe(struct i2c_client *client);
++int msp430_programmer_remove(struct i2c_client *client);
++void msp430_programmer_upgrade(struct i2c_client *client);
++
++
++#define I2C_ID_REGISTER			1
++#define I2C_ID_VALUE			0xCC
++
++#define I2C_VERSION_REGISTER	        2
++
++#define I2C_FLAGS_REGISTER 		10
++#define I2C_FLAGS_NAV 			(1 << 0)
++#define I2C_FLAGS_VOL 			(1 << 1)
++#define I2C_FLAGS_IR 			(1 << 2)
++#define I2C_FLAGS_AMBIENT 		(1 << 3)
++#define I2C_FLAGS_BATTERY 		(1 << 4)
++#define I2C_BATT_EVENTS_REGISTER        11
++#define I2C_BATT_EVENTS_DEAD            (1 << 4)
++#define I2C_BATT_EVENTS_CRITICAL        (1 << 3)
++#define I2C_BATT_EVENTS_CHARGE_COMPLETE (1 << 2)
++#define I2C_BATT_EVENTS_REMOVED         (1 << 1)
++#define I2C_BATT_EVENTS_INSERTED        (1 << 0)
++
++#define I2C_NAV_ENCODER_REGISTER 	20
++#define I2C_VOL_ENCODER_REGISTER 	21
++#define I2C_IR_REGISTER         	30
++#define I2C_ALS_REGISTER                40
++#define I2C_BATT_STATE_OF_CHARGE        50
++#define I2C_BATT_CAPACITY               52
++#define I2C_BATT_CHARGE_DISABLE         54
++#define I2C_BATT_VOLTAGE_REGISTER       55
++#define I2C_BATT_SYS_POWER_REGISTER     57
++#define I2C_BATT_VMON1_REGISTER         59
++#define I2C_BATT_VMON2_REGISTER         61
++#define I2C_BATT_DC_JACK_REGISTER       63
++#define I2C_TIME_REGISTER               70
++#define I2C_KILL_REGISTER               99
++
++//  Test registers.
++//  Result values should be:
++#define I2C_TEST_1                      120 /* result should be 123  	       	     */
++#define I2C_TEST_2                      121 /* result should be 1234 	       	     */
++#define I2C_TEST_4                      122 /* result should be 1234567890     	     */
++#define I2C_TEST_8                      123 /* result should be 12345678901234567890 0xAB54A98CEB1F0AD2 */
++#define I2C_READ_BUFFER                 124 /* Read back the contents of the msp430's buffer */
++#define I2C_GP_REGISTER                 125 /* General purpose, 8-byte register.. */

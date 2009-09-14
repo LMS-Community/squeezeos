@@ -1,0 +1,196 @@
+From 41c7c4d7be2b97b2ec7400724d28aef5250e526f Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Fri, 19 Dec 2008 16:24:30 +0800
+Subject: [PATCH] ENGR00101867 i.MX35 USB change for TO 2.0
+
+For TO 2.0, USB changes in this patch include:
+1.USB bus lock is disabled defaultly.
+2.OTG and Host2 use seperate power and over-current polarity.
+3.USB should work in INCR8 mode.
+4.Change TX FIFO threshold to be 0x20 to resolve FIFO underrun
+for USB+ATA case.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx35/usb_dr.c        |    8 ++++++--
+ arch/arm/mach-mx35/usb_h2.c        |    8 ++++++--
+ arch/arm/plat-mxc/usb_common.c     |   24 +++++++++++++++++++-----
+ drivers/usb/host/ehci-fsl.h        |    1 +
+ include/asm-arm/arch-mxc/arc_otg.h |    2 ++
+ include/asm-arm/arch-mxc/fsl_usb.h |   11 +++++++++--
+ 6 files changed, 43 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/usb_dr.c b/arch/arm/mach-mx35/usb_dr.c
+index 0c6383b..205543f 100644
+--- a/arch/arm/mach-mx35/usb_dr.c
++++ b/arch/arm/mach-mx35/usb_dr.c
+@@ -32,8 +32,6 @@ static struct fsl_usb2_platform_data __maybe_unused dr_utmi_config = {
+ 	.gpio_usb_active   = gpio_usbotg_utmi_active,
+ 	.gpio_usb_inactive = gpio_usbotg_utmi_inactive,
+ 	.transceiver       = "utmi",
+-	.change_ahb_burst = 1, /* defaultly i.MX35 is in INCR8 mode */
+-	.ahb_burst_mode = 0, /* i.MX35 should be in INCR mode */
+ };
+ 
+ 
+@@ -95,6 +93,12 @@ static int __init usb_dr_init(void)
+ {
+ 	pr_debug("%s: \n", __func__);
+ 
++	/* i.MX35 1.0 should work in INCR mode */
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++		PDATA->change_ahb_burst = 1;
++		PDATA->ahb_burst_mode = 0;
++	}
++
+ 	dr_register_otg();
+ 	dr_register_host(otg_resources, ARRAY_SIZE(otg_resources));
+ 	dr_register_udc();
+diff --git a/arch/arm/mach-mx35/usb_h2.c b/arch/arm/mach-mx35/usb_h2.c
+index fcc5350..0487cd1 100644
+--- a/arch/arm/mach-mx35/usb_h2.c
++++ b/arch/arm/mach-mx35/usb_h2.c
+@@ -30,8 +30,6 @@ static struct fsl_usb2_platform_data usbh2_config = {
+ 	.gpio_usb_active   = gpio_usbh2_active,
+ 	.gpio_usb_inactive = gpio_usbh2_inactive,
+ 	.transceiver       = "serial",
+-	.change_ahb_burst = 1,	/* i.MX35 should work in INCR mode */
+-	.ahb_burst_mode = 0,
+ };
+ 
+ static struct resource usbh2_resources[] = {
+@@ -51,6 +49,12 @@ static int __init usbh2_init(void)
+ {
+ 	pr_debug("%s: \n", __func__);
+ 
++	/* i.MX35 1.0 should work in INCR mode */
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++		usbh2_config.change_ahb_burst = 1;
++		usbh2_config.ahb_burst_mode = 0;
++	}
++
+ 	host_pdev_register(usbh2_resources, ARRAY_SIZE(usbh2_resources),
+ 			   &usbh2_config);
+ 	return 0;
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index f1a7af8..da0e8de 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -345,11 +345,23 @@ static void usbh2_set_serial_xcvr(void)
+ 	USBCTRL &= ~(UCTRL_H2PM);	/* Power Mask */
+ 	USBCTRL &= ~UCTRL_OCPOL;	/* OverCurrent Polarity is Low Active */
+ 	USBCTRL |= UCTRL_H2WIE |	/* Wakeup intr enable */
+-		UCTRL_H2LOCKD |		/* Host2 Lock Disable */
+ 	    UCTRL_IP_PUE_DOWN |	/* ipp_pue_pulldwn_dpdm */
+ 	    UCTRL_USBTE |	/* USBT is enabled */
+ 	    UCTRL_H2DT;		/* Disable H2 TLL */
+ 
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++		/* Disable Host2 bus Lock for i.MX35 1.0 */
++		USBCTRL |= UCTRL_H2LOCKD;
++		/* USBOTG_PWR low active */
++		USBCTRL &= ~UCTRL_PP;
++		/* OverCurrent Polarity is Low Active */
++		USBCTRL &= ~UCTRL_OCPOL;
++	} else if (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1) {
++		/* i.MX35 2.0 OTG and Host2 have seperate OC/PWR polarity */
++		USBCTRL &= ~UCTRL_H2PP;
++		USBCTRL &= ~UCTRL_H2OCPOL;
++	}
++
+ 	USBCTRL &= ~(UCTRL_PP);
+ 	UH2_PORTSC1 = (UH2_PORTSC1 & (~PORTSC_PTS_MASK)) | PORTSC_PTS_SERIAL;
+ 
+@@ -416,7 +428,7 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 		xops->init(xops);
+ 
+ 	if (xops->xcvr_type == PORTSC_PTS_SERIAL) {
+-		if (machine_is_mx35_3ds()) {
++		if (cpu_is_mx35()) {
+ 			usbh2_set_serial_xcvr();
+ 			/* Close the internal 60Mhz */
+ 			USBCTRL &= ~UCTRL_XCSH2;
+@@ -607,8 +619,10 @@ static void otg_set_utmi_xcvr(void)
+ 		USBCTRL &= ~UCTRL_PP;
+ 		/* OverCurrent Polarity is Low Active */
+ 		USBCTRL &= ~UCTRL_OCPOL;
+-		/* OTG Lock Disable */
+-		USBCTRL |= UCTRL_OLOCKD;
++
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0)
++			/* OTG Lock Disable */
++			USBCTRL |= UCTRL_OLOCKD;
+ 	}
+ 
+ 	USBCTRL &= ~UCTRL_OPM;	/* OTG Power Mask */
+@@ -623,7 +637,7 @@ static void otg_set_utmi_xcvr(void)
+ 		/* Set the PHY clock to 19.2MHz */
+ 		USB_PHY_CTR_FUNC2 &= ~USB_UTMI_PHYCTRL2_PLLDIV_MASK;
+ 		USB_PHY_CTR_FUNC2 |= 0x01;
+-	} else if (machine_is_mx35_3ds()) {
++	} else if (cpu_is_mx35()) {
+ 		/* Workaround an IC issue for 2.6.26 kernal:
+ 		 * when turn off root hub port power, EHCI set
+ 		 * PORTSC reserved bits to be 0, but PTW with 0
+diff --git a/drivers/usb/host/ehci-fsl.h b/drivers/usb/host/ehci-fsl.h
+index 43f6d4f..589c424 100644
+--- a/drivers/usb/host/ehci-fsl.h
++++ b/drivers/usb/host/ehci-fsl.h
+@@ -21,6 +21,7 @@
+ /* offsets for the non-ehci registers in the FSL SOC USB controller */
+ #define FSL_SOC_USB_SBUSCFG     0x90
+ #define FSL_SOC_USB_BURSTSIZE	0x160
++#define FSL_SOC_USB_TXFILLTUNING	0x164
+ #define FSL_SOC_USB_ULPIVP	0x170
+ #define FSL_SOC_USB_PORTSC1	0x184
+ #define PORT_PTS_MSK		(3<<30)
+diff --git a/include/asm-arm/arch-mxc/arc_otg.h b/include/asm-arm/arch-mxc/arc_otg.h
+index 5e3e910..f6129f4 100644
+--- a/include/asm-arm/arch-mxc/arc_otg.h
++++ b/include/asm-arm/arch-mxc/arc_otg.h
+@@ -249,6 +249,7 @@
+ 
+ #define UCTRL_H2UIE		(1 << 20)	/* HOST2 ULPI intr enable */
+ #define UCTRL_H2WIE		(1 << 19)	/* HOST2 wakeup intr enable */
++#define UCTRL_H2PP		(1 << 18)	/* Power Polarity for uh2 */
+ #define UCTRL_H2PM		(1 << 16)	/* HOST2 power mask */
+ 
+ #define UCTRL_H1WIR		(1 << 15)	/* HOST1 wakeup intr request received */
+@@ -277,6 +278,7 @@
+ #define UCTRL_USBTE             (1 <<  4)       /* USBT Transceiver enable */
+ #define UCTRL_OCPOL             (1 <<  3)       /* OverCurrent Polarity */
+ #define UCTRL_OCE               (1 <<  2)       /* OverCurrent Enable */
++#define UCTRL_H2OCPOL		(1 <<  2)       /* OverCurrent Polarity of Host2 */
+ #define UCTRL_H2OCS             (1 <<  1)       /* Host OverCurrent State */
+ #define UCTRL_BPE		(1 <<  0)	/* bypass mode enable */
+ #define UCTRL_OTD		(1 <<  0)	/* OTG TLL Disable */
+diff --git a/include/asm-arm/arch-mxc/fsl_usb.h b/include/asm-arm/arch-mxc/fsl_usb.h
+index 2dcbb0e..9dc456c 100644
+--- a/include/asm-arm/arch-mxc/fsl_usb.h
++++ b/include/asm-arm/arch-mxc/fsl_usb.h
+@@ -60,13 +60,20 @@ fsl_platform_set_vbus_power(struct fsl_usb2_platform_data *pdata, int on)
+ static inline void fsl_platform_set_ahb_burst(struct usb_hcd *hcd)
+ {
+ 	struct fsl_usb2_platform_data *pdata;
++	unsigned int temp;
+ 
+ 	pdata = hcd->self.controller->platform_data;
+ 	if (pdata->change_ahb_burst) {
+-		unsigned int temp;
+-
+ 		temp = readl(hcd->regs + FSL_SOC_USB_SBUSCFG);
+ 		writel((temp & (~(0x7))) | pdata->ahb_burst_mode,
+ 			hcd->regs + FSL_SOC_USB_SBUSCFG);
+ 	}
++
++	/* Increase TX fifo threshold for USB+ATA for i.mx35 2.0 */
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1) {
++		temp = readl(hcd->regs + FSL_SOC_USB_TXFILLTUNING);
++		/* Change TX FIFO threshold to be 0x20 */
++		writel((temp & (~(0x3f << 16)) | (0x20 << 16)),
++			hcd->regs + FSL_SOC_USB_TXFILLTUNING);
++	}
+ }
+-- 
+1.5.4.4
+

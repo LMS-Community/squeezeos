@@ -1,0 +1,89 @@
+From 72f647adc0fef69abf9420042b5e7ff6ea8b6064 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Tue, 17 Feb 2009 19:42:09 +0800
+Subject: [PATCH] ENGR00107806-3 imx35: sgtl5000: use func to control spk amp shutdown
+
+Becuase spk amp shutdown pin can be connected to PM gpo or cpu GPIO, I use a
+function amp_enable in arch/arm/mach-xxx/mxxxx-3stack.c to controll shutdown.
+This is imx35 specific modification.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c |   43 +++++++++++++++++++++++++++++++++++++-
+ 1 files changed, 42 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index bec5bca..d5b2294 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -863,6 +863,10 @@ unsigned int headphone_det_status(void)
+ 	return ret;
+ }
+ 
++static int mxc_sgtl5000_plat_init(void);
++static int mxc_sgtl5000_plat_finit(void);
++static int mxc_sgtl5000_amp_enable(int enable);
++
+ static struct mxc_sgtl5000_platform_data sgtl5000_data = {
+ 	.ssi_num = 1,
+ 	.src_port = 1,
+@@ -871,11 +875,13 @@ static struct mxc_sgtl5000_platform_data sgtl5000_data = {
+ 	.hp_status = headphone_det_status,
+ 	.vddio_reg = NULL,
+ 	.vdda_reg = "VCAM",
+-	.amp_gpo = "SPKR",
++	.amp_enable = mxc_sgtl5000_amp_enable,
+ 	.vddio = 0,
+ 	.vdda = 3000000,
+ 	.vddd = 0,
+ 	.sysclk = 12000000,
++	.init = mxc_sgtl5000_plat_init,
++	.finit = mxc_sgtl5000_plat_finit,
+ };
+ 
+ static struct platform_device sgtl5000_device = {
+@@ -886,6 +892,41 @@ static struct platform_device sgtl5000_device = {
+ 		} ,
+ };
+ 
++static int mxc_sgtl5000_plat_init(void)
++{
++	struct regulator *reg;
++	reg = regulator_get(&sgtl5000_device.dev, "SPKR");
++	if (IS_ERR(reg))
++		return -EINVAL;
++	sgtl5000_data.priv = reg;
++	return 0;
++}
++
++static int mxc_sgtl5000_plat_finit(void)
++{
++	struct regulator *reg;
++	reg = sgtl5000_data.priv;
++	if (reg) {
++		regulator_put(reg, &sgtl5000_device.dev);
++		sgtl5000_data.priv = NULL;
++	}
++	return 0;
++}
++
++static int mxc_sgtl5000_amp_enable(int enable)
++{
++	struct regulator *reg;
++	reg = sgtl5000_data.priv;
++
++	if (!reg)
++		return -EINVAL;
++	if (enable)
++		regulator_enable(reg);
++	else
++		regulator_disable(reg);
++	return 0;
++}
++
+ static void mxc_sgtl5000_init(void)
+ {
+ 	int err;
+-- 
+1.5.4.4
+

@@ -1,0 +1,235 @@
+From 9e8d23e5274dd116fbe4ddbec569df581be36bf3 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 23 Jul 2007 03:13:01 -0400
+Subject: [PATCH] Unionfs: pass nameidata intent information to lower level file systems
+
+As of 2.6.23-rc1, nfs2 and nfs3, like nfs4 before them, begin relying on the
+struct nameidata and especially the intent information, which is passed to
+vfs_create() and others.  So, as of now, unionfs properly creates and passes
+that intent data to the lower level file system.  Currently supported are
+LOOKUP_CREATE open intents.  Others can be supported in the future
+incrementally.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    9 ++++++-
+ fs/unionfs/lookup.c |   62 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/unionfs/rename.c |    9 ++++++-
+ fs/unionfs/subr.c   |   18 +++++++++++++-
+ fs/unionfs/union.h  |    2 +
+ 5 files changed, 96 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index eb5d5a0..868923a 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -177,19 +177,26 @@ static int __copyup_ndentry(struct dentry *old_lower_dentry,
+ 		run_sioq(__unionfs_mknod, &args);
+ 		err = args.err;
+ 	} else if (S_ISREG(old_mode)) {
++		struct nameidata *nd = alloc_lower_nd(LOOKUP_CREATE);
++		if (!nd) {
++			err = -ENOMEM;
++			goto out;
++		}
++		args.create.nd = nd;
+ 		args.create.parent = new_lower_parent_dentry->d_inode;
+ 		args.create.dentry = new_lower_dentry;
+ 		args.create.mode = old_mode;
+-		args.create.nd = NULL;
+ 
+ 		run_sioq(__unionfs_create, &args);
+ 		err = args.err;
++		free_lower_nd(nd, err);
+ 	} else {
+ 		printk(KERN_ERR "unionfs: unknown inode type %d\n",
+ 		       old_mode);
+ 		BUG();
+ 	}
+ 
++out:
+ 	return err;
+ }
+ 
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 2045a43..f21a9f3 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -573,3 +573,65 @@ void update_bstart(struct dentry *dentry)
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, NULL);
+ 	}
+ }
++
++
++/*
++ * Allocate and fill in a nameidata structure (the intent part) we can pass
++ * to a lower file system.  Returns NULL on error (only -ENOMEM possible),
++ * or a valid allocated nameidata structure.  Inside that structure, this
++ * function may also return an allocated struct file (for open intents).
++ * The caller, when done with this nd, must kfree both the intent file and
++ * the entire nd.
++ */
++struct nameidata *alloc_lower_nd(unsigned int flags)
++{
++	struct nameidata *nd;
++#ifdef ALLOC_LOWER_ND_FILE
++	/*
++	 * XXX: one day we may need to have the lower return an open file
++	 * for us.  It is not needed in 2.6.23-rc1 for nfs2/nfs3, but may
++	 * very well be needed for nfs4.
++	 */
++	struct file *file;
++#endif /* ALLOC_LOWER_ND_FILE */
++
++	nd = kzalloc(sizeof(struct nameidata), GFP_KERNEL);
++	if (!nd)
++		goto out;
++
++	switch (flags) {
++	case LOOKUP_CREATE:
++		nd->flags = LOOKUP_CREATE;
++		nd->intent.open.flags = FMODE_READ | FMODE_WRITE | O_CREAT;
++#ifdef ALLOC_LOWER_ND_FILE
++		file = kzalloc(sizeof(struct file), GFP_KERNEL);
++		if (!file) {
++			kfree(nd);
++			nd = NULL;
++			goto out;
++		}
++		nd->intent.open.file = file;
++#endif /* ALLOC_LOWER_ND_FILE */
++		break;
++	default:
++		/*
++		 * We should never get here, for now.
++		 * We can add new cases here later on.
++		 */
++		BUG();
++		break;
++	}
++out:
++	return nd;
++}
++
++void free_lower_nd(struct nameidata *nd, int err)
++{
++	if (nd->intent.open.file) {
++		if (!err)
++			fput(nd->intent.open.file); /* XXX: open file not needed? */
++		kfree(nd->intent.open.file);
++	}
++	kfree(nd);
++}
++
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 1761f8b..d6b0215 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -256,6 +256,7 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 	 */
+ 	if ((old_bstart != old_bend) || (do_copyup != -1)) {
+ 		struct dentry *lower_parent;
++		struct nameidata *nd;
+ 		if (!wh_old || wh_old->d_inode || bwh_old < 0) {
+ 			printk(KERN_ERR "unionfs: rename error "
+ 			       "(wh_old=%p/%p bwh_old=%d)\n", wh_old,
+@@ -263,9 +264,14 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 			err = -EIO;
+ 			goto out;
+ 		}
++		nd = alloc_lower_nd(LOOKUP_CREATE);
++		if (!nd) {
++			err = -ENOMEM;
++			goto out;
++		}
+ 		lower_parent = lock_parent(wh_old);
+ 		local_err = vfs_create(lower_parent->d_inode, wh_old, S_IRUGO,
+-				       NULL);
++				       nd);
+ 		unlock_dir(lower_parent);
+ 		if (!local_err)
+ 			set_dbopaque(old_dentry, bwh_old);
+@@ -278,6 +284,7 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 			       "the source in rename!\n");
+ 			err = -EIO;
+ 		}
++		free_lower_nd(nd, local_err);
+ 	}
+ 
+ out:
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index 5db9e62..3b76737 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -29,6 +29,7 @@ int create_whiteout(struct dentry *dentry, int start)
+ 	struct dentry *lower_dir_dentry;
+ 	struct dentry *lower_dentry;
+ 	struct dentry *lower_wh_dentry;
++	struct nameidata *nd;
+ 	char *name = NULL;
+ 	int err = -EINVAL;
+ 
+@@ -82,14 +83,20 @@ int create_whiteout(struct dentry *dentry, int start)
+ 			goto out;
+ 		}
+ 
++		nd = alloc_lower_nd(LOOKUP_CREATE);
++		if (!nd) {
++			err = -ENOMEM;
++			goto out;
++		}
+ 		lower_dir_dentry = lock_parent(lower_wh_dentry);
+ 		if (!(err = is_robranch_super(dentry->d_sb, bindex)))
+ 			err = vfs_create(lower_dir_dentry->d_inode,
+ 					 lower_wh_dentry,
+ 					 ~current->fs->umask & S_IRWXUGO,
+-					 NULL);
++					 nd);
+ 		unlock_dir(lower_dir_dentry);
+ 		dput(lower_wh_dentry);
++		free_lower_nd(nd, err);
+ 
+ 		if (!err || !IS_COPYUP_ERR(err))
+ 			break;
+@@ -151,6 +158,7 @@ int make_dir_opaque(struct dentry *dentry, int bindex)
+ 	int err = 0;
+ 	struct dentry *lower_dentry, *diropq;
+ 	struct inode *lower_dir;
++	struct nameidata *nd;
+ 
+ 	lower_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 	lower_dir = lower_dentry->d_inode;
+@@ -165,10 +173,16 @@ int make_dir_opaque(struct dentry *dentry, int bindex)
+ 		goto out;
+ 	}
+ 
++	nd = alloc_lower_nd(LOOKUP_CREATE);
++	if (!nd) {
++		err = -ENOMEM;
++		goto out;
++	}
+ 	if (!diropq->d_inode)
+-		err = vfs_create(lower_dir, diropq, S_IRUGO, NULL);
++		err = vfs_create(lower_dir, diropq, S_IRUGO, nd);
+ 	if (!err)
+ 		set_dbopaque(dentry, bindex);
++	free_lower_nd(nd, err);
+ 
+ 	dput(diropq);
+ 
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index cd1f37c..00f2b36 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -252,6 +252,8 @@ extern int realloc_dentry_private_data(struct dentry *dentry);
+ extern int new_dentry_private_data(struct dentry *dentry);
+ extern void free_dentry_private_data(struct dentry *dentry);
+ extern void update_bstart(struct dentry *dentry);
++extern struct nameidata *alloc_lower_nd(unsigned int flags);
++extern void free_lower_nd(struct nameidata *nd, int err);
+ 
+ /*
+  * EXTERNALS:
+-- 
+1.5.4.3
+

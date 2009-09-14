@@ -1,0 +1,1804 @@
+From fc4ab4b3a2646fa3c290aca5f64ce5546a345769 Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Thu, 29 Jan 2009 19:11:10 -0700
+Subject: [PATCH] ENGR00104785-1 ADC: Add on-chip ADC and touchscreen controller drivers
+
+This patch adds a driver for the i.MX on-chip ADC block, and a driver
+for its assocated touchscreen controller.  Since the ADC is on-chip,
+it doesn't fit into the PMIC driver infrastructure, and is placed
+in the new directory drivers/mxc/adc.
+
+Signed-off-by: Quinn Jensen <quinn.jensen@freescale.com>
+---
+ drivers/input/touchscreen/Kconfig      |   12 +
+ drivers/input/touchscreen/Makefile     |    1 +
+ drivers/input/touchscreen/imx_adc_ts.c |  114 ++++
+ drivers/mxc/Kconfig                    |    1 +
+ drivers/mxc/Makefile                   |    1 +
+ drivers/mxc/adc/Kconfig                |   14 +
+ drivers/mxc/adc/Makefile               |    4 +
+ drivers/mxc/adc/imx_adc.c              | 1036 ++++++++++++++++++++++++++++++++
+ drivers/mxc/adc/imx_adc_reg.h          |  242 ++++++++
+ include/asm-arm/arch-mxc/imx_adc.h     |  275 +++++++++
+ 10 files changed, 1700 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 00d3484..1459734 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -146,6 +146,18 @@ config TOUCHSCREEN_MXC
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called mxc_ts.
+ 
++config TOUCHSCREEN_IMX_ADC
++	tristate "Freescale i.MX ADC touchscreen input driver"
++	depends on IMX_ADC
++	help
++	  Say Y here if you have a Freescale i.MX based board with a
++	  touchscreen interfaced to the processor's integrated ADC.
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called imx_adc_ts.
++
+ config TOUCHSCREEN_PENMOUNT
+ 	tristate "Penmount serial touchscreen"
+ 	select SERIO
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index 92b0661..82d7bca 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -17,6 +17,7 @@ obj-$(CONFIG_TOUCHSCREEN_MK712)		+= mk712.o
+ obj-$(CONFIG_TOUCHSCREEN_HP600)		+= hp680_ts_input.o
+ obj-$(CONFIG_TOUCHSCREEN_HP7XX)		+= jornada720_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_MXC)		+= mxc_ts.o
++obj-$(CONFIG_TOUCHSCREEN_IMX_ADC)	+= imx_adc_ts.o
+ obj-$(CONFIG_TOUCHSCREEN_USB_COMPOSITE)	+= usbtouchscreen.o
+ obj-$(CONFIG_TOUCHSCREEN_PENMOUNT)	+= penmount.o
+ obj-$(CONFIG_TOUCHSCREEN_TOUCHRIGHT)	+= touchright.o
+diff --git a/drivers/input/touchscreen/imx_adc_ts.c b/drivers/input/touchscreen/imx_adc_ts.c
+new file mode 100644
+index 0000000..461d9c9
+--- /dev/null
++++ b/drivers/input/touchscreen/imx_adc_ts.c
+@@ -0,0 +1,114 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file imx_adc_ts.c
++ *
++ * @brief Driver for the Freescale Semiconductor i.MX ADC touchscreen.
++ *
++ * This touchscreen driver is designed as a standard input driver.  It is a
++ * wrapper around the low level ADC driver. Much of the hardware configuration
++ * and touchscreen functionality is implemented in the low level ADC driver.
++ * During initialization, this driver creates a kernel thread.  This thread
++ * then calls the ADC driver to obtain touchscreen values continously. These
++ * values are then passed to the input susbsystem.
++ *
++ * @ingroup touchscreen
++ */
++
++#include <linux/kernel.h>
++#include <linux/kthread.h>
++#include <linux/module.h>
++#include <linux/sched.h>
++#include <linux/input.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/freezer.h>
++#include <asm/arch/imx_adc.h>
++
++#define IMX_ADC_TS_NAME	"imx_adc_ts"
++
++static struct input_dev *imx_inputdev;
++static u32 input_ts_installed;
++
++static int ts_thread(void *arg)
++{
++	struct t_touch_screen ts_sample;
++	int wait = 0;
++	daemonize("imx_adc_ts");
++	while (input_ts_installed) {
++		try_to_freeze();
++
++		memset(&ts_sample, 0, sizeof(ts_sample));
++		if (0 != imx_adc_get_touch_sample(&ts_sample, !wait))
++			continue;
++
++		input_report_abs(imx_inputdev, ABS_X, ts_sample.x_position);
++		input_report_abs(imx_inputdev, ABS_Y, ts_sample.y_position);
++		input_report_abs(imx_inputdev, ABS_PRESSURE,
++				 ts_sample.contact_resistance);
++		input_sync(imx_inputdev);
++		wait = ts_sample.contact_resistance;
++		msleep(10);
++	}
++
++	return 0;
++}
++
++static int __init imx_adc_ts_init(void)
++{
++	int retval;
++
++	if (!is_imx_adc_ready())
++		return -ENODEV;
++
++	imx_inputdev = input_allocate_device();
++	if (!imx_inputdev) {
++		pr_err("imx_ts_init: not enough memory for input device\n");
++		return -ENOMEM;
++	}
++
++	imx_inputdev->name = IMX_ADC_TS_NAME;
++	imx_inputdev->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
++	imx_inputdev->keybit[BIT_WORD(BTN_TOUCH)] |= BIT_MASK(BTN_TOUCH);
++	imx_inputdev->absbit[0] =
++	    BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) | BIT_MASK(ABS_PRESSURE);
++	retval = input_register_device(imx_inputdev);
++	if (retval < 0) {
++		input_free_device(imx_inputdev);
++		return retval;
++	}
++
++	input_ts_installed = 1;
++	kthread_run(ts_thread, NULL, "ts_thread");
++	pr_info("i.MX ADC input touchscreen loaded.\n");
++	return 0;
++}
++
++static void __exit imx_adc_ts_exit(void)
++{
++	input_ts_installed = 0;
++	input_unregister_device(imx_inputdev);
++
++	if (imx_inputdev) {
++		input_free_device(imx_inputdev);
++		imx_inputdev = NULL;
++	}
++}
++
++late_initcall(imx_adc_ts_init);
++module_exit(imx_adc_ts_exit);
++
++MODULE_DESCRIPTION("i.MX ADC input touchscreen driver");
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mxc/Kconfig b/drivers/mxc/Kconfig
+index 60bbfb2..4e5bfb9 100644
+--- a/drivers/mxc/Kconfig
++++ b/drivers/mxc/Kconfig
+@@ -31,6 +31,7 @@ source "drivers/mxc/asrc/Kconfig"
+ source "drivers/mxc/bt/Kconfig"
+ source "drivers/mxc/gps_ioctrl/Kconfig"
+ source "drivers/mxc/mlb/Kconfig"
++source "drivers/mxc/adc/Kconfig"
+ 
+ endmenu
+ 
+diff --git a/drivers/mxc/Makefile b/drivers/mxc/Makefile
+index e0d0706..a2e2571 100644
+--- a/drivers/mxc/Makefile
++++ b/drivers/mxc/Makefile
+@@ -16,3 +16,4 @@ obj-$(CONFIG_MXC_ASRC)                 += asrc/
+ obj-$(CONFIG_MXC_BLUETOOTH)		+= bt/
+ obj-$(CONFIG_GPS_IOCTRL)		+= gps_ioctrl/
+ obj-$(CONFIG_MXC_MLB)                   += mlb/
++obj-$(CONFIG_IMX_ADC)                   += adc/
+diff --git a/drivers/mxc/adc/Kconfig b/drivers/mxc/adc/Kconfig
+new file mode 100644
+index 0000000..91ad23b
+--- /dev/null
++++ b/drivers/mxc/adc/Kconfig
+@@ -0,0 +1,14 @@
++#
++# i.MX ADC devices
++#
++
++menu "i.MX ADC support"
++
++config IMX_ADC
++	tristate "i.MX ADC"
++	depends on ARCH_MXC
++	default n
++	help
++	   This selects the Freescale i.MX on-chip ADC driver.
++
++endmenu
+diff --git a/drivers/mxc/adc/Makefile b/drivers/mxc/adc/Makefile
+new file mode 100644
+index 0000000..e21e48e
+--- /dev/null
++++ b/drivers/mxc/adc/Makefile
+@@ -0,0 +1,4 @@
++#
++# Makefile for i.MX adc devices.
++#
++obj-$(CONFIG_IMX_ADC)		+= imx_adc.o
+diff --git a/drivers/mxc/adc/imx_adc.c b/drivers/mxc/adc/imx_adc.c
+new file mode 100644
+index 0000000..c837bca
+--- /dev/null
++++ b/drivers/mxc/adc/imx_adc.c
+@@ -0,0 +1,1036 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file adc/imx_adc.c
++ * @brief This is the main file of i.MX ADC driver.
++ *
++ * @ingroup IMX_ADC
++ */
++
++/*
++ * Includes
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/interrupt.h>
++#include <linux/platform_device.h>
++#include <linux/poll.h>
++#include <linux/sched.h>
++#include <linux/time.h>
++#include <linux/wait.h>
++#include <asm/arch/imx_adc.h>
++#include "imx_adc_reg.h"
++
++static int imx_adc_major;
++
++/*!
++ * Number of users waiting in suspendq
++ */
++static int swait;
++
++/*!
++ * To indicate whether any of the adc devices are suspending
++ */
++static int suspend_flag;
++
++/*!
++ * The suspendq is used by blocking application calls
++ */
++static wait_queue_head_t suspendq;
++static wait_queue_head_t tsq;
++
++static bool imx_adc_ready;
++static bool ts_data_ready;
++static int tsi_data = TSI_DATA;
++static unsigned short ts_data_buf[16];
++
++static struct class *imx_adc_class;
++static struct imx_adc_data *adc_data;
++
++static DECLARE_MUTEX(general_convert_mutex);
++static DECLARE_MUTEX(ts_convert_mutex);
++
++unsigned long tsc_base;
++
++int is_imx_adc_ready(void)
++{
++	return imx_adc_ready;
++}
++EXPORT_SYMBOL(is_imx_adc_ready);
++
++void tsc_clk_enable(void)
++{
++	unsigned long reg;
++
++	clk_enable(adc_data->adc_clk);
++
++	reg = __raw_readl(tsc_base + TGCR);
++	reg |= TGCR_IPG_CLK_EN;
++	__raw_writel(reg, tsc_base + TGCR);
++}
++
++void tsc_clk_disable(void)
++{
++	unsigned long reg;
++
++	clk_disable(adc_data->adc_clk);
++
++	reg = __raw_readl(tsc_base + TGCR);
++	reg &= ~TGCR_IPG_CLK_EN;
++	__raw_writel(reg, tsc_base + TGCR);
++}
++
++void tsc_self_reset(void)
++{
++	unsigned long reg;
++
++	reg = __raw_readl(tsc_base + TGCR);
++	reg |= TGCR_TSC_RST;
++	__raw_writel(reg, tsc_base + TGCR);
++
++	while (__raw_readl(tsc_base + TGCR) & TGCR_TSC_RST)
++		continue;
++}
++
++/* Internal reference */
++void tsc_intref_enable(void)
++{
++	unsigned long reg;
++
++	reg = __raw_readl(tsc_base + TGCR);
++	reg |= TGCR_INTREFEN;
++	__raw_writel(reg, tsc_base + TGCR);
++}
++
++/* initialize touchscreen */
++void imx_tsc_init(void)
++{
++	unsigned long reg;
++	int lastitemid;
++	int dbtime;
++
++	/* Level sense */
++	reg = __raw_readl(tsc_base + TCQCR);
++	reg |= CQCR_PD_CFG;
++	reg |= (0xf << CQCR_FIFOWATERMARK_SHIFT);  /* watermark */
++	__raw_writel(reg, tsc_base + TCQCR);
++
++	/* Configure 4-wire */
++	reg = TSC_4WIRE_PRECHARGE;
++	reg |= CC_IGS;
++	__raw_writel(reg, tsc_base + TCC0);
++
++	reg = TSC_4WIRE_TOUCH_DETECT;
++	reg |= 3 << CC_NOS_SHIFT;	/* 4 samples */
++	reg |= 32 << CC_SETTLING_TIME_SHIFT;	/* it's important! */
++	__raw_writel(reg, tsc_base + TCC1);
++
++	reg = TSC_4WIRE_X_MEASUMENT;
++	reg |= 3 << CC_NOS_SHIFT;	/* 4 samples */
++	reg |= 16 << CC_SETTLING_TIME_SHIFT;	/* settling time */
++	__raw_writel(reg, tsc_base + TCC2);
++
++	reg = TSC_4WIRE_Y_MEASUMENT;
++	reg |= 3 << CC_NOS_SHIFT;	/* 4 samples */
++	reg |= 16 << CC_SETTLING_TIME_SHIFT;	/* settling time */
++	__raw_writel(reg, tsc_base + TCC3);
++
++	reg = (TCQ_ITEM_TCC0 << TCQ_ITEM7_SHIFT) |
++	      (TCQ_ITEM_TCC0 << TCQ_ITEM6_SHIFT) |
++	      (TCQ_ITEM_TCC1 << TCQ_ITEM5_SHIFT) |
++	      (TCQ_ITEM_TCC0 << TCQ_ITEM4_SHIFT) |
++	      (TCQ_ITEM_TCC3 << TCQ_ITEM3_SHIFT) |
++	      (TCQ_ITEM_TCC2 << TCQ_ITEM2_SHIFT) |
++	      (TCQ_ITEM_TCC1 << TCQ_ITEM1_SHIFT) |
++	      (TCQ_ITEM_TCC0 << TCQ_ITEM0_SHIFT);
++	__raw_writel(reg, tsc_base + TCQ_ITEM_7_0);
++
++	lastitemid = 5;
++	reg = __raw_readl(tsc_base + TCQCR);
++	reg = (reg & ~CQCR_LAST_ITEM_ID_MASK) |
++	      (lastitemid << CQCR_LAST_ITEM_ID_SHIFT);
++	__raw_writel(reg, tsc_base + TCQCR);
++
++	/* pen down enable */
++	reg = __raw_readl(tsc_base + TCQCR);
++	reg &= ~CQCR_PD_MSK;
++	__raw_writel(reg, tsc_base + TCQCR);
++	reg = __raw_readl(tsc_base + TCQMR);
++	reg &= ~TCQMR_PD_IRQ_MSK;
++	__raw_writel(reg, tsc_base + TCQMR);
++
++	/* Debounce time = dbtime*8 adc clock cycles */
++	reg = __raw_readl(tsc_base + TGCR);
++	dbtime = 3;
++	reg &= ~TGCR_PDBTIME_MASK;
++	reg |= dbtime << TGCR_PDBTIME_SHIFT;
++	reg |= TGCR_HSYNC_EN;
++	__raw_writel(reg, tsc_base + TGCR);
++
++}
++
++static irqreturn_t imx_adc_interrupt(int irq, void *dev_id)
++{
++	int reg;
++
++	/* disable pen down detect */
++	reg = __raw_readl(tsc_base + TGCR);
++	reg &= ~TGCR_PD_EN;
++	__raw_writel(reg, tsc_base + TGCR);
++
++	ts_data_ready = 1;
++	wake_up_interruptible(&tsq);
++	return IRQ_HANDLED;
++}
++
++enum IMX_ADC_STATUS imx_adc_read_general(unsigned short *result)
++{
++	unsigned long reg;
++	unsigned int data_num = 0;
++
++	reg = __raw_readl(tsc_base + GCQCR);
++	reg |= CQCR_FQS;
++	__raw_writel(reg, tsc_base + GCQCR);
++
++	while (!(__raw_readl(tsc_base + GCQSR) & CQSR_EOQ))
++		continue;
++	reg = __raw_readl(tsc_base + GCQCR);
++	reg &= ~CQCR_FQS;
++	__raw_writel(reg, tsc_base + GCQCR);
++	reg = __raw_readl(tsc_base + GCQSR);
++	reg |= CQSR_EOQ;
++	__raw_writel(reg, tsc_base + GCQSR);
++
++	while (!(__raw_readl(tsc_base + GCQSR) & CQSR_EMPT)) {
++		result[data_num] = __raw_readl(tsc_base + GCQFIFO) >>
++				 GCQFIFO_ADCOUT_SHIFT;
++		data_num++;
++	}
++	return IMX_ADC_SUCCESS;
++}
++
++/*!
++ * This function will get raw (X,Y) value by converting the voltage
++ * @param        touch_sample Pointer to touch sample
++ *
++ * return        This funciton returns 0 if successful.
++ *
++ *
++ */
++enum IMX_ADC_STATUS imx_adc_read_ts(struct t_touch_screen *touch_sample,
++				    int wait_tsi)
++{
++	int reg;
++	int data_num = 0;
++	int detect_sample1, detect_sample2;
++
++	memset(ts_data_buf, 0, sizeof ts_data_buf);
++	touch_sample->valid_flag = 1;
++
++	if (wait_tsi) {
++		/* Config idle for 4-wire */
++		reg = TSC_4WIRE_TOUCH_DETECT;
++		__raw_writel(reg, tsc_base + TICR);
++
++		/* Pen interrupt starts new conversion queue */
++		reg = __raw_readl(tsc_base + TCQCR);
++		reg &= ~CQCR_QSM_MASK;
++		reg |= CQCR_QSM_PEN;
++		__raw_writel(reg, tsc_base + TCQCR);
++
++		/* PDEN and PDBEN */
++		reg = __raw_readl(tsc_base + TGCR);
++		reg |= (TGCR_PDB_EN | TGCR_PD_EN);
++		__raw_writel(reg, tsc_base + TGCR);
++
++		wait_event_interruptible(tsq, ts_data_ready);
++		while (!(__raw_readl(tsc_base + TCQSR) & CQSR_EOQ))
++			continue;
++		/* stop the conversion */
++		reg = __raw_readl(tsc_base + TCQCR);
++		reg &= ~CQCR_QSM_MASK;
++		__raw_writel(reg, tsc_base + TCQCR);
++		reg = CQSR_PD | CQSR_EOQ;
++		__raw_writel(reg, tsc_base + TCQSR);
++
++		/* change configuration for FQS mode */
++		tsi_data = TSI_DATA;
++		reg = (0x1 << CC_YPLLSW_SHIFT) | (0x1 << CC_XNURSW_SHIFT) |
++		      CC_XPULSW;
++		__raw_writel(reg, tsc_base + TICR);
++	} else {
++		/* FQS semaphore */
++		down(&ts_convert_mutex);
++
++		reg = (0x1 << CC_YPLLSW_SHIFT) | (0x1 << CC_XNURSW_SHIFT) |
++		      CC_XPULSW;
++		__raw_writel(reg, tsc_base + TICR);
++
++		/* FQS */
++		reg = __raw_readl(tsc_base + TCQCR);
++		reg &= ~CQCR_QSM_MASK;
++		reg |= CQCR_QSM_FQS;
++		__raw_writel(reg, tsc_base + TCQCR);
++		reg = __raw_readl(tsc_base + TCQCR);
++		reg |= CQCR_FQS;
++		__raw_writel(reg, tsc_base + TCQCR);
++		while (!(__raw_readl(tsc_base + TCQSR) & CQSR_EOQ))
++			continue;
++
++		/* stop FQS */
++		reg = __raw_readl(tsc_base + TCQCR);
++		reg &= ~CQCR_QSM_MASK;
++		__raw_writel(reg, tsc_base + TCQCR);
++		reg = __raw_readl(tsc_base + TCQCR);
++		reg &= ~CQCR_FQS;
++		__raw_writel(reg, tsc_base + TCQCR);
++
++		/* clear status bit */
++		reg = __raw_readl(tsc_base + TCQSR);
++		reg |= CQSR_EOQ;
++		__raw_writel(reg, tsc_base + TCQSR);
++		tsi_data = FQS_DATA;
++	}
++
++	while (!(__raw_readl(tsc_base + TCQSR) & CQSR_EMPT)) {
++		reg = __raw_readl(tsc_base + TCQFIFO);
++		ts_data_buf[data_num] = reg;
++		data_num++;
++	}
++
++	touch_sample->x_position1 = ts_data_buf[4] >> 4;
++	touch_sample->x_position2 = ts_data_buf[5] >> 4;
++	touch_sample->x_position3 = ts_data_buf[6] >> 4;
++	touch_sample->y_position1 = ts_data_buf[9] >> 4;
++	touch_sample->y_position2 = ts_data_buf[10] >> 4;
++	touch_sample->y_position3 = ts_data_buf[11] >> 4;
++
++	detect_sample1 = ts_data_buf[0];
++	detect_sample2 = ts_data_buf[12];
++
++	if ((detect_sample1 > 0x6000) || (detect_sample2 > 0x6000))
++		touch_sample->valid_flag = 0;
++
++	ts_data_ready = 0;
++
++	if (!(touch_sample->x_position1 ||
++	      touch_sample->x_position2 || touch_sample->x_position3))
++		touch_sample->contact_resistance = 0;
++	else
++		touch_sample->contact_resistance = 1;
++
++	if (tsi_data == FQS_DATA)
++		up(&ts_convert_mutex);
++	return IMX_ADC_SUCCESS;
++}
++
++/*!
++ * This function performs filtering and rejection of excessive noise prone
++ * sampl.
++ *
++ * @param        ts_curr     Touch screen value
++ *
++ * @return       This function returns 0 on success, -1 otherwise.
++ */
++static int imx_adc_filter(struct t_touch_screen *ts_curr)
++{
++
++	unsigned int ydiff1, ydiff2, ydiff3, xdiff1, xdiff2, xdiff3;
++	unsigned int sample_sumx, sample_sumy;
++	static unsigned int prev_x[FILTLEN], prev_y[FILTLEN];
++	int index = 0;
++	unsigned int y_curr, x_curr;
++	static int filt_count;
++	/* Added a variable filt_type to decide filtering at run-time */
++	unsigned int filt_type = 0;
++
++	/* ignore the data converted when pen down and up */
++	if ((ts_curr->contact_resistance == 0) || tsi_data == TSI_DATA) {
++		ts_curr->x_position = 0;
++		ts_curr->y_position = 0;
++		filt_count = 0;
++		return 0;
++	}
++	/* ignore the data valid */
++	if (ts_curr->valid_flag == 0)
++		return -1;
++
++	ydiff1 = abs(ts_curr->y_position1 - ts_curr->y_position2);
++	ydiff2 = abs(ts_curr->y_position2 - ts_curr->y_position3);
++	ydiff3 = abs(ts_curr->y_position1 - ts_curr->y_position3);
++	if ((ydiff1 > DELTA_Y_MAX) ||
++	    (ydiff2 > DELTA_Y_MAX) || (ydiff3 > DELTA_Y_MAX)) {
++		pr_debug("imx_adc_filter: Ret pos 1\n");
++		return -1;
++	}
++
++	xdiff1 = abs(ts_curr->x_position1 - ts_curr->x_position2);
++	xdiff2 = abs(ts_curr->x_position2 - ts_curr->x_position3);
++	xdiff3 = abs(ts_curr->x_position1 - ts_curr->x_position3);
++
++	if ((xdiff1 > DELTA_X_MAX) ||
++	    (xdiff2 > DELTA_X_MAX) || (xdiff3 > DELTA_X_MAX)) {
++		pr_debug("imx_adc_filter: Ret pos 2\n");
++		return -1;
++	}
++	/* Compute two closer values among the three available Y readouts */
++
++	if (ydiff1 < ydiff2) {
++		if (ydiff1 < ydiff3) {
++			/* Sample 0 & 1 closest together */
++			sample_sumy = ts_curr->y_position1 +
++			    ts_curr->y_position2;
++		} else {
++			/* Sample 0 & 2 closest together */
++			sample_sumy = ts_curr->y_position1 +
++			    ts_curr->y_position3;
++		}
++	} else {
++		if (ydiff2 < ydiff3) {
++			/* Sample 1 & 2 closest together */
++			sample_sumy = ts_curr->y_position2 +
++			    ts_curr->y_position3;
++		} else {
++			/* Sample 0 & 2 closest together */
++			sample_sumy = ts_curr->y_position1 +
++			    ts_curr->y_position3;
++		}
++	}
++
++	/*
++	 * Compute two closer values among the three available X
++	 * readouts
++	 */
++	if (xdiff1 < xdiff2) {
++		if (xdiff1 < xdiff3) {
++			/* Sample 0 & 1 closest together */
++			sample_sumx = ts_curr->x_position1 +
++			    ts_curr->x_position2;
++		} else {
++			/* Sample 0 & 2 closest together */
++			sample_sumx = ts_curr->x_position1 +
++			    ts_curr->x_position3;
++		}
++	} else {
++		if (xdiff2 < xdiff3) {
++			/* Sample 1 & 2 closest together */
++			sample_sumx = ts_curr->x_position2 +
++			    ts_curr->x_position3;
++		} else {
++			/* Sample 0 & 2 closest together */
++			sample_sumx = ts_curr->x_position1 +
++			    ts_curr->x_position3;
++		}
++	}
++
++	/*
++	 * Wait FILTER_MIN_DELAY number of samples to restart
++	 * filtering
++	 */
++	if (filt_count < FILTER_MIN_DELAY) {
++		/*
++		 * Current output is the average of the two closer
++		 * values and no filtering is used
++		 */
++		y_curr = (sample_sumy / 2);
++		x_curr = (sample_sumx / 2);
++		ts_curr->y_position = y_curr;
++		ts_curr->x_position = x_curr;
++		filt_count++;
++
++	} else {
++		if (abs(sample_sumx - (prev_x[0] + prev_x[1])) >
++		    (DELTA_X_MAX * 16)) {
++			pr_debug("imx_adc_filter: : Ret pos 3\n");
++			return -1;
++		}
++		if (abs(sample_sumy - (prev_y[0] + prev_y[1])) >
++		    (DELTA_Y_MAX * 16)) {
++			pr_debug("imx_adc_filter: : Ret pos 4\n");
++			return -1;
++		}
++		sample_sumy /= 2;
++		sample_sumx /= 2;
++		/* Use hard filtering if the sample difference < 10 */
++		if ((abs(sample_sumy - prev_y[0]) > 10) ||
++		    (abs(sample_sumx - prev_x[0]) > 10))
++			filt_type = 1;
++
++		/*
++		 * Current outputs are the average of three previous
++		 * values and the present readout
++		 */
++		y_curr = sample_sumy;
++		for (index = 0; index < FILTLEN; index++) {
++			if (filt_type == 0)
++				y_curr = y_curr + (prev_y[index]);
++			else
++				y_curr = y_curr + (prev_y[index] / 3);
++		}
++		if (filt_type == 0)
++			y_curr = y_curr >> 2;
++		else
++			y_curr = y_curr >> 1;
++		ts_curr->y_position = y_curr;
++
++		x_curr = sample_sumx;
++		for (index = 0; index < FILTLEN; index++) {
++			if (filt_type == 0)
++				x_curr = x_curr + (prev_x[index]);
++			else
++				x_curr = x_curr + (prev_x[index] / 3);
++		}
++		if (filt_type == 0)
++			x_curr = x_curr >> 2;
++		else
++			x_curr = x_curr >> 1;
++		ts_curr->x_position = x_curr;
++
++	}
++
++	/* Update previous X and Y values */
++	for (index = (FILTLEN - 1); index > 0; index--) {
++		prev_x[index] = prev_x[index - 1];
++		prev_y[index] = prev_y[index - 1];
++	}
++
++	/*
++	 * Current output will be the most recent past for the
++	 * next sample
++	 */
++	prev_y[0] = y_curr;
++	prev_x[0] = x_curr;
++
++	return 0;
++
++}
++
++/*!
++ * This function retrieves the current touch screen (X,Y) coordinates.
++ *
++ * @param        touch_sample Pointer to touch sample.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_get_touch_sample(struct t_touch_screen
++					     *touch_sample, int wait_tsi)
++{
++	if (imx_adc_read_ts(touch_sample, wait_tsi))
++		return IMX_ADC_ERROR;
++	if (!imx_adc_filter(touch_sample))
++		return IMX_ADC_SUCCESS;
++	else
++		return IMX_ADC_ERROR;
++}
++EXPORT_SYMBOL(imx_adc_get_touch_sample);
++
++/*!
++ * This is the suspend of power management for the i.MX ADC API.
++ * It supports SAVE and POWER_DOWN state.
++ *
++ * @param        pdev           the device
++ * @param        state          the state
++ *
++ * @return       This function returns 0 if successful.
++ */
++static int imx_adc_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	suspend_flag = 1;
++	tsc_clk_disable();
++	return 0;
++};
++
++/*!
++ * This is the resume of power management for the i.MX adc API.
++ * It supports RESTORE state.
++ *
++ * @param        pdev           the device
++ *
++ * @return       This function returns 0 if successful.
++ */
++static int imx_adc_resume(struct platform_device *pdev)
++{
++	suspend_flag = 0;
++
++	tsc_clk_enable();
++
++	while (swait > 0) {
++		swait--;
++		wake_up_interruptible(&suspendq);
++	}
++
++	return 0;
++}
++
++/*!
++ * This function implements the open method on an i.MX ADC device.
++ *
++ * @param        inode       pointer on the node
++ * @param        file        pointer on the file
++ * @return       This function returns 0.
++ */
++static int imx_adc_open(struct inode *inode, struct file *file)
++{
++	while (suspend_flag) {
++		swait++;
++		/* Block if the device is suspended */
++		if (wait_event_interruptible(suspendq, !suspend_flag))
++			return -ERESTARTSYS;
++	}
++	pr_debug("imx_adc : imx_adc_open()\n");
++	return 0;
++}
++
++/*!
++ * This function implements the release method on an i.MX ADC device.
++ *
++ * @param        inode       pointer on the node
++ * @param        file        pointer on the file
++ * @return       This function returns 0.
++ */
++static int imx_adc_free(struct inode *inode, struct file *file)
++{
++	pr_debug("imx_adc : imx_adc_free()\n");
++	return 0;
++}
++
++/*!
++ * This function initializes all ADC registers with default values. This
++ * function also registers the interrupt events.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++int imx_adc_init(void)
++{
++	int reg;
++
++	pr_debug("imx_adc_init()\n");
++
++	if (suspend_flag)
++		return -EBUSY;
++
++	tsc_clk_enable();
++
++	/* Reset */
++	tsc_self_reset();
++
++	/* Internal reference */
++	tsc_intref_enable();
++
++	/* Set power mode */
++	reg = __raw_readl(tsc_base + TGCR) & ~TGCR_POWER_MASK;
++	reg |= TGCR_POWER_SAVE;
++	__raw_writel(reg, tsc_base + TGCR);
++
++	imx_tsc_init();
++
++	return IMX_ADC_SUCCESS;
++}
++EXPORT_SYMBOL(imx_adc_init);
++
++/*!
++ * This function disables the ADC, de-registers the interrupt events.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_deinit(void)
++{
++	pr_debug("imx_adc_deinit()\n");
++
++	return IMX_ADC_SUCCESS;
++}
++EXPORT_SYMBOL(imx_adc_deinit);
++
++/*!
++ * This function triggers a conversion and returns one sampling result of one
++ * channel.
++ *
++ * @param        channel   The channel to be sampled
++ * @param        result    The pointer to the conversion result. The memory
++ *                         should be allocated by the caller of this function.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_convert(enum t_channel channel,
++				    unsigned short *result)
++{
++	int reg;
++	int lastitemid;
++	struct t_touch_screen touch_sample;
++
++	switch (channel) {
++
++	case TS_X_POS:
++		imx_adc_get_touch_sample(&touch_sample, 0);
++		result[0] = touch_sample.x_position;
++
++		/* if no pen down ,recover the register configuration */
++		if (touch_sample.contact_resistance == 0) {
++			reg = __raw_readl(tsc_base + TCQCR);
++			reg &= ~CQCR_QSM_MASK;
++			reg |= CQCR_QSM_PEN;
++			__raw_writel(reg, tsc_base + TCQCR);
++			reg = __raw_readl(tsc_base + TGCR);
++			reg |= TGCR_PDB_EN | TGCR_PD_EN;
++			__raw_writel(reg, tsc_base + TGCR);
++		}
++		break;
++
++	case TS_Y_POS:
++		imx_adc_get_touch_sample(&touch_sample, 0);
++		result[1] = touch_sample.y_position;
++
++		/* if no pen down ,recover the register configuration */
++		if (touch_sample.contact_resistance == 0) {
++			reg = __raw_readl(tsc_base + TCQCR);
++			reg &= ~CQCR_QSM_MASK;
++			reg |= CQCR_QSM_PEN;
++			__raw_writel(reg, tsc_base + TCQCR);
++
++			reg = __raw_readl(tsc_base + TGCR);
++			reg |= TGCR_PDB_EN | TGCR_PD_EN;
++			__raw_writel(reg, tsc_base + TGCR);
++		}
++		break;
++
++	case GER_PURPOSE_ADC0:
++		down(&general_convert_mutex);
++
++		lastitemid = 0;
++		reg = (0xf << CQCR_FIFOWATERMARK_SHIFT) |
++		      (lastitemid << CQCR_LAST_ITEM_ID_SHIFT) | CQCR_QSM_FQS;
++		__raw_writel(reg, tsc_base + GCQCR);
++
++		reg = TSC_GENERAL_ADC_GCC0;
++		reg |= (3 << CC_NOS_SHIFT) | (16 << CC_SETTLING_TIME_SHIFT);
++		__raw_writel(reg, tsc_base + GCC0);
++
++		imx_adc_read_general(result);
++		up(&general_convert_mutex);
++		break;
++
++	case GER_PURPOSE_ADC1:
++		down(&general_convert_mutex);
++
++		lastitemid = 0;
++		reg = (0xf << CQCR_FIFOWATERMARK_SHIFT) |
++		      (lastitemid << CQCR_LAST_ITEM_ID_SHIFT) | CQCR_QSM_FQS;
++		__raw_writel(reg, tsc_base + GCQCR);
++
++		reg = TSC_GENERAL_ADC_GCC1;
++		reg |= (3 << CC_NOS_SHIFT) | (16 << CC_SETTLING_TIME_SHIFT);
++		__raw_writel(reg, tsc_base + GCC0);
++
++		imx_adc_read_general(result);
++		up(&general_convert_mutex);
++		break;
++
++	case GER_PURPOSE_ADC2:
++		down(&general_convert_mutex);
++
++		lastitemid = 0;
++		reg = (0xf << CQCR_FIFOWATERMARK_SHIFT) |
++		      (lastitemid << CQCR_LAST_ITEM_ID_SHIFT) | CQCR_QSM_FQS;
++		__raw_writel(reg, tsc_base + GCQCR);
++
++		reg = TSC_GENERAL_ADC_GCC2;
++		reg |= (3 << CC_NOS_SHIFT) | (16 << CC_SETTLING_TIME_SHIFT);
++		__raw_writel(reg, tsc_base + GCC0);
++
++		imx_adc_read_general(result);
++		up(&general_convert_mutex);
++		break;
++
++	case GER_PURPOSE_MULTICHNNEL:
++		down(&general_convert_mutex);
++
++		reg = TSC_GENERAL_ADC_GCC0;
++		reg |= (3 << CC_NOS_SHIFT) | (16 << CC_SETTLING_TIME_SHIFT);
++		__raw_writel(reg, tsc_base + GCC0);
++
++		reg = TSC_GENERAL_ADC_GCC1;
++		reg |= (3 << CC_NOS_SHIFT) | (16 << CC_SETTLING_TIME_SHIFT);
++		__raw_writel(reg, tsc_base + GCC1);
++
++		reg = TSC_GENERAL_ADC_GCC2;
++		reg |= (3 << CC_NOS_SHIFT) | (16 << CC_SETTLING_TIME_SHIFT);
++		__raw_writel(reg, tsc_base + GCC2);
++
++		reg = (GCQ_ITEM_GCC2 << GCQ_ITEM2_SHIFT) |
++		      (GCQ_ITEM_GCC1 << GCQ_ITEM1_SHIFT) |
++		      (GCQ_ITEM_GCC0 << GCQ_ITEM0_SHIFT);
++		__raw_writel(reg, tsc_base + GCQ_ITEM_7_0);
++
++		lastitemid = 2;
++		reg = (0xf << CQCR_FIFOWATERMARK_SHIFT) |
++		      (lastitemid << CQCR_LAST_ITEM_ID_SHIFT) | CQCR_QSM_FQS;
++		__raw_writel(reg, tsc_base + GCQCR);
++
++		imx_adc_read_general(result);
++		up(&general_convert_mutex);
++		break;
++	default:
++		pr_debug("%s: bad channel number\n", __func__);
++		return IMX_ADC_ERROR;
++	}
++
++	return IMX_ADC_SUCCESS;
++}
++EXPORT_SYMBOL(imx_adc_convert);
++
++/*!
++ * This function triggers a conversion and returns sampling results of each
++ * specified channel.
++ *
++ * @param        channels  This input parameter is bitmap to specify channels
++ *                         to be sampled.
++ * @param        result    The pointer to array to store sampling results.
++ *                         The memory should be allocated by the caller of this
++ *                         function.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_convert_multichnnel(enum t_channel channels,
++						unsigned short *result)
++{
++	imx_adc_convert(GER_PURPOSE_MULTICHNNEL, result);
++	return IMX_ADC_SUCCESS;
++}
++EXPORT_SYMBOL(imx_adc_convert_multichnnel);
++
++/*!
++ * This function implements IOCTL controls on an i.MX ADC device.
++ *
++ * @param        inode       pointer on the node
++ * @param        file        pointer on the file
++ * @param        cmd         the command
++ * @param        arg         the parameter
++ * @return       This function returns 0 if successful.
++ */
++static int imx_adc_ioctl(struct inode *inode, struct file *file,
++			 unsigned int cmd, unsigned long arg)
++{
++	struct t_adc_convert_param *convert_param;
++
++	if ((_IOC_TYPE(cmd) != 'p') && (_IOC_TYPE(cmd) != 'D'))
++		return -ENOTTY;
++
++	while (suspend_flag) {
++		swait++;
++		/* Block if the device is suspended */
++		if (wait_event_interruptible(suspendq, !suspend_flag))
++			return -ERESTARTSYS;
++	}
++
++	switch (cmd) {
++	case IMX_ADC_INIT:
++		pr_debug("init adc\n");
++		CHECK_ERROR(imx_adc_init());
++		break;
++
++	case IMX_ADC_DEINIT:
++		pr_debug("deinit adc\n");
++		CHECK_ERROR(imx_adc_deinit());
++		break;
++
++	case IMX_ADC_CONVERT:
++		convert_param = kmalloc(sizeof(*convert_param), GFP_KERNEL);
++		if (convert_param == NULL)
++			return -ENOMEM;
++		if (copy_from_user(convert_param,
++				   (struct t_adc_convert_param *)arg,
++				   sizeof(*convert_param))) {
++			kfree(convert_param);
++			return -EFAULT;
++		}
++		CHECK_ERROR_KFREE(imx_adc_convert(convert_param->channel,
++						  convert_param->result),
++				  (kfree(convert_param)));
++
++		if (copy_to_user((struct t_adc_convert_param *)arg,
++				 convert_param, sizeof(*convert_param))) {
++			kfree(convert_param);
++			return -EFAULT;
++		}
++		kfree(convert_param);
++		break;
++
++	case IMX_ADC_CONVERT_MULTICHANNEL:
++		convert_param = kmalloc(sizeof(*convert_param), GFP_KERNEL);
++		if (convert_param == NULL)
++			return -ENOMEM;
++		if (copy_from_user(convert_param,
++				   (struct t_adc_convert_param *)arg,
++				   sizeof(*convert_param))) {
++			kfree(convert_param);
++			return -EFAULT;
++		}
++		CHECK_ERROR_KFREE(imx_adc_convert_multichnnel
++				  (convert_param->channel,
++				   convert_param->result),
++				  (kfree(convert_param)));
++
++		if (copy_to_user((struct t_adc_convert_param *)arg,
++				 convert_param, sizeof(*convert_param))) {
++			kfree(convert_param);
++			return -EFAULT;
++		}
++		kfree(convert_param);
++		break;
++
++	default:
++		pr_debug("imx_adc_ioctl: unsupported ioctl command 0x%x\n",
++			 cmd);
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static struct file_operations imx_adc_fops = {
++	.owner = THIS_MODULE,
++	.ioctl = imx_adc_ioctl,
++	.open = imx_adc_open,
++	.release = imx_adc_free,
++};
++
++static int imx_adc_module_probe(struct platform_device *pdev)
++{
++	int ret = 0;
++	int retval;
++	struct device *temp_class;
++	struct resource *res;
++	void __iomem *base;
++
++	/* ioremap the base address */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (res == NULL) {
++		dev_err(&pdev->dev, "No TSC base address provided\n");
++		goto err_out0;
++	}
++	base = ioremap(res->start, res->end - res->start);
++	if (base == NULL) {
++		dev_err(&pdev->dev, "failed to rebase TSC base address\n");
++		goto err_out0;
++	}
++	tsc_base = (unsigned long)base;
++
++	/* create the chrdev */
++	imx_adc_major = register_chrdev(0, "imx_adc", &imx_adc_fops);
++
++	if (imx_adc_major < 0) {
++		dev_err(&pdev->dev, "Unable to get a major for imx_adc\n");
++		return imx_adc_major;
++	}
++	init_waitqueue_head(&suspendq);
++	init_waitqueue_head(&tsq);
++
++	imx_adc_class = class_create(THIS_MODULE, "imx_adc");
++	if (IS_ERR(imx_adc_class)) {
++		dev_err(&pdev->dev, "Error creating imx_adc class.\n");
++		ret = PTR_ERR(imx_adc_class);
++		goto err_out1;
++	}
++
++	temp_class = device_create(imx_adc_class, NULL,
++				   MKDEV(imx_adc_major, 0), "imx_adc");
++	if (IS_ERR(temp_class)) {
++		dev_err(&pdev->dev, "Error creating imx_adc class device.\n");
++		ret = PTR_ERR(temp_class);
++		goto err_out2;
++	}
++
++	adc_data = kmalloc(sizeof(struct imx_adc_data), GFP_KERNEL);
++	if (adc_data == NULL)
++		return -ENOMEM;
++	adc_data->irq = platform_get_irq(pdev, 0);
++	retval = request_irq(adc_data->irq, imx_adc_interrupt,
++			     0, MOD_NAME, MOD_NAME);
++	if (retval) {
++		dev_dbg(&pdev->dev, "ADC: request_irq(%d) returned error %d\n",
++			MXC_INT_TSC, retval);
++		return retval;
++	}
++	adc_data->adc_clk = clk_get(&pdev->dev, "tchscrn_clk");
++
++	ret = imx_adc_init();
++
++	if (ret != IMX_ADC_SUCCESS) {
++		dev_err(&pdev->dev, "Error in imx_adc_init.\n");
++		goto err_out4;
++	}
++	imx_adc_ready = 1;
++	pr_info("i.MX ADC at 0x%x irq %d\n", (unsigned int)res->start,
++		adc_data->irq);
++	return ret;
++
++err_out4:
++	device_destroy(imx_adc_class, MKDEV(imx_adc_major, 0));
++err_out2:
++	class_destroy(imx_adc_class);
++err_out1:
++	unregister_chrdev(imx_adc_major, "imx_adc");
++err_out0:
++	return ret;
++}
++
++static int imx_adc_module_remove(struct platform_device *pdev)
++{
++	imx_adc_ready = 0;
++	imx_adc_deinit();
++	device_destroy(imx_adc_class, MKDEV(imx_adc_major, 0));
++	class_destroy(imx_adc_class);
++	unregister_chrdev(imx_adc_major, "imx_adc");
++	free_irq(adc_data->irq, MOD_NAME);
++	kfree(adc_data);
++	pr_debug("i.MX ADC successfully removed\n");
++	return 0;
++}
++
++static struct platform_driver imx_adc_driver = {
++	.driver = {
++		   .name = "imx_adc",
++		   },
++	.suspend = imx_adc_suspend,
++	.resume = imx_adc_resume,
++	.probe = imx_adc_module_probe,
++	.remove = imx_adc_module_remove,
++};
++
++/*
++ * Initialization and Exit
++ */
++static int __init imx_adc_module_init(void)
++{
++	pr_debug("i.MX ADC driver loading...\n");
++	return platform_driver_register(&imx_adc_driver);
++}
++
++static void __exit imx_adc_module_exit(void)
++{
++	platform_driver_unregister(&imx_adc_driver);
++	pr_debug("i.MX ADC driver successfully unloaded\n");
++}
++
++/*
++ * Module entry points
++ */
++
++module_init(imx_adc_module_init);
++module_exit(imx_adc_module_exit);
++
++MODULE_DESCRIPTION("i.MX ADC device driver");
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mxc/adc/imx_adc_reg.h b/drivers/mxc/adc/imx_adc_reg.h
+new file mode 100644
+index 0000000..8ae7760
+--- /dev/null
++++ b/drivers/mxc/adc/imx_adc_reg.h
+@@ -0,0 +1,242 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU Lesser General
++ * Public License.  You may obtain a copy of the GNU Lesser General
++ * Public License Version 2.1 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/lgpl-license.html
++ * http://www.gnu.org/copyleft/lgpl.html
++ */
++
++#ifndef __IMX_ADC_H__
++#define __IMX_ADC_H__
++
++/* TSC General Config Register */
++#define TGCR                  0x000
++#define TGCR_IPG_CLK_EN       (1 << 0)
++#define TGCR_TSC_RST          (1 << 1)
++#define TGCR_FUNC_RST         (1 << 2)
++#define TGCR_SLPC             (1 << 4)
++#define TGCR_STLC             (1 << 5)
++#define TGCR_HSYNC_EN         (1 << 6)
++#define TGCR_HSYNC_POL        (1 << 7)
++#define TGCR_POWERMODE_SHIFT  8
++#define TGCR_POWER_OFF        (0x0 << TGCR_POWERMODE_SHIFT)
++#define TGCR_POWER_SAVE       (0x1 << TGCR_POWERMODE_SHIFT)
++#define TGCR_POWER_ON         (0x3 << TGCR_POWERMODE_SHIFT)
++#define TGCR_POWER_MASK       (0x3 << TGCR_POWERMODE_SHIFT)
++#define TGCR_INTREFEN         (1 << 10)
++#define TGCR_ADCCLKCFG_SHIFT  16
++#define TGCR_PD_EN            (1 << 23)
++#define TGCR_PDB_EN           (1 << 24)
++#define TGCR_PDBTIME_SHIFT    25
++#define TGCR_PDBTIME128       (0x3f << TGCR_PDBTIME_SHIFT)
++#define TGCR_PDBTIME_MASK     (0x7f << TGCR_PDBTIME_SHIFT)
++
++/* TSC General Status Register */
++#define TGSR                  0x004
++#define TCQ_INT               (1 << 0)
++#define GCQ_INT               (1 << 1)
++#define SLP_INT               (1 << 2)
++#define TCQ_DMA               (1 << 16)
++#define GCQ_DMA               (1 << 17)
++
++/* TSC IDLE Config Register */
++#define TICR                  0x008
++
++/* TouchScreen Convert Queue FIFO Register */
++#define TCQFIFO               0x400
++/* TouchScreen Convert Queue Control Register */
++#define TCQCR                 0x404
++#define CQCR_QSM_SHIFT        0
++#define CQCR_QSM_STOP         (0x0 << CQCR_QSM_SHIFT)
++#define CQCR_QSM_PEN          (0x1 << CQCR_QSM_SHIFT)
++#define CQCR_QSM_FQS          (0x2 << CQCR_QSM_SHIFT)
++#define CQCR_QSM_FQS_PEN      (0x3 << CQCR_QSM_SHIFT)
++#define CQCR_QSM_MASK         (0x3 << CQCR_QSM_SHIFT)
++#define CQCR_FQS              (1 << 2)
++#define CQCR_RPT              (1 << 3)
++#define CQCR_LAST_ITEM_ID_SHIFT   4
++#define CQCR_LAST_ITEM_ID_MASK    (0xf << CQCR_LAST_ITEM_ID_SHIFT)
++#define CQCR_FIFOWATERMARK_SHIFT  8
++#define CQCR_FIFOWATERMARK_MASK   (0xf << CQCR_FIFOWATERMARK_SHIFT)
++#define CQCR_REPEATWAIT_SHIFT     12
++#define CQCR_REPEATWAIT_MASK      (0xf << CQCR_REPEATWAIT_SHIFT)
++#define CQCR_QRST             (1 << 16)
++#define CQCR_FRST             (1 << 17)
++#define CQCR_PD_MSK           (1 << 18)
++#define CQCR_PD_CFG           (1 << 19)
++
++/* TouchScreen Convert Queue Status Register */
++#define TCQSR                 0x408
++#define CQSR_PD               (1 << 0)
++#define CQSR_EOQ              (1 << 1)
++#define CQSR_FOR              (1 << 4)
++#define CQSR_FUR              (1 << 5)
++#define CQSR_FER              (1 << 6)
++#define CQSR_EMPT             (1 << 13)
++#define CQSR_FULL             (1 << 14)
++#define CQSR_FDRY             (1 << 15)
++
++/* TouchScreen Convert Queue Mask Register */
++#define TCQMR                 0x40c
++#define TCQMR_PD_IRQ_MSK      (1 << 0)
++#define TCQMR_EOQ_IRQ_MSK     (1 << 1)
++#define TCQMR_FOR_IRQ_MSK     (1 << 4)
++#define TCQMR_FUR_IRQ_MSK     (1 << 5)
++#define TCQMR_FER_IRQ_MSK     (1 << 6)
++#define TCQMR_PD_DMA_MSK      (1 << 16)
++#define TCQMR_EOQ_DMA_MSK     (1 << 17)
++#define TCQMR_FOR_DMA_MSK     (1 << 20)
++#define TCQMR_FUR_DMA_MSK     (1 << 21)
++#define TCQMR_FER_DMA_MSK     (1 << 22)
++#define TCQMR_FDRY_DMA_MSK    (1 << 31)
++
++/* TouchScreen Convert Queue ITEM 7~0 */
++#define TCQ_ITEM_7_0          0x420
++
++/* TouchScreen Convert Queue ITEM 15~8 */
++#define TCQ_ITEM_15_8         0x424
++
++#define TCQ_ITEM7_SHIFT       28
++#define TCQ_ITEM6_SHIFT       24
++#define TCQ_ITEM5_SHIFT       20
++#define TCQ_ITEM4_SHIFT       16
++#define TCQ_ITEM3_SHIFT       12
++#define TCQ_ITEM2_SHIFT       8
++#define TCQ_ITEM1_SHIFT       4
++#define TCQ_ITEM0_SHIFT       0
++
++#define TCQ_ITEM_TCC0         0x0
++#define TCQ_ITEM_TCC1         0x1
++#define TCQ_ITEM_TCC2         0x2
++#define TCQ_ITEM_TCC3         0x3
++#define TCQ_ITEM_TCC4         0x4
++#define TCQ_ITEM_TCC5         0x5
++#define TCQ_ITEM_TCC6         0x6
++#define TCQ_ITEM_TCC7         0x7
++#define TCQ_ITEM_GCC7         0x8
++#define TCQ_ITEM_GCC6         0x9
++#define TCQ_ITEM_GCC5         0xa
++#define TCQ_ITEM_GCC4         0xb
++#define TCQ_ITEM_GCC3         0xc
++#define TCQ_ITEM_GCC2         0xd
++#define TCQ_ITEM_GCC1         0xe
++#define TCQ_ITEM_GCC0         0xf
++
++/* TouchScreen Convert Config 0-7 */
++#define TCC0                  0x440
++#define TCC1                  0x444
++#define TCC2                  0x448
++#define TCC3                  0x44c
++#define TCC4                  0x450
++#define TCC5                  0x454
++#define TCC6                  0x458
++#define TCC7                  0x45c
++#define CC_PEN_IACK           (1 << 1)
++#define CC_SEL_REFN_SHIFT     2
++#define CC_SEL_REFN_YNLR      (0x1 << CC_SEL_REFN_SHIFT)
++#define CC_SEL_REFN_AGND      (0x2 << CC_SEL_REFN_SHIFT)
++#define CC_SEL_REFN_MASK      (0x3 << CC_SEL_REFN_SHIFT)
++#define CC_SELIN_SHIFT        4
++#define CC_SELIN_XPUL         (0x0 << CC_SELIN_SHIFT)
++#define CC_SELIN_YPLL         (0x1 << CC_SELIN_SHIFT)
++#define CC_SELIN_XNUR         (0x2 << CC_SELIN_SHIFT)
++#define CC_SELIN_YNLR         (0x3 << CC_SELIN_SHIFT)
++#define CC_SELIN_WIPER        (0x4 << CC_SELIN_SHIFT)
++#define CC_SELIN_INAUX0       (0x5 << CC_SELIN_SHIFT)
++#define CC_SELIN_INAUX1       (0x6 << CC_SELIN_SHIFT)
++#define CC_SELIN_INAUX2       (0x7 << CC_SELIN_SHIFT)
++#define CC_SELIN_MASK         (0x7 << CC_SELIN_SHIFT)
++#define CC_SELREFP_SHIFT      7
++#define CC_SELREFP_YPLL       (0x0 << CC_SELREFP_SHIFT)
++#define CC_SELREFP_XPUL       (0x1 << CC_SELREFP_SHIFT)
++#define CC_SELREFP_EXT        (0x2 << CC_SELREFP_SHIFT)
++#define CC_SELREFP_INT        (0x3 << CC_SELREFP_SHIFT)
++#define CC_SELREFP_MASK       (0x3 << CC_SELREFP_SHIFT)
++#define CC_XPULSW             (1 << 9)
++#define CC_XNURSW_SHIFT       10
++#define CC_XNURSW_HIGH        (0x0 << CC_XNURSW_SHIFT)
++#define CC_XNURSW_OFF         (0x1 << CC_XNURSW_SHIFT)
++#define CC_XNURSW_LOW         (0x3 << CC_XNURSW_SHIFT)
++#define CC_XNURSW_MASK        (0x3 << CC_XNURSW_SHIFT)
++#define CC_YPLLSW_SHIFT       12
++#define CC_YPLLSW_MASK        (0x3 << CC_YPLLSW_SHIFT)
++#define CC_YNLRSW             (1 << 14)
++#define CC_WIPERSW            (1 << 15)
++#define CC_NOS_SHIFT          16
++#define CC_YPLLSW_HIGH        (0x0 << CC_NOS_SHIFT)
++#define CC_YPLLSW_OFF         (0x1 << CC_NOS_SHIFT)
++#define CC_YPLLSW_LOW         (0x3 << CC_NOS_SHIFT
++#define CC_NOS_MASK           (0xf << CC_NOS_SHIFT)
++#define CC_IGS                (1 << 20)
++#define CC_SETTLING_TIME_SHIFT 24
++#define CC_SETTLING_TIME_MASK (0xff << CC_SETTLING_TIME_SHIFT)
++
++#define TSC_4WIRE_PRECHARGE    0x158c
++#define TSC_4WIRE_TOUCH_DETECT 0x578e
++
++#define TSC_4WIRE_X_MEASUMENT  0x1c90
++#define TSC_4WIRE_Y_MEASUMENT  0x4604
++
++#define TSC_GENERAL_ADC_GCC0   0x17dc
++#define TSC_GENERAL_ADC_GCC1   0x17ec
++#define TSC_GENERAL_ADC_GCC2   0x17fc
++
++/* GeneralADC Convert Queue FIFO Register */
++#define GCQFIFO                0x800
++#define GCQFIFO_ADCOUT_SHIFT   4
++#define GCQFIFO_ADCOUT_MASK    (0xfff << GCQFIFO_ADCOUT_SHIFT)
++/* GeneralADC Convert Queue Control Register */
++#define GCQCR                  0x804
++/* GeneralADC Convert Queue Status Register */
++#define GCQSR                  0x808
++/* GeneralADC Convert Queue Mask Register */
++#define GCQMR                  0x80c
++
++/* GeneralADC Convert Queue ITEM 7~0 */
++#define GCQ_ITEM_7_0           0x820
++/* GeneralADC Convert Queue ITEM 15~8 */
++#define GCQ_ITEM_15_8          0x824
++
++#define GCQ_ITEM7_SHIFT        28
++#define GCQ_ITEM6_SHIFT        24
++#define GCQ_ITEM5_SHIFT        20
++#define GCQ_ITEM4_SHIFT        16
++#define GCQ_ITEM3_SHIFT        12
++#define GCQ_ITEM2_SHIFT        8
++#define GCQ_ITEM1_SHIFT        4
++#define GCQ_ITEM0_SHIFT        0
++
++#define GCQ_ITEM_GCC0          0x0
++#define GCQ_ITEM_GCC1          0x1
++#define GCQ_ITEM_GCC2          0x2
++#define GCQ_ITEM_GCC3          0x3
++
++/* GeneralADC Convert Config 0-7 */
++#define GCC0                   0x840
++#define GCC1                   0x844
++#define GCC2                   0x848
++#define GCC3                   0x84c
++#define GCC4                   0x850
++#define GCC5                   0x854
++#define GCC6                   0x858
++#define GCC7                   0x85c
++
++/* TSC Test Register R/W */
++#define TTR                    0xc00
++/* TSC Monitor Register 1, 2 */
++#define MNT1                   0xc04
++#define MNT2                   0xc04
++
++#define DETECT_ITEM_ID_1       1
++#define DETECT_ITEM_ID_2       5
++#define TS_X_ITEM_ID           2
++#define TS_Y_ITEM_ID           3
++#define TSI_DATA               1
++#define FQS_DATA               0
++
++#endif				/* __IMX_ADC_H__ */
+diff --git a/include/asm-arm/arch-mxc/imx_adc.h b/include/asm-arm/arch-mxc/imx_adc.h
+new file mode 100644
+index 0000000..5c0e246
+--- /dev/null
++++ b/include/asm-arm/arch-mxc/imx_adc.h
+@@ -0,0 +1,275 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU Lesser General
++ * Public License.  You may obtain a copy of the GNU Lesser General
++ * Public License Version 2.1 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/lgpl-license.html
++ * http://www.gnu.org/copyleft/lgpl.html
++ */
++
++#ifndef __ASM_ARCH_IMX_ADC_H__
++#define __ASM_ARCH_IMX_ADC_H__
++
++/*!
++ * @defgroup IMX_ADC Digitizer Driver
++ * @ingroup IMX_DRVRS
++ */
++
++/*!
++ * @file arch-mxc/imx_adc.h
++ * @brief This is the header of IMX ADC driver.
++ *
++ * @ingroup IMX_ADC
++ */
++
++#include <linux/ioctl.h>
++
++/*!
++ * @enum IMX_ADC_STATUS
++ * @brief Define return values for all IMX_ADC APIs.
++ *
++ * These return values are used by all of the IMX_ADC APIs.
++ *
++ * @ingroup IMX_ADC
++ */
++enum IMX_ADC_STATUS {
++	/*! The requested operation was successfully completed. */
++	IMX_ADC_SUCCESS = 0,
++	/*! The requested operation could not be completed due to an error. */
++	IMX_ADC_ERROR = -1,
++	/*!
++	 * The requested operation failed because one or more of the
++	 * parameters was invalid.
++	 */
++	IMX_ADC_PARAMETER_ERROR = -2,
++	/*!
++	 * The requested operation could not be completed because the ADC
++	 * hardware does not support it.
++	 */
++	IMX_ADC_NOT_SUPPORTED = -3,
++	/*! Error in malloc function */
++	IMX_ADC_MALLOC_ERROR = -5,
++	/*! Error in un-subscribe event */
++	IMX_ADC_UNSUBSCRIBE_ERROR = -6,
++	/*! Event occur and not subscribed */
++	IMX_ADC_EVENT_NOT_SUBSCRIBED = -7,
++	/*! Error - bad call back */
++	IMX_ADC_EVENT_CALL_BACK = -8,
++	/*!
++	 * The requested operation could not be completed because there
++	 * are too many ADC client requests
++	 */
++	IMX_ADC_CLIENT_NBOVERFLOW = -9,
++};
++
++/*
++ * Macros implementing error handling
++ */
++#define CHECK_ERROR(a)			\
++do {					\
++		int ret = (a); 			\
++		if (ret != IMX_ADC_SUCCESS)	\
++	return ret; 			\
++} while (0)
++
++#define CHECK_ERROR_KFREE(func, freeptrs) \
++do { \
++	int ret = (func); \
++	if (ret != IMX_ADC_SUCCESS) { \
++		freeptrs;	\
++		return ret;	\
++	}	\
++} while (0)
++
++#define MOD_NAME  "mxcadc"
++
++/*!
++ * @name IOCTL user space interface
++ */
++
++/*!
++ * Initialize ADC.
++ * Argument type: none.
++ */
++#define IMX_ADC_INIT                   _IO('p', 0xb0)
++/*!
++ * De-initialize ADC.
++ * Argument type: none.
++ */
++#define IMX_ADC_DEINIT                 _IO('p', 0xb1)
++/*!
++ * Convert one channel.
++ * Argument type: pointer to t_adc_convert_param.
++ */
++#define IMX_ADC_CONVERT                _IOWR('p', 0xb2, int)
++/*!
++ * Convert multiple channels.
++ * Argument type: pointer to t_adc_convert_param.
++ */
++#define IMX_ADC_CONVERT_MULTICHANNEL   _IOWR('p', 0xb4, int)
++
++/*! @{ */
++/*!
++ * @name Touch Screen minimum and maximum values
++ */
++#define IMX_ADC_DEVICE "/dev/imx_adc"
++
++/*
++ * Maximun allowed variation in the three X/Y co-ordinates acquired from
++ * touch screen
++ */
++#define DELTA_Y_MAX             100
++#define DELTA_X_MAX             100
++
++/* Upon clearing the filter, this is the delay in restarting the filter */
++#define FILTER_MIN_DELAY        4
++
++/* Length of X and Y touch screen filters */
++#define FILTLEN                 3
++
++#define TS_X_MAX                1000
++#define TS_Y_MAX                1000
++
++#define TS_X_MIN                80
++#define TS_Y_MIN                80
++
++/*! @} */
++/*!
++ * This enumeration defines input channels for IMX ADC
++ */
++
++enum t_channel {
++	TS_X_POS,
++	TS_Y_POS,
++	GER_PURPOSE_ADC0,
++	GER_PURPOSE_ADC1,
++	GER_PURPOSE_ADC2,
++	GER_PURPOSE_MULTICHNNEL,
++};
++
++/*!
++ * This structure is used to report touch screen value.
++ */
++struct t_touch_screen {
++	/* Touch Screen X position */
++	unsigned int x_position;
++	/* Touch Screen X position1 */
++	unsigned int x_position1;
++	/* Touch Screen X position2 */
++	unsigned int x_position2;
++	/* Touch Screen X position3 */
++	unsigned int x_position3;
++	/* Touch Screen Y position */
++	unsigned int y_position;
++	/* Touch Screen Y position1 */
++	unsigned int y_position1;
++	/* Touch Screen Y position2 */
++	unsigned int y_position2;
++	/* Touch Screen Y position3 */
++	unsigned int y_position3;
++	/* Touch Screen contact value */
++	unsigned int contact_resistance;
++	/* Flag indicate the data usability */
++	unsigned int valid_flag;
++};
++
++/*!
++ * This structure is used with IOCTL code \a IMX_ADC_CONVERT,
++ * \a IMX_ADC_CONVERT_8X and \a IMX_ADC_CONVERT_MULTICHANNEL.
++ */
++
++struct t_adc_convert_param {
++	/* channel or channels to be sampled.  */
++	enum t_channel channel;
++	/* holds up to 16 sampling results */
++	unsigned short result[16];
++};
++
++/* EXPORTED FUNCTIONS */
++
++#ifdef __KERNEL__
++/* Driver data */
++struct imx_adc_data {
++	u32 irq;
++	struct clk *adc_clk;
++};
++
++/*!
++ * This function initializes all ADC registers with default values. This
++ * function also registers the interrupt events.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_init(void);
++
++/*!
++ * This function disables the ADC, de-registers the interrupt events.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_deinit(void);
++
++/*!
++ * This function triggers a conversion and returns one sampling result of one
++ * channel.
++ *
++ * @param        channel   The channel to be sampled
++ * @param        result    The pointer to the conversion result. The memory
++ *                         should be allocated by the caller of this function.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++
++enum IMX_ADC_STATUS imx_adc_convert(enum t_channel channel,
++				    unsigned short *result);
++
++/*!
++ * This function triggers a conversion and returns sampling results of each
++ * specified channel.
++ *
++ * @param        channels  This input parameter is bitmap to specify channels
++ *                         to be sampled.
++ * @param        result    The pointer to array to store sampling result.
++ *                         The order of the result in the array is from lowest
++ *                         channel number to highest channel number of the
++ *                         sampled channels.
++ *                         The memory should be allocated by the caller of this
++ *                         function.
++ *			   Note that the behavior of this function might differ
++ *			   from one platform to another regarding especially
++ *			   channels order.
++ *
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++
++enum IMX_ADC_STATUS imx_adc_convert_multichnnel(enum t_channel channels,
++						unsigned short *result);
++
++/*!
++ * This function retrieves the current touch screen operation mode.
++ *
++ * @param        touch_sample Pointer to touch sample.
++ * @param        wait_tsi     if true, we wait until interrupt occurs
++ * @return       This function returns IMX_ADC_SUCCESS if successful.
++ */
++enum IMX_ADC_STATUS imx_adc_get_touch_sample(struct t_touch_screen *ts_value,
++					     int wait_tsi);
++
++/*!
++ * This function read the touch screen value.
++ *
++ * @param        touch_sample    return value of touch screen
++ * @param        wait_tsi        if true, we need wait until interrupt occurs
++ * @return       This function returns 0.
++ */
++enum IMX_ADC_STATUS imx_adc_read_ts(struct t_touch_screen *touch_sample,
++				    int wait_tsi);
++
++int is_imx_adc_ready(void);
++
++#endif				/* _KERNEL */
++#endif				/* __ASM_ARCH_IMX_ADC_H__ */
+-- 
+1.5.4.4
+

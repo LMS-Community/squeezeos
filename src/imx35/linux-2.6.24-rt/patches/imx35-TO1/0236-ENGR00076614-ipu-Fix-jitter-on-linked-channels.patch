@@ -1,0 +1,135 @@
+From b931d57d0059de7bc3027d1a4ec83a1ff67619ec Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 30 Jun 2008 10:22:47 -0500
+Subject: [PATCH] ENGR00076614 ipu: Fix jitter on linked channels
+
+The ipu needs the current buffer to start on buffer 1 when channels are linked.
+So we make the framebuffer start with buffer 1.
+Also, we need to make sure the buffer addresses are reset after panning.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |   11 +++++------
+ drivers/video/mxc/mxc_ipuv3_fb.c                 |    7 +++----
+ drivers/video/mxc/mxcfb.c                        |    6 +++---
+ 3 files changed, 11 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+old mode 100755
+new mode 100644
+index 171b999..7922c3d
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -545,8 +545,6 @@ static int mxc_v4l2out_streamon(vout_data * vout)
+ 			fbvar.xres = fbvar.xres_virtual = out_width;
+ 			fbvar.yres = out_height;
+ 			fbvar.yres_virtual = out_height * 2;
+-
+-			fb_set_var(fbi, &fbvar);
+ 		} else if (vout->cur_disp_output == 5) {
+ 			vout->display_ch = MEM_DC_SYNC;
+ 			fbvar.bits_per_pixel = 16;
+@@ -555,12 +553,13 @@ static int mxc_v4l2out_streamon(vout_data * vout)
+ 			fbvar.xres = fbvar.xres_virtual = out_width;
+ 			fbvar.yres = out_height;
+ 			fbvar.yres_virtual = out_height * 2;
+-
+-			fb_set_var(fbi, &fbvar);
+ 		} else {
+ 			vout->display_ch = MEM_BG_SYNC;
+ 		}
+ 
++		fbvar.activate |= FB_ACTIVATE_FORCE;
++		fb_set_var(fbi, &fbvar);
++
+ 		fb_pos.x = vout->crop_current.left;
+ 		fb_pos.y = vout->crop_current.top;
+ 		if (fbi->fbops->fb_ioctl) {
+@@ -571,8 +570,8 @@ static int mxc_v4l2out_streamon(vout_data * vout)
+ 			set_fs(old_fs);
+ 		}
+ 
+-		vout->display_bufs[0] = fbi->fix.smem_start;
+-		vout->display_bufs[1] = fbi->fix.smem_start +
++		vout->display_bufs[1] = fbi->fix.smem_start;
++		vout->display_bufs[0] = fbi->fix.smem_start +
+ 		    (fbi->fix.line_length * fbi->var.yres);
+ 		vout->display_buf_size = vout->crop_current.width *
+ 		    vout->crop_current.height * fbi->var.bits_per_pixel / 8;
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 96baa25..2bfb264 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -26,7 +26,6 @@
+ /*!
+  * Include files
+  */
+-#define DEBUG
+ #include <linux/module.h>
+ #include <linux/kernel.h>
+ #include <linux/platform_device.h>
+@@ -242,17 +241,18 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		ipu_disp_set_window_pos(mxc_fbi->ipu_ch, 0, 0);
+ 	}
+ 
+-	mxc_fbi->cur_ipu_buf = 0;
++	mxc_fbi->cur_ipu_buf = 1;
+ 	sema_init(&mxc_fbi->flip_sem, 1);
++	fbi->var.xoffset = fbi->var.yoffset = 0;
+ 
+ 	retval = ipu_init_channel_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 					 bpp_to_pixfmt(fbi),
+ 					 fbi->var.xres, fbi->var.yres,
+ 					 fbi->fix.line_length,
+ 					 IPU_ROTATE_NONE,
+-					 fbi->fix.smem_start,
+ 					 fbi->fix.smem_start +
+ 					 (fbi->fix.line_length * fbi->var.yres),
++					 fbi->fix.smem_start,
+ 					 0, 0);
+ 	if (retval) {
+ 		dev_err(fbi->device,
+@@ -261,7 +261,6 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	}
+ 
+ 	if (mxc_fbi->blank == FB_BLANK_UNBLANK) {
+-		ipu_select_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER, 0);
+ 		ipu_enable_channel(mxc_fbi->ipu_ch);
+ 	}
+ 
+diff --git a/drivers/video/mxc/mxcfb.c b/drivers/video/mxc/mxcfb.c
+index 17fd312..247b5da 100644
+--- a/drivers/video/mxc/mxcfb.c
++++ b/drivers/video/mxc/mxcfb.c
+@@ -248,17 +248,18 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 
+ 	ipu_sdc_set_window_pos(mxc_fbi->ipu_ch, 0, 0);
+ 
+-	mxc_fbi->cur_ipu_buf = 0;
++	mxc_fbi->cur_ipu_buf = 1;
+ 	sema_init(&mxc_fbi->flip_sem, 1);
++	fbi->var.xoffset = fbi->var.yoffset = 0;
+ 
+ 	retval = ipu_init_channel_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 					 bpp_to_pixfmt(fbi->var.bits_per_pixel),
+ 					 fbi->var.xres, fbi->var.yres,
+ 					 fbi->var.xres_virtual,
+ 					 IPU_ROTATE_NONE,
+-					 fbi->fix.smem_start,
+ 					 fbi->fix.smem_start +
+ 					 (fbi->fix.line_length * fbi->var.yres),
++					 fbi->fix.smem_start,
+ 					 0, 0);
+ 	if (retval) {
+ 		dev_err(fbi->device,
+@@ -267,7 +268,6 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	}
+ 
+ 	if (mxc_fbi->blank == FB_BLANK_UNBLANK) {
+-		ipu_select_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER, 0);
+ 		ipu_enable_channel(mxc_fbi->ipu_ch);
+ 	}
+ 
+-- 
+1.5.4.4
+

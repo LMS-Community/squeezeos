@@ -1,0 +1,72 @@
+From 83a27c623f458907d490ec8a4baf7045a7007c00 Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Sat, 27 Sep 2008 14:57:21 +0800
+Subject: [PATCH] ENGR00093241 add pmic adc status report function for mc13783
+
+report if the adc is ready or not.
+
+Signed-off-by: Shen Yong<b00984@freescale.com>
+---
+ drivers/mxc/pmic/mc13783/pmic_adc.c |   11 +++++++++++
+ include/asm-arm/arch-mxc/pmic_adc.h |    5 ++++-
+ 2 files changed, 15 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/pmic/mc13783/pmic_adc.c b/drivers/mxc/pmic/mc13783/pmic_adc.c
+index d11bc47..85365a4 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_adc.c
++++ b/drivers/mxc/pmic/mc13783/pmic_adc.c
+@@ -128,6 +128,15 @@ static unsigned channel_num[] = {
+ 	7
+ };
+ 
++static bool pmic_adc_ready;
++
++int is_pmic_adc_ready()
++{
++	return pmic_adc_ready;
++}
++EXPORT_SYMBOL(is_pmic_adc_ready);
++
++
+ /*!
+  * This is the suspend of power management for the mc13783 ADC API.
+  * It supports SAVE and POWER_DOWN state.
+@@ -1474,6 +1483,7 @@ static int pmic_adc_module_probe(struct platform_device *pdev)
+ 		goto err_out4;
+ 	}
+ 
++	pmic_adc_ready = 1;
+ 	pr_debug(KERN_INFO "PMIC ADC successfully probed\n");
+ 	return ret;
+ 
+@@ -1488,6 +1498,7 @@ static int pmic_adc_module_probe(struct platform_device *pdev)
+ 
+ static int pmic_adc_module_remove(struct platform_device *pdev)
+ {
++	pmic_adc_ready = 0;
+ 	pmic_adc_deinit();
+ 	device_destroy(pmic_adc_class, MKDEV(pmic_adc_major, 0));
+ 	class_destroy(pmic_adc_class);
+diff --git a/include/asm-arm/arch-mxc/pmic_adc.h b/include/asm-arm/arch-mxc/pmic_adc.h
+index 832cfe3..0ddb3dc 100644
+--- a/include/asm-arm/arch-mxc/pmic_adc.h
++++ b/include/asm-arm/arch-mxc/pmic_adc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -448,5 +448,8 @@ PMIC_STATUS pmic_adc_install_ts(void);
+  * @return       This function returns 0 if successful.
+  */
+ PMIC_STATUS pmic_adc_remove_ts(void);
++
++int is_pmic_adc_ready(void);
++
+ #endif				/* _KERNEL */
+ #endif				/* __ASM_ARCH_MXC_PMIC_ADC_H__ */
+-- 
+1.5.4.4
+

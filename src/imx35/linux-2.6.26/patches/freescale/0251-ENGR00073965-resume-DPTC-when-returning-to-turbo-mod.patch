@@ -1,0 +1,45 @@
+From dc7bf1195a5f2765056e334bc8b1db5c0fe78e30 Mon Sep 17 00:00:00 2001
+From: Yves Vandervennet <r55763@tx30-bester.am.freescale.net>
+Date: Mon, 1 Dec 2008 16:36:45 -0600
+Subject: [PATCH] ENGR00073965 resume DPTC when returning to turbo mode
+
+dptc_resume() called from the DPTC delayed function
+
+Signed-off-by: Yves Vandervennet <r55763@tx30-bester.am.freescale.net>
+---
+ arch/arm/mach-mx3/clock.c |    8 +++-----
+ 1 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/clock.c b/arch/arm/mach-mx3/clock.c
+index 1a26745..c7ffa00 100644
+--- a/arch/arm/mach-mx3/clock.c
++++ b/arch/arm/mach-mx3/clock.c
+@@ -20,6 +20,7 @@
+ #include <asm/arch/clock.h>
+ #include <asm/arch/mxc_dptc.h>
+ #include <asm/div64.h>
++#include <asm/arch/mxc_dptc.h>
+ 
+ #include "crm_regs.h"
+ 
+@@ -1243,15 +1244,12 @@ static void dptcen_after_timeout(unsigned long ptr)
+ 	u32 dptc_active;
+ 
+ 	spin_lock_irqsave(&mxc_dfs_lock, flags);
+-	pmcr0 = __raw_readl(MXC_CCM_PMCR0);
+-	dptc_active = pmcr0 & MXC_CCM_PMCR0_DPTEN;
+ 
+ 	/*
+ 	 * If DPTC is still active and core is running in Turbo mode
+ 	 */
+-	if ((dptcen_timer.data == cpu_wp_nr - 1) && dptc_active) {
+-		pmcr0 |= (MXC_CCM_PMCR0_DPVCR | MXC_CCM_PMCR0_DPVV);
+-		__raw_writel(pmcr0, MXC_CCM_PMCR0);
++	if (dptcen_timer.data == cpu_wp_nr - 1) {
++		dptc_resume();
+ 	}
+ 	spin_unlock_irqrestore(&mxc_dfs_lock, flags);
+ }
+-- 
+1.5.4.4
+

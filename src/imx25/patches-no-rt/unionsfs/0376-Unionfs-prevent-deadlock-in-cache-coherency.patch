@@ -1,0 +1,67 @@
+From 1b9b44355a3c07d04720fa0b10dd4ca53813cb45 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 20 Dec 2007 23:08:13 -0500
+Subject: [PATCH] Unionfs: prevent deadlock in cache coherency
+
+Don't try to truncate_inode_pages in in purge_inode_data, because this could
+lead to a deadlock between some of address_space ops and dentry
+revalidation: the address space op is invoked with a lock on our own page,
+and truncate_inode_pages will block on locked pages.  Instead, it should be
+enough to be gentler and just invalidate_mapping_pages.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   32 +++++++++++---------------------
+ 1 files changed, 11 insertions(+), 21 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index c7b6a7c..68c07ba 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -248,32 +248,22 @@ bool is_newer_lower(const struct dentry *dentry)
+ }
+ 
+ /*
+- * Purge/remove/unmap all date pages of a unionfs inode.  This is called
+- * when the lower inode has changed, and we have to force processes to get
+- * the new data.
+- *
+- * XXX: Our implementation works in that as long as a user process will have
+- * caused Unionfs to be called, directly or indirectly, even to just do
+- * ->d_revalidate; then we will have purged the current Unionfs data and the
+- * process will see the new data.  For example, a process that continually
+- * re-reads the same file's data will see the NEW data as soon as the lower
+- * file had changed, upon the next read(2) syscall (even if the file is
+- * still open!)  However, this doesn't work when the process re-reads the
+- * open file's data via mmap(2) (unless the user unmaps/closes the file and
+- * remaps/reopens it).  Once we respond to ->readpage(s), then the kernel
+- * maps the page into the process's address space and there doesn't appear
+- * to be a way to force the kernel to invalidate those pages/mappings, and
+- * force the process to re-issue ->readpage.  If there's a way to invalidate
+- * active mappings and force a ->readpage, let us know please
+- * (invalidate_inode_pages2 doesn't do the trick).
++ * Purge and invalidate as many data pages of a unionfs inode.  This is
++ * called when the lower inode has changed, and we want to force processes
++ * to re-get the new data.
+  */
+ static inline void purge_inode_data(struct inode *inode)
+ {
+ 	/* remove all non-private mappings */
+ 	unmap_mapping_range(inode->i_mapping, 0, 0, 0);
+-
+-	if (inode->i_data.nrpages)
+-		truncate_inode_pages(&inode->i_data, 0);
++	/* invalidate as many pages as possible */
++	invalidate_mapping_pages(inode->i_mapping, 0, -1);
++	/*
++	 * Don't try to truncate_inode_pages here, because this could lead
++	 * to a deadlock between some of address_space ops and dentry
++	 * revalidation: the address space op is invoked with a lock on our
++	 * own page, and truncate_inode_pages will block on locked pages.
++	 */
+ }
+ 
+ void purge_sb_data(struct super_block *sb)
+-- 
+1.5.4.3
+

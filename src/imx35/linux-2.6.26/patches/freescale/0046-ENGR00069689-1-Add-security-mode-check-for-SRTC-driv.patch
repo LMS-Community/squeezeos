@@ -1,0 +1,132 @@
+From 53e0b9f42a411420632f9580e8175225957181d6 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 8 Sep 2008 13:31:30 -0500
+Subject: [PATCH] ENGR00069689-1 Add security mode check for SRTC driver
+
+Add security mode check for SRTC driver in initialization stage.
+For low security mode, only set LPCR EN_LP
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx37/devices.c   |    5 ++++
+ drivers/rtc/rtc-mxc_v2.c       |   49 ++++++++++++++++++++++++++++-----------
+ include/asm-arm/arch-mxc/mxc.h |    4 +++
+ 3 files changed, 44 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index e4f3646..8dcc70b 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -93,6 +93,10 @@ static inline void mxc_init_owire(void)
+ #endif
+ 
+ #if defined(CONFIG_RTC_DRV_MXC_V2) || defined(CONFIG_RTC_DRV_MXC_V2_MODULE)
++static struct mxc_srtc_platform_data srtc_data = {
++	.srtc_sec_mode_addr = 0xC3FAC80C,
++};
++
+ static struct resource rtc_resources[] = {
+ 	{
+ 	 .start = SRTC_BASE_ADDR,
+@@ -109,6 +113,7 @@ static struct platform_device mxc_rtc_device = {
+ 	.id = 0,
+ 	.dev = {
+ 		.release = mxc_nop_release,
++		.platform_data = &srtc_data,
+ 		},
+ 	.num_resources = ARRAY_SIZE(rtc_resources),
+ 	.resource = rtc_resources,
+diff --git a/drivers/rtc/rtc-mxc_v2.c b/drivers/rtc/rtc-mxc_v2.c
+index 705fca5..beb68c8 100644
+--- a/drivers/rtc/rtc-mxc_v2.c
++++ b/drivers/rtc/rtc-mxc_v2.c
+@@ -132,6 +132,12 @@
+ #define SRTC_HPISR	0x34	/* HP Interrupt Status Reg */
+ #define SRTC_HPIENR	0x38	/* HP Interrupt Enable Reg */
+ 
++#define SRTC_SECMODE_MASK	0x3	/* the mask of SRTC security mode */
++#define SRTC_SECMODE_LOW	0x0	/* Low Security */
++#define SRTC_SECMODE_MED	0x1	/* Medium Security */
++#define SRTC_SECMODE_HIGH	0x2	/* High Security */
++#define SRTC_SECMODE_RESERVED	0x3	/* Reserved */
++
+ struct rtc_drv_data {
+ 	struct rtc_device *rtc;
+ 	void __iomem *ioaddr;
+@@ -502,7 +508,9 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 	struct resource *res;
+ 	struct rtc_device *rtc;
+ 	struct rtc_drv_data *pdata = NULL;
++	struct mxc_srtc_platform_data *plat_data = NULL;
+ 	void __iomem *ioaddr;
++	void __iomem *srtc_secmode_addr;
+ 	int ret = 0;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+@@ -550,21 +558,34 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 	__raw_writel(0xFFFFFFFF, ioaddr + SRTC_LPSR);
+ 	rtc_write_sync_lp(ioaddr);
+ 
+-	/* move out of init state */
+-	__raw_writel((SRTC_LPCR_IE | SRTC_LPCR_NSA), ioaddr + SRTC_LPCR);
+-	rtc_write_sync_lp(ioaddr);
+-	while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_IES) == 0)
+-		msleep(1);
+-
+-	/* move out of non-valid state */
+-	__raw_writel((SRTC_LPCR_IE | SRTC_LPCR_NVE | SRTC_LPCR_NSA |
+-		      SRTC_LPCR_EN_LP), ioaddr + SRTC_LPCR);
+-	rtc_write_sync_lp(ioaddr);
+-	while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_NVES) == 0)
+-		msleep(1);
++	plat_data = (struct mxc_srtc_platform_data *)pdev->dev.platform_data;
++	srtc_secmode_addr = ioremap(plat_data->srtc_sec_mode_addr, 1);
+ 
+-	__raw_writel(0xFFFFFFFF, ioaddr + SRTC_LPSR);
+-	rtc_write_sync_lp(ioaddr);
++	/* Check SRTC security mode */
++	if ((__raw_readl(srtc_secmode_addr) & SRTC_SECMODE_MASK) ==
++	    SRTC_SECMODE_LOW) {
++		/* Low security mode */
++		__raw_writel(SRTC_LPCR_EN_LP, ioaddr + SRTC_LPCR);
++		rtc_write_sync_lp(ioaddr);
++	} else {
++		/* move out of init state */
++		__raw_writel((SRTC_LPCR_IE | SRTC_LPCR_NSA),
++			     ioaddr + SRTC_LPCR);
++		rtc_write_sync_lp(ioaddr);
++		while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_IES) == 0)
++			msleep(1);
++
++		/* move out of non-valid state */
++		__raw_writel((SRTC_LPCR_IE | SRTC_LPCR_NVE | SRTC_LPCR_NSA |
++			      SRTC_LPCR_EN_LP), ioaddr + SRTC_LPCR);
++		rtc_write_sync_lp(ioaddr);
++
++		while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_NVES) == 0)
++			msleep(1);
++
++		__raw_writel(0xFFFFFFFF, ioaddr + SRTC_LPSR);
++		rtc_write_sync_lp(ioaddr);
++	}
+ 
+ 	rtc = rtc_device_register(pdev->name, &pdev->dev,
+ 				  &mxc_rtc_ops, THIS_MODULE);
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 10409cf..17f7688 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -208,6 +208,10 @@ struct flexcan_platform_data {
+ 	void (*inactive) (int id);
+ };
+ 
++struct mxc_srtc_platform_data {
++	u32 srtc_sec_mode_addr;
++};
++
+ extern void mxc_wd_reset(void);
+ unsigned long board_get_ckih_rate(void);
+ 
+-- 
+1.5.4.4
+

@@ -3,11 +3,14 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-PR = "r1"
+PR = "r4"
 
 PROVIDES = "marvell-wlan-tools"
 
-SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686"
+SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686 \
+	file://allow-special-char-in-ssid.patch;patch=1 \
+	file://config-file-sync.patch;patch=1 \
+"
 
 S = "${WORKDIR}/src_gspi8686"
 

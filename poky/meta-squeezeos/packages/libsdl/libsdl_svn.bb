@@ -5,12 +5,15 @@ LICENSE = "LGPL"
 BV = "1.2.13"
 
 PV = "${BV}+svnr${SRCREV}"
-PR = "r1"
+PR = "r2"
 
 DEPENDS = "alsa-lib"
 RDEPENDS = "alsa-lib"
 
-SRC_URI="${SQUEEZEPLAY_SCM};module=SDL-${BV}"
+SRC_URI = " \
+	${SQUEEZEPLAY_SCM};module=SDL-${BV} \
+	file://fbvideo-no-timings.patch;patch=1 \
+	"
 
 S = "${WORKDIR}/SDL-${BV}"
 

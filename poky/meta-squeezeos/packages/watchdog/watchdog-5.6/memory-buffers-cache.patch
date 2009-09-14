@@ -1,0 +1,40 @@
+Index: watchdog-5.6/src/memory.c
+===================================================================
+--- watchdog-5.6.orig/src/memory.c	2009-06-02 09:43:31.000000000 +0100
++++ watchdog-5.6/src/memory.c	2009-06-02 10:11:49.000000000 +0100
+@@ -18,10 +18,12 @@
+ 
+ #define FREEMEM		"MemFree:"
+ #define FREESWAP	"SwapFree:"
++#define MEMBUFFERS	"Buffers:"
++#define MEMCACHED	"Cached:"
+ 
+ int check_memory(void)
+ {
+-    char buf[1024], *ptr1, *ptr2;
++    char buf[1024], *ptr1, *ptr2, *ptr3, *ptr4;
+     unsigned int free;
+ 
+     /* is the memory file open? */
+@@ -60,8 +62,10 @@
+     
+     ptr1 = strstr(buf, FREEMEM);
+     ptr2 = strstr(buf, FREESWAP);
++    ptr3 = strstr(buf, MEMBUFFERS);
++    ptr4 = strstr(buf, MEMCACHED);
+     
+-    if (!ptr1 || !ptr2) {
++    if (!ptr1 || !ptr2 || !ptr3 || !ptr4) {
+ #if USE_SYSLOG
+ 	syslog(LOG_ERR, "/proc/meminfo contains invalid data (read = %s)", buf);
+ #else				/* USE_SYSLOG */
+@@ -74,7 +78,8 @@
+     }
+ 
+     /* we only care about integer values */
+-    free = atoi(ptr1+strlen(FREEMEM)) + atoi(ptr2+strlen(FREESWAP));
++    free = atoi(ptr1+strlen(FREEMEM)) + atoi(ptr2+strlen(FREESWAP)) +
++	atoi(ptr3+strlen(MEMBUFFERS)) + atoi(ptr4+strlen(MEMCACHED));
+ 
+ #if USE_SYSLOG
+     if (verbose && logtick && ticker == 1)

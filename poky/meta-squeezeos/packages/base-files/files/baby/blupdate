@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# This script upgrades the bootloader, it is not meant to be used on
+# production systems.
+
+BOARD_REV=`awk '/Revision/ {print $3}' /proc/cpuinfo`
+BOOTLOADER_FILE=/lib/firmware/redboot-baby-$BOARD_REV.bin
+
+if [ ! -r $BOOTLOADER_FILE ]
+then
+    /usr/bin/logger -s "No bootloader for board: $BOARD_REV"
+    exit 1
+fi
+
+BOOTLOADER_LEN=`ls -l $BOOTLOADER_FILE | awk '{print $5}'`
+if [ "x0" == "x$BOOTLOADER_LEN" ]
+then
+    /usr/bin/logger -s "Bootloader truncated for board: $BOARD_REV"
+    exit 2
+fi
+
+BOOTLOADER_DEV=/dev/mtd/`grep redboot /proc/mtd | cut -c4`
+if [ "x" == "x$BOOTLOADER_DEV" ]
+then
+    /usr/bin/logger -s "No bootloader device"
+    exit 3
+fi
+
+BOOTLOADER_DEV_MD5=`/usr/sbin/nanddump -q -o -l $BOOTLOADER_LEN $BOOTLOADER_DEV | /usr/bin/md5sum | awk '{print $1}'`
+BOOTLOADER_FILE_MD5=`/usr/bin/md5sum $BOOTLOADER_FILE | awk '{print $1}'`
+
+if [ "x$BOOTLOADER_DEV_MD5" == "x$BOOTLOADER_FILE_MD5" ]
+then
+    # no upgrade needed
+    exit 0
+fi
+
+/bin/grep -q RedBoot $BOOTLOADER_FILE
+BOOTLOADER_VALID=$?
+
+if [ "x$BOOTLOADER_VALID" != "x0" ]
+then
+    /usr/bin/logger -s "Bootloader is invalid"
+    exit 4
+fi
+
+/usr/bin/logger -s "Bootloader upgrade ..."
+
+# now the risky part!
+/usr/sbin/flash_eraseall -q $BOOTLOADER_DEV
+/usr/sbin/nandwrite -q -p $BOOTLOADER_DEV $BOOTLOADER_FILE
+
+/usr/bin/logger -s "... done"

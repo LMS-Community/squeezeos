@@ -79,7 +79,7 @@ class Hg(Fetch):
             host = "/"
             ud.host = "localhost"
 
-        if ud.user == None:
+        if not ud.user:
             hgroot = host + ud.path
         else:
             hgroot = ud.user + "@" + host + ud.path
@@ -123,9 +123,6 @@ class Hg(Fetch):
             bb.msg.debug(1, bb.msg.domain.Fetcher, "Running %s" % updatecmd)
             runfetchcmd(updatecmd, d)
 
-            updatecmd = self._buildhgcommand(ud, d, "update")
-            bb.msg.debug(1, bb.msg.domain.Fetcher, "Running %s" % updatecmd)
-            runfetchcmd(updatecmd, d)
         else:
             fetchcmd = self._buildhgcommand(ud, d, "fetch")
             bb.msg.note(1, bb.msg.domain.Fetcher, "Fetch " + loc)
@@ -134,6 +131,12 @@ class Hg(Fetch):
             os.chdir(ud.pkgdir)
             bb.msg.debug(1, bb.msg.domain.Fetcher, "Running %s" % fetchcmd)
             runfetchcmd(fetchcmd, d)
+	
+	# Even when we clone (fetch), we still need to update as hg's clone
+	# won't checkout the specified revision if its on a branch
+        updatecmd = self._buildhgcommand(ud, d, "update")
+        bb.msg.debug(1, bb.msg.domain.Fetcher, "Running %s" % updatecmd)
+        runfetchcmd(updatecmd, d)
 
         os.chdir(ud.pkgdir)
         try:

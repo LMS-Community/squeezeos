@@ -1,0 +1,69 @@
+From 759ea536ca1b79acd20b7e0b231896615113f2ad Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+Date: Mon, 19 Jan 2009 12:24:17 -0600
+Subject: [PATCH] ENGR00068859 : Add STOP mode support to MX37
+
+Added code to correctly enter STOP mode.
+Also added support for turning on EMPGC0 MX37 for TO1.1.1
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+(cherry picked from commit 6e319fb35d0237bb9ff2816e528f2a8670b07939)
+---
+ arch/arm/mach-mx37/system.c |   14 +++++++++-----
+ 1 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/system.c b/arch/arm/mach-mx37/system.c
+index b72a73b..f872846 100644
+--- a/arch/arm/mach-mx37/system.c
++++ b/arch/arm/mach-mx37/system.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -45,7 +45,6 @@ static struct clk *gpc_dvfs_clk;
+ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ {
+ 	u32 plat_lpc, gpc_pgr, arm_srpgcr, empgcr0, empgcr1, ccm_clpcr;
+-
+ 	/* always allow platform to issue a deep sleep mode request */
+ 	plat_lpc = __raw_readl(MXC_ARM1176_PLAT_LPC) &
+ 	    ~(MXC_ARM1176_PLAT_LPC_DSM);
+@@ -67,8 +66,12 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		plat_lpc |= MXC_ARM1176_PLAT_LPC_DSM;
+ 		if (mode == WAIT_UNCLOCKED_POWER_OFF)
+ 			ccm_clpcr |= (0x1 << MXC_CCM_CLPCR_LPM_OFFSET);
+-		else
++		else {
+ 			ccm_clpcr |= (0x2 << MXC_CCM_CLPCR_LPM_OFFSET);
++			ccm_clpcr |= (0x3 << MXC_CCM_CLPCR_STBY_COUNT_OFFSET);
++			ccm_clpcr |= MXC_CCM_CLPCR_VSTBY;
++			ccm_clpcr |= MXC_CCM_CLPCR_SBYOS;
++		}
+ 
+ 		gpc_pgr |= (0x1 << MXC_GPC_PGR_ARMPG_OFFSET);
+ 		arm_srpgcr |= MXC_SRPGCR_PCR;
+@@ -90,7 +93,9 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
+ 	__raw_writel(gpc_pgr, MXC_GPC_PGR);
+ 	__raw_writel(arm_srpgcr, MXC_SRPGC_ARM_SRPGCR);
+-/*	 __raw_writel(empgcr0, MXC_EMPGC0_ARM_EMPGCR); //TODO: system crash */
++	if ((mxc_cpu_is_rev(CHIP_REV_1_0)) != 1)
++		__raw_writel(empgcr0, MXC_EMPGC0_ARM_EMPGCR);
++
+ 	__raw_writel(empgcr1, MXC_EMPGC1_ARM_EMPGCR);
+ 
+ 	flush_cache_all();
+@@ -165,7 +170,6 @@ void arch_idle(void)
+ 	if (likely(!mxc_jtag_enabled)) {
+ 		mxc_cpu_lp_set(arch_idle_mode);
+ 		cpu_do_idle();
+-
+ 		/* gpc clock is needed for SRPG */
+ 		clk_disable(gpc_dvfs_clk);
+ 		if (low_bus_freq_mode) {
+-- 
+1.5.4.4
+

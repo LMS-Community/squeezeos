@@ -1,0 +1,43 @@
+From 5f34032a26530909785109febc3261cd8f2621c4 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 27 Jul 2008 15:28:44 -0400
+Subject: [PATCH] Unionfs: properly hash newly created inodes
+
+This fixes LTP's syscalls/rename13 test.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |    2 +-
+ fs/unionfs/main.c  |    3 +++
+ 2 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index fa3c518..a05b412 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -339,7 +339,7 @@ check_link:
+ 
+ 	/* Its a hard link, so use the same inode */
+ 	new_dentry->d_inode = igrab(old_dentry->d_inode);
+-	d_instantiate(new_dentry, new_dentry->d_inode);
++	d_add(new_dentry, new_dentry->d_inode);
+ 	unionfs_copy_attr_all(dir, lower_new_dentry->d_parent->d_inode);
+ 	fsstack_copy_inode_size(dir, lower_new_dentry->d_parent->d_inode);
+ 
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 0cdd50b..fea670b 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -128,6 +128,9 @@ skip:
+ 	/* only (our) lookup wants to do a d_add */
+ 	switch (flag) {
+ 	case INTERPOSE_DEFAULT:
++		/* for operations which create new inodes */
++		d_add(dentry, inode);
++		break;
+ 	case INTERPOSE_REVAL_NEG:
+ 		d_instantiate(dentry, inode);
+ 		break;
+-- 
+1.5.4.3
+

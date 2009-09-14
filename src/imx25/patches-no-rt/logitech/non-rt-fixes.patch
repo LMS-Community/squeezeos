@@ -1,0 +1,223 @@
+Index: linux-2.6.26/.config
+===================================================================
+--- linux-2.6.26.orig/.config	2009-08-18 17:29:32.000000000 +0100
++++ linux-2.6.26/.config	2009-08-18 15:32:12.000000000 +0100
+@@ -1,17 +1,17 @@
+ #
+ # Automatically generated make config: don't edit
+-# Linux kernel version: 2.6.26.8-rt16
+-# Tue Aug 11 10:37:31 2009
++# Linux kernel version: 2.6.26.8
++# Tue Aug 18 15:32:12 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+ # CONFIG_GENERIC_GPIO is not set
+ CONFIG_GENERIC_TIME=y
+ CONFIG_GENERIC_CLOCKEVENTS=y
+-CONFIG_STACKTRACE_SUPPORT=y
+ CONFIG_MMU=y
+ # CONFIG_NO_IOPORT is not set
+ CONFIG_GENERIC_HARDIRQS=y
++CONFIG_STACKTRACE_SUPPORT=y
+ CONFIG_LOCKDEP_SUPPORT=y
+ CONFIG_TRACE_IRQFLAGS_SUPPORT=y
+ CONFIG_HARDIRQS_SW_RESEND=y
+@@ -55,7 +55,6 @@
+ # CONFIG_BLK_DEV_INITRD is not set
+ CONFIG_CC_OPTIMIZE_FOR_SIZE=y
+ CONFIG_SYSCTL=y
+-# CONFIG_RADIX_TREE_CONCURRENT is not set
+ CONFIG_EMBEDDED=y
+ CONFIG_UID16=y
+ CONFIG_SYSCTL_SYSCALL=y
+@@ -80,11 +79,9 @@
+ # CONFIG_SLUB is not set
+ # CONFIG_SLOB is not set
+ CONFIG_PROFILING=y
+-# CONFIG_TRACEPOINTS is not set
+ # CONFIG_MARKERS is not set
+ CONFIG_OPROFILE=y
+ CONFIG_HAVE_OPROFILE=y
+-CONFIG_PROFILE_NMI=y
+ # CONFIG_KPROBES is not set
+ CONFIG_HAVE_KPROBES=y
+ CONFIG_HAVE_KRETPROBES=y
+@@ -119,7 +116,7 @@
+ CONFIG_DEFAULT_CFQ=y
+ # CONFIG_DEFAULT_NOOP is not set
+ CONFIG_DEFAULT_IOSCHED="cfq"
+-# CONFIG_CLASSIC_RCU is not set
++CONFIG_CLASSIC_RCU=y
+ 
+ #
+ # System Type
+@@ -189,12 +186,6 @@
+ CONFIG_MACH_MX25_BABY=y
+ # CONFIG_MX25_DOZE_DURING_IDLE is not set
+ CONFIG_MXC_SDMA_API=y
+-
+-#
+-# SDMA options
+-#
+-CONFIG_SDMA_IRAM=y
+-CONFIG_SDMA_IRAM_SIZE=0x1000
+ CONFIG_ARCH_MXC_HAS_NFC_V2=y
+ CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ 
+@@ -244,18 +235,7 @@
+ CONFIG_NO_HZ=y
+ CONFIG_HIGH_RES_TIMERS=y
+ CONFIG_GENERIC_CLOCKEVENTS_BUILD=y
+-# CONFIG_PREEMPT_NONE is not set
+-# CONFIG_PREEMPT_VOLUNTARY is not set
+-# CONFIG_PREEMPT_DESKTOP is not set
+-CONFIG_PREEMPT_RT=y
+ CONFIG_PREEMPT=y
+-CONFIG_PREEMPT_SOFTIRQS=y
+-CONFIG_PREEMPT_SOFTIRQS_PRIORITIES="tasklet/0:88,40"
+-CONFIG_PREEMPT_HARDIRQS=y
+-CONFIG_PREEMPT_HARDIRQS_PRIORITIES="mxcsdma:90,40"
+-CONFIG_PREEMPT_RCU=y
+-CONFIG_PREEMPT_RCU_BOOST=y
+-CONFIG_RCU_TRACE=y
+ CONFIG_HZ=100
+ CONFIG_AEABI=y
+ # CONFIG_OABI_COMPAT is not set
+@@ -655,8 +635,6 @@
+ # CONFIG_R3964 is not set
+ # CONFIG_RAW_DRIVER is not set
+ # CONFIG_TCG_TPM is not set
+-# CONFIG_RMEM is not set
+-# CONFIG_ALLOC_RTSJ_MEM is not set
+ CONFIG_I2C=y
+ CONFIG_I2C_BOARDINFO=y
+ # CONFIG_I2C_CHARDEV is not set
+@@ -1134,13 +1112,8 @@
+ CONFIG_DEBUG_FS=y
+ # CONFIG_HEADERS_CHECK is not set
+ # CONFIG_DEBUG_KERNEL is not set
+-# CONFIG_RTMUTEX_CHECK is not set
+ # CONFIG_DEBUG_BUGVERBOSE is not set
+ CONFIG_FRAME_POINTER=y
+-CONFIG_HAVE_FTRACE=y
+-CONFIG_HAVE_DYNAMIC_FTRACE=y
+-# CONFIG_EVENT_TRACER is not set
+-# CONFIG_WAKEUP_LATENCY_HIST is not set
+ # CONFIG_SAMPLES is not set
+ # CONFIG_DEBUG_USER is not set
+ 
+Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
+===================================================================
+--- linux-2.6.26.orig/sound/soc/codecs/tlv320aic3104.c	2009-08-18 17:29:44.000000000 +0100
++++ linux-2.6.26/sound/soc/codecs/tlv320aic3104.c	2009-08-18 17:28:29.000000000 +0100
+@@ -86,6 +86,8 @@
+ 
+ /* codec private data */
+ struct aic3104_priv {
++	struct snd_soc_codec *codec;
++
+ 	unsigned int sysclk;
+ 	int master;
+ 
+@@ -103,6 +105,10 @@
+ 	int headphone_button;
+ 	int linein_test;
+ 	int headphone_detect_phase;
++
++	struct work_struct timer_work;
++	struct work_struct mute_work;
++	int mute;
+ };
+ 
+ 
+@@ -1218,21 +1224,32 @@
+ 	return 0;
+ }
+ 
+-static int aic3104_mute(struct snd_soc_dai *dai, int mute)
++static void aic3104_mute_work(struct work_struct *ptr)
+ {
+-	struct snd_soc_codec *codec = dai->codec;
++	struct aic3104_priv *aic3104 = container_of(ptr, struct aic3104_priv, mute_work);
++	struct snd_soc_codec *codec = aic3104->codec;
++
+ 	u8 ldac_reg = aic3104_read_reg_cache(codec, LDAC_VOL) & ~MUTE_ON;
+ 	u8 rdac_reg = aic3104_read_reg_cache(codec, RDAC_VOL) & ~MUTE_ON;
+ 
+ 	//printk("###### %s:%d %s\n", __FILE__, __LINE__, __FUNCTION__);
+ 
+-	if (mute) {
++	if (aic3104->mute) {
+ 		aic3104_write_reg(codec, LDAC_VOL, ldac_reg | MUTE_ON);
+ 		aic3104_write_reg(codec, RDAC_VOL, rdac_reg | MUTE_ON);
+ 	} else {
+ 		aic3104_write_reg(codec, LDAC_VOL, ldac_reg);
+ 		aic3104_write_reg(codec, RDAC_VOL, rdac_reg);
+ 	}
++}
++
++static int aic3104_mute(struct snd_soc_dai *dai, int mute)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct aic3104_priv *aic3104 = codec->private_data;
++
++	aic3104->mute = mute;
++	schedule_work(&aic3104->mute_work);
+ 
+ 	return 0;
+ }
+@@ -1401,7 +1418,7 @@
+ 	aic3104->timer.data = (unsigned long) codec;
+ 
+ 	aic3104->timer.expires = jiffies + HEADPHONE_POLL_INTERVAL;
+-	add_timer(&aic3104->timer);
++	//add_timer(&aic3104->timer);
+ 
+ 	return 0;
+ }
+@@ -1461,14 +1478,15 @@
+ };
+ 
+ 
+-static void aic3104_timer_callback(unsigned long ptr)
++static void aic3104_timer_work(struct work_struct *ptr)
+ {
++	struct aic3104_priv *aic3104 = container_of(ptr, struct aic3104_priv, timer_work);
++	struct snd_soc_codec *codec = aic3104->codec;
++
+ 	/*
+ 	 * AIC3106 has the documentation for registers 13 and 14.
+ 	 * reading register 14 clears the stickyness of register 13.
+ 	 */
+-	struct snd_soc_codec *codec = (struct snd_soc_codec *) ptr;
+-	struct aic3104_priv *aic3104 = codec->private_data;
+ 	int val, headset_detected, button_detected;
+ 
+ 	switch (aic3104->headphone_detect_phase) {
+@@ -1537,6 +1555,14 @@
+ 	add_timer(&aic3104->timer);
+ }
+ 
++static void aic3104_timer_callback(unsigned long ptr)
++{
++	struct snd_soc_codec *codec = (struct snd_soc_codec *) ptr;
++	struct aic3104_priv *aic3104 = codec->private_data;
++
++	schedule_work(&aic3104->timer_work);
++}
++
+ 
+ // XXXX for debugging i2c
+ static struct snd_soc_codec *debugreg_codec;
+@@ -1618,6 +1644,10 @@
+ 
+         mutex_init(&aic3104->lock);
+ 	codec->private_data = aic3104;
++	aic3104->codec = codec;
++
++	INIT_WORK(&aic3104->timer_work, aic3104_timer_work);
++	INIT_WORK(&aic3104->mute_work, aic3104_mute_work);
+ 
+ 	codec->reg_cache_size = sizeof(aic3104_reg);
+ 	codec->reg_cache = kmemdup(aic3104_reg, sizeof(aic3104_reg), GFP_KERNEL);

@@ -1,0 +1,91 @@
+#!/bin/sh
+
+## Variables
+SAMBASTATUS=/etc/samba/status
+
+## Before we start up, lets check if we're even allowed to
+STATUS=`cat $SAMBASTATUS`
+
+createConfig() {
+	####
+	## Function to setup the config file
+	####
+	
+	## Variables
+	DISTCONFIG=/etc/samba/smb.conf.dist
+	DESTCONFIG=/etc/samba/smb.conf
+	MEDIA=/media
+	PLAYBACK=/etc/squeezeplay/userpath/settings/Playback.lua
+	
+	MEDIATEMPLATE="
+	[media-_DIR_]
+	    comment = USB/SD Media - _DIR_
+	    path = /media/_DIR_
+	    public = no
+	    writable = yes
+	    valid users = root
+	"
+	
+	## Gather some data to use later
+	foundHostname=`cat $PLAYBACK | sed -e "s|,|\n|g" | grep "name=" | awk -F\" '{print $2}' | sed 's/ //g'`
+	if [ "x$foundHostname" == "x" ]; then
+		echo "No Player Name found in $PLAYBACK file. Using hostname instead."
+		foundHostname=`hostname`
+	fi
+	
+	## Replace some variables from the smb.conf.dist file with accurate info
+	sed -e "s/_HOSTNAME_/$foundHostname/g" $DISTCONFIG > $DESTCONFIG
+	
+	## Now lets add each of the media locations we've found
+	for dir in `ls -1 $MEDIA`
+	do
+	        echo "
+	[media-$dir]
+	        comment = USB/SD Media - $dir
+	        path = $MEDIA/$dir
+	        public = no
+	        writable = yes
+	        valid users = root
+	" >> $DESTCONFIG
+	done
+}
+
+
+## Now lets setup the startup commands
+case "$1" in
+    start)
+
+	if [ "$STATUS" == "enabled" ]; then 
+		echo "Sleeping for 5 seconds to let devices settle..." 
+		/bin/sleep 5
+	
+		echo "Creating configuration from .dist file..."
+		createConfig
+		
+		echo "Starting Samba"
+		/usr/sbin/smbd &
+		/usr/sbin/nmbd &
+	else
+		echo "Samba is disabled, not starting. Check $SAMBASTATUS."
+	fi
+	;;
+
+    stop)
+	echo "Stopping Samba"
+
+	killall -q nmbd
+	killall -q smbd
+	;;
+
+    restart)
+	$0 stop
+	sleep 2
+	$0 start
+	;;
+
+    *)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit 0

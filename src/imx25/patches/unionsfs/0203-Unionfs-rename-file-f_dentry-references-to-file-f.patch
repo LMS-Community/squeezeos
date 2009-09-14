@@ -1,0 +1,384 @@
+From 6cd54e01bd4f73d03d431dafd07f697992f3653a Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 29 Jun 2007 02:33:14 -0400
+Subject: [PATCH] Unionfs: rename file->f_dentry references to file->f_path.dentry
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   48 +++++++++++++++++++++++-----------------------
+ fs/unionfs/copyup.c     |    4 +-
+ fs/unionfs/debug.c      |    2 +-
+ fs/unionfs/dirfops.c    |    6 ++--
+ fs/unionfs/file.c       |    6 ++--
+ fs/unionfs/mmap.c       |   18 ++++++++--------
+ fs/unionfs/rdstate.c    |    2 +-
+ 7 files changed, 43 insertions(+), 43 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index f7f49b4..18ade2f 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -73,7 +73,7 @@ retry:
+ 	dput(tmp_dentry);
+ 
+ 	err = copyup_named_file(dentry->d_parent->d_inode, file, name, bstart,
+-				bindex, file->f_dentry->d_inode->i_size);
++				bindex, file->f_path.dentry->d_inode->i_size);
+ 	if (err) {
+ 		if (err == -EEXIST)
+ 			goto retry;
+@@ -105,7 +105,7 @@ static void cleanup_file(struct file *file)
+ {
+ 	int bindex, bstart, bend;
+ 	struct file **lf;
+-	struct super_block *sb = file->f_dentry->d_sb;
++	struct super_block *sb = file->f_path.dentry->d_sb;
+ 
+ 	lf = UNIONFS_F(file)->lower_files;
+ 	bstart = fbstart(file);
+@@ -157,7 +157,7 @@ static int open_all_files(struct file *file)
+ 	int bindex, bstart, bend, err = 0;
+ 	struct file *lower_file;
+ 	struct dentry *lower_dentry;
+-	struct dentry *dentry = file->f_dentry;
++	struct dentry *dentry = file->f_path.dentry;
+ 	struct super_block *sb = dentry->d_sb;
+ 
+ 	bstart = dbstart(dentry);
+@@ -192,7 +192,7 @@ static int open_highest_file(struct file *file, int willwrite)
+ 	int bindex, bstart, bend, err = 0;
+ 	struct file *lower_file;
+ 	struct dentry *lower_dentry;
+-	struct dentry *dentry = file->f_dentry;
++	struct dentry *dentry = file->f_path.dentry;
+ 	struct inode *parent_inode = dentry->d_parent->d_inode;
+ 	struct super_block *sb = dentry->d_sb;
+ 	size_t inode_size = dentry->d_inode->i_size;
+@@ -237,7 +237,7 @@ out:
+ static int do_delayed_copyup(struct file *file)
+ {
+ 	int bindex, bstart, bend, err = 0;
+-	struct dentry *dentry = file->f_dentry;
++	struct dentry *dentry = file->f_path.dentry;
+ 	struct inode *parent_inode = dentry->d_parent->d_inode;
+ 	loff_t inode_size = dentry->d_inode->i_size;
+ 
+@@ -306,7 +306,7 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	int size;
+ 	int err = 0;
+ 
+-	dentry = file->f_dentry;
++	dentry = file->f_path.dentry;
+ 	unionfs_lock_dentry(dentry);
+ 	sb = dentry->d_sb;
+ 
+@@ -398,19 +398,19 @@ static int __open_dir(struct inode *inode, struct file *file)
+ 	struct file *lower_file;
+ 	int bindex, bstart, bend;
+ 
+-	bstart = fbstart(file) = dbstart(file->f_dentry);
+-	bend = fbend(file) = dbend(file->f_dentry);
++	bstart = fbstart(file) = dbstart(file->f_path.dentry);
++	bend = fbend(file) = dbend(file->f_path.dentry);
+ 
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		lower_dentry =
+-			unionfs_lower_dentry_idx(file->f_dentry, bindex);
++			unionfs_lower_dentry_idx(file->f_path.dentry, bindex);
+ 		if (!lower_dentry)
+ 			continue;
+ 
+ 		dget(lower_dentry);
+-		unionfs_mntget(file->f_dentry, bindex);
++		unionfs_mntget(file->f_path.dentry, bindex);
+ 		lower_file = dentry_open(lower_dentry,
+-					 unionfs_lower_mnt_idx(file->f_dentry,
++					 unionfs_lower_mnt_idx(file->f_path.dentry,
+ 							       bindex),
+ 					 file->f_flags);
+ 		if (IS_ERR(lower_file))
+@@ -436,17 +436,17 @@ static int __open_file(struct inode *inode, struct file *file)
+ 	int lower_flags;
+ 	int bindex, bstart, bend;
+ 
+-	lower_dentry = unionfs_lower_dentry(file->f_dentry);
++	lower_dentry = unionfs_lower_dentry(file->f_path.dentry);
+ 	lower_flags = file->f_flags;
+ 
+-	bstart = fbstart(file) = dbstart(file->f_dentry);
+-	bend = fbend(file) = dbend(file->f_dentry);
++	bstart = fbstart(file) = dbstart(file->f_path.dentry);
++	bend = fbend(file) = dbend(file->f_path.dentry);
+ 
+ 	/*
+ 	 * check for the permission for lower file.  If the error is
+ 	 * COPYUP_ERR, copyup the file.
+ 	 */
+-	if (lower_dentry->d_inode && is_robranch(file->f_dentry)) {
++	if (lower_dentry->d_inode && is_robranch(file->f_path.dentry)) {
+ 		/*
+ 		 * if the open will change the file, copy it up otherwise
+ 		 * defer it.
+@@ -458,7 +458,7 @@ static int __open_file(struct inode *inode, struct file *file)
+ 			/* copyup the file */
+ 			for (bindex = bstart - 1; bindex >= 0; bindex--) {
+ 				err = copyup_file(
+-					file->f_dentry->d_parent->d_inode,
++					file->f_path.dentry->d_parent->d_inode,
+ 					file, bstart, bindex, size);
+ 				if (!err)
+ 					break;
+@@ -474,10 +474,10 @@ static int __open_file(struct inode *inode, struct file *file)
+ 	 * dentry_open will decrement mnt refcnt if err.
+ 	 * otherwise fput() will do an mntput() for us upon file close.
+ 	 */
+-	unionfs_mntget(file->f_dentry, bstart);
++	unionfs_mntget(file->f_path.dentry, bstart);
+ 	lower_file =
+ 		dentry_open(lower_dentry,
+-			    unionfs_lower_mnt_idx(file->f_dentry, bstart),
++			    unionfs_lower_mnt_idx(file->f_path.dentry, bstart),
+ 			    lower_flags);
+ 	if (IS_ERR(lower_file))
+ 		return PTR_ERR(lower_file);
+@@ -522,7 +522,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 		goto out;
+ 	}
+ 
+-	dentry = file->f_dentry;
++	dentry = file->f_path.dentry;
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	bstart = fbstart(file) = dbstart(dentry);
+@@ -548,7 +548,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 			if (!lower_file)
+ 				continue;
+ 
+-			branchput(file->f_dentry->d_sb, bindex);
++			branchput(file->f_path.dentry->d_sb, bindex);
+ 			/* fput calls dput for lower_dentry */
+ 			fput(lower_file);
+ 		}
+@@ -567,7 +567,7 @@ out_nofree:
+ 	unionfs_check_inode(inode);
+ 	if (!err) {
+ 		unionfs_check_file(file);
+-		unionfs_check_dentry(file->f_dentry->d_parent);
++		unionfs_check_dentry(file->f_path.dentry->d_parent);
+ 	}
+ 	return err;
+ }
+@@ -596,7 +596,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 		goto out;
+ 	unionfs_check_file(file);
+ 	fileinfo = UNIONFS_F(file);
+-	BUG_ON(file->f_dentry->d_inode != inode);
++	BUG_ON(file->f_path.dentry->d_inode != inode);
+ 	inodeinfo = UNIONFS_I(inode);
+ 
+ 	/* fput all the lower files */
+@@ -656,7 +656,7 @@ static long do_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 		err = lower_file->f_op->unlocked_ioctl(lower_file, cmd, arg);
+ 	} else if (lower_file->f_op->ioctl) {
+ 		lock_kernel();
+-		err = lower_file->f_op->ioctl(lower_file->f_dentry->d_inode,
++		err = lower_file->f_op->ioctl(lower_file->f_path.dentry->d_inode,
+ 					      lower_file, cmd, arg);
+ 		unlock_kernel();
+ 	}
+@@ -681,7 +681,7 @@ static int unionfs_ioctl_queryfile(struct file *file, unsigned int cmd,
+ 	struct dentry *dentry, *lower_dentry;
+ 	struct vfsmount *mnt;
+ 
+-	dentry = file->f_dentry;
++	dentry = file->f_path.dentry;
+ 	unionfs_lock_dentry(dentry);
+ 	orig_bstart = dbstart(dentry);
+ 	orig_bend = dbend(dentry);
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 9a68813..64bb5ef 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -506,7 +506,7 @@ int copyup_named_file(struct inode *dir, struct file *file, char *name,
+ 	int err = 0;
+ 	struct file *output_file = NULL;
+ 
+-	err = copyup_dentry(dir, file->f_dentry, bstart, new_bindex,
++	err = copyup_dentry(dir, file->f_path.dentry, bstart, new_bindex,
+ 			    name, strlen(name), &output_file, len);
+ 	if (!err) {
+ 		fbstart(file) = new_bindex;
+@@ -525,7 +525,7 @@ int copyup_file(struct inode *dir, struct file *file, int bstart,
+ {
+ 	int err = 0;
+ 	struct file *output_file = NULL;
+-	struct dentry *dentry = file->f_dentry;
++	struct dentry *dentry = file->f_path.dentry;
+ 
+ 	err = copyup_dentry(dir, dentry, bstart, new_bindex,
+ 			    dentry->d_name.name, dentry->d_name.len,
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index b4d35d6..cc9d42a 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -333,7 +333,7 @@ void __unionfs_check_file(const struct file *file,
+ 	int printed_caller = 0;
+ 
+ 	BUG_ON(!file);
+-	dentry = file->f_dentry;
++	dentry = file->f_path.dentry;
+ 	sb = dentry->d_sb;
+ 	dstart = dbstart(dentry);
+ 	dend = dbend(dentry);
+diff --git a/fs/unionfs/dirfops.c b/fs/unionfs/dirfops.c
+index 8503411..4ba8f6c 100644
+--- a/fs/unionfs/dirfops.c
++++ b/fs/unionfs/dirfops.c
+@@ -102,7 +102,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 	if ((err = unionfs_file_revalidate(file, 0)))
+ 		goto out;
+ 
+-	inode = file->f_dentry->d_inode;
++	inode = file->f_path.dentry->d_inode;
+ 
+ 	uds = UNIONFS_F(file)->rdstate;
+ 	if (!uds) {
+@@ -156,7 +156,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 		uds->dirpos = offset;
+ 
+ 		/* Copy the atime. */
+-		fsstack_copy_attr_atime(inode, lower_file->f_dentry->d_inode);
++		fsstack_copy_attr_atime(inode, lower_file->f_path.dentry->d_inode);
+ 
+ 		if (err < 0)
+ 			goto out;
+@@ -239,7 +239,7 @@ static loff_t unionfs_dir_llseek(struct file *file, loff_t offset, int origin)
+ 				else
+ 					err = -EINVAL;
+ 			} else {
+-				rdstate = find_rdstate(file->f_dentry->d_inode,
++				rdstate = find_rdstate(file->f_path.dentry->d_inode,
+ 						       offset);
+ 				if (rdstate) {
+ 					UNIONFS_F(file)->rdstate = rdstate;
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 8f42da3..e978766 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -79,7 +79,7 @@ static ssize_t unionfs_write(struct file *file, const char __user *buf,
+ 	err = do_sync_write(file, buf, count, ppos);
+ 	/* update our inode times upon a successful lower write */
+ 	if (err >= 0) {
+-		unionfs_copy_attr_times(file->f_dentry->d_inode);
++		unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+ 		unionfs_check_file(file);
+ 	}
+ 
+@@ -133,9 +133,9 @@ out:
+ 	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	if (!err) {
+ 		/* copyup could cause parent dir times to change */
+-		unionfs_copy_attr_times(file->f_dentry->d_parent->d_inode);
++		unionfs_copy_attr_times(file->f_path.dentry->d_parent->d_inode);
+ 		unionfs_check_file(file);
+-		unionfs_check_dentry(file->f_dentry->d_parent);
++		unionfs_check_dentry(file->f_path.dentry->d_parent);
+ 	}
+ 	return err;
+ }
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 7b4a6f5..56937b7 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -121,7 +121,7 @@ static int unionfs_do_readpage(struct file *file, struct page *page)
+ 	struct page *lower_page;
+ 	char *lower_page_data;
+ 
+-	dentry = file->f_dentry;
++	dentry = file->f_path.dentry;
+ 	if (UNIONFS_F(file) == NULL) {
+ 		err = -ENOENT;
+ 		goto out_err;
+@@ -200,7 +200,7 @@ int unionfs_readpage(struct file *file, struct page *page)
+ {
+ 	int err;
+ 
+-	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb);
+ 	if ((err = unionfs_file_revalidate(file, 0)))
+ 		goto out;
+ 	unionfs_check_file(file);
+@@ -210,7 +210,7 @@ int unionfs_readpage(struct file *file, struct page *page)
+ 	if (!err) {
+ 		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
+ 			    unionfs_lower_dentry(file->f_path.dentry));
+-		unionfs_copy_attr_times(file->f_dentry->d_inode);
++		unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+ 	}
+ 
+ 	/*
+@@ -221,7 +221,7 @@ int unionfs_readpage(struct file *file, struct page *page)
+ out:
+ 	unlock_page(page);
+ 	unionfs_check_file(file);
+-	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 
+ 	return err;
+ }
+@@ -231,7 +231,7 @@ int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
+ {
+ 	int err;
+ 
+-	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb);
+ 	/*
+ 	 * This is the only place where we unconditionally copy the lower
+ 	 * attribute times before calling unionfs_file_revalidate.  The
+@@ -243,10 +243,10 @@ int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
+ 	 * changed lower mtimes, and avoid an invariant violation warning,
+ 	 * is here, in ->prepare_write.
+ 	 */
+-	unionfs_copy_attr_times(file->f_dentry->d_inode);
++	unionfs_copy_attr_times(file->f_path.dentry->d_inode);
+ 	err = unionfs_file_revalidate(file, 1);
+ 	unionfs_check_file(file);
+-	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 
+ 	return err;
+ }
+@@ -264,7 +264,7 @@ int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
+ 
+ 	BUG_ON(file == NULL);
+ 
+-	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb);
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
+ 	unionfs_check_file(file);
+@@ -312,7 +312,7 @@ out:
+ 	if (err < 0)
+ 		ClearPageUptodate(page);
+ 
+-	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	unionfs_check_file(file);
+ 	return err;		/* assume all is ok */
+ }
+diff --git a/fs/unionfs/rdstate.c b/fs/unionfs/rdstate.c
+index 06ad5a8..5c9d14b 100644
+--- a/fs/unionfs/rdstate.c
++++ b/fs/unionfs/rdstate.c
+@@ -91,7 +91,7 @@ int init_rdstate(struct file *file)
+ 	       (sizeof(unsigned int) + sizeof(unsigned int)));
+ 	BUG_ON(UNIONFS_F(file)->rdstate != NULL);
+ 
+-	UNIONFS_F(file)->rdstate = alloc_rdstate(file->f_dentry->d_inode,
++	UNIONFS_F(file)->rdstate = alloc_rdstate(file->f_path.dentry->d_inode,
+ 						 fbstart(file));
+ 
+ 	return (UNIONFS_F(file)->rdstate ? 0 : -ENOMEM);
+-- 
+1.5.4.3
+

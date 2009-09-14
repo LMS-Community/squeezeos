@@ -1,0 +1,80 @@
+From a314871b3b78899931a264e99285323c4ef07a35 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 30 Apr 2007 17:30:48 -0400
+Subject: [PATCH] Documentation update regarding overlapping branches and new lookup code.
+
+Added detailed comment and updated documentation (issues.txt) to explain why
+overlapping branches are disallowed, better explain cache coherency issues,
+and mention upcoming do_lookup_lookup changes.
+---
+ Documentation/filesystems/unionfs/issues.txt |   19 ++++++++++++-------
+ fs/unionfs/main.c                            |   16 +++++++++++++++-
+ 2 files changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/issues.txt b/Documentation/filesystems/unionfs/issues.txt
+index a434fee..ba68e6c 100644
+--- a/Documentation/filesystems/unionfs/issues.txt
++++ b/Documentation/filesystems/unionfs/issues.txt
+@@ -5,12 +5,15 @@ KNOWN Unionfs 2.0 ISSUES:
+    This means we can't reliably detect a read-only NFS export.
+ 
+ 2. Modifying a Unionfs branch directly, while the union is mounted, is
+-   currently unsupported.  We have tested Unionfs under such conditions, and
+-   fixed any bugs we found (Unionfs comes with an extensive regression test
+-   suite).  However, it may still be possible that changes made to lower
+-   branches directly could cause cache incoherency which, in the worst case,
+-   may case an oops.  We are currently addressing this problem for Unionfs
+-   and also generically for all stackable file systems, by handing mmap and
++   currently unsupported, because it could cause a cache incoherency between
++   the union layer and the lower file systems (for that reason, Unionfs
++   currently prohibits using branches which overlap with each other, even
++   partially).  We have tested Unionfs under such conditions, and fixed any
++   bugs we found (Unionfs comes with an extensive regression test suite).
++   However, it may still be possible that changes made to lower branches
++   directly could cause cache incoherency which, in the worst case, may case
++   an oops.  We are currently addressing this problem for Unionfs and also
++   generically for all stackable file systems, by handling mmap and
+    introducing small VFS/MM changes that would allow a file system to handle
+    cache coherency correctly.
+ 
+@@ -33,7 +36,9 @@ KNOWN Unionfs 2.0 ISSUES:
+ 3. Unionfs should not use lookup_one_len() on the underlying f/s as it
+    confuses NFS.  Currently, unionfs_lookup() passes lookup intents to the
+    lower file-system, this eliminates part of the problem.  The remaining
+-   calls to lookup_one_len may need to be changed to pass an intent.
++   calls to lookup_one_len may need to be changed to pass an intent.  We are
++   currently introducing VFS changes to fs/namei.c's do_path_lookup() to
++   allow proper file lookup and opening in stackable file systems.
+ 
+ 
+ For more information, see <http://unionfs.filesystems.org/>.
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index f6bb5b4..7723190 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -350,7 +350,21 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ 
+ 	BUG_ON(branches != (hidden_root_info->bend + 1));
+ 
+-	/* ensure that no overlaps exist in the branches */
++	/*
++	 * Ensure that no overlaps exist in the branches.
++	 *
++	 * This test is required because the Linux kernel has no support
++	 * currently for ensuring coherency between stackable layers and
++	 * branches.  If we were to allow overlapping branches, it would be
++	 * possible, for example, to delete a file via one branch, which
++	 * would not be reflected in another branch.  Such incoherency could
++	 * lead to inconsistencies and even kernel oopses.  Rather than
++	 * implement hacks to work around some of these cache-coherency
++	 * problems, we prevent branch overlapping, for now.  A complete
++	 * solution will involve proper kernel/VFS support for cache
++	 * coherency, at which time we could safely remove this
++	 * branch-overlapping test.
++	 */
+ 	for (i = 0; i < branches; i++) {
+ 		for (j = i + 1; j < branches; j++) {
+ 			dent1 = hidden_root_info->lower_paths[i].dentry;
+-- 
+1.5.4.3
+

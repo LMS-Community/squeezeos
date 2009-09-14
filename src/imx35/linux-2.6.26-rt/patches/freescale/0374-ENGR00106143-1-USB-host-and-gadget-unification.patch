@@ -1,0 +1,563 @@
+From 8d507f54d28523371f1dc1fb030be013a89b9612 Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Thu, 29 Jan 2009 22:55:46 -0700
+Subject: [PATCH] ENGR00106143-1 USB: host and gadget unification
+
+Updates to USB common code required for MX25 3stack, and
+beneficial to the other platforms as well.
+- Make suspend/resume processing for OTG more robust.
+- Save EHCI registers in pdata struct, not in global variables.
+
+Signed-off-by: Quinn Jensen <quinn.jensen@freescale.com>
+---
+ arch/arm/plat-mxc/Kconfig       |    8 ++-
+ arch/arm/plat-mxc/Makefile      |   17 +++++-
+ arch/arm/plat-mxc/usb_common.c  |   47 +++++++++++----
+ drivers/usb/gadget/Kconfig      |    6 +-
+ drivers/usb/gadget/arcotg_udc.c |   48 +++++++++++++++-
+ drivers/usb/gadget/arcotg_udc.h |    1 +
+ drivers/usb/host/Kconfig        |    8 ++-
+ drivers/usb/host/ehci-arc.c     |  120 +++++++++++++++++++++++----------------
+ drivers/usb/otg/Makefile        |    1 +
+ include/linux/fsl_devices.h     |   14 ++++-
+ 10 files changed, 197 insertions(+), 73 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index d86d45b..8a98a91 100644
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -102,8 +102,14 @@ config ISP1504_MXC_OTG
+ # set iff we need the UTMI transceiver code
+ config UTMI_MXC
+ 	bool
++	select UTMI_MXC_OTG if ARCH_MX25 && USB_GADGET && USB_EHCI_HCD && USB_OTG
+ 	default y if USB_EHCI_FSL_UTMI || USB_GADGET_FSL_UTMI
+-	depends on ARCH_MX35 || ARCH_MX37 || ARCH_MX51
++	depends on ARCH_MX25 || ARCH_MX35 || ARCH_MX37 || ARCH_MX51
++
++config UTMI_MXC_OTG
++	tristate
++	help
++	  Support for USB OTG pin detect using the UTMI transceiver on MXC platforms.
+ 
+ # set iff we need the 1301 transceiver code
+ config ISP1301_MXC
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index bb1131c..c9d5f58 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -16,7 +16,6 @@ obj-y += irq.o
+ endif
+ 
+ obj-$(CONFIG_ARCH_MX21) += dma_mx2.o
+-obj-$(CONFIG_ARCH_MX25) += 
+ obj-$(CONFIG_ARCH_MX27) += dma_mx2.o usb_common.o
+ obj-$(CONFIG_ARCH_MX3) += dptc.o usb_common.o entry-pm.o
+ obj-$(CONFIG_ARCH_MX35) += usb_common.o serialxc.o
+@@ -33,7 +32,11 @@ obj-$(CONFIG_CPU_FREQ_IMX)    += cpufreq.o
+ obj-$(CONFIG_ISP1504_MXC) += isp1504xc.o
+ obj-$(CONFIG_ISP1301_MXC) += isp1301xc.o
+ obj-$(CONFIG_MC13783_MXC) += mc13783_xc.o
+-obj-$(CONFIG_USB_EHCI_FSL_UTMI) += utmixc.o
++
++# obj-$(CONFIG_USB_EHCI_FSL_UTMI) += utmixc.o
++ifneq ($(strip $(CONFIG_USB_EHCI_FSL_UTMI) $(CONFIG_USB_GADGET_FSL_UTMI)),)
++obj-y += utmixc.o
++endif
+ 
+ ifneq ($(CONFIG_USB_EHCI_ARC_H1),)
+ ifneq ($(CONFIG_ARCH_MX51),y)
+@@ -42,3 +45,13 @@ else
+ obj-y += isp1504xc.o
+ endif
+ endif
++
++ifneq ($(CONFIG_ARCH_MX25)$(CONFIG_USB),)
++obj-y += usb_common.o
++endif
++
++ifeq ($(CONFIG_ARCH_MX25),y)
++ifneq ($(CONFIG_USB_EHCI_ARC_H2),)
++obj-y += serialxc.o
++endif
++endif
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index a3a1111..f6016ea 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -343,7 +343,7 @@ static void usbh2_set_serial_xcvr(void)
+ 
+ 	USBCTRL &= ~(UCTRL_H2SIC_MASK);	/* Disable bypass mode */
+ 	USBCTRL &= ~(UCTRL_H2PM);	/* Power Mask */
+-	USBCTRL &= ~UCTRL_OCPOL;	/* OverCurrent Polarity is Low Active */
++	USBCTRL &= ~UCTRL_H2OCPOL;	/* OverCurrent Polarity is Low Active */
+ 	USBCTRL |= UCTRL_H2WIE |	/* Wakeup intr enable */
+ 	    UCTRL_IP_PUE_DOWN |	/* ipp_pue_pulldwn_dpdm */
+ 	    UCTRL_USBTE |	/* USBT is enabled */
+@@ -360,6 +360,16 @@ static void usbh2_set_serial_xcvr(void)
+ 		/* i.MX35 2.0 OTG and Host2 have seperate OC/PWR polarity */
+ 		USBCTRL &= ~UCTRL_H2PP;
+ 		USBCTRL &= ~UCTRL_H2OCPOL;
++	} else if (cpu_is_mx25()) {
++		/*
++		 * USBH2_PWR and USBH2_OC are active high.
++		 * Must force xcvr clock to "internal" so that
++		 * we can write to PTS field after it's been
++		 * cleared by ehci_turn_off_all_ports().
++		 */
++		USBCTRL |= UCTRL_H2PP | UCTRL_H2OCPOL | UCTRL_XCSH2;
++		/* Disable Host2 bus Lock */
++		USBCTRL |= UCTRL_H2LOCKD;
+ 	}
+ 
+ 	USBCTRL &= ~(UCTRL_PP);
+@@ -432,7 +442,8 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 			usbh2_set_serial_xcvr();
+ 			/* Close the internal 60Mhz */
+ 			USBCTRL &= ~UCTRL_XCSH2;
+-		}
++		} else if (cpu_is_mx25())
++			usbh2_set_serial_xcvr();
+ 		else
+ 			usbh1_set_serial_xcvr();
+ 	} else if (xops->xcvr_type == PORTSC_PTS_ULPI) {
+@@ -614,6 +625,9 @@ static void otg_set_utmi_xcvr(void)
+ 		USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_OC_POL;
+ 		/* Enable OTG Overcurrent Event */
+ 		USB_PHY_CTR_FUNC &= ~USB_UTMI_PHYCTRL_OC_DIS;
++	} else if (cpu_is_mx25()) {
++		USBCTRL |= UCTRL_OCPOL;
++		USBCTRL &= ~UCTRL_PP;
+ 	} else {
+ 		/* USBOTG_PWR low active */
+ 		USBCTRL &= ~UCTRL_PP;
+@@ -638,18 +652,20 @@ static void otg_set_utmi_xcvr(void)
+ 		USB_PHY_CTR_FUNC2 &= ~USB_UTMI_PHYCTRL2_PLLDIV_MASK;
+ 		USB_PHY_CTR_FUNC2 |= 0x01;
+ 	}
+-	/* Workaround an IC issue for 2.6.26 kernal:
+-	 * when turn off root hub port power, EHCI set
+-	 * PORTSC reserved bits to be 0, but PTW with 0
+-	 * means 8 bits tranceiver width, here change
+-	 * it back to be 16 bits and do PHY diable and
+-	 * then enable.
+-	 */
+-	UOG_PORTSC1 |= PORTSC_PTW;
++	if (!cpu_is_mx25()) {
++		/* Workaround an IC issue for 2.6.26 kernal:
++		 * when turn off root hub port power, EHCI set
++		 * PORTSC reserved bits to be 0, but PTW with 0
++		 * means 8 bits tranceiver width, here change
++		 * it back to be 16 bits and do PHY diable and
++		 * then enable.
++		 */
++		UOG_PORTSC1 |= PORTSC_PTW;
+ 
+-	/* Enable UTMI interface in PHY control Reg */
+-	USB_PHY_CTR_FUNC &= ~USB_UTMI_PHYCTRL_UTMI_ENABLE;
+-	USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
++		/* Enable UTMI interface in PHY control Reg */
++		USB_PHY_CTR_FUNC &= ~USB_UTMI_PHYCTRL_UTMI_ENABLE;
++		USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
++	}
+ 
+ 	if (UOG_HCSPARAMS & HCSPARAMS_PPC)
+ 		UOG_PORTSC1 |= PORTSC_PORT_POWER;
+@@ -668,6 +684,11 @@ static void otg_set_utmi_xcvr(void)
+ 	 * the ULPI transceiver to reset too.
+ 	 */
+ 	msleep(100);
++
++	/* Turn off the usbpll for mx25 UTMI tranceivers */
++	/* DDD: can we do this UTMI xcvrs on all boards? */
++	if (cpu_is_mx25())
++		clk_disable(usb_clk);
+ }
+ 
+ static int otg_used = 0;
+diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
+index 6294176..2ef862e 100644
+--- a/drivers/usb/gadget/Kconfig
++++ b/drivers/usb/gadget/Kconfig
+@@ -438,7 +438,7 @@ choice
+ 
+ config USB_GADGET_FSL_MC13783
+ 	bool "Freescale MC13783"
+-	depends on !USB_EHCI_FSL_1301 && !USB_EHCI_FSL_1504 && !USB_EHCI_FSL_UTMI
++	depends on !USB_EHCI_FSL_1301 && !USB_EHCI_FSL_1504 && !USB_EHCI_FSL_UTMI && !MACH_MX25_3DS
+ 	---help---
+ 	  Enable support for the Full Speed Freescale MC13783 transceiver.
+ 
+@@ -447,7 +447,7 @@ config USB_GADGET_FSL_MC13783
+ 
+ config USB_GADGET_FSL_1301
+ 	bool "Philips ISP1301"
+-	depends on !USB_EHCI_FSL_MC13783 && !USB_EHCI_FSL_1504 && !USB_EHCI_FSL_UTMI
++	depends on !USB_EHCI_FSL_MC13783 && !USB_EHCI_FSL_1504 && !USB_EHCI_FSL_UTMI && !MACH_MX25_3DS
+ 	---help---
+ 	  Enable support for the Full Speed Philips ISP1301 transceiver.
+ 
+@@ -457,7 +457,7 @@ config USB_GADGET_FSL_1301
+ 
+ config USB_GADGET_FSL_1504
+ 	bool "Philips ISP1504"
+-	depends on !USB_EHCI_FSL_MC13783 && !USB_EHCI_FSL_1301 && !USB_EHCI_FSL_UTMI
++	depends on !USB_EHCI_FSL_MC13783 && !USB_EHCI_FSL_1301 && !USB_EHCI_FSL_UTMI && !MACH_MX25_3DS
+ 	---help---
+ 	  Enable support for the High Speed Philips ISP1504 transceiver.
+ 
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 400ac81..88a7c79 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -2093,7 +2093,7 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
+ 
+ 	if (udc_controller->transceiver) {
+ 		/* Suspend the controller until OTG enable it */
+-		udc_suspend(udc_controller);
++		udc_controller->stopped = 1;
+ 		printk(KERN_INFO "Suspend udc for OTG auto detect\n");
+ 
+ 		/* export udc suspend/resume call to OTG */
+@@ -2786,6 +2786,35 @@ static int __exit fsl_udc_remove(struct platform_device *pdev)
+ 
+ static int udc_suspend(struct fsl_udc *udc)
+ {
++	u32 mode, usbcmd;
++
++	mode = fsl_readl(&dr_regs->usbmode) & USB_MODE_CTRL_MODE_MASK;
++	usbcmd = fsl_readl(&dr_regs->usbcmd);
++
++	pr_debug("%s(): mode 0x%x stopped %d\n", __func__, mode, udc->stopped);
++
++	/*
++	 * If the controller is already stopped, then this must be a
++	 * PM suspend.  Remember this fact, so that we will leave the
++	 * controller stopped at PM resume time.
++	 */
++	if (udc->stopped) {
++		pr_debug("gadget already stopped, leaving early\n");
++		udc->already_stopped = 1;
++		return 0;
++	}
++
++	if (mode != USB_MODE_CTRL_MODE_DEVICE) {
++		pr_debug("gadget not in device mode, leaving early\n");
++		return 0;
++	}
++
++	printk(KERN_INFO "USB Gadget suspended\n");
++
++	/* stop the controller */
++	usbcmd = fsl_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
++	fsl_writel(usbcmd, &dr_regs->usbcmd);
++
+ 	udc->stopped = 1;
+ 	return 0;
+ }
+@@ -2805,6 +2834,19 @@ static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state)
+  *-----------------------------------------------------------------*/
+ static int fsl_udc_resume(struct platform_device *pdev)
+ {
++	pr_debug("%s(): stopped %d  already_stopped %d\n", __func__,
++		 udc_controller->stopped, udc_controller->already_stopped);
++
++	/*
++	 * If the controller was stopped at suspend time, then
++	 * don't resume it now.
++	 */
++	if (udc_controller->already_stopped) {
++		udc_controller->already_stopped = 0;
++		pr_debug("gadget was already stopped, leaving early\n");
++		return 0;
++	}
++
+ 	/* Enable DR irq reg and set controller Run */
+ 	if (udc_controller->stopped) {
+ 		dr_controller_setup(udc_controller);
+@@ -2813,6 +2855,8 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 	udc_controller->usb_state = USB_STATE_ATTACHED;
+ 	udc_controller->ep0_state = WAIT_FOR_SETUP;
+ 	udc_controller->ep0_dir = 0;
++
++	printk(KERN_INFO "USB Gadget resumed\n");
+ 	return 0;
+ }
+ 
+diff --git a/drivers/usb/gadget/arcotg_udc.h b/drivers/usb/gadget/arcotg_udc.h
+index 1d130f8..9ef3e2e 100644
+--- a/drivers/usb/gadget/arcotg_udc.h
++++ b/drivers/usb/gadget/arcotg_udc.h
+@@ -556,6 +556,7 @@ struct fsl_udc {
+ 	unsigned vbus_active:1;
+ 	unsigned stopped:1;
+ 	unsigned remote_wakeup:1;
++	unsigned already_stopped:1;
+ 
+ 	struct ep_queue_head *ep_qh;	/* Endpoints Queue-Head */
+ 	struct fsl_req *status_req;	/* ep0 status request */
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 89fdec3..8964a42 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -61,7 +61,7 @@ config USB_EHCI_ARC_H1
+ config USB_EHCI_ARC_H2
+ 	bool "Support for Host2 port on Freescale controller"
+ 	depends on USB_EHCI_ARC	&& \
+-		   (ARCH_MX27 || ARCH_MX3 || ARCH_MX35)
++		   (ARCH_MX25 || ARCH_MX27 || ARCH_MX3 || ARCH_MX35)
+ 	---help---
+ 	  Enable support for the USB Host2 port.
+ 
+@@ -89,12 +89,13 @@ choice
+ 	depends on USB_EHCI_ARC_OTG
+ 	default USB_EHCI_FSL_1504 if ARCH_MX3
+ 	default USB_EHCI_FSL_1301 if ARCH_MX27
+-	default USB_EHCI_FSL_UTMI if (ARCH_MX35 || ARCH_MX37 || ARCH_MX51)
++	default USB_EHCI_FSL_UTMI if (ARCH_MX25 || ARCH_MX35 || ARCH_MX37 || ARCH_MX51)
+ 	---help---
+ 	  Choose the transceiver to use with the Freescale DR port.
+ 
+ config USB_EHCI_FSL_MC13783
+ 	bool "Freescale MC13783"
++	depends on !MACH_MX25_3DS
+ 	---help---
+ 	  Enable support for the Full Speed Freescale MC13783 transceiver.
+ 
+@@ -103,6 +104,7 @@ config USB_EHCI_FSL_MC13783
+ 
+ config USB_EHCI_FSL_1301
+ 	bool "Philips ISP1301"
++	depends on !MACH_MX25_3DS
+ 	---help---
+ 	  Enable support for the Full Speed Philips ISP1301 transceiver.
+ 
+@@ -121,7 +123,7 @@ config USB_EHCI_FSL_1504
+ 
+ config USB_EHCI_FSL_UTMI
+ 	bool "Internal UTMI"
+-	depends on (ARCH_MX35 || ARCH_MX37 || ARCH_MX51)
++	depends on (ARCH_MX25 || ARCH_MX35 || ARCH_MX37 || ARCH_MX51)
+ 	---help---
+ 	  Enable support for the on-chip High Speed UTMI transceiver.
+ 
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index b0b7543..abc6524 100644
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -279,8 +279,6 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 	usb_remove_hcd(hcd);
+ 	usb_put_hcd(hcd);
+ 
+-	kfree(pdata->ehci_regs_save);
+-	pdata->ehci_regs_save = NULL;
+ 	/*
+ 	 * do platform specific un-initialization:
+ 	 * release iomux pins, etc.
+@@ -423,14 +421,6 @@ static int ehci_fsl_drv_remove(struct platform_device *pdev)
+ 
+ 
+ #ifdef CONFIG_PM
+-/*
+- * Holding pen for all the EHCI registers except port_status,
+- * which is a zero element array and hence takes no space.
+- * The port_status register is saved in usb_ehci_portsc.
+- */
+-volatile static struct ehci_regs usb_ehci_regs;
+-static u32 usb_ehci_portsc;
+-
+ /* suspend/resume, section 4.3 */
+ 
+ /* These routines rely on the bus (pci, platform, etc)
+@@ -445,9 +435,33 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ {
+ 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
+ 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+-	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-	struct ehci_regs *ehci_regs_ptr;
+ 	u32 tmp;
++	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
++
++#ifdef DEBUG
++	u32 mode = ehci_readl(ehci, hcd->regs + FSL_SOC_USB_USBMODE);
++	mode &= USBMODE_CM_MASK;
++	tmp = ehci_readl(ehci, hcd->regs + 0x140);	/* usbcmd */
++
++	printk(KERN_DEBUG "%s('%s'): suspend=%d already_suspended=%d "
++	       "mode=%d  usbcmd %08x\n", __func__, pdata->name,
++	       pdata->suspended, pdata->already_suspended, mode, tmp);
++#endif
++
++	/*
++	 * If the controller is already suspended, then this must be a
++	 * PM suspend.  Remember this fact, so that we will leave the
++	 * controller suspended at PM resume time.
++	 */
++	if (pdata->suspended) {
++		pr_debug("%s: already suspended, leaving early\n", __func__);
++		pdata->already_suspended = 1;
++		return 0;
++	}
++
++	pr_debug("%s: suspending...\n", __func__);
++
++	printk(KERN_INFO "USB Host suspended\n");
+ 
+ 	hcd->state = HC_STATE_SUSPENDED;
+ 	pdev->dev.power.power_state = PMSG_SUSPEND;
+@@ -460,28 +474,23 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 	tmp &= ~CMD_RUN;
+ 	ehci_writel(ehci, tmp, &ehci->regs->command);
+ 
+-	if (!pdata->ehci_regs_save) {
+-		ehci_regs_ptr = kmalloc(sizeof(struct ehci_regs), GFP_KERNEL);
+-		if (!ehci_regs_ptr)
+-			return -ENOMEM;
+-	} else
+-		ehci_regs_ptr = (struct ehci_regs *)pdata->ehci_regs_save;
+-
+ 	/* save EHCI registers */
+-	ehci_regs_ptr->command = ehci_readl(ehci, &ehci->regs->command);
+-	ehci_regs_ptr->status = ehci_readl(ehci, &ehci->regs->status);
+-	ehci_regs_ptr->intr_enable = ehci_readl(ehci, &ehci->regs->intr_enable);
+-	ehci_regs_ptr->frame_index = ehci_readl(ehci, &ehci->regs->frame_index);
+-	ehci_regs_ptr->segment = ehci_readl(ehci, &ehci->regs->segment);
+-	ehci_regs_ptr->frame_list = ehci_readl(ehci, &ehci->regs->frame_list);
+-	ehci_regs_ptr->async_next = ehci_readl(ehci, &ehci->regs->async_next);
+-	ehci_regs_ptr->configured_flag =
++	pdata->pm_command = ehci_readl(ehci, &ehci->regs->command);
++	pdata->pm_command &= ~CMD_RUN;
++	pdata->pm_status  = ehci_readl(ehci, &ehci->regs->status);
++	pdata->pm_intr_enable  = ehci_readl(ehci, &ehci->regs->intr_enable);
++	pdata->pm_frame_index  = ehci_readl(ehci, &ehci->regs->frame_index);
++	pdata->pm_segment  = ehci_readl(ehci, &ehci->regs->segment);
++	pdata->pm_frame_list  = ehci_readl(ehci, &ehci->regs->frame_list);
++	pdata->pm_async_next  = ehci_readl(ehci, &ehci->regs->async_next);
++	pdata->pm_configured_flag  =
+ 		ehci_readl(ehci, &ehci->regs->configured_flag);
+-	ehci_regs_ptr->port_status[0] =
+-		ehci_readl(ehci, &ehci->regs->port_status[0]);
+-	ehci_regs_ptr->port_status[0] &= cpu_to_hc32(ehci, ~PORT_RWC_BITS);
++	pdata->pm_portsc = ehci_readl(ehci, &ehci->regs->port_status[0]);
++
++	/* clear the W1C bits */
++	pdata->pm_portsc &= cpu_to_hc32(ehci, ~PORT_RWC_BITS);
+ 
+-	pdata->ehci_regs_save = (void *)ehci_regs_ptr;
++	pdata->suspended = 1;
+ 
+ 	/* clear PP to cut power to the port */
+ 	tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+@@ -497,29 +506,44 @@ static int ehci_fsl_drv_resume(struct platform_device *pdev)
+ 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 	u32 tmp;
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-	struct ehci_regs *ehci_regs_ptr;
+ 
+-	/* set host mode */
+-	tmp = USBMODE_CM_HOST | (pdata->es ? USBMODE_ES : 0);
+-	ehci_writel(ehci, tmp, hcd->regs + FSL_SOC_USB_USBMODE);
++	printk(KERN_INFO "USB Host resumed\n");
+ 
+-	if (!pdata->ehci_regs_save)
+-		return -EFAULT;
++	pr_debug("%s('%s'): suspend=%d already_suspended=%d\n", __func__,
++		pdata->name, pdata->suspended, pdata->already_suspended);
++
++	/*
++	 * If the controller was already suspended at suspend time,
++	 * then don't resume it now.
++	 */
++	if (pdata->already_suspended) {
++		pr_debug("already suspended, leaving early\n");
++		pdata->already_suspended = 0;
++		return 0;
++	}
++
++	if (!pdata->suspended) {
++		pr_debug("not suspended, leaving early\n");
++		return 0;
++	}
++
++	pdata->suspended = 0;
+ 
+-	ehci_regs_ptr = (struct ehci_regs *)pdata->ehci_regs_save;
++	pr_debug("%s resuming...\n", __func__);
++
++	/* set host mode */
++	fsl_platform_set_host_mode(hcd);
+ 
+ 	/* restore EHCI registers */
+-	ehci_writel(ehci, ehci_regs_ptr->command, &ehci->regs->command);
+-	ehci_writel(ehci, ehci_regs_ptr->intr_enable, &ehci->regs->intr_enable);
+-	ehci_writel(ehci, ehci_regs_ptr->frame_index, &ehci->regs->frame_index);
+-	ehci_writel(ehci, ehci_regs_ptr->segment, &ehci->regs->segment);
+-	ehci_writel(ehci, ehci_regs_ptr->frame_list, &ehci->regs->frame_list);
+-	ehci_writel(ehci, ehci_regs_ptr->async_next, &ehci->regs->async_next);
+-	ehci_writel(ehci, ehci_regs_ptr->configured_flag,
++	ehci_writel(ehci, pdata->pm_command, &ehci->regs->command);
++	ehci_writel(ehci, pdata->pm_intr_enable, &ehci->regs->intr_enable);
++	ehci_writel(ehci, pdata->pm_frame_index, &ehci->regs->frame_index);
++	ehci_writel(ehci, pdata->pm_segment, &ehci->regs->segment);
++	ehci_writel(ehci, pdata->pm_frame_list, &ehci->regs->frame_list);
++	ehci_writel(ehci, pdata->pm_async_next, &ehci->regs->async_next);
++	ehci_writel(ehci, pdata->pm_configured_flag,
+ 		    &ehci->regs->configured_flag);
+-	ehci_writel(ehci, ehci_regs_ptr->status, &ehci->regs->status);
+-	ehci_writel(ehci, ehci_regs_ptr->port_status[0],
+-			&ehci->regs->port_status[0]);
++	ehci_writel(ehci, pdata->pm_portsc, &ehci->regs->port_status[0]);
+ 
+ 	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+ 	hcd->state = HC_STATE_RUNNING;
+diff --git a/drivers/usb/otg/Makefile b/drivers/usb/otg/Makefile
+index f3c99e7..85979c0 100644
+--- a/drivers/usb/otg/Makefile
++++ b/drivers/usb/otg/Makefile
+@@ -4,3 +4,4 @@
+ # USB transceiver
+ fsl_otg_arc-objs		:= fsl_otg.o otg_fsm.o
+ obj-$(CONFIG_ISP1504_MXC_OTG) += fsl_otg_arc.o
++obj-$(CONFIG_UTMI_MXC_OTG) += fsl_otg_arc.o
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index ba605db..c2754d7 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -109,7 +109,6 @@ struct fsl_usb2_platform_data {
+ 	int (*platform_init) (struct platform_device *);
+ 	void (*platform_uninit) (struct fsl_usb2_platform_data *);
+ 	void __iomem *regs;	/* ioremap'd register base */
+-	void *ehci_regs_save;	/* Save ehci registers for resume */
+ 	u32 xcvr_type;		/* PORTSC_PTS_* */
+ 	char *transceiver;	/* transceiver name */
+ 	unsigned power_budget;	/* for hcd->power_budget */
+@@ -125,6 +124,19 @@ struct fsl_usb2_platform_data {
+ 	unsigned			le_setup_buf : 1;
+ 	unsigned change_ahb_burst:1;
+ 	unsigned ahb_burst_mode:3;
++	unsigned			suspended : 1;
++	unsigned			already_suspended : 1;
++
++	/* register save area for suspend/resume */
++	u32				pm_command;
++	u32				pm_status;
++	u32				pm_intr_enable;
++	u32				pm_frame_index;
++	u32				pm_segment;
++	u32				pm_frame_list;
++	u32				pm_async_next;
++	u32				pm_configured_flag;
++	u32				pm_portsc;
+ };
+ 
+ /* Flags in fsl_usb2_mph_platform_data */
+-- 
+1.5.4.4
+

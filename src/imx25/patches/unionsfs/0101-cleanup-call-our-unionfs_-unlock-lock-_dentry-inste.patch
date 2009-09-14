@@ -1,0 +1,36 @@
+From 04fc6482b313cb3238de4b3498edb3dc5d3d03de Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 18 Apr 2007 02:08:14 -0400
+Subject: [PATCH] cleanup: call our unionfs_{unlock,lock}_dentry instead of mutex ops.
+
+This is for consistency with the rest of the code, which helps us place
+debugging code when un/locking our special "info" mutex in our dentries.
+---
+ fs/unionfs/lookup.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 7918f04..253fe4a 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -464,7 +464,7 @@ int new_dentry_private_data(struct dentry *dentry)
+ 			goto out;
+ 
+ 		mutex_init(&info->lock);
+-		mutex_lock(&info->lock);
++		unionfs_lock_dentry(dentry);
+ 		unlock_on_err = 1;
+ 
+ 		info->lower_paths = NULL;
+@@ -500,7 +500,7 @@ int new_dentry_private_data(struct dentry *dentry)
+ out_free:
+ 	kfree(info->lower_paths);
+ 	if (unlock_on_err)
+-		mutex_unlock(&info->lock);
++		unionfs_unlock_dentry(dentry);
+ 
+ out:
+ 	free_dentry_private_data(info);
+-- 
+1.5.4.3
+

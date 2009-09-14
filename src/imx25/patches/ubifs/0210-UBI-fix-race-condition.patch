@@ -1,0 +1,56 @@
+From 736f53399bee6c5542b4f84c80b8bd0a72242aec Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sat, 23 May 2009 13:44:09 +0300
+Subject: [PATCH] UBI: fix race condition
+
+This patch fixes a minor problem where we may fail to wake
+upe the UBI background thread. This is not fatal at all,
+it may just result at sligtly worse performace for a short
+period of time, just because the thread will be woken up
+when real I/O on the UBI starts.
+
+Anywey, the issue is the race condition between
+'ubi_attach_mtd_dev()' and 'ubi_thread()'. If we do not
+serialize them, the 'wake_up_process()' call may be done
+before 'ubi_thread()' went seep, but after it checked
+'ubi->thread_enabled'.
+
+This issue was spotted by Shin Hong <hongshin@gmail.com>
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index d782190..84c23e1 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -380,7 +380,7 @@ static void free_user_volumes(struct ubi_device *ubi)
+  * @ubi: UBI device description object
+  *
+  * This function returns zero in case of success and a negative error code in
+- * case of failure. Note, this function destroys all volumes if it failes.
++ * case of failure. Note, this function destroys all volumes if it fails.
+  */
+ static int uif_init(struct ubi_device *ubi)
+ {
+@@ -871,9 +871,15 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 		ubi->beb_rsvd_pebs);
+ 	ubi_msg("max/mean erase counter: %d/%d", ubi->max_ec, ubi->mean_ec);
+ 
++	/*
++	 * The below lock makes sure we do not race with 'ubi_thread()' which
++	 * checks @ubi->thread_enabled. Otherwise we may fail to wake it up.
++	 */
++	spin_lock(&ubi->wl_lock);
+ 	if (!DBG_DISABLE_BGT)
+ 		ubi->thread_enabled = 1;
+ 	wake_up_process(ubi->bgt_thread);
++	spin_unlock(&ubi->wl_lock);
+ 
+ 	ubi_devices[ubi_num] = ubi;
+ 	return ubi_num;
+-- 
+1.5.4.3
+

@@ -1,0 +1,40 @@
+From 725dd1dc03b1a924064fcc6c9dcec05bfd17c2d5 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 22 Mar 2007 20:08:30 -0400
+Subject: [PATCH] Unionfs: vfsmount reference counting fixes
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |    8 +++-----
+ 1 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 4756b78..b08842f 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -235,8 +235,8 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ 		valid = __unionfs_d_revalidate_one(chain[i], nd);
+ 		/* XXX: is this the correct mntput condition?! */
+ 		if (valid && chain_len > 0 &&
+-		    sbgen != dgen && dentry->d_inode &&
+-		    S_ISDIR(dentry->d_inode->i_mode)) {
++		    sbgen != dgen && chain[i]->d_inode &&
++		    S_ISDIR(chain[i]->d_inode->i_mode)) {
+ 			for (bindex = saved_bstart; bindex <= saved_bend; bindex++)
+ 				unionfs_mntput(chain[i], bindex);
+ 		}
+@@ -256,9 +256,7 @@ int __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd)
+ 	saved_bend = dbend(dentry);
+ 	valid = __unionfs_d_revalidate_one(dentry, nd);
+ 
+-	if (valid && chain_len > 0 &&
+-	    sbgen != dgen && dentry->d_inode &&
+-	    S_ISDIR(dentry->d_inode->i_mode)) {
++	if (valid && chain_len > 0 && sbgen != dgen) {
+ 		for (bindex = saved_bstart; bindex <= saved_bend; bindex++)
+ 			unionfs_mntput(dentry, bindex);
+ 	}
+-- 
+1.5.4.3
+

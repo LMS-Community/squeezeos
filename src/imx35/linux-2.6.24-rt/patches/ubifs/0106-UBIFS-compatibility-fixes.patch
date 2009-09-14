@@ -1,0 +1,67 @@
+From 8f9493b5b568243123e07545092c46a25ff838aa Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 25 Jul 2008 17:34:19 +0300
+Subject: [PATCH] UBIFS: compatibility fixes
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/compat.h |    3 +++
+ fs/ubifs/super.c  |    6 ++++++
+ 2 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/fs/ubifs/compat.h b/fs/ubifs/compat.h
+index 72ca52d..87322df 100644
+--- a/fs/ubifs/compat.h
++++ b/fs/ubifs/compat.h
+@@ -84,5 +84,8 @@ int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma);
+ #define UBIFS_COMPAT_NO_SHARED_MMAP
+ #endif
+ 
++#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,24))
++#define UBIFS_COMPAT_SUPPORT_NFS
++#endif
+ 
+ #endif /* !__UBIFS_COMPAT_H__ */
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 8b8f568..7945fa4 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -35,7 +35,9 @@
+ #include <linux/parser.h>
+ #include <linux/seq_file.h>
+ #include <linux/mount.h>
++#ifdef UBIFS_COMPAT_SUPPORT_NFS
+ #include <linux/exportfs.h>
++#endif
+ #include "ubifs.h"
+ 
+ /* Slab cache for UBIFS inodes */
+@@ -1591,6 +1593,7 @@ struct super_operations ubifs_super_operations = {
+ 	.sync_fs       = ubifs_sync_fs,
+ };
+ 
++#ifdef UBIFS_COMPAT_SUPPORT_NFS
+ /*
+  * Note, since UBIFS does re-use inode numbers at the moment, we do not check
+  * the generation number in this function.
+@@ -1635,6 +1638,7 @@ static struct dentry *ubifs_fh_to_dentry(struct super_block *sb,
+ static struct export_operations ubifs_export_ops = {
+ 	.fh_to_dentry = ubifs_fh_to_dentry,
+ };
++#endif /* UBIFS_COMPAT_SUPPORT_NFS */
+ 
+ /**
+  * open_ubi - parse UBI device name string and open the UBI device.
+@@ -1771,7 +1775,9 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	if (c->max_inode_sz > MAX_LFS_FILESIZE)
+ 		sb->s_maxbytes = c->max_inode_sz = MAX_LFS_FILESIZE;
+ 	sb->s_op = &ubifs_super_operations;
++#ifdef UBIFS_COMPAT_SUPPORT_NFS
+ 	sb->s_export_op = &ubifs_export_ops;
++#endif
+ 
+ 	mutex_lock(&c->umount_mutex);
+ 	err = mount_ubifs(c);
+-- 
+1.5.6.3
+

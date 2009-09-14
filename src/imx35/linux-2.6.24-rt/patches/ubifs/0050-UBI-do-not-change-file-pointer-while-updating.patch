@@ -1,0 +1,58 @@
+From e3695da687031aeb9745ef21512e9c34404cbd5a Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 24 Jan 2008 16:45:57 +0200
+Subject: [PATCH] UBI: do not change file pointer while updating
+
+Since we do not change semantics of seek(), changing the file
+pointer while updating does not make much sense.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |    4 +---
+ drivers/mtd/ubi/upd.c  |    1 -
+ 2 files changed, 1 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index a7aa123..d9bd494 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -368,6 +368,7 @@ static ssize_t vol_cdev_write(struct file *file, const char __user *buf,
+ 		 */
+ 		count = err;
+ 
++		vol->updating = 0;
+ 		err = ubi_check_volume(ubi, vol->vol_id);
+ 		if (err < 0)
+ 			return err;
+@@ -382,7 +383,6 @@ static ssize_t vol_cdev_write(struct file *file, const char __user *buf,
+ 		revoke_exclusive(desc, UBI_READWRITE);
+ 	}
+ 
+-	*offp += count;
+ 	return count;
+ }
+ 
+@@ -430,8 +430,6 @@ static int vol_cdev_ioctl(struct inode *inode, struct file *file,
+ 		err = ubi_start_update(ubi, vol->vol_id, bytes);
+ 		if (bytes == 0)
+ 			revoke_exclusive(desc, UBI_READWRITE);
+-
+-		file->f_pos = 0;
+ 		break;
+ 	}
+ 
+diff --git a/drivers/mtd/ubi/upd.c b/drivers/mtd/ubi/upd.c
+index e32b04d..3defa57 100644
+--- a/drivers/mtd/ubi/upd.c
++++ b/drivers/mtd/ubi/upd.c
+@@ -343,7 +343,6 @@ int ubi_more_update_data(struct ubi_device *ubi, int vol_id,
+ 		if (err == 0) {
+ 			err = to_write;
+ 			vfree(vol->upd_buf);
+-			vol->updating = 0;
+ 		}
+ 	}
+ 
+-- 
+1.5.6.3
+

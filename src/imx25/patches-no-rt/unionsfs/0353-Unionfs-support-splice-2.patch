@@ -1,0 +1,59 @@
+From da0eabc3c1e579f029f9c3f7b6e6000a7327e738 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 24 Nov 2007 20:05:47 -0500
+Subject: [PATCH] Unionfs: support splice(2)
+
+Also remove redundant variable from unionfs_readpage (saves a bit on stack
+space).
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c |    1 +
+ fs/unionfs/mmap.c |   10 ++++++++--
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index cfbfb8e..b7d0d55 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -246,4 +246,5 @@ struct file_operations unionfs_main_fops = {
+ 	.fsync		= unionfs_fsync,
+ 	.fasync		= unionfs_fasync,
+ 	.splice_read	= generic_file_splice_read,
++	.splice_write	= generic_file_splice_write,
+ };
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index fa358ef..623a913 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -147,7 +147,7 @@ static int unionfs_readpage(struct file *file, struct page *page)
+ 	struct inode *inode;
+ 	mm_segment_t old_fs;
+ 	char *page_data = NULL;
+-	loff_t offset;
++	mode_t orig_mode;
+ 
+ 	unionfs_read_lock(file->f_path.dentry->d_sb);
+ 	err = unionfs_file_revalidate(file, false);
+@@ -175,11 +175,17 @@ static int unionfs_readpage(struct file *file, struct page *page)
+ 	 * the necessary magic for us.
+ 	 */
+ 	lower_file->f_pos = page_offset(page);
+-	offset = page_offset(page);
+ 	old_fs = get_fs();
+ 	set_fs(KERNEL_DS);
++	/*
++	 * generic_file_splice_write may call us on a file not opened for
++	 * reading, so temporarily allow reading.
++	 */
++	orig_mode = lower_file->f_mode;
++	lower_file->f_mode |= FMODE_READ;
+ 	err = vfs_read(lower_file, page_data, PAGE_CACHE_SIZE,
+ 		       &lower_file->f_pos);
++	lower_file->f_mode = orig_mode;
+ 	set_fs(old_fs);
+ 	if (err >= 0 && err < PAGE_CACHE_SIZE)
+ 		memset(page_data + err, 0, PAGE_CACHE_SIZE - err);
+-- 
+1.5.4.3
+

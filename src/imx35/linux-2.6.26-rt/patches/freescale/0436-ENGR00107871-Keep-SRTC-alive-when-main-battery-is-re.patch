@@ -1,0 +1,117 @@
+From f32010a76b1caff59dd8c142a6b129ed216d5684 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Mon, 23 Feb 2009 21:47:16 +0800
+Subject: [PATCH] ENGR00107871 Keep SRTC alive when main battery is removed
+
+1. Keep VSRTC and CLK32KMCU on for all states for MC13892
+2. Even if low security mode, allow SRTC move to valid state except MX51 TO1.
+3. When main battery is removed, coincell battery on MX51/MX37 MC13892
+board is used. Please ensure the voltage of coincell battery is enough
+to keep VSRTC alive.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack.c |   13 +++++++++++--
+ arch/arm/mach-mx51/mx51_3stack.c |    7 +++++++
+ drivers/rtc/rtc-mxc_v2.c         |    8 ++++----
+ 3 files changed, 22 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 8f4c872..079bead 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -26,6 +26,7 @@
+ #include <linux/i2c.h>
+ #include <linux/ata.h>
+ #include <linux/regulator/regulator.h>
++#include <linux/pmic_external.h>
+ #if defined(CONFIG_MTD) || defined(CONFIG_MTD_MODULE)
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/map.h>
+@@ -106,9 +107,10 @@ struct cpu_wp *get_cpu_wp(int *wp)
+ 	return cpu_wp_auto;
+ }
+ 
+-static void mc13892_reg_int(void)
++static int mc13892_reg_int(void)
+ {
+ 	int i = 0;
++	unsigned int value;
+ 	struct regulator *regulator;
+ 	struct cpu_wp *cpu_wp_tbl1;
+ 	int cpu_wp_nr1;
+@@ -144,7 +146,7 @@ static void mc13892_reg_int(void)
+ 
+ 	/* for board v1.1 do nothing*/
+ 	if (!board_is_mx37(BOARD_REV_2))
+-		return;
++		return -EINVAL;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(reg_name); i++) {
+ 		regulator = regulator_get(NULL, reg_name[i]);
+@@ -170,6 +172,13 @@ static void mc13892_reg_int(void)
+ 	cpu_wp_tbl1 = get_cpu_wp(&cpu_wp_nr1);
+ 	for (i = 0; i < cpu_wp_nr1; i++)
+ 		cpu_wp_tbl1[i].cpu_voltage += 50000;
++
++	/* Bit 4 DRM: keep VSRTC and CLK32KMCU on for all states */
++	pmic_read_reg(REG_POWER_CTL0, &value, 0xffffff);
++	value |= 0x000010;
++	pmic_write_reg(REG_POWER_CTL0, value, 0xffffff);
++
++	return 0;
+ }
+ 
+ late_initcall(mc13892_reg_int);
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 52b9adf..7fc80a1 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -106,6 +106,7 @@ static void power_on_evt_handler(void)
+ static int __init mc13892_reg_int(void)
+ {
+ 	int i = 0;
++	unsigned int value;
+ 	struct regulator *regulator;
+ 	struct regulator *gp;
+ 	struct regulator *lp;
+@@ -187,6 +188,12 @@ static int __init mc13892_reg_int(void)
+ 	power_key_event.param = NULL;
+ 	power_key_event.func = (void *)power_on_evt_handler;
+ 	pmic_event_subscribe(EVENT_PWRONI, power_key_event);
++
++	/* Bit 4 DRM: keep VSRTC and CLK32KMCU on for all states */
++	pmic_read_reg(REG_POWER_CTL0, &value, 0xffffff);
++	value |= 0x000010;
++	pmic_write_reg(REG_POWER_CTL0, value, 0xffffff);
++
+ 	return 0;
+ }
+ 
+diff --git a/drivers/rtc/rtc-mxc_v2.c b/drivers/rtc/rtc-mxc_v2.c
+index d9dc243..0b8ae96 100644
+--- a/drivers/rtc/rtc-mxc_v2.c
++++ b/drivers/rtc/rtc-mxc_v2.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -571,9 +571,9 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 	srtc_secmode_addr = ioremap(plat_data->srtc_sec_mode_addr, 1);
+ 
+ 	/* Check SRTC security mode */
+-	if ((__raw_readl(srtc_secmode_addr) & SRTC_SECMODE_MASK) ==
+-	    SRTC_SECMODE_LOW) {
+-		/* Low security mode */
++	if (((__raw_readl(srtc_secmode_addr) & SRTC_SECMODE_MASK) ==
++	    SRTC_SECMODE_LOW) && (cpu_is_mx51_rev(CHIP_REV_1_0) == 1)) {
++		/* Workaround for MX51 TO1 due to inaccurate CKIL clock */
+ 		__raw_writel(SRTC_LPCR_EN_LP, ioaddr + SRTC_LPCR);
+ 		rtc_write_sync_lp_no_wait(ioaddr);
+ 	} else {
+-- 
+1.5.4.4
+

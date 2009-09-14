@@ -1,0 +1,815 @@
+Index: linux-2.6.26/sound/soc/codecs/Kconfig
+===================================================================
+--- linux-2.6.26.orig/sound/soc/codecs/Kconfig	2009-06-17 10:26:33.000000000 +0100
++++ linux-2.6.26/sound/soc/codecs/Kconfig	2009-06-17 10:29:49.000000000 +0100
+@@ -69,3 +69,7 @@
+ 	tristate
+ 	depends on SND_SOC
+ 
++config SND_SOC_TLV320AIC3104
++	tristate
++	depends on SND_SOC && I2C
++
+Index: linux-2.6.26/sound/soc/codecs/Makefile
+===================================================================
+--- linux-2.6.26.orig/sound/soc/codecs/Makefile	2009-06-17 10:26:33.000000000 +0100
++++ linux-2.6.26/sound/soc/codecs/Makefile	2009-06-17 10:29:49.000000000 +0100
+@@ -12,6 +12,7 @@
+ snd-soc-wm8580-objs := wm8580.o
+ snd-soc-sgtl5000-objs := sgtl5000.o
+ snd-soc-bluetooth-objs := bluetooth.o
++snd-soc-tlv320aic3104-objs := tlv320aic3104.o
+ 
+ obj-$(CONFIG_SND_SOC_AC97_CODEC)	+= snd-soc-ac97.o
+ obj-$(CONFIG_SND_SOC_WM8350)	+= snd-soc-wm8350.o
+@@ -27,3 +28,4 @@
+ obj-$(CONFIG_SND_SOC_WM8580)    += snd-soc-wm8580.o
+ obj-$(CONFIG_SND_SOC_SGTL5000)	+= snd-soc-sgtl5000.o
+ obj-$(CONFIG_SND_SOC_BLUETOOTH)	+= snd-soc-bluetooth.o
++obj-$(CONFIG_SND_SOC_TLV320AIC3104)	+= snd-soc-tlv320aic3104.o
+Index: linux-2.6.26/sound/soc/imx/Kconfig
+===================================================================
+--- linux-2.6.26.orig/sound/soc/imx/Kconfig	2009-06-17 10:26:32.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/Kconfig	2009-06-17 10:29:49.000000000 +0100
+@@ -66,3 +66,10 @@
+  help
+    Say Y if you want to add support for SoC audio on IMX 3STACK
+    with the BLUETOOTH.
++
++config SND_SOC_BABY_TLV320AIC3104
++ tristate "SoC Audio support for Baby Boom - TLV320AIC3104"
++ select SND_MXC_SOC_SSI
++ select SND_SOC_TLV320AIC3104
++ help
++   Say Y if you would like your baby to speak
+Index: linux-2.6.26/sound/soc/imx/Makefile
+===================================================================
+--- linux-2.6.26.orig/sound/soc/imx/Makefile	2009-06-17 10:26:32.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/Makefile	2009-06-17 10:29:49.000000000 +0100
+@@ -20,4 +20,6 @@
+ obj-$(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) += snd-soc-imx-3stack-sgtl5000.o
+ snd-soc-imx-3stack-bt-objs := imx-3stack-bt.o
+ obj-$(CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH) += snd-soc-imx-3stack-bt.o
++snd-soc-baby-tlv320aic3104-objs := baby-tlv320aic3104.o
++obj-$(CONFIG_SND_SOC_BABY_TLV320AIC3104) += snd-soc-baby-tlv320aic3104.o
+ 
+Index: linux-2.6.26/sound/soc/imx/imx-ssi.c
+===================================================================
+--- linux-2.6.26.orig/sound/soc/imx/imx-ssi.c	2009-06-17 10:26:32.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/imx-ssi.c	2009-06-17 10:29:49.000000000 +0100
+@@ -276,7 +276,8 @@
+ 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
+ 	case SND_SOC_DAIFMT_CBS_CFS:
+ 		stcr |= SSI_STCR_TFDIR | SSI_STCR_TXDIR;
+-		srcr |= SSI_SRCR_RFDIR | SSI_SRCR_RXDIR;
++		/* RXDIR = 0 for SSI Internal Continuous Clock mode */
++		srcr |= SSI_SRCR_RFDIR /*| SSI_SRCR_RXDIR*/;
+ 		if (((fmt & SND_SOC_DAIFMT_FORMAT_MASK) == SND_SOC_DAIFMT_I2S)
+ 		    && (fmt & SND_SOC_DAIFMT_TDM)) {
+ 			scr &= ~SSI_SCR_I2S_MODE_MASK;
+Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/sound/soc/codecs/tlv320aic3104.c	2009-06-17 10:29:49.000000000 +0100
+@@ -0,0 +1,373 @@
++/*
++ * tlv320aic3104.c
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/version.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/i2c.h>
++#include <linux/spi/spi.h>
++#include <linux/platform_device.h>
++#include <sound/driver.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/tlv.h>
++#include <sound/initval.h>
++#include <asm/div64.h>
++
++#define AUDIO_NAME "TLV320AIC3104"
++#define TLV320AIC3104_VERSION "0.1"
++
++#define TLV320AIC3104_RATES (SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_48000 | \
++		      SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000)
++
++static const struct snd_soc_pcm_stream tlv320aic3104_dai_playback = {
++	.stream_name = "Playback",
++	.channels_min = 2,
++	.channels_max = 2,
++	.rates = TLV320AIC3104_RATES,
++	.formats = SNDRV_PCM_FMTBIT_S24_LE,
++};
++
++/* dai ops, called by machine drivers */
++static const struct snd_soc_dai_ops tlv320aic3104_dai_ops = {
++};
++
++/* audio ops, called by alsa */
++static const struct snd_soc_ops tlv320aic3104_dai_audio_ops = {
++};
++
++static const struct snd_soc_codec_ops tlv320aic3104_codec_ops = {
++};
++
++
++static struct i2c_client *tlv320aic3104_i2c;
++static struct timer_list tlv320aic3104_timer;
++
++static int tlv320aic3104_headphone = 0;
++
++static void tlv320aic3104_timer_callback(unsigned long ptr)
++{
++	//struct fab4_ir_data *data = (struct fab4_ir_data *) ptr;
++	int val;
++
++	val = (i2c_smbus_read_byte_data(tlv320aic3104_i2c, 13) >> 5) & 0x3;
++
++	if (tlv320aic3104_headphone != val) {
++		tlv320aic3104_headphone = val;
++
++		// FIXME do something sensible
++		printk("headphone detect %x\n", val);
++	}
++
++	tlv320aic3104_timer.expires = jiffies + HZ;
++	add_timer(&tlv320aic3104_timer);
++}
++
++
++static int tlv320aic3104_codec_probe(struct device *dev)
++{
++	struct snd_soc_codec *codec = to_snd_soc_codec(dev);
++
++	printk(KERN_INFO "TLV320AIC3104 Audio Codec %s", TLV320AIC3104_VERSION);
++
++	codec->owner = THIS_MODULE;
++	codec->ops = &tlv320aic3104_codec_ops;
++
++	snd_soc_register_codec(codec);
++
++	return 0;
++
++}
++
++static int tlv320aic3104_codec_remove(struct device *dev)
++{
++	struct snd_soc_codec *codec = to_snd_soc_codec(dev);
++	kfree(codec->private_data);
++	return 0;
++}
++
++static int tlv320aic3104_dai_probe(struct device *dev)
++{
++	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
++	printk(KERN_INFO "****\n**** TLV320AIC3104 DAI PROBE\n****\n");
++	dai->playback = &tlv320aic3104_dai_playback;
++	snd_soc_register_codec_dai(dai);
++	return 0;
++}
++
++const char tlv320aic3104_codec[SND_SOC_CODEC_NAME_SIZE] = "tlv320aic3104-codec";
++EXPORT_SYMBOL_GPL(tlv320aic3104_codec);
++
++static struct snd_soc_device_driver tlv320aic3104_codec_driver = {
++	.type = SND_SOC_BUS_TYPE_CODEC,
++	.driver = {
++		   .name = tlv320aic3104_codec,
++		   .owner = THIS_MODULE,
++		   .bus = &asoc_bus_type,
++		   .probe = tlv320aic3104_codec_probe,
++		   .remove = __devexit_p(tlv320aic3104_codec_remove),
++		   },
++};
++
++const char tlv320aic3104_dai[SND_SOC_CODEC_NAME_SIZE] = "tlv320aic3104-dai";
++EXPORT_SYMBOL_GPL(tlv320aic3104_dai);
++
++static struct snd_soc_device_driver tlv320aic3104_dai_driver = {
++	.type = SND_SOC_BUS_TYPE_DAI,
++	.driver = {
++		   .name = tlv320aic3104_dai,
++		   .owner = THIS_MODULE,
++		   .bus = &asoc_bus_type,
++		   .probe = tlv320aic3104_dai_probe,
++		   },
++};
++
++
++/* START: HACK TO BRING UP PA3 */
++
++static unsigned short normal_i2c[] = { 0x18, I2C_CLIENT_END };
++
++I2C_CLIENT_INSMOD;
++
++static struct i2c_client client_template;
++
++
++/*
++ * MCLK 12 MHz  P  R  J  D
++ * 44.1kHz      1  1  7  5264
++ * 48kHz        1  1  8  1920
++ */
++
++#define PLL_P 1
++#define PLL_R 1
++#define PLL_J 7
++#define PLL_D 5264
++
++unsigned char codec_init_data[] = {
++	/* software reset */
++	1, (1 << 7),
++
++	/* configure master clock */
++	3, ((1<<7) |              /* PLL enabled */
++	    (PLL_P<<0)            /* PLL P value */
++	    ),
++	4, (PLL_J<<2),            /* PLL J value */
++	5, (PLL_D >> 6),          /* PLL D value */
++	6, ((PLL_D & 0x3F) << 2), /* PLL D value */
++
++	/* configure I2S */
++	8, ((1 << 7) |            /* BCLK is an output */
++	    (1 << 6)              /* WCLK is an output */
++	    ),
++	9, (2 << 4),              /* Audio data work length 24 bits */
++
++	/* DAC signal path */
++	7, ((1 << 7) |            /* fs(ref) = 44.1kHz */
++	    (1 << 3) |            /* Left-DAC plays left-channel data */
++	    (1 << 1)              /* Right-DAC plays right-channel data */
++	    ),
++	37, ((1 << 7) |           /* Left DAC is powered up */
++	     (1 << 6)             /* Right DAC is powered up */
++	     ),
++
++#if 0
++	/* Route to DAC_x3 - higher quality, lower power */
++	41, ((1 << 6) |           /* Left DAC outputs to DAC_L3 */
++	     (1 << 4) |           /* Right DAC outputs to DAC_R3 */
++	     (2 << 0)             /* Right DAC volume follows Left DAC */
++	     ),
++#else
++	/* Route to DAC_x1 - allows mixing */
++	41, ((0 << 6) |           /* Left DAC outputs to DAC_L1 */
++	     (0 << 4) |           /* Right DAC outputs to DAC_R1 */
++	     (2 << 0)             /* Right DAC volume follows Left DAC */
++	     ),
++#endif
++	43, 0x00,                 /* Left DAC gain 0 dB */
++
++#if 0
++	/* Output stage OP/M - higher quality, lower power */
++	86, (1 << 3),             /* Left LOP/M is not muted */
++	93, (1 << 3),             /* Right LOP/M is not muted */
++#else
++	/* Output stage OP/M - mixing with other signals */
++	82, (1 << 7),             /* DAC_L1 is routed to Left LOP/M */
++	92, (1 << 7),             /* DAC_R1 is routed to Right LOP/M */
++	86, ((1 << 3) |           /* Left LOP/M is not muted */
++	     (1 << 0)             /* Left LOP/M is powered up */
++	     ),
++	93, ((1 << 3) |           /* Right LOP/M is not muted */
++	     (1 << 0)             /* Right LOP/M is powered up */
++	     ),
++#endif
++
++#if 1
++	/* Headphone */
++	13, (1 << 7),             /* headphone detect on */
++	25, (2 << 6),             /* turn on MICBIAS to 2.5V */
++	38, (4 << 3),             /* turn off HPRCOM */
++  	40, (0x2 << 6),           /* 1.65 V bias for HP output */
++  	47, (1 << 7),             /* DAC_L1 is routed to HPLOUT */
++  	51, ((0 << 4) |           /* 0dB level */
++  	     (1 << 3) |           /* HPLOUT is not muted */
++  	     (1 << 2) |           /* Drive to 1.65V when powered down (avoid pops) */
++	     (1 << 0)             /* HPLOUT is powered up */
++  		),
++	64, (1 << 7),             /* DAC_R1 is routed to HPROUT */
++	65, ((0 << 4) |           /* 0dB level */
++	     (1 << 3) |           /* HPROUT is not muted */
++	     (0 << 2) |           /* Drive to common mode voltage */
++  	     (1 << 0)             /* HPROUT is powered up */
++	     ),
++#endif
++};
++
++static int tlv320_codec_init(struct i2c_client *i2c) {
++	int errors = 0;
++	int i;
++
++	for (i = 0; i < sizeof(codec_init_data); i+=2) {
++		i2c_master_send(i2c, &(codec_init_data[i]), 2);
++	}
++
++	return errors;
++}
++static int tlv320_codec_probe(struct i2c_adapter *adap, int addr, int kind)
++{
++        struct i2c_client *i2c;
++        int ret;
++
++        client_template.adapter = adap;
++        client_template.addr = addr;
++
++        i2c = kmemdup(&client_template, sizeof(client_template), GFP_KERNEL);
++        if (i2c == NULL) {
++                return -ENOMEM;
++        }
++
++        ret = i2c_attach_client(i2c);
++        if (ret < 0) {
++                printk("failed to attach codec at addr %x\n", addr);
++                goto err;
++        }
++
++	tlv320aic3104_i2c = i2c;
++
++	tlv320_codec_init(i2c);
++
++	init_timer(&tlv320aic3104_timer);
++	tlv320aic3104_timer.function = tlv320aic3104_timer_callback;
++	//tlv320aic3104_timer.data = (unsigned long) isp;
++
++	tlv320aic3104_timer.expires = jiffies + HZ;
++	add_timer(&tlv320aic3104_timer);
++
++#if 0
++	{
++		int i, val;
++		for (i=0; i<128; i++) {
++			val = i2c_smbus_read_byte_data(i2c, i);
++			printk("%d: %x ", i, val);
++			if (i % 8 == 0) {
++				printk("\n");
++			}
++		}
++		printk("\n");
++	}
++#endif
++
++        return ret;
++
++err:
++        kfree(i2c);
++        return ret;
++}
++
++
++static int tlv320_i2c_attach(struct i2c_adapter *adap)
++{
++        return i2c_probe(adap, &addr_data, tlv320_codec_probe);
++}
++
++
++static int tlv320_i2c_detach(struct i2c_client *client)
++{
++	return 0;
++}
++
++
++static struct i2c_driver tlv320_i2c_driver = {
++        .driver = {
++                .name = "TLV320 I2C Codec",
++                .owner = THIS_MODULE,
++        },
++        .id =             I2C_DRIVERID_TLV320AIC23B,
++        .attach_adapter = tlv320_i2c_attach,
++        .detach_client =  tlv320_i2c_detach,
++        .command =        NULL,
++};
++
++/* STOP: HACK TO BRING UP PA3 */
++
++
++static __init int tlv320aic3104_init(void)
++{
++	int ret = 0;
++
++
++        ret = i2c_add_driver(&tlv320_i2c_driver);
++	if (ret) {
++		printk("tlv320 I2C init failed\n");
++	}
++
++	ret = driver_register(&tlv320aic3104_codec_driver.driver);
++	if (ret < 0) {
++		return ret;
++	}
++
++	ret = driver_register(&tlv320aic3104_dai_driver.driver);
++	if (ret < 0) {
++		driver_unregister(&tlv320aic3104_codec_driver.driver);
++		return ret;
++	}
++
++	return ret;
++}
++
++static __exit void tlv320aic3104_exit(void)
++{
++	driver_unregister(&tlv320aic3104_dai_driver.driver);
++	driver_unregister(&tlv320aic3104_codec_driver.driver);
++}
++
++module_init(tlv320aic3104_init);
++module_exit(tlv320aic3104_exit);
++
++MODULE_DESCRIPTION("ASoC TLV320AIC3104 driver");
++MODULE_AUTHOR("Richard Titmuss");
++MODULE_LICENSE("GPL");
+Index: linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c	2009-06-17 10:29:49.000000000 +0100
+@@ -0,0 +1,348 @@
++/*
++ * baby-tlv320aic3104.c
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/device.h>
++#include <linux/i2c.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <sound/driver.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++
++#include <asm/hardware.h>
++#include <asm/arch/clock.h>
++#include <asm/arch/mxc.h>
++
++#include "imx-pcm.h"
++#include "imx-ssi.h"
++
++
++extern void gpio_activate_audio_ports(int ssi_port);
++extern const char tlv320aic3104_codec[SND_SOC_CODEC_NAME_SIZE];
++extern const char tlv320aic3104_dai[SND_SOC_CODEC_NAME_SIZE];
++
++static void headphone_detect_handler(struct work_struct *work);
++static DECLARE_WORK(hp_event, headphone_detect_handler);
++static struct snd_soc_machine *baby_mach;
++
++static void baby_init_dam(int ssi_port, int dai_port)
++{
++	/* TLV320AIC3104 uses SSI1 or SSI2 via AUDMUX port dai_port for audio */
++
++        /* reset port ssi_port & dai_port */
++        DAM_PTCR(ssi_port) = 0;
++        DAM_PDCR(ssi_port) = 0;
++        DAM_PTCR(dai_port) = 0;
++        DAM_PDCR(dai_port) = 0;
++
++        /* set to synchronous */
++        DAM_PTCR(ssi_port) |= AUDMUX_PTCR_SYN;
++        DAM_PTCR(dai_port) |= AUDMUX_PTCR_SYN;
++
++        /* set Rx sources ssi_port <--> dai_port */
++        DAM_PDCR(ssi_port) |= AUDMUX_PDCR_RXDSEL(dai_port);
++        DAM_PDCR(dai_port) |= AUDMUX_PDCR_RXDSEL(ssi_port);
++
++        /* set Tx frame direction and source dai_port--> ssi_port output */
++        DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TFSDIR;
++        DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, dai_port);
++
++        /* set Tx Clock direction and source dai_port--> ssi_port output */
++        DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TCLKDIR;
++        DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, dai_port);
++}
++
++static int baby_hifi_hw_params(struct snd_pcm_substream *substream,
++				     struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct mxc_audio_platform_data *dev_data = pcm_link->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	unsigned int channels = params_channels(params);
++	u32 dai_format;
++	struct clk *cko1, *parent;
++	unsigned long rate;
++
++	baby_init_dam(dev_data->src_port, dev_data->ext_port);
++
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_IF |
++	    SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_SYNC;
++
++	if (channels == 2)
++		dai_format |= SND_SOC_DAIFMT_TDM;
++
++	/* set cpu DAI configuration */
++	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
++
++	/* set i.MX active slot mask */
++	cpu_dai->ops->set_tdm_slot(cpu_dai,
++				   channels == 1 ? 0xfffffffe : 0xfffffffc,
++				   channels);
++
++	/* set the SSI system clock as input (unused) */
++	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_OUT);
++
++	/* cko1 clock */
++	cko1 = clk_get(NULL, "clko_clk");
++	if (IS_ERR(cko1))
++		return;
++	parent = clk_get(NULL, "usb_clk");
++	if (IS_ERR(parent))
++		return;
++	clk_set_parent(cko1, parent);
++	rate = clk_round_rate(cko1, 12000000);
++
++	if (rate < 11000000 || rate > 13000000) {
++		pr_err("Error: audio mclk freq %ld out of range!\n", rate);
++		clk_put(parent);
++		clk_put(cko1);
++		return;
++	}
++	clk_set_rate(cko1, rate);
++	clk_enable(cko1);
++
++	return 0;
++}
++
++/*
++ * baby tlv320aic3104 HiFi DAI opserations.
++ */
++static struct snd_soc_ops baby_hifi_ops = {
++	.hw_params = baby_hifi_hw_params,
++};
++
++static int hifi_pcm_new(struct snd_soc_pcm_link *pcm_link)
++{
++	int ret;
++	pcm_link->audio_ops = &baby_hifi_ops;
++	ret = snd_soc_pcm_new(pcm_link, 1, 0);
++	if (ret < 0) {
++		pr_err("%s: Failed to create hifi pcm\n", __func__);
++		return ret;
++	}
++
++	return 0;
++}
++
++struct snd_soc_pcm_link_ops hifi_pcm = {
++	.new = hifi_pcm_new,
++};
++
++static void headphone_detect_handler(struct work_struct *work)
++{
++//FIXME Commented out to compile	sysfs_notify(&baby_mach->pdev->dev.driver->kobj, NULL,
++//FIXME Commented out to compile		     "headphone");
++//FIXME Commented out to compile
++}
++
++static irqreturn_t imx_headphone_detect_handler(int irq, void *dev_id)
++{
++	schedule_work(&hp_event);
++	return IRQ_HANDLED;
++
++}
++
++static int baby_mach_probe(struct snd_soc_machine
++				 *machine)
++{
++	struct snd_soc_codec *codec;
++	struct snd_soc_pcm_link *pcm_link;
++	int ret;
++	printk(KERN_INFO "****\n**** TLV320AIC3104 BABY MACH PROBE\n****\n");
++
++	pcm_link = list_first_entry(&machine->active_list,
++				    struct snd_soc_pcm_link, active_list);
++	codec = pcm_link->codec;
++
++	snd_soc_dapm_set_policy(machine, SND_SOC_DAPM_POLICY_STREAM);
++
++	/* register card with ALSA upper layers */
++	ret = snd_soc_register_card(machine);
++	if (ret < 0) {
++		pr_err("%s: failed to register sound card\n", __func__);
++		return ret;
++	}
++
++	return 0;
++}
++
++struct snd_soc_machine_ops baby_mach_ops = {
++	.mach_probe = baby_mach_probe,
++};
++
++static ssize_t show_headphone(struct device_driver *dev, char *buf)
++{
++#if 0
++	unsigned int value;
++
++	if (value == 0)
++		strcpy(buf, "speaker\n");
++	else
++		strcpy(buf, "headphone\n");
++#endif
++	strcpy(buf, "fixme\n");
++
++	return strlen(buf);
++}
++
++DRIVER_ATTR(headphone, S_IRUGO | S_IWUSR, show_headphone, NULL);
++
++/*
++ * This function will register the snd_soc_pcm_link drivers.
++ * It also registers devices for platform DMA, I2S, SSP and registers an
++ * I2C driver to probe the codec.
++ */
++static int __init baby_tlv320aic3104_probe(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine;
++	struct mxc_audio_platform_data *dev_data = pdev->dev.platform_data;
++	struct snd_soc_pcm_link *hifi;
++	const char *ssi_port;
++	int ret;
++
++	machine = kzalloc(sizeof(struct snd_soc_machine), GFP_KERNEL);
++	if (machine == NULL)
++		return -ENOMEM;
++
++	machine->owner = THIS_MODULE;
++	machine->pdev = pdev;
++	machine->name = "baby";
++	machine->longname = "tlv320aic3104";
++	machine->ops = &baby_mach_ops;
++	pdev->dev.driver_data = machine;
++
++	/* register card */
++	baby_mach = machine;
++	ret = snd_soc_new_card(machine, 1, SNDRV_DEFAULT_IDX1,
++			       SNDRV_DEFAULT_STR1);
++	if (ret < 0) {
++		pr_err("%s: failed to create stereo sound card\n", __func__);
++		goto err;
++	}
++
++	/* baby tlv320aic3104 hifi interface */
++	if (dev_data->src_port == 1)
++		ssi_port = imx_ssi_1;
++	else
++		ssi_port = imx_ssi_3;
++	hifi = snd_soc_pcm_link_new(machine,
++				    "baby-tlv320aic3104", &hifi_pcm,
++				    imx_pcm, tlv320aic3104_codec,
++				    tlv320aic3104_dai, ssi_port);
++	if (hifi == NULL) {
++		pr_err("Failed to create HiFi PCM link\n");
++		goto err;
++	}
++
++	ret = snd_soc_pcm_link_attach(hifi);
++	hifi->private_data = dev_data;
++	if (ret < 0)
++		goto link_err;
++
++	/* Configure audio port 3 */
++	gpio_activate_audio_ports(dev_data->src_port);
++
++#if 0
++	// XXXX
++	if (request_irq
++	    (dev_data->intr_id_hp, imx_headphone_detect_handler, 0,
++	     "headphone", machine))
++		goto link_err;
++#endif
++
++	ret = driver_create_file(pdev->dev.driver, &driver_attr_headphone);
++	if (ret < 0)
++		goto sysfs_err;
++
++	return ret;
++
++      sysfs_err:
++	driver_remove_file(pdev->dev.driver, &driver_attr_headphone);
++      link_err:
++	snd_soc_machine_free(machine);
++      err:
++	kfree(machine);
++	return ret;
++}
++
++static int __devexit baby_tlv320aic3104_remove(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine = pdev->dev.driver_data;
++
++	baby_mach = NULL;
++	driver_remove_file(pdev->dev.driver, &driver_attr_headphone);
++	kfree(machine);
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int baby_tlv320aic3104_suspend(struct platform_device
++				     *pdev, pm_message_t state)
++{
++	struct snd_soc_machine *machine = pdev->dev.driver_data;
++	return snd_soc_suspend(machine, state);
++}
++
++static int baby_tlv320aic3104_resume(struct platform_device
++				    *pdev)
++{
++	struct snd_soc_machine *machine = pdev->dev.driver_data;
++	return snd_soc_resume(machine);
++}
++
++#else
++#define baby_tlv320aic3104_suspend NULL
++#define baby_tlv320aic3104_resume  NULL
++#endif
++
++static struct platform_driver baby_tlv320aic3104_driver = {
++	.probe = baby_tlv320aic3104_probe,
++	.remove = __devexit_p(baby_tlv320aic3104_remove),
++	.suspend = baby_tlv320aic3104_suspend,
++	.resume = baby_tlv320aic3104_resume,
++	.driver = {
++		   .name = "baby-tlv320aic3104",
++		   .owner = THIS_MODULE,
++		   },
++};
++
++static int __init baby_asoc_init(void)
++{
++	return platform_driver_register(&baby_tlv320aic3104_driver);
++}
++
++static void __exit baby_asoc_exit(void)
++{
++	platform_driver_unregister(&baby_tlv320aic3104_driver);
++}
++
++module_init(baby_asoc_init);
++module_exit(baby_asoc_exit);
++
++/* Module information */
++MODULE_DESCRIPTION("ALSA SoC tlv320aic3104 baby");
++MODULE_AUTHOR("Richard Titmuss");
++MODULE_LICENSE("GPL");
+Index: linux-2.6.26/arch/arm/mach-mx25/clock.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/clock.c	2009-06-17 10:29:45.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/clock.c	2009-06-17 10:29:49.000000000 +0100
+@@ -1443,6 +1443,10 @@
+ 	.set_rate = _clk_usb_set_rate,
+ 	.round_rate = _clk_usb_round_rate,
+ 	.set_parent = _clk_usb_set_parent,
++	.enable = _clk_enable,
++	.enable_reg = MXC_CCM_CGCR0,
++	.enable_shift = MXC_CCM_CGCR0_HCLK_USBOTG_OFFSET,
++	.disable = _clk_disable,
+ };
+ 
+ /* CLKO */

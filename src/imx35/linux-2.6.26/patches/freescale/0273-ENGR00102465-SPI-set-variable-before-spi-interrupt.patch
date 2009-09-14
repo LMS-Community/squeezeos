@@ -1,0 +1,42 @@
+From 7708d91db49e5131ecbb64b93fa2bc6c51fcb83b Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Fri, 12 Dec 2008 12:31:53 +0800
+Subject: [PATCH] ENGR00102465 SPI: set variable before spi interrupt
+
+The variable used in spi interrupt function should be set
+before enable interrupt
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/spi/mxc_spi.c |    5 ++---
+ 1 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/spi/mxc_spi.c b/drivers/spi/mxc_spi.c
+index 35d0d7e..432ca1b 100644
+--- a/drivers/spi/mxc_spi.c
++++ b/drivers/spi/mxc_spi.c
+@@ -722,9 +722,9 @@ static irqreturn_t mxc_spi_isr(int irq, void *dev_id)
+ 			u32 count = (master_drv_data->transfer.count >
+ 				     fifo_size) ? fifo_size :
+ 			    master_drv_data->transfer.count;
++			master_drv_data->transfer.rx_count = count;
+ 			spi_put_tx_data(master_drv_data->base, count,
+ 					master_drv_data);
+-			master_drv_data->transfer.rx_count = count;
+ 		}
+ 	} else {
+ 		complete(&master_drv_data->xfer_done);
+@@ -839,9 +839,8 @@ int mxc_spi_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 	count = (t->len > fifo_size) ? fifo_size : t->len;
+ 
+ 	/* Perform Tx transaction */
+-
+-	spi_put_tx_data(master_drv_data->base, count, master_drv_data);
+ 	master_drv_data->transfer.rx_count = count;
++	spi_put_tx_data(master_drv_data->base, count, master_drv_data);
+ 
+ 	/* Wait for transfer completion */
+ 
+-- 
+1.5.4.4
+

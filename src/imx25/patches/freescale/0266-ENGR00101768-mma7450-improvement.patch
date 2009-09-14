@@ -1,0 +1,226 @@
+From e9fa5ab31d0f65acd109e052ba114ece58192bc3 Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Mon, 8 Dec 2008 17:43:05 +0800
+Subject: [PATCH] ENGR00101768 mma7450 improvement
+
+mma7450 improvement
+
+Signed-off-by: Shen Yong<b00984@freescale.com>
+---
+ drivers/hwmon/mxc_mma7450.c |   94 ++++++++++++++++++++++++------------------
+ 1 files changed, 54 insertions(+), 40 deletions(-)
+
+diff --git a/drivers/hwmon/mxc_mma7450.c b/drivers/hwmon/mxc_mma7450.c
+index 535ba95..a354b9f 100644
+--- a/drivers/hwmon/mxc_mma7450.c
++++ b/drivers/hwmon/mxc_mma7450.c
+@@ -30,6 +30,9 @@
+ #define POLL_INTERVAL		50
+ #define DEBUG
+ 
++#define INPUT_FUZZ	4
++#define INPUT_FLAT	4
++
+ enum {
+ 	REG_XOUTL = 0x00,
+ 	REG_XOUTH,
+@@ -90,7 +93,8 @@ static ssize_t mma7450_show(struct device *dev,
+ static ssize_t mma7450_store(struct device *dev,
+ 			     struct device_attribute *attr, const char *buf,
+ 			     size_t count);
+-static int mma7450_probe(struct i2c_client *client, const struct i2c_device_id *id);
++static int mma7450_probe(struct i2c_client *client,
++			 const struct i2c_device_id *id);
+ static int mma7450_remove(struct i2c_client *client);
+ static int mma7450_suspend(struct i2c_client *client, pm_message_t state);
+ static int mma7450_resume(struct i2c_client *client);
+@@ -114,9 +118,10 @@ static struct device_attribute mma7450_dev_attr = {
+ };
+ 
+ static const struct i2c_device_id mma7450_id[] = {
+-	{ "mma7450", 0 },
++	{"mma7450", 0},
+ 	{},
+ };
++
+ MODULE_DEVICE_TABLE(i2c, mma7450_id);
+ 
+ static struct i2c_driver i2c_mma7450_driver = {
+@@ -245,9 +250,9 @@ static void set_x_offset(u16 xo)
+ {
+ 	u8 data;
+ 
+-	data = (xo & 0x0F);
++	data = (xo & 0xFF);
+ 	i2c_smbus_write_byte_data(mma7450_client, REG_XOFFL, data);
+-	data = (xo & 0xF0) >> 8;
++	data = (xo & 0xFF00) >> 8;
+ 	i2c_smbus_write_byte_data(mma7450_client, REG_XOFFH, data);
+ }
+ 
+@@ -255,9 +260,9 @@ static void set_y_offset(u16 yo)
+ {
+ 	u8 data;
+ 
+-	data = (yo & 0x0F);
++	data = (yo & 0xFF);
+ 	i2c_smbus_write_byte_data(mma7450_client, REG_YOFFL, data);
+-	data = (yo & 0xF0) >> 8;
++	data = (yo & 0xFF00) >> 8;
+ 	i2c_smbus_write_byte_data(mma7450_client, REG_YOFFH, data);
+ }
+ 
+@@ -265,9 +270,9 @@ static void set_z_offset(u16 zo)
+ {
+ 	u8 data;
+ 
+-	data = (zo & 0x0F);
++	data = (zo & 0xFF);
+ 	i2c_smbus_write_byte_data(mma7450_client, REG_ZOFFL, data);
+-	data = (zo & 0xF0) >> 8;
++	data = (zo & 0xFF00) >> 8;
+ 	i2c_smbus_write_byte_data(mma7450_client, REG_ZOFFH, data);
+ }
+ 
+@@ -372,7 +377,7 @@ static int exec_command(const char *buf, size_t count)
+ 	dev_err(&mma7450_client->dev, "command is not found\n");
+ 	return -1;
+ 
+-mma_exec_command:
++      mma_exec_command:
+ 	if (i != MMA_REG_R && i != MMA_REG_W)
+ 		value = simple_strtoul(arg, NULL, 16);
+ 
+@@ -479,29 +484,29 @@ static ssize_t mma7450_store(struct device *dev,
+ 
+ #endif
+ 
+-static void report_rel(void)
++static void report_abs(void)
+ {
+ 	u8 status, mod = mma_status.mod;
+-	u16 x, y, z;
++	s16 x, y, z, tmp;
+ 
+ 	status = i2c_smbus_read_byte_data(mma7450_client, REG_STATUS);
+ 	if (!(status & 0x01)) {	/* data ready in measurement mode? */
+ 		return;
+ 	}
+-	if ((mod & 0x0c) == 0) { /* 8g range */
+-		x = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_XOUTL);
+-		y = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_YOUTL);
+-		z = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_ZOUTL);
+-		x |= 0xF0 &
+-		(i2c_smbus_read_byte_data(mma7450_client, REG_XOUTH) << 8);
+-		y |= 0xF0 &
+-		(i2c_smbus_read_byte_data(mma7450_client, REG_YOUTH) << 8);
+-		z |= 0xF0 &
+-		(i2c_smbus_read_byte_data(mma7450_client, REG_ZOUTH) << 8);
+-	} else { /* 2g/4g range */
+-		x = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_XOUT8);
+-		y = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_YOUT8);
+-		z = 0x0F & i2c_smbus_read_byte_data(mma7450_client, REG_ZOUT8);
++	if ((mod & 0x0c) == 0) {	/* 8g range */
++		x = 0xFF & i2c_smbus_read_byte_data(mma7450_client, REG_XOUTL);
++		x |= 0xFF00 &
++		    (i2c_smbus_read_byte_data(mma7450_client, REG_XOUTH) << 8);
++		y = 0xFF & i2c_smbus_read_byte_data(mma7450_client, REG_YOUTL);
++		y |= 0xFF00 &
++		    (i2c_smbus_read_byte_data(mma7450_client, REG_YOUTH) << 8);
++		z = 0xFF & i2c_smbus_read_byte_data(mma7450_client, REG_ZOUTL);
++		z |= 0xFF00 &
++		    (i2c_smbus_read_byte_data(mma7450_client, REG_ZOUTH) << 8);
++	} else {		/* 2g/4g range */
++		x = 0xFF & i2c_smbus_read_byte_data(mma7450_client, REG_XOUT8);
++		y = 0xFF & i2c_smbus_read_byte_data(mma7450_client, REG_YOUT8);
++		z = 0xFF & i2c_smbus_read_byte_data(mma7450_client, REG_ZOUT8);
+ 	}
+ 
+ 	status = i2c_smbus_read_byte_data(mma7450_client, REG_STATUS);
+@@ -509,20 +514,25 @@ static void report_rel(void)
+ 		return;
+ 	}
+ 
+-	input_report_rel(mma7450_idev->input, REL_X, x);
+-	input_report_rel(mma7450_idev->input, REL_Y, y);
+-	input_report_rel(mma7450_idev->input, REL_Z, z);
++	/* convert signed 10bits to signed 16bits */
++	x = (short)(x << 6) >> 6;
++	y = (short)(y << 6) >> 6;
++	z = (short)(z << 6) >> 6;
++
++	input_report_abs(mma7450_idev->input, ABS_X, x);
++	input_report_abs(mma7450_idev->input, ABS_Y, y);
++	input_report_abs(mma7450_idev->input, ABS_Z, z);
+ 	input_sync(mma7450_idev->input);
+ }
+ 
+ static void mma_bh_handler(struct work_struct *work)
+ {
+-	report_rel();
++	report_abs();
+ }
+ 
+ static void mma7450_dev_poll(struct input_polled_dev *dev)
+ {
+-	report_rel();
++	report_abs();
+ }
+ 
+ static irqreturn_t mma7450_interrupt(int irq, void *dev_id)
+@@ -594,12 +604,12 @@ static irqreturn_t mma7450_interrupt(int irq, void *dev_id)
+ 	default:
+ 		break;
+ 	}
+-	return IRQ_RETVAL(1);
+-error_bad_int:
++      error_bad_int:
+ 	return IRQ_RETVAL(1);
+ }
+ 
+-static int mma7450_probe(struct i2c_client *client, const struct i2c_device_id *id)
++static int mma7450_probe(struct i2c_client *client,
++			 const struct i2c_device_id *id)
+ {
+ 	int ret;
+ 	struct input_dev *idev;
+@@ -669,7 +679,11 @@ static int mma7450_probe(struct i2c_client *client, const struct i2c_device_id *
+ 	idev->name = DEVICE_NAME;
+ 	idev->id.bustype = BUS_I2C;
+ 	idev->dev.parent = &client->dev;
+-	idev->evbit[0] = BIT_MASK(EV_REL);
++	idev->evbit[0] = BIT_MASK(EV_ABS);
++
++	input_set_abs_params(idev, ABS_X, -512, 512, INPUT_FUZZ, INPUT_FLAT);
++	input_set_abs_params(idev, ABS_Y, -512, 512, INPUT_FUZZ, INPUT_FLAT);
++	input_set_abs_params(idev, ABS_Z, -512, 512, INPUT_FUZZ, INPUT_FLAT);
+ 	ret = input_register_polled_device(mma7450_idev);
+ 	if (ret) {
+ 		dev_err(&client->dev, "register poll device failed!\n");
+@@ -704,17 +718,17 @@ static int mma7450_probe(struct i2c_client *client, const struct i2c_device_id *
+ 	return 0;		/*what value shall be return */
+ 
+ 	/*error handle */
+-error_free_irq1:
++      error_free_irq1:
+ 	free_irq(plat_data->int1, 0);
+-error_rm_poll_dev:
++      error_rm_poll_dev:
+ 	input_unregister_polled_device(mma7450_idev);
+-error_free_poll_dev:
++      error_free_poll_dev:
+ 	input_free_polled_device(mma7450_idev);
+-error_rm_hwmon_dev:
++      error_rm_hwmon_dev:
+ 	hwmon_device_unregister(hwmon_dev);
+-error_rm_dev_file:
++      error_rm_dev_file:
+ 	device_remove_file(&client->dev, &mma7450_dev_attr);
+-error_disable_power:
++      error_disable_power:
+ 	regulator_disable(reg_dvdd_io);	/*shall I check the return value */
+ 	regulator_disable(reg_avdd);
+ 	regulator_put(reg_dvdd_io, &client->dev);
+-- 
+1.5.4.4
+

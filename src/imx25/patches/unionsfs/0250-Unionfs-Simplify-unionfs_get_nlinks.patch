@@ -1,0 +1,79 @@
+From d3d91249d298f3bdcbcafd0fe8ba8984450d9772 Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Mon, 3 Sep 2007 17:22:45 -0400
+Subject: [PATCH] Unionfs: Simplify unionfs_get_nlinks
+
+Since we set the right value for d_type in readdir, there's really no point
+in having to calculate the number of directory links. Some on-disk
+filesystems don't even store the number of links for directories.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/subr.c |   41 +++++++----------------------------------
+ 1 files changed, 7 insertions(+), 34 deletions(-)
+
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index b7e7904..6b93b64 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -188,16 +188,10 @@ out:
+ }
+ 
+ /*
+- * returns the sum of the n_link values of all the underlying inodes of the
+- * passed inode
++ * returns the right n_link value based on the inode type
+  */
+ int unionfs_get_nlinks(const struct inode *inode)
+ {
+-	int sum_nlinks = 0;
+-	int dirs = 0;
+-	int bindex;
+-	struct inode *lower_inode;
+-
+ 	/* don't bother to do all the work since we're unlinked */
+ 	if (inode->i_nlink == 0)
+ 		return 0;
+@@ -205,33 +199,12 @@ int unionfs_get_nlinks(const struct inode *inode)
+ 	if (!S_ISDIR(inode->i_mode))
+ 		return unionfs_lower_inode(inode)->i_nlink;
+ 
+-	for (bindex = ibstart(inode); bindex <= ibend(inode); bindex++) {
+-		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+-
+-		/* ignore files */
+-		if (!lower_inode || !S_ISDIR(lower_inode->i_mode))
+-			continue;
+-
+-		BUG_ON(lower_inode->i_nlink < 0);
+-
+-		/* A deleted directory. */
+-		if (lower_inode->i_nlink == 0)
+-			continue;
+-		dirs++;
+-
+-		/*
+-		 * A broken directory...
+-		 *
+-		 * Some filesystems don't properly set the number of links
+-		 * on empty directories
+-		 */
+-		if (lower_inode->i_nlink == 1)
+-			sum_nlinks += 2;
+-		else
+-			sum_nlinks += (lower_inode->i_nlink - 2);
+-	}
+-
+-	return (!dirs ? 0 : sum_nlinks + 2);
++	/*
++	 * For directories, we return 1. The only place that could cares
++	 * about links is readdir, and there's d_type there so even that
++	 * doesn't matter.
++	 */
++	return 1;
+ }
+ 
+ /* construct whiteout filename */
+-- 
+1.5.4.3
+

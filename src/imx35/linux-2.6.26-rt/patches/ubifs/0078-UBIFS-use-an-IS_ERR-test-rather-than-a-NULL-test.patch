@@ -1,0 +1,55 @@
+From f8a1731699e4bda782168ee4e266726f4ad871bc Mon Sep 17 00:00:00 2001
+From: Julien Brunel <brunel@diku.dk>
+Date: Fri, 29 Aug 2008 11:08:32 +0200
+Subject: [PATCH] UBIFS: use an IS_ERR test rather than a NULL test
+
+In case of error, the function kthread_create returns an ERR pointer,
+but never returns a NULL pointer. So a NULL test that comes before an
+IS_ERR test should be deleted.
+
+The semantic match that finds this problem is as follows:
+(http://www.emn.fr/x-info/coccinelle/)
+
+// <smpl>
+@match_bad_null_test@
+expression x, E;
+statement S1,S2;
+@@
+x = kthread_create(...)
+... when != x = E
+* if (x == NULL)
+S1 else S2
+// </smpl>
+
+Signed-off-by: Julien Brunel <brunel@diku.dk>
+Signed-off-by: Julia Lawall <julia@diku.dk>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |    4 ----
+ 1 files changed, 0 insertions(+), 4 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 7e0fb17..a55c0c5 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1030,8 +1030,6 @@ static int mount_ubifs(struct ubifs_info *c)
+ 
+ 		/* Create background thread */
+ 		c->bgt = kthread_create(ubifs_bg_thread, c, c->bgt_name);
+-		if (!c->bgt)
+-			c->bgt = ERR_PTR(-EINVAL);
+ 		if (IS_ERR(c->bgt)) {
+ 			err = PTR_ERR(c->bgt);
+ 			c->bgt = NULL;
+@@ -1345,8 +1343,6 @@ static int ubifs_remount_rw(struct ubifs_info *c)
+ 
+ 	/* Create background thread */
+ 	c->bgt = kthread_create(ubifs_bg_thread, c, c->bgt_name);
+-	if (!c->bgt)
+-		c->bgt = ERR_PTR(-EINVAL);
+ 	if (IS_ERR(c->bgt)) {
+ 		err = PTR_ERR(c->bgt);
+ 		c->bgt = NULL;
+-- 
+1.5.4.3
+

@@ -1,0 +1,352 @@
+From 7cb335593f69d2a912597c79baaa1d150268532c Mon Sep 17 00:00:00 2001
+From: Xie Xiaobo <X.Xie@freescale.com>
+Date: Tue, 28 Apr 2009 12:22:31 +0800
+Subject: [PATCH] ENGR00108848 MX25: Add Suspend/Resume functionality
+
+Add Suspend/Resume functionality for MX25-3DS platform.
+
+Signed-off-by: Xie Xiaobo <X.Xie@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    6 +-
+ arch/arm/mach-mx25/Makefile             |    2 +
+ arch/arm/mach-mx25/crm_regs.h           |   24 +++++++-
+ arch/arm/mach-mx25/pm.c                 |  102 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx25/system.c             |   98 +++++++++++++++++++++++++++++-
+ 5 files changed, 227 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 9945967..af1ac5e 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Mon Apr 27 10:36:58 2009
++# Tue Apr 28 11:45:20 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -294,7 +294,9 @@ CONFIG_BINFMT_ELF=y
+ #
+ CONFIG_PM=y
+ # CONFIG_PM_DEBUG is not set
+-# CONFIG_SUSPEND is not set
++CONFIG_PM_SLEEP=y
++CONFIG_SUSPEND=y
++CONFIG_SUSPEND_FREEZER=y
+ # CONFIG_APM_EMULATION is not set
+ CONFIG_ARCH_SUSPEND_POSSIBLE=y
+ 
+diff --git a/arch/arm/mach-mx25/Makefile b/arch/arm/mach-mx25/Makefile
+index 0c69f28..a7da089 100644
+--- a/arch/arm/mach-mx25/Makefile
++++ b/arch/arm/mach-mx25/Makefile
+@@ -11,6 +11,8 @@ obj-$(CONFIG_MACH_MX25_3DS)	+= mx25_3stack.o mx25_3stack_gpio.o
+ 
+ obj-$(CONFIG_USB_EHCI_ARC_H2)	+= usb_h2.o
+ 
++obj-$(CONFIG_PM) 		+= pm.o
++
+ ifneq ($(strip $(CONFIG_USB_GADGET_ARC) $(CONFIG_USB_EHCI_ARC_OTG)),)
+ 	obj-y	+= usb_dr.o
+ endif
+diff --git a/arch/arm/mach-mx25/crm_regs.h b/arch/arm/mach-mx25/crm_regs.h
+index 94860f2..4cf074c 100644
+--- a/arch/arm/mach-mx25/crm_regs.h
++++ b/arch/arm/mach-mx25/crm_regs.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -43,6 +43,8 @@
+ #define MXC_CCM_PMCR1               (IO_ADDRESS(CCM_BASE_ADDR) + 0x5C)
+ #define MXC_CCM_PMCR2               (IO_ADDRESS(CCM_BASE_ADDR) + 0x60)
+ #define MXC_CCM_MCR                 (IO_ADDRESS(CCM_BASE_ADDR) + 0x64)
++#define MXC_CCM_LPIMR0		    (IO_ADDRESS(CCM_BASE_ADDR) + 0x68)
++#define MXC_CCM_LPIMR1		    (IO_ADDRESS(CCM_BASE_ADDR) + 0x6C)
+ 
+ #define MXC_CCM_MPCTL_BRMO          (1 << 31)
+ #define MXC_CCM_MPCTL_PD_OFFSET     26
+@@ -170,10 +172,27 @@
+ #define MXC_CCM_CGCR2_UART5_OFFSET       (50-32)
+ #define MXC_CCM_CGCR2_WDOG_OFFSET        (51-32)
+ 
++#define MXC_CCM_CGCR0_STOP_MODE_MASK	\
++			((1 << MXC_CCM_CGCR0_HCLK_SLCDC_OFFSET) | \
++			 (1 << MXC_CCM_CGCR0_HCLK_RTIC_OFFSET) | \
++			 (1 << MXC_CCM_CGCR0_HCLK_EMI_OFFSET) | \
++			 (1 << MXC_CCM_CGCR0_HCLK_BROM_OFFSET))
++
++#define MXC_CCM_CGCR1_STOP_MODE_MASK	((1 << MXC_CCM_CGCR1_IIM_OFFSET) | \
++					 (1 << MXC_CCM_CGCR1_CAN2_OFFSET) | \
++					 (1 << MXC_CCM_CGCR1_CAN1_OFFSET))
++
++#define MXC_CCM_CGCR2_STOP_MODE_MASK	((1 << MXC_CCM_CGCR2_SPBA_OFFSET) | \
++					 (1 << MXC_CCM_CGCR2_SDMA_OFFSET) | \
++					 (1 << MXC_CCM_CGCR2_RTIC_OFFSET))
++
+ #define MXC_CCM_PCDR1_PERDIV1_MASK       0x3f
+ 
+ #define MXC_CCM_RCSR_NF16B               (1 << 14)
+ 
++#define MXC_CCM_PMCR2_VSTBY		(1 << 17)
++#define MXC_CCM_PMCR2_OSC24M_DOWN	(1 << 16)
++
+ #define MXC_CCM_MCR_USB_XTAL_MUX_OFFSET  31
+ #define MXC_CCM_MCR_CLKO_EN_OFFSET       30
+ #define MXC_CCM_MCR_CLKO_DIV_OFFSET      24
+@@ -187,4 +206,7 @@
+ 
+ #define MXC_CCM_MCR_PER_CLK_MUX_MASK     (0xFFFF << 0)
+ 
++#define MXC_CCM_LPIMR0_MASK		0xFFFFFFFF
++#define MXC_CCM_LPIMR1_MASK		0xFFFFFFFF
++
+ #endif				/* __ARCH_ARM_MACH_MX25_CRM_REGS_H__ */
+diff --git a/arch/arm/mach-mx25/pm.c b/arch/arm/mach-mx25/pm.c
+new file mode 100644
+index 0000000..942364d
+--- /dev/null
++++ b/arch/arm/mach-mx25/pm.c
+@@ -0,0 +1,102 @@
++/*
++ *  Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/suspend.h>
++#include <linux/io.h>
++#include "crm_regs.h"
++
++/*!
++ * @defgroup MSL_MX25 i.MX25 Machine Specific Layer (MSL)
++ */
++
++/*!
++ * @file mach-mx25/pm.c
++ * @brief This file contains suspend operations
++ *
++ * @ingroup MSL_MX25
++ */
++static unsigned int cgcr0, cgcr1, cgcr2;
++
++static int mx25_suspend_enter(suspend_state_t state)
++{
++	unsigned int reg;
++
++	switch (state) {
++	case PM_SUSPEND_MEM:
++		mxc_cpu_lp_set(STOP_POWER_OFF);
++		break;
++	case PM_SUSPEND_STANDBY:
++		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++		break;
++	default:
++		return -EINVAL;
++	}
++	/* Executing CP15 (Wait-for-Interrupt) Instruction */
++	cpu_do_idle();
++
++	reg = (__raw_readl(MXC_CCM_CGCR0) & ~MXC_CCM_CGCR1_STOP_MODE_MASK) |
++	    cgcr0;
++	__raw_writel(reg, MXC_CCM_CGCR0);
++
++	reg = (__raw_readl(MXC_CCM_CGCR1) & ~MXC_CCM_CGCR1_STOP_MODE_MASK) |
++	    cgcr1;
++	__raw_writel(reg, MXC_CCM_CGCR1);
++
++	reg = (__raw_readl(MXC_CCM_CGCR2) & ~MXC_CCM_CGCR1_STOP_MODE_MASK) |
++	    cgcr2;
++	__raw_writel(reg, MXC_CCM_CGCR2);
++
++	return 0;
++}
++
++/*
++ * Called after processes are frozen, but before we shut down devices.
++ */
++static int mx25_suspend_prepare(void)
++{
++	cgcr0 = __raw_readl(MXC_CCM_CGCR0) & MXC_CCM_CGCR0_STOP_MODE_MASK;
++	cgcr1 = __raw_readl(MXC_CCM_CGCR1) & MXC_CCM_CGCR1_STOP_MODE_MASK;
++	cgcr2 = __raw_readl(MXC_CCM_CGCR2) & MXC_CCM_CGCR2_STOP_MODE_MASK;
++
++	return 0;
++}
++
++/*
++ * Called after devices are re-setup, but before processes are thawed.
++ */
++static void mx25_suspend_finish(void)
++{
++}
++
++static int mx25_pm_valid(suspend_state_t state)
++{
++	return state > PM_SUSPEND_ON && state <= PM_SUSPEND_MAX;
++}
++
++struct platform_suspend_ops mx25_suspend_ops = {
++	.valid = mx25_pm_valid,
++	.prepare = mx25_suspend_prepare,
++	.enter = mx25_suspend_enter,
++	.finish = mx25_suspend_finish,
++};
++
++static int __init mx25_pm_init(void)
++{
++	pr_info("Static Power Management for Freescale i.MX25\n");
++	suspend_set_ops(&mx25_suspend_ops);
++
++	return 0;
++}
++
++late_initcall(mx25_pm_init);
+diff --git a/arch/arm/mach-mx25/system.c b/arch/arm/mach-mx25/system.c
+index ce4a4fe..654348e 100644
+--- a/arch/arm/mach-mx25/system.c
++++ b/arch/arm/mach-mx25/system.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -13,6 +13,8 @@
+ 
+ #include <linux/clk.h>
+ #include <linux/io.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
+ #include <asm/hardware.h>
+ #include <asm/proc-fns.h>
+ #include <asm/system.h>
+@@ -30,9 +32,98 @@
+  * @ingroup MSL_MX25
+  */
+ 
++/*!
++* MX25 low-power mode
++*/
++enum mx25_low_pwr_mode {
++	MX25_RUN_MODE,
++	MX25_WAIT_MODE,
++	MX25_DOZE_MODE,
++	MX25_STOP_MODE
++};
++
+ extern int mxc_jtag_enabled;
+ 
+ /*!
++ * This function is used to set cpu low power mode before WFI instruction
++ *
++ * @param  mode         indicates different kinds of power modes
++ */
++void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
++{
++	unsigned int lpm;
++	unsigned long reg;
++	unsigned int pmcr2, lpimr;
++	unsigned int cgcr0, cgcr1, cgcr2;
++	struct irq_desc *desc;
++	int i;
++
++	/*read CCTL value */
++	reg = __raw_readl(MXC_CCM_CCTL);
++
++	switch (mode) {
++	case WAIT_UNCLOCKED_POWER_OFF:
++		lpm = MX25_DOZE_MODE;
++		break;
++
++	case STOP_POWER_ON:
++	case STOP_POWER_OFF:
++		lpm = MX25_STOP_MODE;
++		/* The clock of LCDC/SLCDC, SDMA, RTIC, RNGC, MAX, CAN
++		   and EMI needs to be gated on when entering Stop mode.
++		 */
++		cgcr0 = __raw_readl(MXC_CCM_CGCR0);
++		cgcr1 = __raw_readl(MXC_CCM_CGCR1);
++		cgcr2 = __raw_readl(MXC_CCM_CGCR2);
++		__raw_writel(cgcr0 | MXC_CCM_CGCR0_STOP_MODE_MASK,
++			     MXC_CCM_CGCR0);
++		__raw_writel(cgcr1 | MXC_CCM_CGCR1_STOP_MODE_MASK,
++			     MXC_CCM_CGCR1);
++		__raw_writel(cgcr2 | MXC_CCM_CGCR2_STOP_MODE_MASK,
++			     MXC_CCM_CGCR2);
++		/* The interrupts which are not wake-up sources need
++		   be mask when entering Stop mode.
++		 */
++		lpimr = MXC_CCM_LPIMR0_MASK;
++		for (i = 0; i < 32; i++) {
++			desc = irq_desc + i;
++			if ((desc->status & IRQ_WAKEUP) != 0)
++				lpimr &= ~(1 << i);
++		}
++		__raw_writel(lpimr, MXC_CCM_LPIMR0);
++		lpimr = MXC_CCM_LPIMR1_MASK;
++		for (i = 32; i < 64; i++) {
++			desc = irq_desc + i;
++			if ((desc->status & IRQ_WAKEUP) != 0)
++				lpimr &= ~(1 << (i - 32));
++		}
++		__raw_writel(lpimr, MXC_CCM_LPIMR1);
++
++		if (mode == STOP_POWER_OFF) {
++			pmcr2 = __raw_readl(MXC_CCM_PMCR2);
++			pmcr2 |= (MXC_CCM_PMCR2_OSC24M_DOWN |
++				  MXC_CCM_PMCR2_VSTBY);
++			__raw_writel(pmcr2, MXC_CCM_PMCR2);
++		}
++		break;
++
++	case WAIT_CLOCKED:
++	case WAIT_UNCLOCKED:
++	default:
++		/* Wait is the default mode used when idle. */
++		lpm = MX25_WAIT_MODE;
++		break;
++	}
++
++	/* program LP CTL bit */
++	reg = ((reg & (~MXC_CCM_CCTL_LP_CTL_MASK)) |
++	       lpm << MXC_CCM_CCTL_LP_CTL_OFFSET);
++
++	__raw_writel(reg, MXC_CCM_CCTL);
++}
++EXPORT_SYMBOL(mxc_cpu_lp_set);
++
++/*!
+  * This function puts the CPU into idle mode. It is called by default_idle()
+  * in process.c file.
+  */
+@@ -42,8 +133,11 @@ void arch_idle(void)
+ 	 * This should do all the clock switching
+ 	 * and wait for interrupt tricks.
+ 	 */
+-	if (!mxc_jtag_enabled)
++	if (!mxc_jtag_enabled) {
++		/* set as Wait mode */
++		mxc_cpu_lp_set(WAIT_UNCLOCKED);
+ 		cpu_do_idle();
++	}
+ }
+ 
+ /*
+-- 
+1.5.4.4
+

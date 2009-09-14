@@ -3,12 +3,13 @@ SECTION = "base"
 DEPENDS = "zlib lzo"
 HOMEPAGE = "http://www.linux-mtd.infradead.org/"
 LICENSE = "GPLv2"
-PR = "r3"
+PR = "r4"
 
 SRC_URI = "git://git.infradead.org/mtd-utils.git;protocol=git;tag=41c53b6f2d756ae995c3ffa4455576515427c5e0 \
 	   file://new-ubi-git.patch;patch=1 \
 	   file://nanddump_skip_bad_blocks.patch;patch=1 \
-	   file://ubinize_null_img.patch;patch=1"
+	   file://ubinize_null_img.patch;patch=1 \
+	   file://ubirename.patch;patch=1"
 
 S = "${WORKDIR}/git/"
 

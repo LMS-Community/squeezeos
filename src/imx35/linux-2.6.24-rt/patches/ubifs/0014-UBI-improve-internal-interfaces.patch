@@ -1,0 +1,506 @@
+From 5a06056dfe17535a84b7c34c8bf22ced78465e6e Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 16 Dec 2007 20:00:38 +0200
+Subject: [PATCH] UBI: improve internal interfaces
+
+Pass volume description object to the EBA function which makes
+more sense, and EBA function do not have to find the volume
+description object by volume ID.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c  |    4 +-
+ drivers/mtd/ubi/cdev.c   |    6 ++--
+ drivers/mtd/ubi/eba.c    |   51 +++++++++++++++++++++------------------------
+ drivers/mtd/ubi/gluebi.c |    9 +++----
+ drivers/mtd/ubi/kapi.c   |   12 +++++-----
+ drivers/mtd/ubi/misc.c   |    2 +-
+ drivers/mtd/ubi/ubi.h    |   21 ++++++++++---------
+ drivers/mtd/ubi/upd.c    |    7 ++---
+ drivers/mtd/ubi/vmt.c    |   22 +++++++++----------
+ drivers/mtd/ubi/vtbl.c   |    6 +++-
+ 10 files changed, 68 insertions(+), 72 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index b85ca18..5d00364 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -249,7 +249,7 @@ static void kill_volumes(struct ubi_device *ubi)
+ 
+ 	for (i = 0; i < ubi->vtbl_slots; i++)
+ 		if (ubi->volumes[i])
+-			ubi_free_volume(ubi, i);
++			ubi_free_volume(ubi, ubi->volumes[i]);
+ }
+ 
+ /**
+@@ -300,7 +300,7 @@ static int uif_init(struct ubi_device *ubi)
+ 
+ 	for (i = 0; i < ubi->vtbl_slots; i++)
+ 		if (ubi->volumes[i]) {
+-			err = ubi_add_volume(ubi, i);
++			err = ubi_add_volume(ubi, ubi->volumes[i]);
+ 			if (err) {
+ 				ubi_err("cannot add volume %d", i);
+ 				goto out_volumes;
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 7697eda..24344ba 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -249,7 +249,7 @@ static ssize_t vol_cdev_read(struct file *file, __user char *buf, size_t count,
+ 		if (off + len >= vol->usable_leb_size)
+ 			len = vol->usable_leb_size - off;
+ 
+-		err = ubi_eba_read_leb(ubi, vol_id, lnum, tbuf, off, len, 0);
++		err = ubi_eba_read_leb(ubi, vol, lnum, tbuf, off, len, 0);
+ 		if (err)
+ 			break;
+ 
+@@ -339,7 +339,7 @@ static ssize_t vol_cdev_direct_write(struct file *file, const char __user *buf,
+ 			break;
+ 		}
+ 
+-		err = ubi_eba_write_leb(ubi, vol_id, lnum, tbuf, off, len,
++		err = ubi_eba_write_leb(ubi, vol, lnum, tbuf, off, len,
+ 					UBI_UNKNOWN);
+ 		if (err)
+ 			break;
+@@ -484,7 +484,7 @@ static int vol_cdev_ioctl(struct inode *inode, struct file *file,
+ 		}
+ 
+ 		dbg_msg("erase LEB %d:%d", vol->vol_id, lnum);
+-		err = ubi_eba_unmap_leb(ubi, vol->vol_id, lnum);
++		err = ubi_eba_unmap_leb(ubi, vol, lnum);
+ 		if (err)
+ 			break;
+ 
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 5fdb31b..b2b0f29 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -289,17 +289,17 @@ static void leb_write_unlock(struct ubi_device *ubi, int vol_id, int lnum)
+ /**
+  * ubi_eba_unmap_leb - un-map logical eraseblock.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume description object
+  * @lnum: logical eraseblock number
+  *
+  * This function un-maps logical eraseblock @lnum and schedules corresponding
+  * physical eraseblock for erasure. Returns zero in case of success and a
+  * negative error code in case of failure.
+  */
+-int ubi_eba_unmap_leb(struct ubi_device *ubi, int vol_id, int lnum)
++int ubi_eba_unmap_leb(struct ubi_device *ubi, struct ubi_volume *vol,
++		      int lnum)
+ {
+-	int idx = vol_id2idx(ubi, vol_id), err, pnum;
+-	struct ubi_volume *vol = ubi->volumes[idx];
++	int err, pnum, vol_id = vol->vol_id;
+ 
+ 	if (ubi->ro_mode)
+ 		return -EROFS;
+@@ -326,7 +326,7 @@ out_unlock:
+ /**
+  * ubi_eba_read_leb - read data.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume description object
+  * @lnum: logical eraseblock number
+  * @buf: buffer to store the read data
+  * @offset: offset from where to read
+@@ -342,12 +342,11 @@ out_unlock:
+  * returned for any volume type if an ECC error was detected by the MTD device
+  * driver. Other negative error cored may be returned in case of other errors.
+  */
+-int ubi_eba_read_leb(struct ubi_device *ubi, int vol_id, int lnum, void *buf,
+-		     int offset, int len, int check)
++int ubi_eba_read_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
++		     void *buf, int offset, int len, int check)
+ {
+-	int err, pnum, scrub = 0, idx = vol_id2idx(ubi, vol_id);
++	int err, pnum, scrub = 0, vol_id = vol->vol_id;
+ 	struct ubi_vid_hdr *vid_hdr;
+-	struct ubi_volume *vol = ubi->volumes[idx];
+ 	uint32_t uninitialized_var(crc);
+ 
+ 	err = leb_read_lock(ubi, vol_id, lnum);
+@@ -555,7 +554,7 @@ write_error:
+ /**
+  * ubi_eba_write_leb - write data to dynamic volume.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume description object
+  * @lnum: logical eraseblock number
+  * @buf: the data to write
+  * @offset: offset within the logical eraseblock where to write
+@@ -563,15 +562,14 @@ write_error:
+  * @dtype: data type
+  *
+  * This function writes data to logical eraseblock @lnum of a dynamic volume
+- * @vol_id. Returns zero in case of success and a negative error code in case
++ * @vol. Returns zero in case of success and a negative error code in case
+  * of failure. In case of error, it is possible that something was still
+  * written to the flash media, but may be some garbage.
+  */
+-int ubi_eba_write_leb(struct ubi_device *ubi, int vol_id, int lnum,
++int ubi_eba_write_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
+ 		      const void *buf, int offset, int len, int dtype)
+ {
+-	int idx = vol_id2idx(ubi, vol_id), err, pnum, tries = 0;
+-	struct ubi_volume *vol = ubi->volumes[idx];
++	int err, pnum, tries = 0, vol_id = vol->vol_id;
+ 	struct ubi_vid_hdr *vid_hdr;
+ 
+ 	if (ubi->ro_mode)
+@@ -590,7 +588,8 @@ int ubi_eba_write_leb(struct ubi_device *ubi, int vol_id, int lnum,
+ 		if (err) {
+ 			ubi_warn("failed to write data to PEB %d", pnum);
+ 			if (err == -EIO && ubi->bad_allowed)
+-				err = recover_peb(ubi, pnum, vol_id, lnum, buf, offset, len);
++				err = recover_peb(ubi, pnum, vol_id, lnum, buf,
++						  offset, len);
+ 			if (err)
+ 				ubi_ro_mode(ubi);
+ 		}
+@@ -678,7 +677,7 @@ write_error:
+ /**
+  * ubi_eba_write_leb_st - write data to static volume.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume description object
+  * @lnum: logical eraseblock number
+  * @buf: data to write
+  * @len: how many bytes to write
+@@ -686,7 +685,7 @@ write_error:
+  * @used_ebs: how many logical eraseblocks will this volume contain
+  *
+  * This function writes data to logical eraseblock @lnum of static volume
+- * @vol_id. The @used_ebs argument should contain total number of logical
++ * @vol. The @used_ebs argument should contain total number of logical
+  * eraseblock in this static volume.
+  *
+  * When writing to the last logical eraseblock, the @len argument doesn't have
+@@ -698,12 +697,11 @@ write_error:
+  * volumes. This function returns zero in case of success and a negative error
+  * code in case of failure.
+  */
+-int ubi_eba_write_leb_st(struct ubi_device *ubi, int vol_id, int lnum,
+-			 const void *buf, int len, int dtype, int used_ebs)
++int ubi_eba_write_leb_st(struct ubi_device *ubi, struct ubi_volume *vol,
++			 int lnum, const void *buf, int len, int dtype,
++			 int used_ebs)
+ {
+-	int err, pnum, tries = 0, data_size = len;
+-	int idx = vol_id2idx(ubi, vol_id);
+-	struct ubi_volume *vol = ubi->volumes[idx];
++	int err, pnum, tries = 0, data_size = len, vol_id = vol->vol_id;
+ 	struct ubi_vid_hdr *vid_hdr;
+ 	uint32_t crc;
+ 
+@@ -799,7 +797,7 @@ write_error:
+ /*
+  * ubi_eba_atomic_leb_change - change logical eraseblock atomically.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume escription object
+  * @lnum: logical eraseblock number
+  * @buf: data to write
+  * @len: how many bytes to write
+@@ -814,11 +812,10 @@ write_error:
+  * UBI reserves one LEB for the "atomic LEB change" operation, so only one
+  * LEB change may be done at a time. This is ensured by @ubi->alc_mutex.
+  */
+-int ubi_eba_atomic_leb_change(struct ubi_device *ubi, int vol_id, int lnum,
+-			      const void *buf, int len, int dtype)
++int ubi_eba_atomic_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
++			      int lnum, const void *buf, int len, int dtype)
+ {
+-	int err, pnum, tries = 0, idx = vol_id2idx(ubi, vol_id);
+-	struct ubi_volume *vol = ubi->volumes[idx];
++	int err, pnum, tries = 0, vol_id = vol->vol_id;
+ 	struct ubi_vid_hdr *vid_hdr;
+ 	uint32_t crc;
+ 
+diff --git a/drivers/mtd/ubi/gluebi.c b/drivers/mtd/ubi/gluebi.c
+index 41ff74c..d397219 100644
+--- a/drivers/mtd/ubi/gluebi.c
++++ b/drivers/mtd/ubi/gluebi.c
+@@ -129,8 +129,7 @@ static int gluebi_read(struct mtd_info *mtd, loff_t from, size_t len,
+ 		if (to_read > total_read)
+ 			to_read = total_read;
+ 
+-		err = ubi_eba_read_leb(ubi, vol->vol_id, lnum, buf, offs,
+-				       to_read, 0);
++		err = ubi_eba_read_leb(ubi, vol, lnum, buf, offs, to_read, 0);
+ 		if (err)
+ 			break;
+ 
+@@ -187,8 +186,8 @@ static int gluebi_write(struct mtd_info *mtd, loff_t to, size_t len,
+ 		if (to_write > total_written)
+ 			to_write = total_written;
+ 
+-		err = ubi_eba_write_leb(ubi, vol->vol_id, lnum, buf, offs,
+-					to_write, UBI_UNKNOWN);
++		err = ubi_eba_write_leb(ubi, vol, lnum, buf, offs, to_write,
++					UBI_UNKNOWN);
+ 		if (err)
+ 			break;
+ 
+@@ -237,7 +236,7 @@ static int gluebi_erase(struct mtd_info *mtd, struct erase_info *instr)
+ 		return -EROFS;
+ 
+ 	for (i = 0; i < count; i++) {
+-		err = ubi_eba_unmap_leb(ubi, vol->vol_id, lnum + i);
++		err = ubi_eba_unmap_leb(ubi, vol, lnum + i);
+ 		if (err)
+ 			goto out_err;
+ 	}
+diff --git a/drivers/mtd/ubi/kapi.c b/drivers/mtd/ubi/kapi.c
+index 3bf2c95..c2fafe6 100644
+--- a/drivers/mtd/ubi/kapi.c
++++ b/drivers/mtd/ubi/kapi.c
+@@ -332,7 +332,7 @@ int ubi_leb_read(struct ubi_volume_desc *desc, int lnum, char *buf, int offset,
+ 	if (len == 0)
+ 		return 0;
+ 
+-	err = ubi_eba_read_leb(ubi, vol_id, lnum, buf, offset, len, check);
++	err = ubi_eba_read_leb(ubi, vol, lnum, buf, offset, len, check);
+ 	if (err && err == -EBADMSG && vol->vol_type == UBI_STATIC_VOLUME) {
+ 		ubi_warn("mark volume %d as corrupted", vol_id);
+ 		vol->corrupted = 1;
+@@ -399,7 +399,7 @@ int ubi_leb_write(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 	if (len == 0)
+ 		return 0;
+ 
+-	return ubi_eba_write_leb(ubi, vol_id, lnum, buf, offset, len, dtype);
++	return ubi_eba_write_leb(ubi, vol, lnum, buf, offset, len, dtype);
+ }
+ EXPORT_SYMBOL_GPL(ubi_leb_write);
+ 
+@@ -448,7 +448,7 @@ int ubi_leb_change(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 	if (len == 0)
+ 		return 0;
+ 
+-	return ubi_eba_atomic_leb_change(ubi, vol_id, lnum, buf, len, dtype);
++	return ubi_eba_atomic_leb_change(ubi, vol, lnum, buf, len, dtype);
+ }
+ EXPORT_SYMBOL_GPL(ubi_leb_change);
+ 
+@@ -481,7 +481,7 @@ int ubi_leb_erase(struct ubi_volume_desc *desc, int lnum)
+ 	if (vol->upd_marker)
+ 		return -EBADF;
+ 
+-	err = ubi_eba_unmap_leb(ubi, vol_id, lnum);
++	err = ubi_eba_unmap_leb(ubi, vol, lnum);
+ 	if (err)
+ 		return err;
+ 
+@@ -542,7 +542,7 @@ int ubi_leb_unmap(struct ubi_volume_desc *desc, int lnum)
+ 	if (vol->upd_marker)
+ 		return -EBADF;
+ 
+-	return ubi_eba_unmap_leb(ubi, vol_id, lnum);
++	return ubi_eba_unmap_leb(ubi, vol, lnum);
+ }
+ EXPORT_SYMBOL_GPL(ubi_leb_unmap);
+ 
+@@ -587,7 +587,7 @@ int ubi_leb_map(struct ubi_volume_desc *desc, int lnum, int dtype)
+ 	if (vol->eba_tbl[lnum] >= 0)
+ 		return -EBADMSG;
+ 
+-	return ubi_eba_write_leb(ubi, vol_id, lnum, NULL, 0, 0, dtype);
++	return ubi_eba_write_leb(ubi, vol, lnum, NULL, 0, 0, dtype);
+ }
+ EXPORT_SYMBOL_GPL(ubi_leb_map);
+ 
+diff --git a/drivers/mtd/ubi/misc.c b/drivers/mtd/ubi/misc.c
+index 9e2338c..93e0528 100644
+--- a/drivers/mtd/ubi/misc.c
++++ b/drivers/mtd/ubi/misc.c
+@@ -79,7 +79,7 @@ int ubi_check_volume(struct ubi_device *ubi, int vol_id)
+ 		else
+ 			size = vol->usable_leb_size;
+ 
+-		err = ubi_eba_read_leb(ubi, vol_id, i, buf, 0, size, 1);
++		err = ubi_eba_read_leb(ubi, vol, i, buf, 0, size, 1);
+ 		if (err) {
+ 			if (err == -EBADMSG)
+ 				err = 1;
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index 23875bf..0a3a803 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -410,8 +410,8 @@ int ubi_read_volume_table(struct ubi_device *ubi, struct ubi_scan_info *si);
+ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req);
+ int ubi_remove_volume(struct ubi_volume_desc *desc);
+ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs);
+-int ubi_add_volume(struct ubi_device *ubi, int vol_id);
+-void ubi_free_volume(struct ubi_device *ubi, int vol_id);
++int ubi_add_volume(struct ubi_device *ubi, struct ubi_volume *vol);
++void ubi_free_volume(struct ubi_device *ubi, struct ubi_volume *vol);
+ 
+ /* upd.c */
+ int ubi_start_update(struct ubi_device *ubi, int vol_id, long long bytes);
+@@ -435,16 +435,17 @@ void ubi_gluebi_updated(struct ubi_volume *vol);
+ #endif
+ 
+ /* eba.c */
+-int ubi_eba_unmap_leb(struct ubi_device *ubi, int vol_id, int lnum);
+-int ubi_eba_read_leb(struct ubi_device *ubi, int vol_id, int lnum, void *buf,
+-		     int offset, int len, int check);
+-int ubi_eba_write_leb(struct ubi_device *ubi, int vol_id, int lnum,
++int ubi_eba_unmap_leb(struct ubi_device *ubi, struct ubi_volume *vol,
++		      int lnum);
++int ubi_eba_read_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
++		     void *buf, int offset, int len, int check);
++int ubi_eba_write_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
+ 		      const void *buf, int offset, int len, int dtype);
+-int ubi_eba_write_leb_st(struct ubi_device *ubi, int vol_id, int lnum,
+-			 const void *buf, int len, int dtype,
++int ubi_eba_write_leb_st(struct ubi_device *ubi, struct ubi_volume *vol,
++			 int lnum, const void *buf, int len, int dtype,
+ 			 int used_ebs);
+-int ubi_eba_atomic_leb_change(struct ubi_device *ubi, int vol_id, int lnum,
+-			      const void *buf, int len, int dtype);
++int ubi_eba_atomic_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
++			      int lnum, const void *buf, int len, int dtype);
+ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 		     struct ubi_vid_hdr *vid_hdr);
+ int ubi_eba_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si);
+diff --git a/drivers/mtd/ubi/upd.c b/drivers/mtd/ubi/upd.c
+index 0efc586..a95dcaa 100644
+--- a/drivers/mtd/ubi/upd.c
++++ b/drivers/mtd/ubi/upd.c
+@@ -136,7 +136,7 @@ int ubi_start_update(struct ubi_device *ubi, int vol_id, long long bytes)
+ 
+ 	/* Before updating - wipe out the volume */
+ 	for (i = 0; i < vol->reserved_pebs; i++) {
+-		err = ubi_eba_unmap_leb(ubi, vol_id, i);
++		err = ubi_eba_unmap_leb(ubi, vol, i);
+ 		if (err)
+ 			return err;
+ 	}
+@@ -209,8 +209,7 @@ static int write_leb(struct ubi_device *ubi, int vol_id, int lnum, void *buf,
+ 		if (len != l)
+ 			dbg_msg("skip last %d bytes (0xFF)", len - l);
+ 
+-		err = ubi_eba_write_leb(ubi, vol_id, lnum, buf, 0, l,
+-					UBI_UNKNOWN);
++		err = ubi_eba_write_leb(ubi, vol, lnum, buf, 0, l, UBI_UNKNOWN);
+ 	} else {
+ 		/*
+ 		 * When writing static volume, and this is the last logical
+@@ -222,7 +221,7 @@ static int write_leb(struct ubi_device *ubi, int vol_id, int lnum, void *buf,
+ 		 * contain zeros, not random trash.
+ 		 */
+ 		memset(buf + len, 0, vol->usable_leb_size - len);
+-		err = ubi_eba_write_leb_st(ubi, vol_id, lnum, buf, len,
++		err = ubi_eba_write_leb_st(ubi, vol, lnum, buf, len,
+ 					   UBI_UNKNOWN, used_ebs);
+ 	}
+ 
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 787ce9e..d2d12de 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -417,7 +417,7 @@ int ubi_remove_volume(struct ubi_volume_desc *desc)
+ 		return err;
+ 
+ 	for (i = 0; i < vol->reserved_pebs; i++) {
+-		err = ubi_eba_unmap_leb(ubi, vol_id, i);
++		err = ubi_eba_unmap_leb(ubi, vol, i);
+ 		if (err)
+ 			return err;
+ 	}
+@@ -524,7 +524,7 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
+ 
+ 	if (pebs < 0) {
+ 		for (i = 0; i < -pebs; i++) {
+-			err = ubi_eba_unmap_leb(ubi, vol_id, reserved_pebs + i);
++			err = ubi_eba_unmap_leb(ubi, vol, reserved_pebs + i);
+ 			if (err)
+ 				goto out_acc;
+ 		}
+@@ -573,17 +573,16 @@ out_free:
+ /**
+  * ubi_add_volume - add volume.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume description object
+  *
+  * This function adds an existin volume and initializes all its data
+  * structures. Returnes zero in case of success and a negative error code in
+  * case of failure.
+  */
+-int ubi_add_volume(struct ubi_device *ubi, int vol_id)
++int ubi_add_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+ {
+-	int err;
++	int err, vol_id = vol->vol_id;
+ 	dev_t dev;
+-	struct ubi_volume *vol = ubi->volumes[vol_id];
+ 
+ 	dbg_msg("add volume %d", vol_id);
+ 	ubi_dbg_dump_vol_info(vol);
+@@ -634,22 +633,21 @@ out_cdev:
+ /**
+  * ubi_free_volume - free volume.
+  * @ubi: UBI device description object
+- * @vol_id: volume ID
++ * @vol: volume description object
+  *
+- * This function frees all resources for volume @vol_id but does not remove it.
++ * This function frees all resources for volume @vol but does not remove it.
+  * Used only when the UBI device is detached.
+  */
+-void ubi_free_volume(struct ubi_device *ubi, int vol_id)
++void ubi_free_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+ {
+ 	int err;
+-	struct ubi_volume *vol = ubi->volumes[vol_id];
+ 
+-	dbg_msg("free volume %d", vol_id);
++	dbg_msg("free volume %d", vol->vol_id);
+ 	ubi_assert(vol);
+ 
+ 	vol->removed = 1;
+ 	err = ubi_destroy_gluebi(vol);
+-	ubi->volumes[vol_id] = NULL;
++	ubi->volumes[vol->vol_id] = NULL;
+ 	cdev_del(&vol->cdev);
+ 	volume_sysfs_close(vol);
+ }
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index 25b3bd6..3349c28 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -86,8 +86,10 @@ int ubi_change_vtbl_record(struct ubi_device *ubi, int idx,
+ {
+ 	int i, err;
+ 	uint32_t crc;
++	struct ubi_volume *layout_vol;
+ 
+ 	ubi_assert(idx >= 0 && idx < ubi->vtbl_slots);
++	layout_vol = ubi->volumes[vol_id2idx(UBI_LAYOUT_VOL_ID)];
+ 
+ 	if (!vtbl_rec)
+ 		vtbl_rec = &empty_vtbl_record;
+@@ -99,12 +101,12 @@ int ubi_change_vtbl_record(struct ubi_device *ubi, int idx,
+ 	mutex_lock(&ubi->vtbl_mutex);
+ 	memcpy(&ubi->vtbl[idx], vtbl_rec, sizeof(struct ubi_vtbl_record));
+ 	for (i = 0; i < UBI_LAYOUT_VOLUME_EBS; i++) {
+-		err = ubi_eba_unmap_leb(ubi, UBI_LAYOUT_VOL_ID, i);
++		err = ubi_eba_unmap_leb(ubi, layout_vol, i);
+ 		if (err) {
+ 			mutex_unlock(&ubi->vtbl_mutex);
+ 			return err;
+ 		}
+-		err = ubi_eba_write_leb(ubi, UBI_LAYOUT_VOL_ID, i, ubi->vtbl, 0,
++		err = ubi_eba_write_leb(ubi, layout_vol, i, ubi->vtbl, 0,
+ 					ubi->vtbl_size, UBI_LONGTERM);
+ 		if (err) {
+ 			mutex_unlock(&ubi->vtbl_mutex);
+-- 
+1.5.6.3
+

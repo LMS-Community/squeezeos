@@ -1,0 +1,106 @@
+From 8d02b6b650322e45d596fe947e7b25544e1f066e Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 25 May 2007 15:37:38 -0400
+Subject: [PATCH] bugfix: prevent null-deref oops if lower f/s is NFS (mmap writes)
+
+This is a workaround fora deficiency of the linux MM layer, which doesn't
+allow clean coordination between upper and lower pages in stackable layers.
+We prevent an oops, but the cost is that we're not able to implement
+writepages cleanly, not can we call the lower file system's writepages.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   54 +++++++++++++++++++++++++++++++++++++++-------------
+ 1 files changed, 40 insertions(+), 14 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 105cc20..c795915 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -19,6 +19,39 @@
+ 
+ #include "union.h"
+ 
++/*
++ * Unionfs doesn't implement ->writepages, which is OK with the VFS and
++ * nkeeps our code simpler and smaller.  Nevertheless, somehow, our own
++ * ->writepage must be called so we can sync the upper pages with the lower
++ * pages: otherwise data changed at the upper layer won't get written to the
++ * lower layer.
++ *
++ * Some lower file systems (e.g., NFS) expect the VFS to call its writepages
++ * only, which in turn will call generic_writepages and invoke each of the
++ * lower file system's ->writepage.  NFS in particular uses the
++ * wbc->fs_private field in its nfs_writepage, which is set in its
++ * nfs_writepages.  So if we don't call the lower nfs_writepages first, then
++ * NFS's nfs_writepage will dereference a NULL wbc->fs_private and cause an
++ * OOPS.  If, however, we implement a unionfs_writepages and then we do call
++ * the lower nfs_writepages, then we "lose control" over the pages we're
++ * trying to write to the lower file system: we won't be writing our own
++ * new/modified data from the upper pages to the lower pages, and any
++ * mmap-based changes are lost.
++ *
++ * This is a fundamental cache-coherency problem in Linux.  The kernel isn't
++ * able to support such stacking abstractions cleanly.  One possible clean
++ * way would be that a lower file system's ->writepage method have some sort
++ * of a callback to validate if any upper pages for the same file+offset
++ * exist and have newer content in them.
++ *
++ * This whole NULL ptr dereference is triggered at the lower file system
++ * (NFS) because the wbc->for_writepages is set to 1.  Therefore, to avoid
++ * this NULL pointer dereference, we set this flag to 0 and restore it upon
++ * exit.  This probably means that we're slightly less efficient in writing
++ * pages out, doing them one at a time, but at least we avoid the oops until
++ * such day as Linux can better support address_space_ops in a stackable
++ * fashion.
++ */
+ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ {
+ 	int err = -EIO;
+@@ -26,7 +59,7 @@ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	struct inode *lower_inode;
+ 	struct page *lower_page;
+ 	char *kaddr, *lower_kaddr;
+-	struct writeback_control lower_wbc;
++	int saved_for_writepages = wbc->for_writepages;
+ 
+ 	inode = page->mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+@@ -46,20 +79,14 @@ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	kunmap(lower_page);
+ 
+ 	BUG_ON(!lower_inode->i_mapping->a_ops->writepage);
+-	memcpy(&lower_wbc, wbc, sizeof(struct writeback_control));
+-	/*
+-	 * This condition should never occur, but if it does, it causes NFS
+-	 * (if used a s lower branch) to deference wbc->fs_private,
+-	 * resulting in a NULL deref oops.
+-	 * XXX: Maybe it's an NFS/VFS bug?
+-	 */
+-	if (lower_wbc.for_writepages && !lower_wbc.fs_private) {
+-		printk("unionfs: setting wbc.for_writepages to 0\n");
+-		lower_wbc.for_writepages = 0;
+-	}
++
++	/* workaround for some lower file systems: see big comment on top */
++	if (wbc->for_writepages && !wbc->fs_private)
++		wbc->for_writepages = 0;
+ 
+ 	/* call lower writepage (expects locked page) */
+-	err = lower_inode->i_mapping->a_ops->writepage(lower_page, &lower_wbc);
++	err = lower_inode->i_mapping->a_ops->writepage(lower_page, wbc);
++	wbc->for_writepages = saved_for_writepages; /* restore value */
+ 
+ 	/*
+ 	 * update mtime and ctime of lower level file system
+@@ -76,7 +103,6 @@ int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 
+ out:
+ 	unlock_page(page);
+-
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

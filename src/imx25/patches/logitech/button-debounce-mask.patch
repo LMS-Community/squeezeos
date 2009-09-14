@@ -1,0 +1,48 @@
+Index: linux-2.6.26/drivers/mxc/baby/baby_buttons.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/baby_buttons.c	2009-08-06 11:01:30.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/baby_buttons.c	2009-08-06 11:01:10.000000000 +0100
+@@ -47,11 +47,13 @@
+ static void button_handler(struct baby_buttons *state, int bnum)
+ {
+ 	unsigned int gpio = state->gpio[bnum];
++	u32 irq = IOMUX_TO_IRQ(gpio);
+ 
+ 	switch (state->bstate[bnum]) {
+ 	case BUTTON_IDLE:
+ 		/* H -> L just occurred (called by IRQ). */
+-		disable_irq(IOMUX_TO_IRQ(gpio));
++		irq_desc[irq].chip->mask(irq);
++		disable_irq(irq);
+ 
+ 		state->bstate[bnum] = BUTTON_PRESSED;
+ 		mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
+@@ -79,13 +81,14 @@
+ 			 */
+ 			state->bstate[bnum] = BUTTON_HOLD;
+ 
+-			set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_RISING);
+-			enable_irq(IOMUX_TO_IRQ(gpio));
++			set_irq_type(irq, IRQ_TYPE_EDGE_RISING);
++			enable_irq(irq);
+ 		}
+ 		break;
+ 
+ 	case BUTTON_HOLD:
+-		disable_irq(IOMUX_TO_IRQ(gpio));
++		irq_desc[irq].chip->mask(irq);
++		disable_irq(irq);
+ 
+ 		state->bstate[bnum] = BUTTON_RELEASED;
+ 		mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
+@@ -96,8 +99,8 @@
+ 	case BUTTON_RELEASED:
+ 		state->bstate[bnum] = BUTTON_IDLE;
+ 
+-		set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_FALLING);
+-		enable_irq(IOMUX_TO_IRQ(gpio));
++		set_irq_type(irq, IRQ_TYPE_EDGE_FALLING);
++		enable_irq(irq);
+ 		break;
+ 	}
+ }

@@ -1,0 +1,50 @@
+From 7f2fe8efdb0da26cddb4bc5557be855a1118f763 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Mon, 17 Nov 2008 13:34:06 -0700
+Subject: [PATCH] ENGR00099226 NAND: interrupt may not get cleared after op done
+
+When the the MXC NAND driver waits for an operation to complete
+(wait_op_done) and it is using an interrupt to signal the end of
+the operation and the interrupt fires before the wait can be queued,
+the interrupt bit did not get cleared.  This commit clears the
+interrupt whether or not it was pending.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ drivers/mtd/nand/mxc_nd.c  |    2 +-
+ drivers/mtd/nand/mxc_nd2.c |    4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mtd/nand/mxc_nd.c b/drivers/mtd/nand/mxc_nd.c
+index c07c547..fc95af3 100644
+--- a/drivers/mtd/nand/mxc_nd.c
++++ b/drivers/mtd/nand/mxc_nd.c
+@@ -153,8 +153,8 @@ static void wait_op_done(int maxRetries, u16 param, bool useirq)
+ 		if ((NFC_CONFIG2 & NFC_INT) == 0) {
+ 			NFC_CONFIG1 &= ~NFC_INT_MSK;	/* Enable interrupt */
+ 			wait_event(irq_waitq, NFC_CONFIG2 & NFC_INT);
+-			NFC_CONFIG2 &= ~NFC_INT;
+ 		}
++		NFC_CONFIG2 &= ~NFC_INT;
+ 	} else {
+ 		while (maxRetries-- > 0) {
+ 			if (NFC_CONFIG2 & NFC_INT) {
+diff --git a/drivers/mtd/nand/mxc_nd2.c b/drivers/mtd/nand/mxc_nd2.c
+index f77ee3b..d6b5aa1 100644
+--- a/drivers/mtd/nand/mxc_nd2.c
++++ b/drivers/mtd/nand/mxc_nd2.c
+@@ -170,9 +170,9 @@ static void wait_op_done(int maxRetries, bool useirq)
+ 				  REG_NFC_INTRRUPT);
+ 			wait_event(irq_waitq,
+ 				   (raw_read(REG_NFC_OPS_STAT) & NFC_OPS_STAT));
+-			WRITE_NFC_IP_REG((raw_read(REG_NFC_OPS_STAT) &
+-					  ~NFC_OPS_STAT), REG_NFC_OPS_STAT);
+ 		}
++		WRITE_NFC_IP_REG((raw_read(REG_NFC_OPS_STAT) &
++				  ~NFC_OPS_STAT), REG_NFC_OPS_STAT);
+ 	} else {
+ 		while (1) {
+ 			maxRetries--;
+-- 
+1.5.4.4
+

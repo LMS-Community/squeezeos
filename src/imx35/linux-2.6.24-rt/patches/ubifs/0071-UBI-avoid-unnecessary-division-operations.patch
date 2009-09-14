@@ -1,0 +1,194 @@
+From f0d15866bcf2f8e024de96afa85149a924ec7f30 Mon Sep 17 00:00:00 2001
+From: Kyungmin Park <kyungmin.park@samsung.com>
+Date: Thu, 22 May 2008 10:32:18 +0900
+Subject: [PATCH] UBI: avoid unnecessary division operations
+
+UBI already checks that @min io size is the power of 2 at io_init.
+It is save to use bit operations then.
+
+Signed-off-by: Kyungmin Park <kyungmin.park@samsung.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    8 ++++++--
+ drivers/mtd/ubi/cdev.c  |    6 +++---
+ drivers/mtd/ubi/eba.c   |    2 +-
+ drivers/mtd/ubi/kapi.c  |    6 +++---
+ drivers/mtd/ubi/misc.c  |    2 +-
+ drivers/mtd/ubi/vmt.c   |    2 +-
+ drivers/mtd/ubi/vtbl.c  |    5 ++---
+ drivers/mtd/ubi/wl.c    |    3 +--
+ 8 files changed, 18 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 961416a..ff4425d 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -530,7 +530,11 @@ static int io_init(struct ubi_device *ubi)
+ 	ubi->min_io_size = ubi->mtd->writesize;
+ 	ubi->hdrs_min_io_size = ubi->mtd->writesize >> ubi->mtd->subpage_sft;
+ 
+-	/* Make sure minimal I/O unit is power of 2 */
++	/*
++	 * Make sure minimal I/O unit is power of 2. Note, there is no
++	 * fundamental reason for this assumption. It is just an optimization
++	 * which allows us to avoid costly division operations.
++	 */
+ 	if (!is_power_of_2(ubi->min_io_size)) {
+ 		ubi_err("min. I/O unit (%d) is not power of 2",
+ 			ubi->min_io_size);
+@@ -581,7 +585,7 @@ static int io_init(struct ubi_device *ubi)
+ 	if (ubi->vid_hdr_offset < UBI_EC_HDR_SIZE ||
+ 	    ubi->leb_start < ubi->vid_hdr_offset + UBI_VID_HDR_SIZE ||
+ 	    ubi->leb_start > ubi->peb_size - UBI_VID_HDR_SIZE ||
+-	    ubi->leb_start % ubi->min_io_size) {
++	    ubi->leb_start & (ubi->min_io_size - 1)) {
+ 		ubi_err("bad VID header (%d) or data offsets (%d)",
+ 			ubi->vid_hdr_offset, ubi->leb_start);
+ 		return -EINVAL;
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 9d6aae5..34175ec 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -290,7 +290,7 @@ static ssize_t vol_cdev_direct_write(struct file *file, const char __user *buf,
+ 	off = do_div(tmp, vol->usable_leb_size);
+ 	lnum = tmp;
+ 
+-	if (off % ubi->min_io_size) {
++	if (off & (ubi->min_io_size - 1)) {
+ 		dbg_err("unaligned position");
+ 		return -EINVAL;
+ 	}
+@@ -299,7 +299,7 @@ static ssize_t vol_cdev_direct_write(struct file *file, const char __user *buf,
+ 		count_save = count = vol->used_bytes - *offp;
+ 
+ 	/* We can write only in fractions of the minimum I/O unit */
+-	if (count % ubi->min_io_size) {
++	if (count & (ubi->min_io_size - 1)) {
+ 		dbg_err("unaligned write length");
+ 		return -EINVAL;
+ 	}
+@@ -559,7 +559,7 @@ static int verify_mkvol_req(const struct ubi_device *ubi,
+ 	if (req->alignment > ubi->leb_size)
+ 		goto bad;
+ 
+-	n = req->alignment % ubi->min_io_size;
++	n = req->alignment & (ubi->min_io_size - 1);
+ 	if (req->alignment != 1 && n)
+ 		goto bad;
+ 
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 7ce91ca..37d7784 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -752,7 +752,7 @@ int ubi_eba_write_leb_st(struct ubi_device *ubi, struct ubi_volume *vol,
+ 		/* If this is the last LEB @len may be unaligned */
+ 		len = ALIGN(data_size, ubi->min_io_size);
+ 	else
+-		ubi_assert(len % ubi->min_io_size == 0);
++		ubi_assert(!(len & (ubi->min_io_size - 1)));
+ 
+ 	vid_hdr = ubi_zalloc_vid_hdr(ubi, GFP_NOFS);
+ 	if (!vid_hdr)
+diff --git a/drivers/mtd/ubi/kapi.c b/drivers/mtd/ubi/kapi.c
+index a70d588..5150883 100644
+--- a/drivers/mtd/ubi/kapi.c
++++ b/drivers/mtd/ubi/kapi.c
+@@ -397,8 +397,8 @@ int ubi_leb_write(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 		return -EROFS;
+ 
+ 	if (lnum < 0 || lnum >= vol->reserved_pebs || offset < 0 || len < 0 ||
+-	    offset + len > vol->usable_leb_size || offset % ubi->min_io_size ||
+-	    len % ubi->min_io_size)
++	    offset + len > vol->usable_leb_size ||
++	    offset & (ubi->min_io_size - 1) || len & (ubi->min_io_size - 1))
+ 		return -EINVAL;
+ 
+ 	if (dtype != UBI_LONGTERM && dtype != UBI_SHORTTERM &&
+@@ -447,7 +447,7 @@ int ubi_leb_change(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 		return -EROFS;
+ 
+ 	if (lnum < 0 || lnum >= vol->reserved_pebs || len < 0 ||
+-	    len > vol->usable_leb_size || len % ubi->min_io_size)
++	    len > vol->usable_leb_size || len & (ubi->min_io_size - 1))
+ 		return -EINVAL;
+ 
+ 	if (dtype != UBI_LONGTERM && dtype != UBI_SHORTTERM &&
+diff --git a/drivers/mtd/ubi/misc.c b/drivers/mtd/ubi/misc.c
+index 93e0528..22ad314 100644
+--- a/drivers/mtd/ubi/misc.c
++++ b/drivers/mtd/ubi/misc.c
+@@ -37,7 +37,7 @@ int ubi_calc_data_len(const struct ubi_device *ubi, const void *buf,
+ {
+ 	int i;
+ 
+-	ubi_assert(length % ubi->min_io_size == 0);
++	ubi_assert(!(length & (ubi->min_io_size - 1)));
+ 
+ 	for (i = length - 1; i >= 0; i--)
+ 		if (((const uint8_t *)buf)[i] != 0xFF)
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 5be58d8..7402025 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -727,7 +727,7 @@ static void paranoid_check_volume(struct ubi_device *ubi, int vol_id)
+ 		goto fail;
+ 	}
+ 
+-	n = vol->alignment % ubi->min_io_size;
++	n = vol->alignment & (ubi->min_io_size - 1);
+ 	if (vol->alignment != 1 && n) {
+ 		ubi_err("alignment is not multiple of min I/O unit");
+ 		goto fail;
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index 9d34a7a..71341d7 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -170,7 +170,7 @@ static int vtbl_check(const struct ubi_device *ubi,
+ 			goto bad;
+ 		}
+ 
+-		n = alignment % ubi->min_io_size;
++		n = alignment & (ubi->min_io_size - 1);
+ 		if (alignment != 1 && n) {
+ 			err = 5;
+ 			goto bad;
+@@ -683,14 +683,13 @@ static int check_scanning_info(const struct ubi_device *ubi,
+ 		return -EINVAL;
+ 	}
+ 
+-	if (si->highest_vol_id >= ubi->vtbl_slots + UBI_INT_VOL_COUNT&&
++	if (si->highest_vol_id >= ubi->vtbl_slots + UBI_INT_VOL_COUNT &&
+ 	    si->highest_vol_id < UBI_INTERNAL_VOL_START) {
+ 		ubi_err("too large volume ID %d found by scanning",
+ 			si->highest_vol_id);
+ 		return -EINVAL;
+ 	}
+ 
+-
+ 	for (i = 0; i < ubi->vtbl_slots + UBI_INT_VOL_COUNT; i++) {
+ 		cond_resched();
+ 
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index a471a49..cc8fe29 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -1368,7 +1368,7 @@ int ubi_thread(void *u)
+ 		int err;
+ 
+ 		if (kthread_should_stop())
+-			goto out;
++			break;
+ 
+ 		if (try_to_freeze())
+ 			continue;
+@@ -1403,7 +1403,6 @@ int ubi_thread(void *u)
+ 		cond_resched();
+ 	}
+ 
+-out:
+ 	dbg_wl("background thread \"%s\" is killed", ubi->bgt_name);
+ 	return 0;
+ }
+-- 
+1.5.6.3
+

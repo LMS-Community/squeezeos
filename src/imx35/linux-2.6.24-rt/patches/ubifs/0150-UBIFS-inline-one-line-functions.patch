@@ -1,0 +1,121 @@
+From ca9f07935beb1bdbc12f7ffe091c98b7c3495cb9 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 27 Aug 2008 12:50:57 +0300
+Subject: [PATCH] UBIFS: inline one-line functions
+
+'ubifs_get_lprops()' and 'ubifs_release_lprops()' basically wrap
+mutex lock and unlock. We have them because we want lprops subsystem
+be separate and as independent as possible. And we planned better
+locking rules for lprops.
+
+Anyway, because they are short, it is better to inline them.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/lprops.c |   28 ----------------------------
+ fs/ubifs/misc.h   |   27 +++++++++++++++++++++++++++
+ fs/ubifs/ubifs.h  |    2 --
+ 3 files changed, 27 insertions(+), 30 deletions(-)
+
+diff --git a/fs/ubifs/lprops.c b/fs/ubifs/lprops.c
+index 3659b88..f27176e 100644
+--- a/fs/ubifs/lprops.c
++++ b/fs/ubifs/lprops.c
+@@ -461,18 +461,6 @@ static void change_category(struct ubifs_info *c, struct ubifs_lprops *lprops)
+ }
+ 
+ /**
+- * ubifs_get_lprops - get reference to LEB properties.
+- * @c: the UBIFS file-system description object
+- *
+- * This function locks lprops. Lprops have to be unlocked by
+- * 'ubifs_release_lprops()'.
+- */
+-void ubifs_get_lprops(struct ubifs_info *c)
+-{
+-	mutex_lock(&c->lp_mutex);
+-}
+-
+-/**
+  * calc_dark - calculate LEB dark space size.
+  * @c: the UBIFS file-system description object
+  * @spc: amount of free and dirty space in the LEB
+@@ -643,22 +631,6 @@ const struct ubifs_lprops *ubifs_change_lp(struct ubifs_info *c,
+ }
+ 
+ /**
+- * ubifs_release_lprops - release lprops lock.
+- * @c: the UBIFS file-system description object
+- *
+- * This function has to be called after each 'ubifs_get_lprops()' call to
+- * unlock lprops.
+- */
+-void ubifs_release_lprops(struct ubifs_info *c)
+-{
+-	ubifs_assert(mutex_is_locked(&c->lp_mutex));
+-	ubifs_assert(c->lst.empty_lebs >= 0 &&
+-		     c->lst.empty_lebs <= c->main_lebs);
+-
+-	mutex_unlock(&c->lp_mutex);
+-}
+-
+-/**
+  * ubifs_get_lp_stats - get lprops statistics.
+  * @c: UBIFS file-system description object
+  * @st: return statistics
+diff --git a/fs/ubifs/misc.h b/fs/ubifs/misc.h
+index 4c12a92..4fa81d8 100644
+--- a/fs/ubifs/misc.h
++++ b/fs/ubifs/misc.h
+@@ -310,4 +310,31 @@ static inline int ubifs_tnc_lookup(struct ubifs_info *c,
+ 	return ubifs_tnc_locate(c, key, node, NULL, NULL);
+ }
+ 
++/**
++ * ubifs_get_lprops - get reference to LEB properties.
++ * @c: the UBIFS file-system description object
++ *
++ * This function locks lprops. Lprops have to be unlocked by
++ * 'ubifs_release_lprops()'.
++ */
++static inline void ubifs_get_lprops(struct ubifs_info *c)
++{
++	mutex_lock(&c->lp_mutex);
++}
++
++/**
++ * ubifs_release_lprops - release lprops lock.
++ * @c: the UBIFS file-system description object
++ *
++ * This function has to be called after each 'ubifs_get_lprops()' call to
++ * unlock lprops.
++ */
++static inline void ubifs_release_lprops(struct ubifs_info *c)
++{
++	ubifs_assert(mutex_is_locked(&c->lp_mutex));
++	ubifs_assert(c->lst.empty_lebs >= 0 &&
++		     c->lst.empty_lebs <= c->main_lebs);
++	mutex_unlock(&c->lp_mutex);
++}
++
+ #endif /* __UBIFS_MISC_H__ */
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 4b33cdb..d1d7403 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1590,12 +1590,10 @@ int ubifs_lpt_post_commit(struct ubifs_info *c);
+ void ubifs_lpt_free(struct ubifs_info *c, int wr_only);
+ 
+ /* lprops.c */
+-void ubifs_get_lprops(struct ubifs_info *c);
+ const struct ubifs_lprops *ubifs_change_lp(struct ubifs_info *c,
+ 					   const struct ubifs_lprops *lp,
+ 					   int free, int dirty, int flags,
+ 					   int idx_gc_cnt);
+-void ubifs_release_lprops(struct ubifs_info *c);
+ void ubifs_get_lp_stats(struct ubifs_info *c, struct ubifs_lp_stats *stats);
+ void ubifs_add_to_cat(struct ubifs_info *c, struct ubifs_lprops *lprops,
+ 		      int cat);
+-- 
+1.5.6.3
+

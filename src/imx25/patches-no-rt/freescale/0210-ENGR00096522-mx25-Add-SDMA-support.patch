@@ -1,0 +1,426 @@
+From 62bc869fafe76c85653838a333550d6999cf692e Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Thu, 23 Oct 2008 16:05:02 -0600
+Subject: [PATCH] ENGR00096522 mx25: Add SDMA support
+
+Add SDMA support for MX25 including SDMA scripts from the
+SS15 release.  The sdma_script_code.h file was derived from:
+http://compass.freescale.net/go/ss15/SS15_Release_Package_MAD.zip
+SS15_Release_Package_MAD/Ram Images/senna/sdma_script_code.h
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    2 +-
+ arch/arm/mach-mx25/clock.c              |    2 +-
+ arch/arm/mach-mx25/devices.c            |   67 +++++++++++++
+ arch/arm/mach-mx25/mm.c                 |    5 +
+ arch/arm/mach-mx25/sdma_script_code.h   |  159 +++++++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mx25.h         |   66 +++++++++++++-
+ 6 files changed, 298 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 2bf25cc..087c7ce 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -182,7 +182,7 @@ CONFIG_ARCH_MX25=y
+ CONFIG_MX25_OPTIONS=y
+ CONFIG_MACH_MX25_3DS=y
+ # CONFIG_MX25_DOZE_DURING_IDLE is not set
+-# CONFIG_MXC_SDMA_API is not set
++CONFIG_MXC_SDMA_API=y
+ 
+ #
+ # Device options
+diff --git a/arch/arm/mach-mx25/clock.c b/arch/arm/mach-mx25/clock.c
+index 34b43ee..538b584 100644
+--- a/arch/arm/mach-mx25/clock.c
++++ b/arch/arm/mach-mx25/clock.c
+@@ -1114,7 +1114,7 @@ struct clk scc_clk = {
+ 
+ struct clk sdma_clk[] = {
+ 	{
+-	 .name = "sdma_clk",
++	 .name = "sdma_ipg_clk",
+ 	 .id = 0,
+ 	 .parent = &ipg_clk,
+ 	 .enable = _clk_enable,
+diff --git a/arch/arm/mach-mx25/devices.c b/arch/arm/mach-mx25/devices.c
+index 7fcaabd..4c50e5f 100644
+--- a/arch/arm/mach-mx25/devices.c
++++ b/arch/arm/mach-mx25/devices.c
+@@ -23,6 +23,57 @@
+ #include <asm/arch/sdma.h>
+ 
+ #include "iomux.h"
++#include "sdma_script_code.h"
++
++void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
++{
++	sdma_script_addr->mxc_sdma_ap_2_ap_addr = ap_2_ap_ADDR;
++	sdma_script_addr->mxc_sdma_ap_2_bp_addr = -1;
++	sdma_script_addr->mxc_sdma_bp_2_ap_addr = -1;
++	sdma_script_addr->mxc_sdma_loopback_on_dsp_side_addr = -1;
++	sdma_script_addr->mxc_sdma_mcu_interrupt_only_addr = -1;
++
++	sdma_script_addr->mxc_sdma_firi_2_per_addr = -1;
++	sdma_script_addr->mxc_sdma_firi_2_mcu_addr = -1;
++	sdma_script_addr->mxc_sdma_per_2_firi_addr = -1;
++	sdma_script_addr->mxc_sdma_mcu_2_firi_addr = -1;
++
++	sdma_script_addr->mxc_sdma_uart_2_per_addr = uart_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_uart_2_mcu_addr = uart_2_mcu_ADDR;
++	sdma_script_addr->mxc_sdma_per_2_app_addr = per_2_app_ADDR;
++	sdma_script_addr->mxc_sdma_mcu_2_app_addr = mcu_2_app_ADDR;
++
++	sdma_script_addr->mxc_sdma_per_2_per_addr = -1;
++
++	sdma_script_addr->mxc_sdma_uartsh_2_per_addr = uartsh_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_uartsh_2_mcu_addr = uartsh_2_mcu_ADDR;
++	sdma_script_addr->mxc_sdma_per_2_shp_addr = per_2_shp_ADDR;
++	sdma_script_addr->mxc_sdma_mcu_2_shp_addr = mcu_2_shp_ADDR;
++
++	sdma_script_addr->mxc_sdma_ata_2_mcu_addr = ata_2_mcu_ADDR;
++	sdma_script_addr->mxc_sdma_mcu_2_ata_addr = mcu_2_ata_ADDR;
++
++	sdma_script_addr->mxc_sdma_app_2_per_addr = app_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_app_2_mcu_addr = app_2_mcu_ADDR;
++	sdma_script_addr->mxc_sdma_shp_2_per_addr = shp_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_shp_2_mcu_addr = shp_2_mcu_ADDR;
++
++	sdma_script_addr->mxc_sdma_mshc_2_mcu_addr = -1;
++	sdma_script_addr->mxc_sdma_mcu_2_mshc_addr = -1;
++
++	sdma_script_addr->mxc_sdma_spdif_2_mcu_addr = -1;
++	sdma_script_addr->mxc_sdma_mcu_2_spdif_addr = -1;
++
++	sdma_script_addr->mxc_sdma_asrc_2_mcu_addr = -1;
++
++	sdma_script_addr->mxc_sdma_dptc_dvfs_addr = -1;
++	sdma_script_addr->mxc_sdma_ext_mem_2_ipu_addr = ext_mem__ipu_ram_ADDR;
++	sdma_script_addr->mxc_sdma_descrambler_addr = -1;
++
++	sdma_script_addr->mxc_sdma_start_addr = (unsigned short *)sdma_code;
++	sdma_script_addr->mxc_sdma_ram_code_size = RAM_CODE_SIZE;
++	sdma_script_addr->mxc_sdma_ram_code_start_addr = RAM_CODE_START_ADDR;
++}
+ 
+ static void mxc_nop_release(struct device *dev)
+ {
+@@ -136,6 +187,14 @@ static struct platform_device mxcspi2_device = {
+ 
+ static inline void mxc_init_spi(void)
+ {
++#ifdef CONFIG_SPI_MXC_DMA
++	spba_take_ownership(SPBA_CSPI2, SPBA_MASTER_A | SPBA_MASTER_C);
++	spba_take_ownership(SPBA_CSPI3, SPBA_MASTER_A | SPBA_MASTER_C);
++#else
++	spba_take_ownership(SPBA_CSPI2, SPBA_MASTER_A);
++	spba_take_ownership(SPBA_CSPI3, SPBA_MASTER_A);
++#endif
++
+ #ifdef CONFIG_SPI_MXC_SELECT1
+ 	if (platform_device_register(&mxcspi1_device) < 0)
+ 		printk(KERN_ERR "Error: Registering the SPI Controller_1\n");
+@@ -303,6 +362,13 @@ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ 	 },
+ };
+ 
++static inline void mxc_init_ssi(void)
++{
++	/* SPBA configuration for SSI - SDMA and MCU are set */
++	spba_take_ownership(SPBA_SSI1, SPBA_MASTER_A | SPBA_MASTER_C);
++	spba_take_ownership(SPBA_SSI2, SPBA_MASTER_A | SPBA_MASTER_C);
++}
++
+ static struct platform_device mxc_dma_device = {
+ 	.name = "mxc_dma",
+ 	.id = 0,
+@@ -322,6 +388,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_spi();
+ 	mxc_init_i2c();
+ 	mxc_init_dma();
++	mxc_init_ssi();
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx25/mm.c b/arch/arm/mach-mx25/mm.c
+index e62768a..771844d 100644
+--- a/arch/arm/mach-mx25/mm.c
++++ b/arch/arm/mach-mx25/mm.c
+@@ -60,6 +60,11 @@ static struct map_desc mxc_io_desc[] __initdata = {
+ 	 .length = AIPS1_SIZE,
+ 	 .type = MT_NONSHARED_DEVICE},
+ 	{
++	 .virtual = SPBA0_BASE_ADDR_VIRT,
++	 .pfn = __phys_to_pfn(SPBA0_BASE_ADDR),
++	 .length = SPBA0_SIZE,
++	 .type = MT_NONSHARED_DEVICE},
++	{
+ 	 .virtual = AIPS2_BASE_ADDR_VIRT,
+ 	 .pfn = __phys_to_pfn(AIPS2_BASE_ADDR),
+ 	 .length = AIPS2_SIZE,
+diff --git a/arch/arm/mach-mx25/sdma_script_code.h b/arch/arm/mach-mx25/sdma_script_code.h
+new file mode 100644
+index 0000000..86789dd
+--- /dev/null
++++ b/arch/arm/mach-mx25/sdma_script_code.h
+@@ -0,0 +1,159 @@
++
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/*!
++ * @file sdma_script_code.h
++ * @brief This file contains functions of SDMA scripts code initialization
++ *
++ * The file was generated automatically. Based on sdma scripts library.
++ *
++ * @ingroup SDMA
++ */
++/************************************************************************
++
++			SDMA RELEASE LABEL: 	"SS15_SENNA"
++
++************************************************************************/
++
++#ifndef SDMA_SCRIPT_CODE_H
++#define SDMA_SCRIPT_CODE_H
++
++/*!
++ * SDMA ROM scripts start addresses and sizes
++ */
++#define start_ADDR	0
++#define start_SIZE	22
++
++#define core_ADDR	80
++#define core_SIZE	233
++
++#define common_ADDR	313
++#define common_SIZE	416
++
++#define ap_2_ap_ADDR	729
++#define ap_2_ap_SIZE	41
++
++#define app_2_mcu_ADDR	770
++#define app_2_mcu_SIZE	64
++
++#define mcu_2_app_ADDR	834
++#define mcu_2_app_SIZE	70
++
++#define uart_2_mcu_ADDR	904
++#define uart_2_mcu_SIZE	75
++
++#define shp_2_mcu_ADDR	979
++#define shp_2_mcu_SIZE	69
++
++#define mcu_2_shp_ADDR	1048
++#define mcu_2_shp_SIZE	72
++
++#define uartsh_2_mcu_ADDR	1120
++#define uartsh_2_mcu_SIZE	69
++
++#define app_2_per_ADDR	1189
++#define app_2_per_SIZE	66
++
++#define per_2_app_ADDR	1255
++#define per_2_app_SIZE	74
++
++#define per_2_shp_ADDR	1329
++#define per_2_shp_SIZE	78
++
++#define shp_2_per_ADDR	1407
++#define shp_2_per_SIZE	72
++
++#define mcu_2_ata_ADDR	1479
++#define mcu_2_ata_SIZE	81
++
++#define ata_2_mcu_ADDR	1560
++#define ata_2_mcu_SIZE	96
++
++#define loop_DMAs_routines_ADDR	1656
++#define loop_DMAs_routines_SIZE	227
++
++#define test_ADDR	1883
++#define test_SIZE	63
++
++#define signature_ADDR	1022
++#define signature_SIZE	1
++
++/*!
++ * SDMA RAM scripts start addresses and sizes
++ */
++#define ext_mem__ipu_ram_ADDR	6144
++#define ext_mem__ipu_ram_SIZE	123
++
++#define uart_2_per_ADDR	6267
++#define uart_2_per_SIZE	73
++
++#define uartsh_2_per_ADDR	6340
++#define uartsh_2_per_SIZE	67
++
++/*!
++ * SDMA RAM image start address and size
++ */
++#define RAM_CODE_START_ADDR		6144
++#define RAM_CODE_SIZE			263
++
++/*!
++ * Buffer that holds the SDMA RAM image
++ */
++__attribute__ ((__aligned__(4)))
++#ifndef CONFIG_XIP_KERNEL
++const
++#endif
++static const short sdma_code[] = {
++	0x0e70, 0x0611, 0x5616, 0xc18a, 0x7d2a, 0x5ade, 0x008e, 0xc19c,
++	0x7c26, 0x5be0, 0x5ef0, 0x5ce8, 0x0688, 0x08ff, 0x0011, 0x28ff,
++	0x00bc, 0x53f6, 0x05df, 0x7d0b, 0x6dc5, 0x03df, 0x7d03, 0x6bd5,
++	0xd84f, 0x982b, 0x6b05, 0xc6d8, 0x7e27, 0x7f29, 0x982b, 0x6d01,
++	0x03df, 0x7d05, 0x6bd5, 0xc702, 0x7e18, 0x7f1a, 0x982b, 0x6b05,
++	0xc678, 0x7e07, 0x7f06, 0x52de, 0x53e6, 0xc1a8, 0x7dd7, 0x0200,
++	0x9803, 0x0007, 0x6004, 0x680c, 0x53f6, 0x028e, 0x00a3, 0xc2ad,
++	0x048b, 0x0498, 0x0454, 0x068a, 0x982b, 0x0207, 0x680c, 0x6ddf,
++	0x0107, 0x68ff, 0x60d0, 0x9834, 0x0207, 0x68ff, 0x6d28, 0x0107,
++	0x6004, 0x680c, 0x9834, 0x0007, 0x68ff, 0x60d0, 0x9834, 0x0288,
++	0x03a5, 0x3b03, 0x3d03, 0x4d00, 0x7d0a, 0x0804, 0x00a5, 0x00da,
++	0x7d1a, 0x02a0, 0x7b01, 0x65d8, 0x7eee, 0x65ff, 0x7eec, 0x0804,
++	0x02d0, 0x7d11, 0x4b00, 0x7c0f, 0x008a, 0x3003, 0x6dcf, 0x6bdf,
++	0x0015, 0x0015, 0x7b02, 0x65d8, 0x0000, 0x7edd, 0x63ff, 0x7edb,
++	0x3a03, 0x6dcd, 0x6bdd, 0x008a, 0x7b02, 0x65d8, 0x0000, 0x7ed3,
++	0x65ff, 0x7ed1, 0x0006, 0xc23a, 0x57db, 0x52f3, 0x6ad5, 0x56fb,
++	0x028e, 0x1a94, 0x6ac3, 0x62c8, 0x0269, 0x7d1e, 0x1e94, 0x6ee3,
++	0x62d0, 0x5aeb, 0x62c8, 0x0248, 0x6ed3, 0x6ac8, 0x2694, 0x52eb,
++	0x6ad5, 0x6ee3, 0x62c8, 0x026e, 0x7d27, 0x6ac8, 0x7f23, 0x2501,
++	0x4d00, 0x7d26, 0x028e, 0x1a98, 0x6ac3, 0x62c8, 0x6ec3, 0x0260,
++	0x7df1, 0x62d0, 0xc2d1, 0x98c0, 0x6ee3, 0x008f, 0x2001, 0x00d5,
++	0x7d01, 0x008d, 0x05a0, 0x62c8, 0x026e, 0x7d0e, 0x6ac8, 0x7f0a,
++	0x2001, 0x7cf9, 0x6add, 0x7f06, 0x0000, 0x4d00, 0x7d09, 0xc251,
++	0x57db, 0x987f, 0x0007, 0x6aff, 0x62d0, 0xc2d1, 0x0458, 0x0454,
++	0x6add, 0x7ff8, 0xc261, 0x987c, 0xc230, 0xc23a, 0x57db, 0x52f3,
++	0x6ad5, 0x56fb, 0x028e, 0x1a94, 0x5202, 0x0269, 0x7d17, 0x1e94,
++	0x5206, 0x0248, 0x5a06, 0x2694, 0x5206, 0x026e, 0x7d26, 0x6ac8,
++	0x7f22, 0x2501, 0x4d00, 0x7d27, 0x028e, 0x1a98, 0x5202, 0x0260,
++	0x7df3, 0x6add, 0x7f18, 0x62d0, 0xc2d1, 0x9903, 0x008f, 0x2001,
++	0x00d5, 0x7d01, 0x008d, 0x05a0, 0x5206, 0x026e, 0x7d0e, 0x6ac8,
++	0x7f0a, 0x2001, 0x7cf9, 0x6add, 0x7f06, 0x0000, 0x4d00, 0x7d0b,
++	0xc251, 0x57db, 0x98c9, 0x0007, 0x6aff, 0x6add, 0x7ffc, 0x62d0,
++	0xc2d1, 0x0458, 0x0454, 0x6add, 0x7ff6, 0xc261, 0x98c6
++};
++#endif
+diff --git a/include/asm-arm/arch-mxc/mx25.h b/include/asm-arm/arch-mxc/mx25.h
+index f27d4c3..757ee67 100644
+--- a/include/asm-arm/arch-mxc/mx25.h
++++ b/include/asm-arm/arch-mxc/mx25.h
+@@ -54,6 +54,17 @@
+  */
+ #define MXC_UART_RXDMUX         0x0004
+ 
++/*!
++ * This option is used to set or clear the dspdma bit in the SDMA config
++ * register.
++ */
++#define MXC_SDMA_DSPDMA         0
++
++/*!
++ * Define this option to specify we are using the newer SDMA module.
++ */
++#define MXC_SDMA_V2
++
+ /*
+  * MX25 memory map:
+  *
+@@ -117,7 +128,7 @@
+  */
+ #define SPBA0_BASE_ADDR       0x50000000
+ #define SPBA0_BASE_ADDR_VIRT  0xFC100000
+-#define SPBA0_SIZE            SZ_256K
++#define SPBA0_SIZE            SZ_1M
+ 
+ #define CSPI3_BASE_ADDR         (SPBA0_BASE_ADDR + 0x00004000)
+ #define UART4_BASE_ADDR         (SPBA0_BASE_ADDR + 0x00008000)
+@@ -134,12 +145,65 @@
+ #define FEC_BASE_ADDR           (SPBA0_BASE_ADDR + 0x00038000)
+ #define SPBA_CTRL_BASE_ADDR     (SPBA0_BASE_ADDR + 0x0003C000)
+ 
++/*!
++ * defines for SPBA modules
++ */
++#define SPBA_CSPI3   (0x1 << 2)
++#define SPBA_UART4   (0x2 << 2)
++#define SPBA_UART3   (0x3 << 2)
++#define SPBA_CSPI2   (0x4 << 2)
++#define SPBA_SSI2    (0x5 << 2)
++#define SPBA_ESAI    (0x6 << 2)
++#define SPBA_ATA     (0x8 << 2)
++#define SPBA_SIM1    (0x9 << 2)
++#define SPBA_SIM2    (0xA << 2)
++#define SPBA_UART5   (0xB << 2)
++#define SPBA_ANALOG  (0xC << 2)
++#define SPBA_SSI1    (0xD << 2)
++#define SPBA_FEC     (0xE << 2)
++
++/*!
++ * Defines for modules using static and dynamic DMA channels
++ */
++#define MXC_DMA_CHANNEL_IRAM         30
++#define MXC_DMA_CHANNEL_UART1_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART1_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART2_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART2_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART3_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART3_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART4_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART4_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART5_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_UART5_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_MMC1         MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_SSI1_RX      MXC_DMA_DYNAMIC_CHANNEL
++#ifdef CONFIG_SDMA_IRAM
++#define MXC_DMA_CHANNEL_SSI1_TX      (MXC_DMA_CHANNEL_IRAM + 1)
++#else
++#define MXC_DMA_CHANNEL_SSI1_TX      MXC_DMA_DYNAMIC_CHANNEL
++#endif
++#define MXC_DMA_CHANNEL_SSI2_RX      MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_SSI2_TX      MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_CSPI1_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_CSPI1_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_CSPI2_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_CSPI2_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_CSPI3_RX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_CSPI3_TX     MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_ATA_RX       MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_ATA_TX       MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_MEMORY       MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_ESAI_RX      MXC_DMA_DYNAMIC_CHANNEL
++#define MXC_DMA_CHANNEL_ESAI_TX      MXC_DMA_DYNAMIC_CHANNEL
++
+ /*
+  * AIPS 2
+  */
+ #define AIPS2_BASE_ADDR       0x53F00000
+ #define AIPS2_BASE_ADDR_VIRT  0xFC200000
+ #define AIPS2_SIZE            SZ_1M
++
+ #define CCM_BASE_ADDR       (AIPS2_BASE_ADDR + 0x00080000)
+ #define GPT4_BASE_ADDR      (AIPS2_BASE_ADDR + 0x00084000)
+ #define GPT3_BASE_ADDR      (AIPS2_BASE_ADDR + 0x00088000)
+-- 
+1.5.4.4
+

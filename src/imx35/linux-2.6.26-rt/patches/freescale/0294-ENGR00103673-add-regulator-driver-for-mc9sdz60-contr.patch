@@ -1,0 +1,293 @@
+From c8e0374ca82ac3e461116deef6671d8e52fcc39b Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Fri, 26 Dec 2008 17:13:01 +0800
+Subject: [PATCH] ENGR00103673 add regulator driver for mc9sdz60 controled power supply
+
+add regulator driver for mc9sdz60 controled power supply
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/mxc/mcu_pmic/mc9sdz60.h           |    3 +
+ drivers/mxc/mcu_pmic/mcu_pmic_core.c      |    6 +-
+ drivers/regulator/Kconfig                 |    6 +
+ drivers/regulator/Makefile                |    2 +-
+ drivers/regulator/mc9sdz60/Makefile       |    1 +
+ drivers/regulator/mc9sdz60/reg-mc9sdz60.c |  203 +++++++++++++++++++++++++++++
+ 6 files changed, 218 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/mcu_pmic/mc9sdz60.h b/drivers/mxc/mcu_pmic/mc9sdz60.h
+index 0dca5df..aaad49c 100644
+--- a/drivers/mxc/mcu_pmic/mc9sdz60.h
++++ b/drivers/mxc/mcu_pmic/mc9sdz60.h
+@@ -67,5 +67,8 @@ int mc9sdz60_write_reg(u8 reg, u8 value);
+ int mc9sdz60_init(void);
+ void mc9sdz60_exit(void);
+ 
++extern int reg_mc9sdz60_probe(void);
++extern int reg_mc9sdz60_remove(void);
++
+ #endif	/* _MC9SDZ60_H_ */
+ 
+diff --git a/drivers/mxc/mcu_pmic/mcu_pmic_core.c b/drivers/mxc/mcu_pmic/mcu_pmic_core.c
+index 01bb0f3..6bff9ab 100644
+--- a/drivers/mxc/mcu_pmic/mcu_pmic_core.c
++++ b/drivers/mxc/mcu_pmic/mcu_pmic_core.c
+@@ -191,8 +191,10 @@ static int __init mcu_pmic_init(void)
+ 	if (is_max8660_present()) {
+ 		pr_info("max8660 is present, reg_max8660_probe\n");
+ 		reg_max8660_probe();
+-	} else
+-		pr_debug("max8660 is not present\n");
++	} else {
++		pr_debug("max8660 is not present, reg_mc9sdz60_probe\n");
++		reg_mc9sdz60_probe();
++	}
+ 	pr_info("mcu_pmic_init completed!\n");
+ 	return 0;
+ 
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index 279733b..931e5b3 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -41,6 +41,12 @@ config REGULATOR_MAX8660
+ 	depends on MXC_PMIC_MC9SDZ60
+ 	default y
+ 
++config REGULATOR_MC9SDZ60
++	tristate "mc9sdz60 Regulator Support"
++	depends on REGULATOR
++	depends on MXC_PMIC_MC9SDZ60
++	default y
++
+ config REGULATOR_WM8350
+ 	tristate "WM8350 Regulator Support"
+ 	depends on REGULATOR
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index 8e61c0c..056e6cf 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -13,4 +13,4 @@ obj-$(CONFIG_REGULATOR_WM8350)  += wm8350/
+ obj-$(CONFIG_REGULATOR_MAX8660) += max8660/
+ obj-$(CONFIG_REGULATOR_MC13892) += mc13892/
+ obj-$(CONFIG_REGULATOR_MC34704) += mc34704/
+-
++obj-$(CONFIG_REGULATOR_MC9SDZ60) += mc9sdz60/
+diff --git a/drivers/regulator/mc9sdz60/Makefile b/drivers/regulator/mc9sdz60/Makefile
+new file mode 100644
+index 0000000..2458715
+--- /dev/null
++++ b/drivers/regulator/mc9sdz60/Makefile
+@@ -0,0 +1 @@
++obj-$(CONFIG_REGULATOR_MC9SDZ60) += reg-mc9sdz60.o
+diff --git a/drivers/regulator/mc9sdz60/reg-mc9sdz60.c b/drivers/regulator/mc9sdz60/reg-mc9sdz60.c
+new file mode 100644
+index 0000000..809b01a
+--- /dev/null
++++ b/drivers/regulator/mc9sdz60/reg-mc9sdz60.c
+@@ -0,0 +1,203 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/bitops.h>
++#include <linux/err.h>
++#include <linux/regulator/regulator-platform.h>
++#include <linux/regulator/regulator-drv.h>
++#include <asm/ioctl.h>
++#include <asm/arch-mxc/pmic_status.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/mcu_max8660-bus.h>
++
++enum {
++	MC9SDZ60_LCD,
++	MC9SDZ60_WIFI,
++	MC9SDZ60_HDD,
++	MC9SDZ60_GPS,
++	MC9SDZ60_SPKR,
++} MC9SDZ60_regulator;
++
++#define NUM_MC9SDZ60_REGULATORS 5
++
++/* lcd */
++static int mc9sdz60_lcd_enable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 6, 1);
++}
++
++static int mc9sdz60_lcd_disable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 6, 0);
++}
++
++static struct regulator_ops mc9sdz60_lcd_ops = {
++	.enable = mc9sdz60_lcd_enable,
++	.disable = mc9sdz60_lcd_disable,
++};
++
++/* wifi */
++static int mc9sdz60_wifi_enable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 5, 1);
++}
++
++static int mc9sdz60_wifi_disable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 5, 0);
++}
++
++static struct regulator_ops mc9sdz60_wifi_ops = {
++	.enable = mc9sdz60_wifi_enable,
++	.disable = mc9sdz60_wifi_disable,
++};
++
++/* hdd */
++static int mc9sdz60_hdd_enable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 4, 1);
++}
++
++static int mc9sdz60_hdd_disable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 4, 0);
++}
++
++static struct regulator_ops mc9sdz60_hdd_ops = {
++	.enable = mc9sdz60_hdd_enable,
++	.disable = mc9sdz60_hdd_disable,
++};
++
++/* gps */
++static int mc9sdz60_gps_enable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 0, 1);
++}
++
++static int mc9sdz60_gps_disable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 0, 0);
++}
++
++static struct regulator_ops mc9sdz60_gps_ops = {
++	.enable = mc9sdz60_gps_enable,
++	.disable = mc9sdz60_gps_disable,
++};
++
++/* speaker */
++static int mc9sdz60_speaker_enable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 1);
++}
++
++static int mc9sdz60_speaker_disable(struct regulator *reg)
++{
++	return pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 0);
++}
++
++static struct regulator_ops mc9sdz60_speaker_ops = {
++	.enable = mc9sdz60_speaker_enable,
++	.disable = mc9sdz60_speaker_disable,
++};
++
++struct mc9sdz60_regulator {
++	struct regulator regulator;
++};
++
++static struct mc9sdz60_regulator
++    reg_mc9sdz60[NUM_MC9SDZ60_REGULATORS] = {
++	{
++	 .regulator = {
++		       .name = "LCD",
++		       .id = MC9SDZ60_LCD,
++		       .ops = &mc9sdz60_lcd_ops,
++		       },
++	 },
++	{
++	 .regulator = {
++		       .name = "WIFI",
++		       .id = MC9SDZ60_WIFI,
++		       .ops = &mc9sdz60_wifi_ops,
++		       },
++	 },
++	{
++	 .regulator = {
++		       .name = "HDD",
++		       .id = MC9SDZ60_HDD,
++		       .ops = &mc9sdz60_hdd_ops,
++		       },
++	 },
++	{
++	 .regulator = {
++		       .name = "GPS",
++		       .id = MC9SDZ60_GPS,
++		       .ops = &mc9sdz60_gps_ops,
++		       },
++
++	 },
++	{
++	 .regulator = {
++		       .name = "SPKR",
++		       .id = MC9SDZ60_SPKR,
++		       .ops = &mc9sdz60_speaker_ops,
++		       },
++
++	 },
++
++};
++
++
++/*
++ * Init and Exit
++ */
++int reg_mc9sdz60_probe(void)
++{
++	int ret11 = 0;
++	int i = 0;
++
++	for (i = 0; i < ARRAY_SIZE(reg_mc9sdz60); i++) {
++		ret11 = regulator_register(&reg_mc9sdz60[i].regulator);
++		regulator_set_platform_constraints(reg_mc9sdz60[i].regulator.
++						   name,
++						   reg_mc9sdz60[i].regulator.
++						   constraints);
++		if (ret11 < 0) {
++			i--;
++			for (; i >= 0; i--)
++				regulator_unregister(
++					&reg_mc9sdz60[i].regulator);
++
++			return ret11;
++		}
++
++	}
++	return 0;
++}
++EXPORT_SYMBOL(reg_mc9sdz60_probe);
++
++int reg_mc9sdz60_remove(void)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(reg_mc9sdz60); i++)
++		regulator_unregister(&reg_mc9sdz60[i].regulator);
++	return 0;
++}
++EXPORT_SYMBOL(reg_mc9sdz60_remove);
++
++
+-- 
+1.5.4.4
+

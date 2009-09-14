@@ -1,0 +1,3262 @@
+From 9b02bcf964e5df7efee11ae9fb9c5023097e9f3b Mon Sep 17 00:00:00 2001
+From: Laura Lawrence <Laura.Lawrence@freescale.com>
+Date: Tue, 22 Jan 2008 15:30:16 -0600
+Subject: [PATCH] ENGR00060848 Add imx37 audio playback support
+
+imx37 driver based on ASoC + Wolfson WM8350 AudioPlus support
+http://opensource.wolfsonmicro.com/node/8
+---
+ arch/arm/configs/imx37_3stack_defconfig      |   61 ++-
+ arch/arm/mach-mx37/Makefile                  |    5 +-
+ arch/arm/mach-mx37/dma.c                     |    4 +-
+ arch/arm/mach-mx37/mx37_3stack.c             |   14 -
+ arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c |  496 +++++++++++++++
+ drivers/pmic/Makefile                        |    5 +-
+ drivers/pmic/pmic-wm8350-i2c.c               |  167 +++++
+ sound/soc/Kconfig                            |    1 +
+ sound/soc/Makefile                           |    2 +-
+ sound/soc/imx/Kconfig                        |   21 +
+ sound/soc/imx/Makefile                       |   10 +
+ sound/soc/imx/imx-pcm.c                      |  549 ++++++++++++++++
+ sound/soc/imx/imx-pcm.h                      |   67 ++
+ sound/soc/imx/imx-ssi.c                      |  862 ++++++++++++++++++++++++++
+ sound/soc/imx/imx-ssi.h                      |  220 +++++++
+ sound/soc/imx/imx37-3stack-wm8350.c          |  600 ++++++++++++++++++
+ 16 files changed, 3062 insertions(+), 22 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index bfa9a02..b6a63bb 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -381,6 +381,22 @@ CONFIG_FW_LOADER=m
+ #
+ CONFIG_CONNECTOR=y
+ CONFIG_PROC_EVENTS=y
++
++#
++# Power Management IC's
++#
++CONFIG_PMIC=y
++CONFIG_PMIC_DEBUG=n
++CONFIG_PMIC_WM8350=y
++
++#
++# WM8350 Config Mode
++#
++CONFIG_PMIC_WM8350_MODE_0=y
++# CONFIG_PMIC_WM8350_MODE_1 is not set
++# CONFIG_PMIC_WM8350_MODE_2 is not set
++# CONFIG_PMIC_WM8350_MODE_3 is not set
++
+ CONFIG_MTD=y
+ # CONFIG_MTD_DEBUG is not set
+ # CONFIG_MTD_CONCAT is not set
+@@ -808,7 +824,50 @@ CONFIG_DUMMY_CONSOLE=y
+ #
+ # Sound
+ #
+-# CONFIG_SOUND is not set
++CONFIG_SOUND=y
++
++#
++# Advanced Linux Sound Architecture
++#
++CONFIG_SND=y
++CONFIG_SND_TIMER=y
++CONFIG_SND_PCM=y
++# CONFIG_SND_SEQUENCER is not set
++CONFIG_SND_OSSEMUL=y
++CONFIG_SND_MIXER_OSS=y
++CONFIG_SND_PCM_OSS=y
++CONFIG_SND_PCM_OSS_PLUGINS=y
++# CONFIG_SND_DYNAMIC_MINORS is not set
++CONFIG_SND_SUPPORT_OLD_API=y
++CONFIG_SND_VERBOSE_PROCFS=y
++# CONFIG_SND_VERBOSE_PRINTK is not set
++# CONFIG_SND_DEBUG is not set
++
++#
++# Generic devices
++#
++# CONFIG_SND_DUMMY is not set
++# CONFIG_SND_MTPAV is not set
++# CONFIG_SND_SERIAL_U16550 is not set
++# CONFIG_SND_MPU401 is not set
++
++#
++# ALSA ARM devices
++#
++
++#
++# System on Chip audio support
++#
++CONFIG_SND_SOC=y
++CONFIG_SND_MXC_SOC=y
++CONFIG_SND_MXC_SOC_SSI=y
++CONFIG_SND_SOC_IMX37_3STACK_WM8350=y
++CONFIG_SND_SOC_WM8350=y
++
++#
++# Open Sound System
++#
++# CONFIG_SOUND_PRIME is not set
+ 
+ #
+ # HID Devices
+diff --git a/arch/arm/mach-mx37/Makefile b/arch/arm/mach-mx37/Makefile
+index 15aba47..bfeaa9b 100644
+--- a/arch/arm/mach-mx37/Makefile
++++ b/arch/arm/mach-mx37/Makefile
+@@ -4,7 +4,8 @@
+ 
+ # Object file lists.
+ 
+-obj-y			:= system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o
++obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o
+ 
+-obj-$(CONFIG_MACH_MX37_3DS)	+= mx37_3stack.o mx37_3stack_gpio.o
++obj-$(CONFIG_MACH_MX37_3DS) += mx37_3stack.o mx37_3stack_gpio.o
+ obj-$(CONFIG_SPI_MXC) += mx37_3stack_cpld.o
++obj-$(CONFIG_PMIC_WM8350) += mx37_3stack_pmic_wm8350.o
+diff --git a/arch/arm/mach-mx37/dma.c b/arch/arm/mach-mx37/dma.c
+index 548fb9c..1ceb0ca 100644
+--- a/arch/arm/mach-mx37/dma.c
++++ b/arch/arm/mach-mx37/dma.c
+@@ -1,5 +1,5 @@
+ /*
+- *  Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -21,7 +21,7 @@
+ #define MXC_SSI_TX1_REG           0x4
+ #define MXC_SSI_RX0_REG           0x8
+ #define MXC_SSI_RX1_REG           0xC
+-#define MXC_SSI_TXFIFO_WML        0x4
++#define MXC_SSI_TXFIFO_WML        0x2
+ #define MXC_SSI_RXFIFO_WML        0x6
+ 
+ typedef struct mxc_sdma_info_entry_s {
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 66f9b37..f6e24b2 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -204,19 +204,6 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ #endif
+ }
+ 
+-/*! PMIC */
+-static struct platform_device pmic_device = {
+-	.name = "wm8350-imx37-3stack",
+-	.id = 0,
+-};
+-
+-static inline void mxc_init_pmic(void)
+-{
+-	if (platform_device_register(&pmic_device) < 0)
+-		printk(KERN_ERR "Error: Registering the PMIC.\n");
+-
+-}
+-
+ /*!
+  * Board specific initialization.
+  */
+@@ -229,7 +216,6 @@ static void __init mxc_board_init(void)
+ 	spi_register_board_info(mxc_spi_board_info,
+ 				ARRAY_SIZE(mxc_spi_board_info));
+ 	mxc_init_nand_mtd();
+-	mxc_init_pmic();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+new file mode 100644
+index 0000000..22b3f80
+--- /dev/null
++++ b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+@@ -0,0 +1,496 @@
++/*
++ * mx37-3stack-pmic-wm8350.c  --  i.MX37 3STACK Driver for Wolfson WM8350 PMIC
++ *
++ * Copyright 2007 Wolfson Microelectronics PLC.
++ * Copyright 2008 Freescale Semiconductor Inc.
++ *
++ * Author: Liam Girdwood
++ *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
++ *
++ *  This program is free software; you can redistribute  it and/or modify it
++ *  under  the terms of  the GNU General  Public License as published by the
++ *  Free Software Foundation;  either version 2 of the  License, or (at your
++ *  option) any later version.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/bitops.h>
++#include <linux/platform_device.h>
++#include <linux/i2c.h>
++#include <linux/err.h>
++#include <linux/pmic/wm8350.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/leds.h>
++#include <linux/fb.h>
++#include <linux/pmic.h>
++
++#include <asm/arch/dma.h>
++#include <asm/arch/spba.h>
++#include <asm/arch/clock.h>
++#include "board-mx37_3stack.h"
++
++/*
++ * Set to 1 when testing battery that is connected otherwise spuriuos debug
++ */
++#define BATTERY 0
++
++extern const char imx37_3stack_audio[32];
++extern struct led_trigger *imx32ads_led_trigger;
++
++/* program WM8350 so board will boot from WM8350 supplies */
++static int program = 0;
++module_param(program, int, 0);
++MODULE_PARM_DESC(program, "program initial DCDC & LDO values");
++
++/*
++ * Program WM8350 with initial DCDC & LDO values.
++ */
++static int program_wm8350(struct wm8350 *wm8350)
++{
++	struct wm8350_pmic *pmic = &wm8350->pmic;
++	u16 val;
++
++	wm8350_reg_unlock(wm8350);
++
++	/* DCDC1 @ 1.6 V  CPU */
++	wm8350_dcdc_set_voltage(pmic, WM8350_DCDC_1, 1600);
++	wm8350_dcdc_set_slot(pmic, WM8350_DCDC_1, 1, 0,
++			     WM8350_DC1_ERRACT_SHUTDOWN_SYS);
++	wm8350_dcdc_enable(pmic, WM8350_DCDC_1, 1);
++
++	/* DCDC3 @ 2.8 V  Peripherals & IO */
++	wm8350_dcdc_set_voltage(pmic, WM8350_DCDC_3, 2800);
++	wm8350_dcdc_set_slot(pmic, WM8350_DCDC_3, 1, 0, WM8350_DC1_ERRACT_NONE);
++	wm8350_dcdc_enable(pmic, WM8350_DCDC_3, 1);
++
++	/* DCDC4 @ 1.8 V Peripherals & IO */
++	wm8350_dcdc_set_voltage(pmic, WM8350_DCDC_4, 1800);
++	wm8350_dcdc_set_slot(pmic, WM8350_DCDC_4, 1, 0, WM8350_DC1_ERRACT_NONE);
++	wm8350_dcdc_enable(pmic, WM8350_DCDC_4, 1);
++
++	/* DCDC6 @ 1.8 V DDR Memory */
++	wm8350_dcdc_set_voltage(pmic, WM8350_DCDC_6, 1800);
++	wm8350_dcdc_set_slot(pmic, WM8350_DCDC_6, 1, 0, WM8350_DC1_ERRACT_NONE);
++	wm8350_dcdc_enable(pmic, WM8350_DCDC_6, 1);
++
++	/* DCDC2 @  OFF - 5.5V SW3 output */
++	wm8350_dcdc_set_slot(pmic, WM8350_DCDC_2, 1, 0,
++			     WM8350_DC1_ERRACT_SHUTDOWN_CONV);
++	wm8350_dcdc_enable(pmic, WM8350_DCDC_2, 0);
++
++	/* DCDC5 @  OFF  - White LEDS */
++	wm8350_dcdc_set_slot(pmic, WM8350_DCDC_5, 1, 1,
++			     WM8350_DC1_ERRACT_SHUTDOWN_CONV);
++	wm8350_dcdc_enable(pmic, WM8350_DCDC_5, 0);
++
++	/* LDO1 @ 2.8 V Peripherals MMC & Camera */
++	wm8350_ldo_set_voltage(pmic, WM8350_LDO_1, 2800);
++	wm8350_ldo_set_slot(pmic, WM8350_LDO_1, 1, 0);
++	wm8350_ldo_enable(pmic, WM8350_LDO_1, 1);
++
++	/* LDO2 @ 3.3 V */
++	wm8350_ldo_set_voltage(pmic, WM8350_LDO_2, 3300);
++	wm8350_ldo_set_slot(pmic, WM8350_LDO_2, 1, 0);
++	wm8350_ldo_enable(pmic, WM8350_LDO_2, 1);
++
++	/* LDO3 @ 1.5 V VDIG, VGEN */
++	wm8350_ldo_set_voltage(pmic, WM8350_LDO_3, 1500);
++	wm8350_ldo_set_slot(pmic, WM8350_LDO_3, 1, 0);
++	wm8350_ldo_enable(pmic, WM8350_LDO_3, 1);
++
++	/* LDO4 @ 2.6 V Transceivers */
++	wm8350_ldo_set_voltage(pmic, WM8350_LDO_4, 2600);
++	wm8350_ldo_set_slot(pmic, WM8350_LDO_4, 1, 0);
++	wm8350_ldo_enable(pmic, WM8350_LDO_4, 1);
++
++	val = wm8350_reg_read(wm8350, WM8350_INTERFACE_CONTROL) &
++	    ~(WM8350_RECONFIG_AT_ON | WM8350_USE_DEV_PINS |
++	      WM8350_SPI_3WIRE | WM8350_SPI_4WIRE);
++	wm8350_reg_write(wm8350, WM8350_INTERFACE_CONTROL,
++			 val | WM8350_CONFIG_DONE | WM8350_AUTOINC);
++
++	/* dummy read required when changing Sec -> Pri I2C */
++	printk("dummy read %x\n", wm8350_reg_read(wm8350, 176));
++	printk("now press button and then swap jumpers if leds work\n");
++	return 0;
++}
++
++#ifdef NOT_PORTED_TO_IMX37_3STACK_YET
++
++static void imx37_3stack_switch_handler(struct wm8350 *wm8350, int irq)
++{
++	printk("switch pressed %d\n", irq);
++}
++#endif
++static struct platform_device *imx_snd_device;
++
++/* i.MX CPU voltage scaling */
++struct pm_circuit imx_cpu_circuit = {
++	.name = "imx_cpu",
++	.regulator_id = WM8350_DCDC_1,
++	.load = PM_LOAD_CPU,
++	.mV_range = {
++		     .dmin = 1400,
++		     .dmax = 1600,
++		     },
++};
++
++/* i.MX 3stack System IO */
++struct pm_circuit imx_io_hi_circuit = {
++	.name = "imx_io_hi",
++	.regulator_id = WM8350_DCDC_3,
++	.load = PM_LOAD_SYS_IO,
++	.mV_range = {
++		     .sval = 2700,
++		     },
++};
++
++/* i.MX 3stack System IO */
++struct pm_circuit imx_io_lo_circuit = {
++	.name = "imx_io_lo",
++	.regulator_id = WM8350_DCDC_4,
++	.load = PM_LOAD_SYS_IO,
++	.mV_range = {
++		     .sval = 1800,
++		     },
++};
++
++/* i.MX 3stack System IO */
++struct pm_circuit imx_io_gen_circuit = {
++	.name = "imx_io_gen",
++	.regulator_id = WM8350_LDO_3,
++	.load = PM_LOAD_SYS_IO,
++	.mV_range = {
++		     .sval = 1500,
++		     },
++};
++
++/* i.MX 3stack DDR RAM */
++struct pm_circuit imx_mem_circuit = {
++	.name = "imx_memory",
++	.regulator_id = WM8350_DCDC_6,
++	.load = PM_LOAD_MEM,
++	.mV_range = {
++		     .sval = 1800,
++		     },
++};
++
++/* i.MX 3stack & MMC & MStick */
++struct pm_circuit imx_vcam_circuit = {
++	.name = "imx_vcam",
++	.regulator_id = WM8350_LDO_1,
++	.load = PM_LOAD_MMC | PM_LOAD_MSTICK | PM_LOAD_CAMERA,
++	.mV_range = {
++		     .sval = 2800,
++		     },
++};
++
++/* i.MX 3stack SIM Card */
++struct pm_circuit imx_vsim_circuit = {
++	.name = "imx_vsim",
++	.regulator_id = WM8350_LDO_2,
++	.load = PM_LOAD_SIM | PM_LOAD_AUDIO,
++	.mV_range = {
++		     .sval = 3300,
++		     },
++};
++
++/* i.MX 3stack Tranceivers and other peripherals */
++struct pm_circuit imx_transceiver_circuit = {
++	.name = "imx_transceiver",
++	.regulator_id = WM8350_LDO_4,
++	.load = PM_LOAD_SERIAL | PM_LOAD_USB | PM_LOAD_IRDA | PM_LOAD_LCD |
++	    PM_LOAD_TV | PM_LOAD_DISK | PM_LOAD_MMC,
++	.mV_range = {
++		     .sval = 2800,
++		     },
++};
++
++void wm8350_free(struct wm8350 *wm8350)
++{
++#if BATTERY
++	struct wm8350_power *power = &wm8350->power;
++#endif
++
++	pm_unregister_circuit(&imx_cpu_circuit);
++	pm_unregister_circuit(&imx_io_hi_circuit);
++	pm_unregister_circuit(&imx_io_lo_circuit);
++	pm_unregister_circuit(&imx_io_gen_circuit);
++	pm_unregister_circuit(&imx_mem_circuit);
++	pm_unregister_circuit(&imx_vcam_circuit);
++	pm_unregister_circuit(&imx_vsim_circuit);
++	pm_unregister_circuit(&imx_transceiver_circuit);
++#ifdef NOT_PORTED_TO_IMX37
++	/* make sure DCDC1 is back at 1.6 volts so we can safely reboot */
++	/* DCDC1 @ 1.6 V */
++	wm8350_dcdc_set_voltage(&wm8350->pmic, WM8350_DCDC_1, 1600);
++	wm8350_dcdc_set_slot(&wm8350->pmic, WM8350_DCDC_1, 1, 0,
++			     WM8350_DC1_ERRACT_SHUTDOWN_SYS);
++	wm8350_dcdc_enable(&wm8350->pmic, WM8350_DCDC_1, 1);
++#endif
++	wm8350_mask_irq(wm8350, WM8350_IRQ_GPIO(7));
++	wm8350_free_irq(wm8350, WM8350_IRQ_GPIO(7));
++	wm8350_mask_irq(wm8350, WM8350_IRQ_WKUP_ONKEY);
++	wm8350_free_irq(wm8350, WM8350_IRQ_WKUP_ONKEY);
++#if BATTERY
++	wm8350_charger_enable(power, 0);
++	wm8350_fast_charger_enable(power, 0);
++#endif
++	if (wm8350->nirq)
++		free_irq(wm8350->nirq, wm8350);
++
++	flush_scheduled_work();
++#ifdef MXC_DPTC
++	mxc_pmic_unregister(&wm8350->pmic);
++#endif
++	if (wm8350->pmic.dev.is_registered)
++		device_unregister(&wm8350->pmic.dev);
++	if (wm8350->rtc.dev.is_registered)
++		device_unregister(&wm8350->rtc.dev);
++	if (wm8350->led.dev.is_registered)
++		device_unregister(&wm8350->led.dev);
++	if (wm8350->wdg.dev.is_registered)
++		device_unregister(&wm8350->wdg.dev);
++	if (wm8350->power.dev.is_registered)
++		device_unregister(&wm8350->power.dev);
++	if (wm8350->backlight.dev.is_registered)
++		device_unregister(&wm8350->backlight.dev);
++	platform_device_unregister(imx_snd_device);
++}
++
++#if BATTERY
++static int wm8350_init_battery(struct wm8350 *wm8350)
++{
++	struct wm8350_power *power = &wm8350->power;
++	struct wm8350_charger_policy *policy = &power->policy;
++
++	policy->eoc_mA = WM8350_CHG_EOC_mA(10);
++	policy->charge_mV = WM8350_CHG_4_05V;
++	policy->fast_limit_mA = WM8350_CHG_FAST_LIMIT_mA(400);
++	policy->charge_timeout = WM8350_CHG_TIME_MIN(60);
++	policy->trickle_start_mV = WM8350_CHG_TRICKLE_3_1V;
++	policy->trickle_charge_mA = WM8350_CHG_TRICKLE_50mA;
++
++	wm8350_charger_enable(power, 1);
++	wm8350_fast_charger_enable(power, 1);
++	return 0;
++}
++#endif
++
++#ifdef NOT_PORTED_TO_IMX37_3STACK_YET
++static int config_gpios(struct wm8350 *wm8350)
++{
++	/* power on */
++	wm8350_gpio_config(wm8350, 0, WM8350_GPIO_DIR_IN,
++			   WM8350_GPIO0_PWR_ON_IN, WM8350_GPIO_ACTIVE_LOW,
++			   WM8350_GPIO_PULL_UP, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_ON);
++
++	/* Sw3 --> PWR_OFF_GPIO3 */
++	/* lg - TODO: GPIO1_0 to be pulled down */
++	wm8350_gpio_config(wm8350, 3, WM8350_GPIO_DIR_IN,
++			   WM8350_GPIO3_PWR_OFF_IN, WM8350_GPIO_ACTIVE_HIGH,
++			   WM8350_GPIO_PULL_DOWN, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_ON);
++
++	/* MR or MEMRST ????? */
++	wm8350_gpio_config(wm8350, 4, WM8350_GPIO_DIR_IN,
++			   WM8350_GPIO4_MR_IN, WM8350_GPIO_ACTIVE_HIGH,
++			   WM8350_GPIO_PULL_DOWN, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_OFF);
++
++	/* Hibernate -- needs level but GPIO5 is edge so we
++	 * will only wake with PWR_ON switch atm */
++	wm8350_gpio_config(wm8350, 5, WM8350_GPIO_DIR_IN,
++			   WM8350_GPIO5_HIBERNATE_IN, WM8350_GPIO_ACTIVE_HIGH,
++			   WM8350_GPIO_PULL_DOWN, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_OFF);
++
++	/* SDOUT */
++	wm8350_gpio_config(wm8350, 6, WM8350_GPIO_DIR_OUT,
++			   WM8350_GPIO6_SDOUT_OUT, WM8350_GPIO_ACTIVE_HIGH,
++			   WM8350_GPIO_PULL_NONE, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_OFF);
++
++	/* GPIO switch SW2 */
++	wm8350_gpio_config(wm8350, 7, WM8350_GPIO_DIR_IN, WM8350_GPIO7_GPIO_IN,
++			   WM8350_GPIO_ACTIVE_HIGH, WM8350_GPIO_PULL_DOWN,
++			   WM8350_GPIO_INVERT_OFF, WM8350_GPIO_DEBOUNCE_ON);
++	wm8350_register_irq(wm8350, WM8350_IRQ_GPIO(7),
++			    imx37_3stack_switch_handler);
++	wm8350_unmask_irq(wm8350, WM8350_IRQ_GPIO(7));
++
++	/* PWR_FAIL */
++	wm8350_gpio_config(wm8350, 8, WM8350_GPIO_DIR_OUT,
++			   WM8350_GPIO8_VCC_FAULT_OUT, WM8350_GPIO_ACTIVE_LOW,
++			   WM8350_GPIO_PULL_NONE, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_OFF);
++
++	/* BATT Fault */
++	wm8350_gpio_config(wm8350, 9, WM8350_GPIO_DIR_OUT,
++			   WM8350_GPIO9_BATT_FAULT_OUT, WM8350_GPIO_ACTIVE_LOW,
++			   WM8350_GPIO_PULL_NONE, WM8350_GPIO_INVERT_OFF,
++			   WM8350_GPIO_DEBOUNCE_OFF);
++
++	return 0;
++}
++
++static int config_hibernate(struct wm8350 *wm8350)
++{
++	struct wm8350_pmic *pmic = &wm8350->pmic;
++
++	/* dont assert RTS when hibernating */
++	wm8350_set_bits(wm8350, WM8350_SYSTEM_HIBERNATE, WM8350_RST_HIB_MODE);
++
++	/* set up hibernate voltages -- needs refining */
++	wm8350_dcdc_set_image_voltage(pmic, WM8350_DCDC_1, 1400,	/*1200, *//* 1.0v for mx32 */
++				      WM8350_DCDC_HIB_MODE_IMAGE,
++				      WM8350_DCDC_HIB_SIG_REG);
++	wm8350_dcdc_set_image_voltage(pmic, WM8350_DCDC_3, 2800,
++				      WM8350_DCDC_HIB_MODE_IMAGE,
++				      WM8350_DCDC_HIB_SIG_REG);
++	wm8350_dcdc_set_image_voltage(pmic, WM8350_DCDC_4, 1800,
++				      WM8350_DCDC_HIB_MODE_IMAGE,
++				      WM8350_DCDC_HIB_SIG_REG);
++	wm8350_dcdc_set_image_voltage(pmic, WM8350_DCDC_6, 1800,
++				      WM8350_DCDC_HIB_MODE_IMAGE,
++				      WM8350_DCDC_HIB_SIG_REG);
++	wm8350_ldo_set_image_voltage(pmic, WM8350_LDO_1, 2800,
++				     WM8350_LDO_HIB_MODE_IMAGE,
++				     WM8350_LDO_HIB_SIG_REG);
++	wm8350_ldo_set_image_voltage(pmic, WM8350_LDO_2, 3300,
++				     WM8350_LDO_HIB_MODE_IMAGE,
++				     WM8350_LDO_HIB_SIG_REG);
++	wm8350_ldo_set_image_voltage(pmic, WM8350_LDO_3, 1500,
++				     WM8350_LDO_HIB_MODE_IMAGE,
++				     WM8350_LDO_HIB_SIG_REG);
++	wm8350_ldo_set_image_voltage(pmic, WM8350_LDO_4, 2500,
++				     WM8350_LDO_HIB_MODE_IMAGE,
++				     WM8350_LDO_HIB_MODE_DIS);
++	return 0;
++}
++#endif				//NOT_PORTED_TO_IMX37_3STACK_YET
++
++int wm8350_init(struct wm8350 *wm8350)
++{
++	int ret;
++
++	if (program) {
++		/* once only...
++		 * or if VRTC batt discharges and there is no PIC */
++		program_wm8350(wm8350);
++		return -EBUSY;
++	}
++
++	/* configure system power circuits */
++	pm_register_circuit(&imx_cpu_circuit);
++	pm_register_circuit(&imx_io_hi_circuit);
++	pm_register_circuit(&imx_io_lo_circuit);
++	pm_register_circuit(&imx_io_gen_circuit);
++	pm_register_circuit(&imx_mem_circuit);
++	pm_register_circuit(&imx_vcam_circuit);
++	pm_register_circuit(&imx_vsim_circuit);
++	pm_register_circuit(&imx_transceiver_circuit);
++
++	/* backlight properties */
++	wm8350->backlight.props.max_brightness = 10;
++	wm8350->backlight.props.power = FB_BLANK_UNBLANK;
++	wm8350->backlight.props.brightness = 5;
++	wm8350->backlight.dcdc = WM8350_DCDC_2;
++	wm8350->backlight.isink = WM8350_ISINK_B;
++	wm8350->backlight.retries = 5;
++
++	/* LED properties */
++	wm8350->led.dcdc = WM8350_DCDC_5;
++	wm8350->led.isink = WM8350_ISINK_A;
++	wm8350->led.retries = 5;
++	wm8350->led.half_value = 986376;
++	wm8350->led.full_value = 1972752;
++
++	/* RTC periodic irq :-
++	 * If we had a dedicated RTC PER IRQ pin we could add it here. */
++	wm8350->rtc.per_irq = 0;
++
++	/* now register all i.MX37 3STACK WM8350 client devices */
++	wm8350_device_register_pmic(wm8350);
++#ifdef NOT_PORTED_TO_IMX37
++	wm8350_device_register_rtc(wm8350);
++	wm8350_device_register_wdg(wm8350);
++	wm8350_device_register_led(wm8350);
++	wm8350_device_register_power(wm8350);
++	wm8350_device_register_backlight(wm8350);
++	/* make sure DCDC1 is back at 1.6 volts so we can safely work */
++	/* DCDC1 @ 1.6 V */
++	wm8350_dcdc_set_voltage(&wm8350->pmic, WM8350_DCDC_1, 1600);
++	wm8350_dcdc_set_slot(&wm8350->pmic, WM8350_DCDC_1, 1, 0,
++			     WM8350_DC1_ERRACT_SHUTDOWN_SYS);
++	wm8350_dcdc_enable(&wm8350->pmic, WM8350_DCDC_1, 1);
++#endif
++	/* register sound */
++	printk("Registering imx37_snd_device");
++	imx_snd_device = platform_device_alloc(imx37_3stack_audio, -1);
++	if (!imx_snd_device) {
++		ret = -ENOMEM;
++		goto err;
++	}
++	platform_set_drvdata(imx_snd_device, &wm8350->audio);
++	ret = platform_device_add(imx_snd_device);
++	if (ret)
++		goto snd_err;
++
++	/* set up PMIC IRQ (active high) to i.MX32ADS */
++#ifdef NOT_PORTED_TO_IMX37
++	printk("Registering PMIC INT");
++	INIT_WORK(&wm8350->work, wm8350_irq_work);
++	wm8350_reg_unlock(wm8350);
++	wm8350_set_bits(wm8350, WM8350_SYSTEM_CONTROL_1, WM8350_IRQ_POL);
++	wm8350_reg_lock(wm8350);
++	set_irq_type(MXC_PMIC_INT_LINE, IRQT_RISING);
++	ret = request_irq(MXC_PMIC_INT_LINE, wm8350_irq_handler,
++			  IRQF_DISABLED, "wm8350-pmic", wm8350);
++	if (ret != 0) {
++		printk(KERN_ERR "wm8350: cant request irq %d\n",
++		       MXC_PMIC_INT_LINE);
++		goto err;
++	}
++	wm8350->nirq = MXC_PMIC_INT_LINE;
++	printk("Configuring WM8350 GPIOS");
++	config_gpios(wm8350);
++	config_hibernate(wm8350);
++
++	/* Sw1 --> PWR_ON */
++	printk("Registering and unmasking the WM8350 wakeup key");
++	wm8350_register_irq(wm8350, WM8350_IRQ_WKUP_ONKEY,
++			    imx37_3stack_switch_handler);
++	wm8350_unmask_irq(wm8350, WM8350_IRQ_WKUP_ONKEY);
++
++	/* unmask all & clear sticky */
++	printk("Unmasking WM8350 local interrupts");
++	wm8350_reg_write(wm8350, WM8350_SYSTEM_INTERRUPTS_MASK, 0x0);
++	schedule_work(&wm8350->work);
++#endif
++
++#ifdef MXC_DPTC
++	/* DPTC reg */
++	mxc_pmic_register(&wm8350->pmic, wm8350_dcdc_set_voltage);
++#endif
++
++#if BATTERY
++	/* not much use without a battery atm */
++	wm8350_init_battery(wm8350);
++#endif
++	printk("Exiting normally from wm8350_init()");
++	return ret;
++      snd_err:
++	platform_device_put(imx_snd_device);
++      err:
++	printk("wm8350_init() FAILED");
++	kfree(wm8350->reg_cache);
++	return ret;
++}
+diff --git a/drivers/pmic/Makefile b/drivers/pmic/Makefile
+index 9b556e1..cab9157 100644
+--- a/drivers/pmic/Makefile
++++ b/drivers/pmic/Makefile
+@@ -3,11 +3,12 @@
+ #
+ 
+ ifeq ($(CONFIG_PMIC_DEBUG),y)
+-	EXTRA_CFLAGS		+= -DDEBUG
++ EXTRA_CFLAGS  += -DDEBUG
+ endif
+ 
+ obj-$(CONFIG_PMIC) += pmic.o
+ 
+ obj-$(CONFIG_PMIC_WM8350) += \
+-	pmic-wm8350.o pmic-wm8350-bus.o
++ pmic-wm8350.o pmic-wm8350-bus.o pmic-wm8350-i2c.o
++
+ 
+diff --git a/drivers/pmic/pmic-wm8350-i2c.c b/drivers/pmic/pmic-wm8350-i2c.c
+new file mode 100644
+index 0000000..9851c15
+--- /dev/null
++++ b/drivers/pmic/pmic-wm8350-i2c.c
+@@ -0,0 +1,167 @@
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/bitops.h>
++#include <linux/platform_device.h>
++#include <linux/i2c.h>
++#include <linux/err.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/leds.h>
++#include <linux/fb.h>
++#include <linux/pmic.h>
++#include <linux/pmic/wm8350.h>
++
++#define WM8350_I2C_ADDR         (0x34 >> 1)
++
++extern void wm8350_free(struct wm8350 *wm8350);
++extern int wm8350_init(struct wm8350* wm8350);
++
++
++static int wm8350_i2c_detach(struct i2c_client *client);
++
++void wm8350_irq_work(struct work_struct *work)
++{
++	wm8350_irq_worker(work);
++}
++
++irqreturn_t wm8350_irq_handler(int irq, void *data)
++{
++	struct wm8350 *wm8350 = (struct wm8350*)data;
++	schedule_work(&wm8350->work);
++	return IRQ_HANDLED;
++}
++
++/*
++ * WM8350 2 wire address
++ */
++static unsigned short normal_i2c[] = { WM8350_I2C_ADDR, I2C_CLIENT_END };
++
++/* Magic definition of all other variables and things */
++I2C_CLIENT_INSMOD;
++
++static int wm8350_pmic_i2c_detect(struct i2c_adapter *adap, int addr, int kind)
++{
++	struct wm8350* wm8350;
++	struct i2c_client *i2c;
++	int ret = 0;
++
++	if (addr != WM8350_I2C_ADDR)
++		return -ENODEV;
++
++	i2c = kzalloc(sizeof(struct i2c_client), GFP_KERNEL);
++	if (i2c == NULL)
++		return -ENOMEM;
++
++	wm8350 = kzalloc(sizeof(struct wm8350), GFP_KERNEL);
++	if (wm8350 == NULL) {
++		kfree(i2c);
++		return -ENOMEM;
++	}
++
++	i2c->addr = addr;
++	i2c->adapter = adap;
++
++	mutex_init(&wm8350->work_mutex);
++	i2c_set_clientdata(i2c, wm8350);
++	wm8350->i2c_client = i2c;
++	wm8350_set_io(wm8350, WM8350_IO_I2C, NULL, NULL);
++
++	ret = i2c_attach_client(i2c);
++	if (ret < 0) {
++		printk(KERN_ERR "wm8350: failed to attach device at addr 0x%x\n", addr);
++		goto err;
++	}
++
++	ret = wm8350_create_cache(wm8350);
++	if (ret < 0) {
++		printk(KERN_ERR "wm8350: failed to create register cache\n");
++		goto err;
++	}
++
++	if (wm8350_reg_read(wm8350, 0) == 0x0)
++		printk("wm8350: found Rev C device\n");
++	else if (wm8350_reg_read(wm8350, 0) == 0x6143)
++		printk("wm8350: found Rev E device\n");
++	else {
++		printk(KERN_ERR "wm8350: device is not a WM8350\n");
++		ret = -ENODEV;
++		goto err;
++	}
++
++	ret = wm8350_init(wm8350);
++	if (ret == 0)
++		return ret;
++
++err:
++	wm8350_i2c_detach(i2c);
++	return ret;
++}
++
++static int wm8350_i2c_attach(struct i2c_adapter *adap)
++{
++	return i2c_probe(adap, &addr_data, wm8350_pmic_i2c_detect);
++}
++
++static int wm8350_i2c_detach(struct i2c_client *client)
++{
++	struct wm8350 *wm8350 = i2c_get_clientdata(client);
++
++	wm8350_free(wm8350);
++	i2c_detach_client(client);
++	kfree(client);
++	if (wm8350->reg_cache)
++		kfree(wm8350->reg_cache);
++	kfree(wm8350);
++
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int wm8350_i2c_suspend(struct i2c_client *client, pm_message_t state)
++{
++	int ret = 0;
++	return ret;
++}
++
++static int wm8350_i2c_resume(struct i2c_client *client)
++{
++	int ret = 0;
++	return ret;
++}
++
++#else
++#define wm8350_i2c_suspend	NULL
++#define wm8350_i2c_resume	NULL
++#endif
++
++static struct i2c_driver wm8350_i2c_driver = {
++	.driver = {
++		.name = "WM8350",
++	},
++	.attach_adapter = wm8350_i2c_attach,
++	.detach_client =  wm8350_i2c_detach,
++	.suspend	= wm8350_i2c_suspend,
++	.resume		= wm8350_i2c_resume,
++	.command =        NULL,
++};
++
++
++static int __init wm8350_pmic_init(void)
++{
++	return i2c_add_driver(&wm8350_i2c_driver);
++}
++
++static void __exit wm8350_pmic_exit(void)
++{
++	i2c_del_driver(&wm8350_i2c_driver);
++}
++
++module_init(wm8350_pmic_init);
++module_exit(wm8350_pmic_exit);
++
++MODULE_AUTHOR("Liam Girdwood");
++MODULE_DESCRIPTION("PMIC WM8350 Driver");
++MODULE_LICENSE("GPL");
++
+diff --git a/sound/soc/Kconfig b/sound/soc/Kconfig
+index 97b2552..8578f7a 100644
+--- a/sound/soc/Kconfig
++++ b/sound/soc/Kconfig
+@@ -28,6 +28,7 @@ source "sound/soc/at91/Kconfig"
+ source "sound/soc/pxa/Kconfig"
+ source "sound/soc/s3c24xx/Kconfig"
+ source "sound/soc/sh/Kconfig"
++source "sound/soc/imx/Kconfig"
+ 
+ # Supported codecs
+ source "sound/soc/codecs/Kconfig"
+diff --git a/sound/soc/Makefile b/sound/soc/Makefile
+index 3041403..94e96a7 100644
+--- a/sound/soc/Makefile
++++ b/sound/soc/Makefile
+@@ -1,4 +1,4 @@
+ snd-soc-core-objs := soc-core.o soc-dapm.o
+ 
+ obj-$(CONFIG_SND_SOC)	+= snd-soc-core.o
+-obj-$(CONFIG_SND_SOC)	+= codecs/ at91/ pxa/ s3c24xx/ sh/
++obj-$(CONFIG_SND_SOC)	+= codecs/ at91/ pxa/ s3c24xx/ sh/ imx/
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+new file mode 100644
+index 0000000..ed3da5c
+--- /dev/null
++++ b/sound/soc/imx/Kconfig
+@@ -0,0 +1,21 @@
++config SND_MXC_SOC
++ tristate "SoC Audio for the Freescale i.MX CPU"
++ depends on ARCH_MXC && SND
++ select SND_PCM
++ help
++   Say Y or M if you want to add support for codecs attached to
++   the MXC I2S or SSP interface. You will also need
++   to select the audio interfaces to support below.
++
++config SND_MXC_SOC_SSI
++ tristate
++
++config SND_SOC_IMX37_3STACK_WM8350
++ tristate "SoC Audio support for MX37 - WM8350"
++ select SND_MXC_SOC_SSI
++ select SND_SOC_WM8350
++ select PMIC_WM8350
++ help
++   Say Y if you want to add support for SoC audio on IMX37 3STACK
++   with the WM8350.
++
+diff --git a/sound/soc/imx/Makefile b/sound/soc/imx/Makefile
+new file mode 100644
+index 0000000..d84f385
+--- /dev/null
++++ b/sound/soc/imx/Makefile
+@@ -0,0 +1,10 @@
++# i.MX Platform Support
++snd-soc-imx-objs := imx-pcm.o
++snd-soc-imx-ssi-objs := imx-ssi.o
++
++obj-$(CONFIG_SND_MXC_SOC) += snd-soc-imx.o
++obj-$(CONFIG_SND_MXC_SOC_SSI) += snd-soc-imx-ssi.o
++
++# i.MX Machine Support
++snd-soc-imx37-3stack-wm8350-objs := imx37-3stack-wm8350.o
++obj-$(CONFIG_SND_SOC_IMX37_3STACK_WM8350) += snd-soc-imx37-3stack-wm8350.o
+diff --git a/sound/soc/imx/imx-pcm.c b/sound/soc/imx/imx-pcm.c
+new file mode 100644
+index 0000000..e39ced4
+--- /dev/null
++++ b/sound/soc/imx/imx-pcm.c
+@@ -0,0 +1,549 @@
++/*
++ * imx-pcm.c -- ALSA SoC interface for the Freescale i.MX3 CPU's
++ *
++ * Copyright 2006 Wolfson Microelectronics PLC.
++ * Author: Liam Girdwood
++ *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
++ *
++ * Based on imx31-pcm.c by	Nicolas Pitre, (C) 2004 MontaVista Software, Inc.
++ * and on mxc-alsa-mc13783 (C) 2006 Freescale.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/dma-mapping.h>
++#include <sound/driver.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <asm/arch/dma.h>
++#include <asm/arch/spba.h>
++#include <asm/arch/clock.h>
++#include <asm/mach-types.h>
++#include <asm/hardware.h>
++
++#include "imx-pcm.h"
++
++/* debug */
++#define IMX_PCM_DEBUG 0
++#if IMX_PCM_DEBUG
++#define dbg(format, arg...) printk(format, ## arg)
++#else
++#define dbg(format, arg...)
++#endif
++
++/*
++ * Coherent DMA memory is used by default, although Freescale have used 
++ * bounce buffers in all their drivers for i.MX31 to date. If you have any 
++ * issues, please select bounce buffers. 
++ */
++#define IMX31_DMA_BOUNCE 0
++
++static const struct snd_pcm_hardware imx_pcm_hardware = {
++	.info = (SNDRV_PCM_INFO_INTERLEAVED |
++		 SNDRV_PCM_INFO_BLOCK_TRANSFER |
++		 SNDRV_PCM_INFO_MMAP |
++		 SNDRV_PCM_INFO_MMAP_VALID |
++		 SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME),
++	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE,
++	.buffer_bytes_max = 32 * 1024,
++	.period_bytes_min = 64,
++	.period_bytes_max = 8 * 1024,
++	.periods_min = 2,
++	.periods_max = 255,
++	.fifo_size = 0,
++};
++
++struct mxc_runtime_data {
++	int dma_ch;
++	struct imx_pcm_dma_param *dma_params;
++	spinlock_t dma_lock;
++	int active, period, periods;
++	int dma_wchannel;
++	int dma_active;
++	int old_offset;
++	int dma_alloc;
++};
++
++static void audio_stop_dma(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++	unsigned long flags;
++#if IMX31_DMA_BOUNCE
++	unsigned int dma_size;
++	unsigned int offset;
++
++	dma_size = frames_to_bytes(runtime, runtime->period_size);
++	offset = dma_size * prtd->periods;
++#endif
++
++	/* stops the dma channel and clears the buffer ptrs */
++	spin_lock_irqsave(&prtd->dma_lock, flags);
++	prtd->active = 0;
++	prtd->period = 0;
++	prtd->periods = 0;
++	mxc_dma_disable(prtd->dma_wchannel);
++
++#if IMX31_DMA_BOUNCE
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
++				 DMA_TO_DEVICE);
++	else
++		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
++				 DMA_FROM_DEVICE);
++#endif
++	spin_unlock_irqrestore(&prtd->dma_lock, flags);
++}
++
++static int dma_new_period(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++	unsigned int dma_size = frames_to_bytes(runtime, runtime->period_size);
++	unsigned int offset = dma_size * prtd->period;
++	int ret = 0;
++	mxc_dma_requestbuf_t sdma_request;
++
++	if (!prtd->active)
++		return 0;
++	//printk(KERN_EMERG"In func %s \n",__FUNCTION__);               
++	memset(&sdma_request, 0, sizeof(mxc_dma_requestbuf_t));
++
++	dbg("period pos  ALSA %x DMA %x\n", runtime->periods, prtd->period);
++	dbg("period size ALSA %x DMA %x Offset %x dmasize %x\n",
++	    (unsigned int)runtime->period_size, runtime->dma_bytes,
++	    offset, dma_size);
++	dbg("DMA addr %x\n", runtime->dma_addr + offset);
++
++#if IMX31_DMA_BOUNCE
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		sdma_request.src_addr = (dma_addr_t) (dma_map_single(NULL,
++								     runtime->
++								     dma_area +
++								     offset,
++								     dma_size,
++								     DMA_TO_DEVICE));
++	else
++		sdma_request.dst_addr = (dma_addr_t) (dma_map_single(NULL,
++								     runtime->
++								     dma_area +
++								     offset,
++								     dma_size,
++								     DMA_FROM_DEVICE));
++#else
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		sdma_request.src_addr =
++		    (dma_addr_t) (runtime->dma_addr + offset);
++	else
++		sdma_request.dst_addr =
++		    (dma_addr_t) (runtime->dma_addr + offset);
++
++#endif
++	sdma_request.num_of_bytes = dma_size;
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		mxc_dma_config(prtd->dma_wchannel, &sdma_request, 1,
++			       MXC_DMA_MODE_WRITE);
++		ret = mxc_dma_enable(prtd->dma_wchannel);
++	} else {
++
++		mxc_dma_config(prtd->dma_wchannel, &sdma_request, 1,
++			       MXC_DMA_MODE_READ);
++		ret = mxc_dma_enable(prtd->dma_wchannel);
++	}
++	prtd->dma_active = 1;
++	prtd->period++;
++	prtd->period %= runtime->periods;
++
++	return ret;
++}
++
++static void audio_dma_irq(void *data)
++{
++	struct snd_pcm_substream *substream = (struct snd_pcm_substream *)data;
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++#if IMX31_DMA_BOUNCE
++	unsigned int dma_size = frames_to_bytes(runtime, runtime->period_size);
++	unsigned int offset = dma_size * prtd->periods;
++#endif
++
++	//printk(KERN_EMERG"In func %s \n",__FUNCTION__);               
++	prtd->dma_active = 0;
++	prtd->periods++;
++	prtd->periods %= runtime->periods;
++
++	dbg("irq per %d offset %x\n", prtd->periods,
++	    frames_to_bytes(runtime, runtime->period_size) * prtd->periods);
++#if IMX31_DMA_BOUNCE
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
++				 DMA_TO_DEVICE);
++	else
++		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
++				 DMA_FROM_DEVICE);
++
++#endif
++
++	if (prtd->active)
++		snd_pcm_period_elapsed(substream);
++	dma_new_period(substream);
++}
++
++static int imx_pcm_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++
++	prtd->period = 0;
++	prtd->periods = 0;
++	return 0;
++}
++
++static int imx_pcm_hw_params(struct snd_pcm_substream *substream,
++			     struct snd_pcm_hw_params *params)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	struct mxc_pcm_dma_params *dma = cpu_dai->dma_data;
++	int ret = 0, channel = 0;
++
++	/* only allocate the DMA chn once */
++	if (!prtd->dma_alloc) {
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++
++			channel =
++			    mxc_dma_request(MXC_DMA_SSI1_16BIT_TX0,
++					    "ALSA TX SDMA");
++			if (channel < 0) {
++				printk(KERN_ERR
++				       "imx-pcm: error requesting a write dma channel\n");
++				return channel;
++			}
++			ret = mxc_dma_callback_set(channel, (mxc_dma_callback_t)
++						   audio_dma_irq,
++						   (void *)substream);
++
++		} else {
++			channel =
++			    mxc_dma_request(MXC_DMA_SSI1_16BIT_RX0,
++					    "ALSA RX SDMA");
++			if (channel < 0) {
++				printk(KERN_ERR
++				       "imx-pcm: error requesting a read dma channel\n");
++				return channel;
++			}
++		}
++		prtd->dma_wchannel = channel;
++		prtd->dma_alloc = 1;
++
++		/* set up chn with params */
++		//      dma->params.callback = audio_dma_irq;
++		dma->params.arg = substream;
++
++		switch (params_format(params)) {
++		case SNDRV_PCM_FORMAT_S16_LE:
++			dma->params.word_size = TRANSFER_16BIT;
++			break;
++		case SNDRV_PCM_FORMAT_S20_3LE:
++		case SNDRV_PCM_FORMAT_S24_LE:
++			dma->params.word_size = TRANSFER_24BIT;
++			break;
++		}
++
++	}
++#if IMX31_DMA_BOUNCE
++	ret = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(params));
++	if (ret < 0) {
++		printk(KERN_ERR "imx-pcm: failed to malloc pcm pages\n");
++		if (channel)
++			mxc_dma_free(channel);
++		return ret;
++	}
++	runtime->dma_addr = virt_to_phys(runtime->dma_area);
++#else
++	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
++#endif
++	return ret;
++}
++
++static int imx_pcm_hw_free(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++
++	if (prtd->dma_wchannel) {
++		mxc_dma_free(prtd->dma_wchannel);
++		prtd->dma_wchannel = 0;
++		prtd->dma_alloc = 0;
++	}
++#if IMX31_DMA_BOUNCE
++	snd_pcm_lib_free_pages(substream);
++#endif
++	return 0;
++}
++
++static int imx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
++{
++	struct mxc_runtime_data *prtd = substream->runtime->private_data;
++	int ret = 0;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++		prtd->dma_active = 0;
++		/* requested stream startup */
++		prtd->active = 1;
++		ret = dma_new_period(substream);
++		break;
++	case SNDRV_PCM_TRIGGER_STOP:
++		/* requested stream shutdown */
++		audio_stop_dma(substream);
++		break;
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++		prtd->active = 0;
++		prtd->periods = 0;
++		break;
++	case SNDRV_PCM_TRIGGER_RESUME:
++		prtd->active = 1;
++		prtd->dma_active = 0;
++		ret = dma_new_period(substream);
++		break;
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		prtd->active = 0;
++		break;
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		prtd->active = 1;
++		if (prtd->old_offset) {
++			prtd->dma_active = 0;
++			ret = dma_new_period(substream);
++		}
++		break;
++	default:
++		ret = -EINVAL;
++		break;
++	}
++
++	return ret;
++}
++
++static snd_pcm_uframes_t imx_pcm_pointer(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++	unsigned int offset = 0;
++
++	/* is a transfer active ? */
++	if (prtd->dma_active) {
++		offset = (runtime->period_size * (prtd->periods)) +
++		    (runtime->period_size >> 1);
++		if (offset >= runtime->buffer_size)
++			offset = runtime->period_size >> 1;
++	} else {
++		offset = (runtime->period_size * (prtd->periods));
++		if (offset >= runtime->buffer_size)
++			offset = 0;
++	}
++	dbg("pointer offset %x\n", offset);
++
++	return offset;
++}
++
++static int imx_pcm_open(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd;
++	int ret;
++
++	snd_soc_set_runtime_hwparams(substream, &imx_pcm_hardware);
++
++	ret = snd_pcm_hw_constraint_integer(runtime,
++					    SNDRV_PCM_HW_PARAM_PERIODS);
++	if (ret < 0)
++		return ret;
++
++	prtd = kzalloc(sizeof(struct mxc_runtime_data), GFP_KERNEL);
++	if (prtd == NULL)
++		return -ENOMEM;
++
++	runtime->private_data = prtd;
++	return 0;
++}
++
++static int imx_pcm_close(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_runtime_data *prtd = runtime->private_data;
++
++	kfree(prtd);
++	return 0;
++}
++
++static int
++imx_pcm_mmap(struct snd_pcm_substream *substream, struct vm_area_struct *vma)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	return dma_mmap_writecombine(substream->pcm->card->dev, vma,
++				     runtime->dma_area,
++				     runtime->dma_addr, runtime->dma_bytes);
++}
++
++struct snd_pcm_ops imx_pcm_ops = {
++	.open = imx_pcm_open,
++	.close = imx_pcm_close,
++	.ioctl = snd_pcm_lib_ioctl,
++	.hw_params = imx_pcm_hw_params,
++	.hw_free = imx_pcm_hw_free,
++	.prepare = imx_pcm_prepare,
++	.trigger = imx_pcm_trigger,
++	.pointer = imx_pcm_pointer,
++	.mmap = imx_pcm_mmap,
++};
++
++static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
++{
++	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
++	struct snd_dma_buffer *buf = &substream->dma_buffer;
++	size_t size = imx_pcm_hardware.buffer_bytes_max;
++	buf->dev.type = SNDRV_DMA_TYPE_DEV;
++	buf->dev.dev = pcm->card->dev;
++	buf->private_data = NULL;
++	buf->area = dma_alloc_writecombine(pcm->card->dev, size,
++					   &buf->addr, GFP_KERNEL);
++	if (!buf->area)
++		return -ENOMEM;
++
++	buf->bytes = size;
++	return 0;
++}
++
++static void imx_pcm_free_dma_buffers(struct snd_pcm *pcm)
++{
++	struct snd_pcm_substream *substream;
++	struct snd_dma_buffer *buf;
++	int stream;
++
++	for (stream = 0; stream < 2; stream++) {
++		substream = pcm->streams[stream].substream;
++		if (!substream)
++			continue;
++
++		buf = &substream->dma_buffer;
++		if (!buf->area)
++			continue;
++
++		dma_free_writecombine(pcm->card->dev, buf->bytes,
++				      buf->area, buf->addr);
++		buf->area = NULL;
++	}
++}
++
++static u64 imx_pcm_dmamask = 0xffffffff;
++
++static int imx_pcm_new(struct snd_soc_platform *platform,
++		       struct snd_card *card, int playback, int capture,
++		       struct snd_pcm *pcm)
++{
++	int ret = 0;
++
++	if (!card->dev->dma_mask)
++		card->dev->dma_mask = &imx_pcm_dmamask;
++	if (!card->dev->coherent_dma_mask)
++		card->dev->coherent_dma_mask = 0xffffffff;
++#if IMX31_DMA_BOUNCE
++	ret = snd_pcm_lib_preallocate_pages_for_all(pcm,
++						    SNDRV_DMA_TYPE_CONTINUOUS,
++						    snd_dma_continuous_data
++						    (GFP_KERNEL),
++						    imx_pcm_hardware.
++						    buffer_bytes_max * 2,
++						    imx_pcm_hardware.
++						    buffer_bytes_max * 2);
++	if (ret < 0) {
++		printk(KERN_ERR "imx-pcm: failed to preallocate pages\n");
++		goto out;
++	}
++#else
++	if (playback) {
++		ret = imx_pcm_preallocate_dma_buffer(pcm,
++						     SNDRV_PCM_STREAM_PLAYBACK);
++		if (ret)
++			goto out;
++	}
++
++	if (capture) {
++		ret = imx_pcm_preallocate_dma_buffer(pcm,
++						     SNDRV_PCM_STREAM_CAPTURE);
++		if (ret)
++			goto out;
++	}
++#endif
++      out:
++	return ret;
++}
++
++static const struct snd_soc_platform_ops imx_platform_ops = {
++	.pcm_new = imx_pcm_new,
++#if IMX31_DMA_BOUNCE
++	.pcm_free = NULL,
++#else
++	.pcm_free = imx_pcm_free_dma_buffers,
++#endif
++};
++
++static int imx_pcm_probe(struct device *dev)
++{
++	struct snd_soc_platform *platform = to_snd_soc_platform(dev);
++
++	platform->pcm_ops = &imx_pcm_ops;
++	platform->platform_ops = &imx_platform_ops;
++	snd_soc_register_platform(platform);
++	return 0;
++}
++
++static int imx_pcm_remove(struct device *dev)
++{
++	return 0;
++}
++
++const char imx_pcm[SND_SOC_PLATFORM_NAME_SIZE] = "imx-pcm";
++EXPORT_SYMBOL_GPL(imx_pcm);
++
++static struct snd_soc_device_driver imx_pcm_driver = {
++	.type = SND_SOC_BUS_TYPE_DMA,
++	.driver = {
++		   .name = imx_pcm,
++		   .owner = THIS_MODULE,
++		   .bus = &asoc_bus_type,
++		   .probe = imx_pcm_probe,
++		   .remove = __devexit_p(imx_pcm_remove),
++		   },
++};
++
++static __init int imx_pcm_init(void)
++{
++	return driver_register(&imx_pcm_driver.driver);
++}
++
++static __exit void imx_pcm_exit(void)
++{
++	driver_unregister(&imx_pcm_driver.driver);
++}
++
++module_init(imx_pcm_init);
++module_exit(imx_pcm_exit);
++
++MODULE_AUTHOR("Liam Girdwood");
++MODULE_DESCRIPTION("Freescale i.MX3x PCM DMA module");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-pcm.h b/sound/soc/imx/imx-pcm.h
+new file mode 100644
+index 0000000..7cf7b75
+--- /dev/null
++++ b/sound/soc/imx/imx-pcm.h
+@@ -0,0 +1,67 @@
++/*
++ * imx-pcm.h :- ASoC platform header for Freescale i.MX
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#ifndef _MXC_PCM_H
++#define _MXC_PCM_H
++
++#include <asm/arch/dma.h>
++
++/* AUDMUX regs definition  */
++#define AUDMUX_IO_BASE_ADDR	IO_ADDRESS(AUDMUX_BASE_ADDR)
++
++#define DAM_PTCR1	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x00)))
++#define DAM_PDCR1	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x04)))
++#define DAM_PTCR2	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x08)))
++#define DAM_PDCR2	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x0C)))
++#define DAM_PTCR3	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x10)))
++#define DAM_PDCR3	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x14)))
++#define DAM_PTCR4	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x18)))
++#define DAM_PDCR4	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x1C)))
++#define DAM_PTCR5	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x20)))
++#define DAM_PDCR5	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x24)))
++#define DAM_PTCR6	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x28)))
++#define DAM_PDCR6	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x2C)))
++#define DAM_PTCR7	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x30)))
++#define DAM_PDCR7	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x34)))
++#define DAM_CNMCR	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 0x38)))
++#define DAM_PTCR(a)	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + a*8)))
++#define DAM_PDCR(a)	(*((volatile u32 *)(AUDMUX_IO_BASE_ADDR + 4 + a*8)))
++
++#define AUDMUX_PTCR_TFSDIR		(1 << 31)
++#define AUDMUX_PTCR_TFSSEL(x, y)		((x << 30) | (((y - 1) & 0x7) << 27))
++#define AUDMUX_PTCR_TCLKDIR		(1 << 26)
++#define AUDMUX_PTCR_TCSEL(x, y)		((x << 25) | (((y - 1) & 0x7) << 22))
++#define AUDMUX_PTCR_RFSDIR		(1 << 21)
++#define AUDMUX_PTCR_RFSSEL(x, y)		((x << 20) | (((y - 1) & 0x7) << 17))
++#define AUDMUX_PTCR_RCLKDIR		(1 << 16)
++#define AUDMUX_PTCR_RCSEL(x, y)		((x << 15) | (((y - 1) & 0x7) << 12))
++#define AUDMUX_PTCR_SYN		(1 << 11)
++
++#define AUDMUX_FROM_TXFS	0
++#define AUDMUX_FROM_RXFS	1
++
++#define AUDMUX_PDCR_RXDSEL(x)		(((x - 1) & 0x7) << 13)
++#define AUDMUX_PDCR_TXDXEN		(1 << 12)
++#define AUDMUX_PDCR_MODE(x)		(((x) & 0x3) << 8)
++#define AUDMUX_PDCR_INNMASK(x)		(((x) & 0xff) << 0)
++
++#define AUDMUX_CNMCR_CEN		(1 << 18)
++#define AUDMUX_CNMCR_FSPOL		(1 << 17)
++#define AUDMUX_CNMCR_CLKPOL		(1 << 16)
++#define AUDMUX_CNMCR_CNTHI(x)		(((x) & 0xff) << 8)
++#define AUDMUX_CNMCR_CNTLOW(x)		(((x) & 0xff) << 0)
++
++struct mxc_pcm_dma_params {
++	char *name;		/* stream identifier */
++	dma_channel_params params;
++};
++
++/* platform data */
++extern const char imx_pcm[SND_SOC_PLATFORM_NAME_SIZE];
++
++#endif
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+new file mode 100644
+index 0000000..cf63305
+--- /dev/null
++++ b/sound/soc/imx/imx-ssi.c
+@@ -0,0 +1,862 @@
++/*
++ * imx-ssi.c  --  SSI driver for Freescale IMX
++ *
++ * Copyright 2006 Wolfson Microelectronics PLC.
++ * Author: Liam Girdwood
++ *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
++ *
++ *  Based on mxc-alsa-mc13783 (C) 2006 Freescale.
++ *
++ *  This program is free software; you can redistribute  it and/or modify it
++ *  under  the terms of  the GNU General  Public License as published by the
++ *  Free Software Foundation;  either version 2 of the  License, or (at your
++ *  option) any later version.
++ *
++ *  Revision history
++ *    29th Aug 2006   Initial version.
++ * 
++ * TODO: 
++ *   Need to rework SSI register defs when new defs go into mainline.
++ *   Add support for TDM and FIFO 1.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/dma-mapping.h>
++#include <linux/clk.h>
++#include <sound/driver.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <asm/arch/dma.h>
++#include <asm/arch/clock.h>
++#include <asm/mach-types.h>
++#include <asm/hardware.h>
++
++#include "imx-ssi.h"
++#include "imx-pcm.h"
++
++/* debug */
++#define IMX_SSI_DEBUG 0
++#if IMX_SSI_DEBUG
++#define dbg(format, arg...) printk(format, ## arg)
++#else
++#define dbg(format, arg...)
++#endif
++
++#define IMX_SSI_DUMP 0
++#if IMX_SSI_DUMP
++#define SSI_DUMP() \
++	printk("dump @ %s\n", __FUNCTION__); \
++	printk("scr %x\n", SSI1_SCR); \
++	printk("sisr %x\n", SSI1_SISR); \
++	printk("stcr %x\n", SSI1_STCR); \
++	printk("srcr %x\n", SSI1_SRCR); \
++	printk("stccr %x\n", SSI1_STCCR); \
++	printk("srccr %x\n", SSI1_SRCCR); \
++	printk("sfcsr %x\n", SSI1_SFCSR); \
++	printk("stmsk %x\n", SSI1_STMSK); \
++	printk("srmsk %x\n", SSI1_SRMSK); \
++	printk("sier %x\n", SSI1_SIER);
++#else
++#define SSI_DUMP()
++#endif
++
++#define SSI1_PORT	0
++#define SSI2_PORT	1
++
++static int ssi_active[2] = { 0, 0 };
++
++static struct mxc_pcm_dma_params imx_ssi1_pcm_stereo_out0 = {
++	.name = "SSI1 PCM Stereo out 0",
++	.params = {
++		   .bd_number = 32,
++		   .word_size = TRANSFER_16BIT,
++		   .transfer_type = emi_2_per,
++		   .watermark_level = SDMA_TXFIFO_WATERMARK,
++		   .per_address = SSI1_BASE_ADDR,
++		   .event_id = DMA_REQ_SSI1_TX1,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi1_pcm_stereo_out1 = {
++	.name = "SSI1 PCM Stereo out 1",
++	.params = {
++		   .bd_number = 32,
++		   .word_size = TRANSFER_16BIT,
++		   .transfer_type = emi_2_per,
++		   .watermark_level = SDMA_TXFIFO_WATERMARK,
++		   .per_address = SSI1_BASE_ADDR + 0x4,
++		   .event_id = DMA_REQ_SSI1_TX2,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi1_pcm_stereo_in0 = {
++	.name = "SSI1 PCM Stereo in 0",
++	.params = {
++		   .bd_number = 1,
++		   .transfer_type = per_2_emi,
++		   .watermark_level = SDMA_RXFIFO_WATERMARK,
++		   .per_address = SSI1_BASE_ADDR + 0x8,
++		   .event_id = DMA_REQ_SSI1_RX1,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi1_pcm_stereo_in1 = {
++	.name = "SSI1 PCM Stereo in 1",
++	.params = {
++		   .bd_number = 1,
++		   .transfer_type = per_2_emi,
++		   .watermark_level = SDMA_RXFIFO_WATERMARK,
++		   .per_address = SSI1_BASE_ADDR + 0xc,
++		   .event_id = DMA_REQ_SSI1_RX2,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi2_pcm_stereo_out0 = {
++	.name = "SSI2 PCM Stereo out 0",
++	.params = {
++		   .bd_number = 1,
++		   .transfer_type = emi_2_per,
++		   .watermark_level = SDMA_TXFIFO_WATERMARK,
++		   .per_address = SSI2_BASE_ADDR,
++		   .event_id = DMA_REQ_SSI2_TX1,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi2_pcm_stereo_out1 = {
++	.name = "SSI2 PCM Stereo out 1",
++	.params = {
++		   .bd_number = 1,
++		   .transfer_type = emi_2_per,
++		   .watermark_level = SDMA_TXFIFO_WATERMARK,
++		   .per_address = SSI2_BASE_ADDR + 0x4,
++		   .event_id = DMA_REQ_SSI2_TX2,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi2_pcm_stereo_in0 = {
++	.name = "SSI2 PCM Stereo in 0",
++	.params = {
++		   .bd_number = 1,
++		   .transfer_type = per_2_emi,
++		   .watermark_level = SDMA_RXFIFO_WATERMARK,
++		   .per_address = SSI2_BASE_ADDR + 0x8,
++		   .event_id = DMA_REQ_SSI2_RX1,
++		   .peripheral_type = SSI,
++		   },
++};
++
++static struct mxc_pcm_dma_params imx_ssi2_pcm_stereo_in1 = {
++	.name = "SSI2 PCM Stereo in 1",
++	.params = {
++		   .bd_number = 1,
++		   .transfer_type = per_2_emi,
++		   .watermark_level = SDMA_RXFIFO_WATERMARK,
++		   .per_address = SSI2_BASE_ADDR + 0xc,
++		   .event_id = DMA_REQ_SSI2_RX2,
++		   .peripheral_type = SSI,
++		   },
++};
++
++/*
++ * SSI system clock configuration.
++ * Should only be called when port is inactive (i.e. SSIEN = 0).
++ */
++static int imx_ssi_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
++				  int clk_id, unsigned int freq, int dir)
++{
++	u32 scr;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		scr = SSI1_SCR;
++	else
++		scr = SSI2_SCR;
++
++	if (scr & SSI_SCR_SSIEN)
++		return 0;
++
++	switch (clk_id) {
++	case IMX_SSP_SYS_CLK:
++		if (dir == SND_SOC_CLOCK_OUT)
++			scr |= SSI_SCR_SYS_CLK_EN;
++		else
++			scr &= ~SSI_SCR_SYS_CLK_EN;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		SSI1_SCR = scr;
++	else
++		SSI2_SCR = scr;
++
++	return 0;
++}
++
++/*
++ * SSI Clock dividers
++ * Should only be called when port is inactive (i.e. SSIEN = 0).
++ */
++static int imx_ssi_set_dai_clkdiv(struct snd_soc_dai *cpu_dai,
++				  int div_id, int div)
++{
++	u32 stccr, srccr;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		if (SSI1_SCR & SSI_SCR_SSIEN)
++			return 0;
++
++		srccr = SSI1_STCCR;
++		stccr = SSI1_STCCR;
++	} else {
++		if (SSI2_SCR & SSI_SCR_SSIEN)
++			return 0;
++
++		srccr = SSI2_STCCR;
++		stccr = SSI2_STCCR;
++	}
++
++	switch (div_id) {
++	case IMX_SSI_TX_DIV_2:
++		stccr &= ~SSI_STCCR_DIV2;
++		stccr |= div;
++		break;
++	case IMX_SSI_TX_DIV_PSR:
++		stccr &= ~SSI_STCCR_PSR;
++		stccr |= div;
++		break;
++	case IMX_SSI_TX_DIV_PM:
++		stccr &= ~0xff;
++		stccr |= SSI_STCCR_PM(div);
++		break;
++	case IMX_SSI_RX_DIV_2:
++		stccr &= ~SSI_STCCR_DIV2;
++		stccr |= div;
++		break;
++	case IMX_SSI_RX_DIV_PSR:
++		stccr &= ~SSI_STCCR_PSR;
++		stccr |= div;
++		break;
++	case IMX_SSI_RX_DIV_PM:
++		stccr &= ~0xff;
++		stccr |= SSI_STCCR_PM(div);
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		SSI1_STCCR = stccr;
++		SSI1_SRCCR = srccr;
++	} else {
++		SSI2_STCCR = stccr;
++		SSI2_SRCCR = srccr;
++	}
++	return 0;
++}
++
++/*
++ * SSI Network Mode or TDM slots configuration.
++ * Should only be called when port is inactive (i.e. SSIEN = 0).
++ */
++static int imx_ssi_set_dai_tdm_slot(struct snd_soc_dai *cpu_dai,
++				    unsigned int mask, int slots)
++{
++	u32 stmsk, srmsk, stccr;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		if (SSI1_SCR & SSI_SCR_SSIEN)
++			return 0;
++		stccr = SSI1_STCCR;
++	} else {
++		if (SSI2_SCR & SSI_SCR_SSIEN)
++			return 0;
++		stccr = SSI2_STCCR;
++	}
++
++	stmsk = srmsk = mask;
++	stccr &= ~SSI_STCCR_DC_MASK;
++	stccr |= SSI_STCCR_DC(slots - 1);
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		SSI1_STMSK = stmsk;
++		SSI1_SRMSK = srmsk;
++		SSI1_SRCCR = SSI1_STCCR = stccr;
++	} else {
++		SSI2_STMSK = stmsk;
++		SSI2_SRMSK = srmsk;
++		SSI2_SRCCR = SSI2_STCCR = stccr;
++	}
++
++	return 0;
++}
++
++/*
++ * SSI DAI format configuration.
++ * Should only be called when port is inactive (i.e. SSIEN = 0).
++ * Note: We don't use the I2S modes but instead manually configure the
++ * SSI for I2S.
++ */
++static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
++{
++	u32 stcr = 0, srcr = 0, scr;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		scr = SSI1_SCR & ~(SSI_SCR_SYN | SSI_SCR_NET);
++	else
++		scr = SSI2_SCR & ~(SSI_SCR_SYN | SSI_SCR_NET);
++
++	if (scr & SSI_SCR_SSIEN)
++		return 0;
++
++	/* DAI mode */
++	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
++	case SND_SOC_DAIFMT_I2S:
++		/* data on rising edge of bclk, frame low 1clk before data */
++		stcr |= SSI_STCR_TFSI | SSI_STCR_TEFS | SSI_STCR_TXBIT0;
++		srcr |= SSI_SRCR_RFSI | SSI_SRCR_REFS | SSI_SRCR_RXBIT0;
++		break;
++	case SND_SOC_DAIFMT_LEFT_J:
++		/* data on rising edge of bclk, frame high with data */
++		stcr |= SSI_STCR_TXBIT0;
++		srcr |= SSI_SRCR_RXBIT0;
++		break;
++	case SND_SOC_DAIFMT_DSP_B:
++		/* data on rising edge of bclk, frame high with data */
++		stcr |= SSI_STCR_TFSL;
++		srcr |= SSI_SRCR_RFSL;
++		break;
++	case SND_SOC_DAIFMT_DSP_A:
++		/* data on rising edge of bclk, frame high 1clk before data */
++		stcr |= SSI_STCR_TFSL | SSI_STCR_TEFS;
++		srcr |= SSI_SRCR_RFSL | SSI_SRCR_REFS;
++		break;
++	}
++
++	/* DAI clock inversion */
++	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
++	case SND_SOC_DAIFMT_IB_IF:
++		stcr |= SSI_STCR_TFSI;
++		stcr &= ~SSI_STCR_TSCKP;
++		srcr |= SSI_SRCR_RFSI;
++		srcr &= ~SSI_SRCR_RSCKP;
++		break;
++	case SND_SOC_DAIFMT_IB_NF:
++		stcr &= ~(SSI_STCR_TSCKP | SSI_STCR_TFSI);
++		srcr &= ~(SSI_SRCR_RSCKP | SSI_SRCR_RFSI);
++		break;
++	case SND_SOC_DAIFMT_NB_IF:
++		stcr |= SSI_STCR_TFSI | SSI_STCR_TSCKP;
++		srcr |= SSI_SRCR_RFSI | SSI_SRCR_RSCKP;
++		break;
++	case SND_SOC_DAIFMT_NB_NF:
++		stcr &= ~SSI_STCR_TFSI;
++		stcr |= SSI_STCR_TSCKP;
++		srcr &= ~SSI_SRCR_RFSI;
++		srcr |= SSI_SRCR_RSCKP;
++		break;
++	}
++
++	/* DAI clock master masks */
++	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
++	case SND_SOC_DAIFMT_CBS_CFS:
++		stcr |= SSI_STCR_TFDIR | SSI_STCR_TXDIR;
++		srcr |= SSI_SRCR_RFDIR | SSI_SRCR_RXDIR;
++		break;
++	case SND_SOC_DAIFMT_CBM_CFS:
++		stcr |= SSI_STCR_TFDIR;
++		srcr |= SSI_SRCR_RFDIR;
++		break;
++	case SND_SOC_DAIFMT_CBS_CFM:
++		stcr |= SSI_STCR_TXDIR;
++		srcr |= SSI_SRCR_RXDIR;
++		break;
++	}
++
++	/* sync */
++	if (!(fmt & SND_SOC_DAIFMT_ASYNC))
++		scr |= SSI_SCR_SYN;
++
++	/* tdm - only for stereo atm */
++	if (fmt & SND_SOC_DAIFMT_TDM)
++		scr |= SSI_SCR_NET;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		SSI1_STCR = stcr;
++		SSI1_SRCR = srcr;
++		SSI1_SCR = scr;
++	} else {
++		SSI2_STCR = stcr;
++		SSI2_SRCR = srcr;
++		SSI1_SCR = scr;
++	}
++	SSI_DUMP();
++	return 0;
++}
++
++static struct clk *ssi_clk;
++
++static int imx_ssi_startup(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++
++	/* we cant really change any SSI values after SSI is enabled 
++	 * need to fix in software for max flexibility - lrg */
++	if (cpu_dai->active)
++		return 0;
++
++	/* reset the SSI port - Sect 45.4.4 */
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++
++		if (ssi_active[SSI1_PORT]++)
++			return 0;
++
++		SSI1_SCR = 0;
++		ssi_clk = clk_get(NULL, "ssi_clk.0");
++		clk_enable(ssi_clk);
++
++		/* BIG FAT WARNING
++		 * SDMA FIFO watermark must == SSI FIFO watermark for 
++		 * best results.
++		 */
++		SSI1_SFCSR = SSI_SFCSR_RFWM1(SSI_RXFIFO_WATERMARK) |
++		    SSI_SFCSR_RFWM0(SSI_RXFIFO_WATERMARK) |
++		    SSI_SFCSR_TFWM1(SSI_TXFIFO_WATERMARK) |
++		    SSI_SFCSR_TFWM0(SSI_TXFIFO_WATERMARK);
++	} else {
++
++		if (ssi_active[SSI2_PORT]++)
++			return 0;
++
++		SSI2_SCR = 0;
++
++		/* above warning applies here too */
++		SSI2_SFCSR = SSI_SFCSR_RFWM1(SSI_RXFIFO_WATERMARK) |
++		    SSI_SFCSR_RFWM0(SSI_RXFIFO_WATERMARK) |
++		    SSI_SFCSR_TFWM1(SSI_TXFIFO_WATERMARK) |
++		    SSI_SFCSR_TFWM0(SSI_TXFIFO_WATERMARK);
++	}
++
++	SSI_DUMP();
++	return 0;
++}
++
++static int imx_ssi_hw_tx_params(struct snd_pcm_substream *substream,
++				struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	u32 stccr, stcr, sier;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		stccr = SSI1_STCCR & ~SSI_STCCR_WL_MASK;
++		stcr = SSI1_STCR;
++		sier = SSI1_SIER;
++	} else {
++		stccr = SSI2_STCCR & ~SSI_STCCR_WL_MASK;
++		stcr = SSI2_STCR;
++		sier = SSI2_SIER;
++	}
++
++	/* DAI data (word) size */
++	switch (params_format(params)) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		stccr |= SSI_STCCR_WL(16);
++		break;
++	case SNDRV_PCM_FORMAT_S20_3LE:
++		stccr |= SSI_STCCR_WL(20);
++		break;
++	case SNDRV_PCM_FORMAT_S24_LE:
++		stccr |= SSI_STCCR_WL(24);
++		break;
++	}
++
++	/* enable interrupts */
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		stcr |= SSI_STCR_TFEN0;
++	else
++		stcr |= SSI_STCR_TFEN1;
++	sier |= SSI_SIER_TDMAE | SSI_SIER_TFE0_EN | SSI_SIER_TFE1_EN |
++	    SSI_SIER_TUE0_EN | SSI_SIER_TUE1_EN;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		SSI1_STCR = stcr;
++		SSI1_STCCR = stccr;
++		SSI1_SIER = sier;
++	} else {
++		SSI2_STCR = stcr;
++		SSI2_STCCR = stccr;
++		SSI2_SIER = sier;
++	}
++
++	return 0;
++}
++
++static int imx_ssi_hw_rx_params(struct snd_pcm_substream *substream,
++				struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	u32 srccr, srcr, sier;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		srccr = SSI1_SRCCR & ~SSI_SRCCR_WL_MASK;
++		srcr = SSI1_SRCR;
++		sier = SSI1_SIER;
++	} else {
++		srccr = SSI2_SRCCR & ~SSI_SRCCR_WL_MASK;
++		srcr = SSI2_SRCR;
++		sier = SSI2_SIER;
++	}
++
++	/* DAI data (word) size */
++	switch (params_format(params)) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		srccr |= SSI_SRCCR_WL(16);
++		break;
++	case SNDRV_PCM_FORMAT_S20_3LE:
++		srccr |= SSI_SRCCR_WL(20);
++		break;
++	case SNDRV_PCM_FORMAT_S24_LE:
++		srccr |= SSI_SRCCR_WL(24);
++		break;
++	}
++
++	/* enable interrupts */
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		srcr |= SSI_SRCR_RFEN0;
++	else
++		srcr |= SSI_SRCR_RFEN1;
++	sier |= SSI_SIER_RDMAE | SSI_SIER_RFF0_EN | SSI_SIER_RFF1_EN |
++	    SSI_SIER_ROE0_EN | SSI_SIER_ROE1_EN;;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		SSI1_SRCR = srcr;
++		SSI1_SRCCR = srccr;
++		SSI1_SIER = sier;
++	} else {
++		SSI2_SRCR = srcr;
++		SSI2_SRCCR = srccr;
++		SSI2_SIER = sier;
++	}
++	return 0;
++}
++
++/*
++ * Should only be called when port is inactive (i.e. SSIEN = 0),
++ * although can be called multiple times by upper layers.
++ */
++static int imx_ssi_hw_params(struct snd_pcm_substream *substream,
++			     struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++
++	/* Tx/Rx config */
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		/* set up DMA params */
++		switch (cpu_dai->id) {
++		case IMX_DAI_SSI0:
++			cpu_dai->dma_data = &imx_ssi1_pcm_stereo_out0;
++			break;
++		case IMX_DAI_SSI1:
++			cpu_dai->dma_data = &imx_ssi1_pcm_stereo_out1;
++			break;
++		case IMX_DAI_SSI2:
++			cpu_dai->dma_data = &imx_ssi2_pcm_stereo_out0;
++			break;
++		case IMX_DAI_SSI3:
++			cpu_dai->dma_data = &imx_ssi2_pcm_stereo_out1;
++			break;
++		}
++
++		/* cant change any parameters when SSI is running */
++		if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++			if (SSI1_SCR & SSI_SCR_SSIEN)
++				return 0;
++		} else {
++			if (SSI2_SCR & SSI_SCR_SSIEN)
++				return 0;
++		}
++		return imx_ssi_hw_tx_params(substream, params);
++	} else {
++		/* set up DMA params */
++		switch (cpu_dai->id) {
++		case IMX_DAI_SSI0:
++			cpu_dai->dma_data = &imx_ssi1_pcm_stereo_in0;
++			break;
++		case IMX_DAI_SSI1:
++			cpu_dai->dma_data = &imx_ssi1_pcm_stereo_in1;
++			break;
++		case IMX_DAI_SSI2:
++			cpu_dai->dma_data = &imx_ssi2_pcm_stereo_in0;
++			break;
++		case IMX_DAI_SSI3:
++			cpu_dai->dma_data = &imx_ssi2_pcm_stereo_in1;
++			break;
++		}
++
++		/* cant change any parameters when SSI is running */
++		if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++			if (SSI1_SCR & SSI_SCR_SSIEN)
++				return 0;
++		} else {
++			if (SSI2_SCR & SSI_SCR_SSIEN)
++				return 0;
++		}
++		return imx_ssi_hw_rx_params(substream, params);
++	}
++}
++
++static int imx_ssi_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	u32 scr;
++
++	/* enable the SSI port, note that no other port config 
++	 * should happen after SSIEN is set */
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++		scr = SSI1_SCR;
++		SSI1_SCR = scr | SSI_SCR_SSIEN;
++	} else {
++		scr = SSI2_SCR;
++		SSI2_SCR = scr | SSI_SCR_SSIEN;
++	}
++	SSI_DUMP();
++	return 0;
++}
++
++static int imx_ssi_trigger(struct snd_pcm_substream *substream, int cmd)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	u32 scr;
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		scr = SSI1_SCR;
++	else
++		scr = SSI2_SCR;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++			scr |= SSI_SCR_TE;
++		else
++			scr |= SSI_SCR_RE;
++		break;
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++			scr &= ~SSI_SCR_TE;
++		else
++			scr &= ~SSI_SCR_RE;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
++		SSI1_SCR = scr;
++	else
++		SSI2_SCR = scr;
++
++	SSI_DUMP();
++	return 0;
++}
++
++static void imx_ssi_shutdown(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++
++	/* shutdown SSI if neither Tx or Rx is active */
++	if (!cpu_dai->active) {
++
++		if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2) {
++
++			if (--ssi_active[SSI1_PORT] > 1)
++				return;
++
++			SSI1_SCR = 0;
++
++			clk_put(ssi_clk);
++
++		} else {
++			if (--ssi_active[SSI2_PORT])
++				return;
++			SSI2_SCR = 0;
++
++		}
++	}
++}
++
++#ifdef CONFIG_PM
++static int imx_ssi_suspend(struct device *dev, pm_message_t state)
++{
++	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
++
++	if (!dai->active)
++		return 0;
++
++	// do we need to disable any clocks
++
++	return 0;
++}
++
++static int imx_ssi_resume(struct device *dev)
++{
++	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
++
++	if (!dai->active)
++		return 0;
++
++	// do we need to enable any clocks
++	return 0;
++}
++
++#else
++#define imx_ssi_suspend	NULL
++#define imx_ssi_resume	NULL
++#endif
++
++#define IMX_SSI_RATES \
++	(SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 | \
++	SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 | \
++	SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 | \
++	SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_88200 | \
++	SNDRV_PCM_RATE_96000)
++
++#define IMX_SSI_BITS \
++	(SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | \
++	SNDRV_PCM_FMTBIT_S24_LE)
++
++static const struct snd_soc_pcm_stream imx_ssi_playback = {
++	.stream_name = "Playback",
++	.channels_min = 1,
++	.channels_max = 2,
++	.rates = IMX_SSI_RATES,
++	.formats = IMX_SSI_BITS,
++};
++
++static const struct snd_soc_pcm_stream imx_ssi_capture = {
++	.stream_name = "Capture",
++	.channels_min = 1,
++	.channels_max = 2,
++	.rates = IMX_SSI_RATES,
++	.formats = IMX_SSI_BITS,
++};
++
++/* dai ops, called by machine drivers */
++static const struct snd_soc_dai_ops imx_ssi_dai_ops = {
++	.set_sysclk = imx_ssi_set_dai_sysclk,
++	.set_clkdiv = imx_ssi_set_dai_clkdiv,
++	.set_fmt = imx_ssi_set_dai_fmt,
++	.set_tdm_slot = imx_ssi_set_dai_tdm_slot,
++};
++
++/* audio ops, called by alsa */
++static const struct snd_soc_ops imx_ssi_audio_ops = {
++	.startup = imx_ssi_startup,
++	.shutdown = imx_ssi_shutdown,
++	.trigger = imx_ssi_trigger,
++	.prepare = imx_ssi_prepare,
++	.hw_params = imx_ssi_hw_params,
++};
++
++const char imx_ssi_1[SND_SOC_DAI_NAME_SIZE] = {
++	"imx-ssi-1"
++};
++
++EXPORT_SYMBOL_GPL(imx_ssi_1);
++
++const char imx_ssi_2[SND_SOC_DAI_NAME_SIZE] = {
++	"imx-ssi-2"
++};
++
++EXPORT_SYMBOL_GPL(imx_ssi_2);
++
++const char imx_ssi_3[SND_SOC_DAI_NAME_SIZE] = {
++	"imx-ssi-3"
++};
++
++EXPORT_SYMBOL_GPL(imx_ssi_3);
++
++const char imx_ssi_4[SND_SOC_DAI_NAME_SIZE] = {
++	"imx-ssi-4"
++};
++
++EXPORT_SYMBOL_GPL(imx_ssi_4);
++
++static int imx_ssi_probe(struct device *dev)
++{
++	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
++
++	if (!strcmp(imx_ssi_1, dai->name))
++		dai->id = IMX_DAI_SSI0;
++	else if (!strcmp(imx_ssi_2, dai->name))
++		dai->id = IMX_DAI_SSI1;
++	else if (!strcmp(imx_ssi_3, dai->name))
++		dai->id = IMX_DAI_SSI2;
++	else if (!strcmp(imx_ssi_4, dai->name))
++		dai->id = IMX_DAI_SSI3;
++	else {
++		printk(KERN_ERR "%s: invalid device %s\n", __func__, dai->name);
++		return -ENODEV;
++	}
++
++	dai->type = SND_SOC_DAI_PCM;
++	dai->ops = &imx_ssi_dai_ops;
++	dai->audio_ops = &imx_ssi_audio_ops;
++	dai->capture = &imx_ssi_capture;
++	dai->playback = &imx_ssi_playback;
++	snd_soc_register_cpu_dai(dai);
++	return 0;
++}
++
++static struct snd_soc_device_driver imx_ssi_driver = {
++	.type = SND_SOC_BUS_TYPE_DAI,
++	.driver = {
++		   .name = "imx-ssi",
++		   .owner = THIS_MODULE,
++		   .bus = &asoc_bus_type,
++		   .probe = imx_ssi_probe,
++		   .suspend = imx_ssi_suspend,
++		   .resume = imx_ssi_resume,
++		   },
++};
++
++static int __init imx_ssi_init(void)
++{
++	return driver_register(&imx_ssi_driver.driver);
++}
++
++static void __exit imx_ssi_exit(void)
++{
++	driver_unregister(&imx_ssi_driver.driver);
++}
++
++module_init(imx_ssi_init);
++module_exit(imx_ssi_exit);
++
++/* Module information */
++MODULE_AUTHOR
++    ("Liam Girdwood, liam.girdwood@wolfsonmicro.com, www.wolfsonmicro.com");
++MODULE_DESCRIPTION("i.MX ASoC I2S driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-ssi.h b/sound/soc/imx/imx-ssi.h
+new file mode 100644
+index 0000000..8f4d12c
+--- /dev/null
++++ b/sound/soc/imx/imx-ssi.h
+@@ -0,0 +1,220 @@
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#ifndef _IMX_SSI_H
++#define _IMX_SSI_H
++
++#include <asm/arch/hardware.h>
++
++/* SSI regs definition */
++#define SSI1_IO_BASE_ADDR	IO_ADDRESS(SSI1_BASE_ADDR)
++#define SSI2_IO_BASE_ADDR	IO_ADDRESS(SSI2_BASE_ADDR)
++
++#define SSI1_STX0	*((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x00))
++#define SSI1_STX1   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x04))
++#define SSI1_SRX0   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x08))
++#define SSI1_SRX1   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x0c))
++#define SSI1_SCR    *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x10))
++#define SSI1_SISR   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x14))
++#define SSI1_SIER   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x18))
++#define SSI1_STCR   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x1c))
++#define SSI1_SRCR   *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x20))
++#define SSI1_STCCR  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x24))
++#define SSI1_SRCCR  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x28))
++#define SSI1_SFCSR  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x2c))
++#define SSI1_STR    *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x30))
++#define SSI1_SOR    *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x34))
++#define SSI1_SACNT  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x38))
++#define SSI1_SACADD *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x3c))
++#define SSI1_SACDAT *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x40))
++#define SSI1_SATAG  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x44))
++#define SSI1_STMSK  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x48))
++#define SSI1_SRMSK  *((volatile u32 *)(SSI1_IO_BASE_ADDR + 0x4c))
++
++#define SSI2_STX0	*((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x00))
++#define SSI2_STX1   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x04))
++#define SSI2_SRX0   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x08))
++#define SSI2_SRX1   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x0c))
++#define SSI2_SCR    *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x10))
++#define SSI2_SISR   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x14))
++#define SSI2_SIER   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x18))
++#define SSI2_STCR   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x1c))
++#define SSI2_SRCR   *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x20))
++#define SSI2_STCCR  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x24))
++#define SSI2_SRCCR  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x28))
++#define SSI2_SFCSR  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x2c))
++#define SSI2_STR    *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x30))
++#define SSI2_SOR    *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x34))
++#define SSI2_SACNT  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x38))
++#define SSI2_SACADD *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x3c))
++#define SSI2_SACDAT *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x40))
++#define SSI2_SATAG  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x44))
++#define SSI2_STMSK  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x48))
++#define SSI2_SRMSK  *((volatile u32 *)(SSI2_IO_BASE_ADDR + 0x4c))
++
++#define SSI_SCR_CLK_IST        (1 << 9)
++#define SSI_SCR_TCH_EN         (1 << 8)
++#define SSI_SCR_SYS_CLK_EN     (1 << 7)
++#define SSI_SCR_I2S_MODE_NORM  (0 << 5)
++#define SSI_SCR_I2S_MODE_MSTR  (1 << 5)
++#define SSI_SCR_I2S_MODE_SLAVE (2 << 5)
++#define SSI_SCR_SYN            (1 << 4)
++#define SSI_SCR_NET            (1 << 3)
++#define SSI_SCR_RE             (1 << 2)
++#define SSI_SCR_TE             (1 << 1)
++#define SSI_SCR_SSIEN          (1 << 0)
++
++#define SSI_SISR_CMDAU         (1 << 18)
++#define SSI_SISR_CMDDU         (1 << 17)
++#define SSI_SISR_RXT           (1 << 16)
++#define SSI_SISR_RDR1          (1 << 15)
++#define SSI_SISR_RDR0          (1 << 14)
++#define SSI_SISR_TDE1          (1 << 13)
++#define SSI_SISR_TDE0          (1 << 12)
++#define SSI_SISR_ROE1          (1 << 11)
++#define SSI_SISR_ROE0          (1 << 10)
++#define SSI_SISR_TUE1          (1 << 9)
++#define SSI_SISR_TUE0          (1 << 8)
++#define SSI_SISR_TFS           (1 << 7)
++#define SSI_SISR_RFS           (1 << 6)
++#define SSI_SISR_TLS           (1 << 5)
++#define SSI_SISR_RLS           (1 << 4)
++#define SSI_SISR_RFF1          (1 << 3)
++#define SSI_SISR_RFF0          (1 << 2)
++#define SSI_SISR_TFE1          (1 << 1)
++#define SSI_SISR_TFE0          (1 << 0)
++
++#define SSI_SIER_RDMAE         (1 << 22)
++#define SSI_SIER_RIE           (1 << 21)
++#define SSI_SIER_TDMAE         (1 << 20)
++#define SSI_SIER_TIE           (1 << 19)
++#define SSI_SIER_CMDAU_EN      (1 << 18)
++#define SSI_SIER_CMDDU_EN      (1 << 17)
++#define SSI_SIER_RXT_EN        (1 << 16)
++#define SSI_SIER_RDR1_EN       (1 << 15)
++#define SSI_SIER_RDR0_EN       (1 << 14)
++#define SSI_SIER_TDE1_EN       (1 << 13)
++#define SSI_SIER_TDE0_EN       (1 << 12)
++#define SSI_SIER_ROE1_EN       (1 << 11)
++#define SSI_SIER_ROE0_EN       (1 << 10)
++#define SSI_SIER_TUE1_EN       (1 << 9)
++#define SSI_SIER_TUE0_EN       (1 << 8)
++#define SSI_SIER_TFS_EN        (1 << 7)
++#define SSI_SIER_RFS_EN        (1 << 6)
++#define SSI_SIER_TLS_EN        (1 << 5)
++#define SSI_SIER_RLS_EN        (1 << 4)
++#define SSI_SIER_RFF1_EN       (1 << 3)
++#define SSI_SIER_RFF0_EN       (1 << 2)
++#define SSI_SIER_TFE1_EN       (1 << 1)
++#define SSI_SIER_TFE0_EN       (1 << 0)
++
++#define SSI_STCR_TXBIT0        (1 << 9)
++#define SSI_STCR_TFEN1         (1 << 8)
++#define SSI_STCR_TFEN0         (1 << 7)
++#define SSI_STCR_TFDIR         (1 << 6)
++#define SSI_STCR_TXDIR         (1 << 5)
++#define SSI_STCR_TSHFD         (1 << 4)
++#define SSI_STCR_TSCKP         (1 << 3)
++#define SSI_STCR_TFSI          (1 << 2)
++#define SSI_STCR_TFSL          (1 << 1)
++#define SSI_STCR_TEFS          (1 << 0)
++
++#define SSI_SRCR_RXBIT0        (1 << 9)
++#define SSI_SRCR_RFEN1         (1 << 8)
++#define SSI_SRCR_RFEN0         (1 << 7)
++#define SSI_SRCR_RFDIR         (1 << 6)
++#define SSI_SRCR_RXDIR         (1 << 5)
++#define SSI_SRCR_RSHFD         (1 << 4)
++#define SSI_SRCR_RSCKP         (1 << 3)
++#define SSI_SRCR_RFSI          (1 << 2)
++#define SSI_SRCR_RFSL          (1 << 1)
++#define SSI_SRCR_REFS          (1 << 0)
++
++#define SSI_STCCR_DIV2         (1 << 18)
++#define SSI_STCCR_PSR          (1 << 15)
++#define SSI_STCCR_WL(x)        ((((x) - 2) >> 1) << 13)
++#define SSI_STCCR_DC(x)        (((x) & 0x1f) << 8)
++#define SSI_STCCR_PM(x)        (((x) & 0xff) << 0)
++#define SSI_STCCR_WL_MASK        (0xf << 13)
++#define SSI_STCCR_DC_MASK        (0x1f << 8)
++#define SSI_STCCR_PM_MASK        (0xff << 0)
++
++#define SSI_SRCCR_DIV2         (1 << 18)
++#define SSI_SRCCR_PSR          (1 << 15)
++#define SSI_SRCCR_WL(x)        ((((x) - 2) >> 1) << 13)
++#define SSI_SRCCR_DC(x)        (((x) & 0x1f) << 8)
++#define SSI_SRCCR_PM(x)        (((x) & 0xff) << 0)
++#define SSI_SRCCR_WL_MASK        (0xf << 13)
++#define SSI_SRCCR_DC_MASK        (0x1f << 8)
++#define SSI_SRCCR_PM_MASK        (0xff << 0)
++
++
++#define SSI_SFCSR_RFCNT1(x)   (((x) & 0xf) << 28)
++#define SSI_SFCSR_TFCNT1(x)   (((x) & 0xf) << 24)
++#define SSI_SFCSR_RFWM1(x)    (((x) & 0xf) << 20)
++#define SSI_SFCSR_TFWM1(x)    (((x) & 0xf) << 16)
++#define SSI_SFCSR_RFCNT0(x)   (((x) & 0xf) << 12)
++#define SSI_SFCSR_TFCNT0(x)   (((x) & 0xf) <<  8)
++#define SSI_SFCSR_RFWM0(x)    (((x) & 0xf) <<  4)
++#define SSI_SFCSR_TFWM0(x)    (((x) & 0xf) <<  0)
++
++#define SSI_STR_TEST          (1 << 15)
++#define SSI_STR_RCK2TCK       (1 << 14)
++#define SSI_STR_RFS2TFS       (1 << 13)
++#define SSI_STR_RXSTATE(x)    (((x) & 0xf) << 8)
++#define SSI_STR_TXD2RXD       (1 <<  7)
++#define SSI_STR_TCK2RCK       (1 <<  6)
++#define SSI_STR_TFS2RFS       (1 <<  5)
++#define SSI_STR_TXSTATE(x)    (((x) & 0xf) << 0)
++
++#define SSI_SOR_CLKOFF        (1 << 6)
++#define SSI_SOR_RX_CLR        (1 << 5)
++#define SSI_SOR_TX_CLR        (1 << 4)
++#define SSI_SOR_INIT          (1 << 3)
++#define SSI_SOR_WAIT(x)       (((x) & 0x3) << 1)
++#define SSI_SOR_SYNRST        (1 << 0)
++
++#define SSI_SACNT_FRDIV(x)    (((x) & 0x3f) << 5)
++#define SSI_SACNT_WR          (x << 4)
++#define SSI_SACNT_RD          (x << 3)
++#define SSI_SACNT_TIF         (x << 2)
++#define SSI_SACNT_FV          (x << 1)
++#define SSI_SACNT_AC97EN      (x << 0)
++
++/* SDMA & SSI watermarks for FIFO's */
++#define SDMA_TXFIFO_WATERMARK				0x2
++#define SDMA_RXFIFO_WATERMARK				0x6
++#define SSI_TXFIFO_WATERMARK				0x2
++#define SSI_RXFIFO_WATERMARK				0x6
++
++/* i.MX DAI SSP ID's */
++#define IMX_DAI_SSI0			0 /* SSI1 FIFO 0 */
++#define IMX_DAI_SSI1			1 /* SSI1 FIFO 1 */
++#define IMX_DAI_SSI2			2 /* SSI2 FIFO 0 */
++#define IMX_DAI_SSI3			3 /* SSI2 FIFO 1 */
++
++/* SSI clock sources */
++#define IMX_SSP_SYS_CLK		0
++
++/* SSI audio dividers */
++#define IMX_SSI_TX_DIV_2			0
++#define IMX_SSI_TX_DIV_PSR			1
++#define IMX_SSI_TX_DIV_PM			2
++#define IMX_SSI_RX_DIV_2			3
++#define IMX_SSI_RX_DIV_PSR			4
++#define IMX_SSI_RX_DIV_PM			5
++
++
++/* SSI Div 2 */
++#define IMX_SSI_DIV_2_OFF		~SSI_STCCR_DIV2
++#define IMX_SSI_DIV_2_ON		SSI_STCCR_DIV2
++
++extern const char imx_ssi_1[SND_SOC_DAI_NAME_SIZE];
++extern const char imx_ssi_2[SND_SOC_DAI_NAME_SIZE];
++extern const char imx_ssi_3[SND_SOC_DAI_NAME_SIZE];
++extern const char imx_ssi_4[SND_SOC_DAI_NAME_SIZE];
++
++#endif
+diff --git a/sound/soc/imx/imx37-3stack-wm8350.c b/sound/soc/imx/imx37-3stack-wm8350.c
+new file mode 100644
+index 0000000..461e6be
+--- /dev/null
++++ b/sound/soc/imx/imx37-3stack-wm8350.c
+@@ -0,0 +1,600 @@
++/*
++ * imx37-3stack-wm8350.c  --  i.MX37 3Stack Driver for Wolfson WM8350 Codec
++ *
++ * Copyright 2007 Wolfson Microelectronics PLC.
++ *
++ * Author: Liam Girdwood
++ *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
++ *
++ *  This program is free software; you can redistribute  it and/or modify it
++ *  under  the terms of  the GNU General  Public License as published by the
++ *  Free Software Foundation;  either version 2 of the  License, or (at your
++ *  option) any later version.
++ *
++ *  Revision history
++ *    19th Jun 2007   Initial version.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/bitops.h>
++#include <linux/platform_device.h>
++#include <linux/i2c.h>
++#include <linux/err.h>
++#include <linux/pmic/wm8350.h>
++#include <sound/driver.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++
++#include <asm/arch/dma.h>
++#include <asm/arch/spba.h>
++#include <asm/arch/clock.h>
++
++#include "imx-ssi.h"
++#include "imx-pcm.h"
++#include "../sound/soc/codecs/wm8350.h"
++
++extern void gpio_activate_audio_ports(void);
++
++/* SSI BCLK and LRC master */
++#define WM8350_SSI_MASTER	1
++
++#define IMX37_3STACK_AUDIO_VERSION "0.3"
++
++struct imx37_3stack_pcm_state {
++	int lr_clk_active;
++};
++
++struct _wm8350_audio {
++	unsigned int channels;
++	snd_pcm_format_t format;
++	unsigned int rate;
++	unsigned int sysclk;
++	unsigned int bclkdiv;
++	unsigned int clkdiv;
++	unsigned int lr_rate;
++};
++
++/* in order of power consumption per rate (lowest first) */
++static const struct _wm8350_audio wm8350_audio[] = {
++	/* 16bit mono modes */
++	{1, SNDRV_PCM_FORMAT_S16_LE, 8000, 12288000 >> 1, 
++		WM8350_BCLK_DIV_48, WM8350_DACDIV_3, 16,},
++	
++	/* 16 bit stereo modes */
++	{2, SNDRV_PCM_FORMAT_S16_LE, 8000, 12288000, 
++		WM8350_BCLK_DIV_48, WM8350_DACDIV_6, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 16000, 12288000, 
++		WM8350_BCLK_DIV_24, WM8350_DACDIV_3, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 32000, 12288000, 
++        WM8350_BCLK_DIV_12, WM8350_DACDIV_1_5, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 48000, 12288000, 
++		WM8350_BCLK_DIV_8, WM8350_DACDIV_1, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 96000, 24576000, 
++		WM8350_BCLK_DIV_8, WM8350_DACDIV_1, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 11025, 11289600, 
++		WM8350_BCLK_DIV_32, WM8350_DACDIV_4, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 22050, 11289600, 
++		WM8350_BCLK_DIV_16, WM8350_DACDIV_2, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 44100, 11289600, 
++		WM8350_BCLK_DIV_8, WM8350_DACDIV_1, 32,},
++	{2, SNDRV_PCM_FORMAT_S16_LE, 88200, 22579200, 
++		WM8350_BCLK_DIV_8, WM8350_DACDIV_1, 32,},
++		
++	/* 24bit stereo modes */
++	{2, SNDRV_PCM_FORMAT_S24_LE, 48000, 12288000, 
++		WM8350_BCLK_DIV_4, WM8350_DACDIV_1, 64,},
++	{2, SNDRV_PCM_FORMAT_S24_LE, 96000, 24576000, 
++		WM8350_BCLK_DIV_4, WM8350_DACDIV_1, 64,},
++	{2, SNDRV_PCM_FORMAT_S24_LE, 44100, 11289600, 
++		WM8350_BCLK_DIV_4, WM8350_DACDIV_1, 64,},
++	{2, SNDRV_PCM_FORMAT_S24_LE, 88200, 22579200, 
++		WM8350_BCLK_DIV_4, WM8350_DACDIV_1, 64,},
++};
++
++#if WM8350_SSI_MASTER
++static int imx37_3stack_startup(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_codec *codec = pcm_link->codec;
++	struct wm8350* wm8350 = codec->control_data;
++	struct imx37_3stack_pcm_state *state = pcm_link->private_data;
++	
++	/* In master mode the LR clock can come from either the DAC or ADC.
++	 * We use the LR clock from whatever stream is enabled first.
++	 */
++
++	if (!state->lr_clk_active) {
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++			wm8350_clear_bits(wm8350, WM8350_CLOCK_CONTROL_2, 
++				WM8350_LRC_ADC_SEL);
++		else
++			wm8350_set_bits(wm8350, WM8350_CLOCK_CONTROL_2, 
++				WM8350_LRC_ADC_SEL);
++	}
++	state->lr_clk_active++;
++	return 0;
++}
++#else
++#define imx37_3stack_startup NULL
++#endif
++	
++static int imx37_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
++	struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	struct snd_soc_dai *codec_dai = pcm_link->codec_dai;
++	struct imx37_3stack_pcm_state *state = pcm_link->private_data;
++	int i, found = 0;
++	snd_pcm_format_t format = params_format(params);
++	unsigned int rate = params_rate(params);
++	unsigned int channels = params_channels(params);
++	u32 dai_format;
++	
++	/* only need to do this once as capture and playback are sync */
++	if (state->lr_clk_active > 1)
++		return 0;
++	
++	/* find the correct audio parameters */
++	for (i = 0; i < ARRAY_SIZE(wm8350_audio); i++) {
++		if (rate == wm8350_audio[i].rate && 
++			format == wm8350_audio[i].format &&
++			channels == wm8350_audio[i].channels) {
++			found = 1;
++			break;
++		}
++	}
++	if (!found)
++		return -EINVAL;
++		
++#if WM8350_SSI_MASTER
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | 
++		SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_SYNC;
++	if (channels == 2)
++		dai_format |= SND_SOC_DAIFMT_TDM;
++		
++	/* set codec DAI configuration */
++	codec_dai->ops->set_fmt(codec_dai, dai_format);
++
++	/* set cpu DAI configuration */
++	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
++		
++	/* set 32KHZ as the codec system clock for DAC and ADC */
++	codec_dai->ops->set_sysclk(codec_dai, WM3850_MCLK_SEL_PLL_32K, 
++		wm8350_audio[i].sysclk, SND_SOC_CLOCK_IN); 
++
++
++#else
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | 
++		SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_SYNC;
++	if (channels == 2)
++		format |= SND_SOC_DAIFMT_TDM;
++		
++	/* set codec DAI configuration */
++	codec_dai->ops->set_fmt(codec_dai, dai_format);
++
++	/* set cpu DAI configuration */
++	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
++		
++	/* set DAC LRC as the codec system clock for DAC and ADC */
++	codec_dai->ops->set_sysclk(codec_dai, WM3850_MCLK_SEL_PLL_DAC, 
++		wm8350_audio[i].sysclk, SND_SOC_CLOCK_IN);
++#endif
++
++	/* set i.MX active slot mask */
++	cpu_dai->ops->set_tdm_slot(cpu_dai, 
++		channels == 1 ? 0xfffffffe : 0xfffffffc, channels);
++		
++	/* set the SSI system clock as input (unused) */
++	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0,
++		SND_SOC_CLOCK_IN);
++
++	/* set codec BCLK division for sample rate */
++	codec_dai->ops->set_clkdiv(codec_dai, WM8350_BCLK_CLKDIV, 
++		wm8350_audio[i].bclkdiv);
++
++	/* DAI is synchronous and clocked with DAC LRCLK */
++	codec_dai->ops->set_clkdiv(codec_dai, 
++			WM8350_DACLR_CLKDIV, wm8350_audio[i].lr_rate);
++
++	/* now configure DAC and ADC clocks */
++	codec_dai->ops->set_clkdiv(codec_dai, 
++		WM8350_DAC_CLKDIV, wm8350_audio[i].clkdiv);
++	
++	codec_dai->ops->set_clkdiv(codec_dai, 
++		WM8350_ADC_CLKDIV, wm8350_audio[i].clkdiv);
++
++#if WM8350_SSI_MASTER
++	/* codec FLL input is 32768 kHz from MCLK */
++		codec_dai->ops->set_pll(codec_dai, 0, 32768,
++		wm8350_audio[i].sysclk);
++#else
++	/* codec FLL input is rate from DAC LRC */
++	codec_dai->ops->set_pll(codec_dai, 0, rate, 
++		wm8350_audio[i].sysclk);
++#endif
++
++	return 0;
++}
++
++static void imx37_3stack_shutdown(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *codec_dai = pcm_link->codec_dai;
++	struct imx37_3stack_pcm_state *state = pcm_link->private_data;
++
++	/* disable the PLL if there are no active Tx or Rx channels */
++	if (!codec_dai->active)
++		codec_dai->ops->set_pll(codec_dai, 0, 0, 0);
++	state->lr_clk_active--;
++}
++
++/*
++ * imx37_3stack WM8350 HiFi DAI opserations.
++ */
++static struct snd_soc_ops imx37_3stack_hifi_ops = {
++	.startup = imx37_3stack_startup,
++	.shutdown = imx37_3stack_shutdown,
++	.hw_params = imx37_3stack_hifi_hw_params,
++};
++
++/* need to refine these */
++static struct wm8350_platform_data imx37_3stack_wm8350_setup = {
++	.vmid_discharge_msecs = 1000,
++	.drain_msecs = 30,
++	.cap_discharge_msecs = 700,
++	.vmid_charge_msecs = 700,
++	.vmid_s_curve = WM8350_S_CURVE_SLOW,
++	.dis_out4 = WM8350_DISCHARGE_SLOW,
++	.dis_out3 = WM8350_DISCHARGE_SLOW,
++	.dis_out2 = WM8350_DISCHARGE_SLOW,
++	.dis_out1 = WM8350_DISCHARGE_SLOW,
++	.vroi_out4 = WM8350_TIE_OFF_500R,
++	.vroi_out3 = WM8350_TIE_OFF_500R,
++	.vroi_out2 = WM8350_TIE_OFF_500R,
++	.vroi_out1 = WM8350_TIE_OFF_500R,
++	.vroi_enable = 0,
++	.codec_current_d0 = WM8350_CODEC_ISEL_1_0,
++	.codec_current_d3 = WM8350_CODEC_ISEL_0_5,
++	.codec_current_charge = WM8350_CODEC_ISEL_1_5,
++};
++
++static int imx37_3stack_pcm_new(struct snd_soc_pcm_link *pcm_link)
++{	
++	struct imx37_3stack_pcm_state *state;
++	int ret;
++	
++	state = kzalloc(sizeof(struct imx37_3stack_pcm_state), GFP_KERNEL);
++	if (state == NULL)
++		return -ENOMEM;
++	
++	pcm_link->audio_ops = &imx37_3stack_hifi_ops;
++	pcm_link->private_data = state;
++	
++	ret = snd_soc_pcm_new(pcm_link, 1, 1);
++	if (ret < 0) {
++		printk(KERN_ERR "%s: failed to create hifi pcm\n", __func__);
++		kfree(state);
++		return ret;
++	}
++	
++	printk(KERN_INFO "i.MX37 WM8350 Audio version %s\n", 
++		IMX37_3STACK_AUDIO_VERSION);
++
++	gpio_activate_audio_ports();
++	
++	/* WM8350 uses SSI1 via AUDMUX port 5 for audio */
++
++	/* reset port 1 & 5*/
++	DAM_PTCR1 = 0;
++	DAM_PDCR1 = 0;
++	DAM_PTCR5 = 0;
++	DAM_PDCR5 = 0;
++
++	/* set to synchronous */
++	DAM_PTCR1 |= AUDMUX_PTCR_SYN;
++	DAM_PTCR5 |= AUDMUX_PTCR_SYN;
++
++#if WM8350_SSI_MASTER
++	/* set Rx sources 1 <--> 5 */
++	DAM_PDCR1 |= AUDMUX_PDCR_RXDSEL(5);
++	DAM_PDCR5 |= AUDMUX_PDCR_RXDSEL(1);
++
++	/* set Tx frame direction and source  5--> 1 output */
++	DAM_PTCR1 |= AUDMUX_PTCR_TFSDIR; 
++	DAM_PTCR1 |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, 5);
++
++	/* set Tx Clock direction and source 5--> 1 output */
++	DAM_PTCR1 |= AUDMUX_PTCR_TCLKDIR; 
++	DAM_PTCR1 |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, 5);
++#else
++	/* set Rx sources 1 <--> 5 */
++	DAM_PDCR1 |= AUDMUX_PDCR_RXDSEL(5);
++	DAM_PDCR5 |= AUDMUX_PDCR_RXDSEL(1);
++
++	/* set Tx frame direction and source  1 --> 5 output */
++	DAM_PTCR5 |= AUDMUX_PTCR_TFSDIR; 
++	DAM_PTCR5 |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, 1);
++
++	/* set Tx Clock direction and source 1--> 5 output */
++	DAM_PTCR5 |= AUDMUX_PTCR_TCLKDIR; 
++	DAM_PTCR5 |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, 1);
++#endif
++
++	return 0;
++}
++
++static int imx37_3stack_pcm_free(struct snd_soc_pcm_link *pcm_link)
++{       
++	kfree(pcm_link->private_data);
++	return 0;
++}
++
++static const struct snd_soc_pcm_link_ops imx37_3stack_pcm_ops = {
++	.new	= imx37_3stack_pcm_new,
++	.free	= imx37_3stack_pcm_free,
++};
++
++/* imx37_3stack machine dapm widgets */
++static const struct snd_soc_dapm_widget imx37_3stack_dapm_widgets[] = {
++	SND_SOC_DAPM_MIC("SiMIC", NULL),
++	SND_SOC_DAPM_MIC("Mic1 Jack", NULL),
++	SND_SOC_DAPM_MIC("Mic2 Jack", NULL),
++	SND_SOC_DAPM_LINE("Line In Jack", NULL),
++	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
++	SND_SOC_DAPM_HP("Headphone Jack", NULL),
++};
++
++/* imx37_3stack machine audio map */
++static const char* audio_map[][3] = {
++
++	/* SiMIC --> IN1LN (with automatic bias) via SP1 */
++	{"IN1LN", NULL, "Mic Bias"},
++	{"Mic Bias", NULL, "SiMIC"},
++	
++	/* Mic 1 Jack --> IN1LN and IN1LP (with automatic bias) */
++	{"IN1LN", NULL, "Mic Bias"},
++	{"IN1LP", NULL, "Mic1 Jack"},
++	{"Mic Bias", NULL, "Mic1 Jack"},
++	
++	/* Mic 2 Jack --> IN1RN and IN1RP (with automatic bias) */
++	{"IN1RN", NULL, "Mic Bias"},
++	{"IN1RP", NULL, "Mic1 Jack"},
++	{"Mic Bias", NULL, "Mic1 Jack"},
++
++	/* Line in Jack --> AUX (L+R) */ 
++	{"IN3R", NULL, "Line In Jack"},
++	{"IN3L", NULL, "Line In Jack"},
++	
++	/* Out1 --> Headphone Jack */
++	{"Headphone Jack", NULL, "OUT1R"},
++	{"Headphone Jack", NULL, "OUT1L"},
++	
++	/* Out1 --> Line Out Jack */
++	{"Line Out Jack", NULL, "OUT2R"},
++	{"Line Out Jack", NULL, "OUT2L"},
++	
++	{NULL, NULL, NULL},
++};
++
++#ifdef CONFIG_PM
++static int imx37_3stack_wm8350_audio_suspend(struct platform_device *dev, 
++	pm_message_t state)
++{
++//	struct snd_soc_machine *machine = pdev->dev.driver_data;
++	int ret = 0;
++	
++	return ret;
++}
++
++static int imx37_3stack_wm8350_audio_resume(struct platform_device *dev)
++{
++//	struct snd_soc_machine *machine = pdev->dev.driver_data;
++	int ret = 0;
++	
++	return ret;
++}
++
++#else
++#define imx37_3stack_wm8350_audio_suspend	NULL
++#define imx37_3stack_wm8350_audio_resume	NULL
++#endif
++
++static void imx37_3stack_jack_handler(struct wm8350 *wm8350, int irq)
++{
++	struct snd_soc_machine *machine = &wm8350->audio;
++	u16 reg;
++	
++	/* debounce for 200ms */
++	schedule_timeout_interruptible(msecs_to_jiffies(200));
++	reg = wm8350_reg_read(wm8350, WM8350_JACK_PIN_STATUS);
++	if (reg & WM8350_JACK_R_LVL) {
++		snd_soc_dapm_set_endpoint(machine, "Line Out Jack", 0);
++		snd_soc_dapm_set_endpoint(machine, "Headphone Jack", 1);
++	} else {
++		snd_soc_dapm_set_endpoint(machine, "Headphone Jack", 0);
++		snd_soc_dapm_set_endpoint(machine, "Line Out Jack", 1);	
++	}
++	snd_soc_dapm_sync_endpoints(machine);
++}
++
++int mach_probe(struct snd_soc_machine *machine)
++{
++	struct snd_soc_codec *codec;
++	struct snd_soc_pcm_link *pcm_link;
++	struct wm8350* wm8350 = to_wm8350_from_audio(machine);
++	int i, ret;
++	u16 reg;
++	
++	pcm_link = list_first_entry(&machine->active_list, 
++		struct snd_soc_pcm_link, active_list);
++	
++	codec = pcm_link->codec;
++	codec->control_data = wm8350;
++	codec->platform_data = &imx37_3stack_wm8350_setup;
++	codec->ops->io_probe(codec, machine);	
++
++	/* set unused imx37_3stack WM8350 codec pins */
++	snd_soc_dapm_set_endpoint(machine, "OUT3", 0);
++	snd_soc_dapm_set_endpoint(machine, "OUT4", 0);
++	snd_soc_dapm_set_endpoint(machine, "IN2R", 0);
++	snd_soc_dapm_set_endpoint(machine, "IN2L", 0);
++	snd_soc_dapm_set_endpoint(machine, "OUT2L", 0);
++	snd_soc_dapm_set_endpoint(machine, "OUT2R", 0);
++
++#if 0
++	/* add imx37_3stack specific controls */
++	for (i = 0; i < ARRAY_SIZE(imx37_3stack_wm8350_audio_controls); i++) {
++		if ((err = snd_ctl_add(machine->card,
++				snd_soc_cnew(&imx37_3stack_wm8350_audio_controls[i],
++					codec, NULL))) < 0)
++			return err;
++	}
++#endif
++
++	/* Add imx37_3stack specific widgets */
++	for(i = 0; i < ARRAY_SIZE(imx37_3stack_dapm_widgets); i++) {
++		snd_soc_dapm_new_control(machine, codec, 
++			&imx37_3stack_dapm_widgets[i]);
++	}
++
++	/* set up imx37_3stack specific audio path audio map */
++	for(i = 0; audio_map[i][0] != NULL; i++) {
++		snd_soc_dapm_connect_input(machine, audio_map[i][0], 
++			audio_map[i][1], audio_map[i][2]);
++	}
++
++	/* connect and enable all imx37_3stack WM8350 jacks (for now) */
++	snd_soc_dapm_set_endpoint(machine, "SiMIC", 1);
++	snd_soc_dapm_set_endpoint(machine, "Mic1 Jack", 1);
++	snd_soc_dapm_set_endpoint(machine, "Mic2 Jack", 1);
++	snd_soc_dapm_set_endpoint(machine, "Line In Jack", 1);
++
++	snd_soc_dapm_set_policy(machine, SND_SOC_DAPM_POLICY_STREAM);
++	snd_soc_dapm_sync_endpoints(machine);
++	
++	/* enable slow clock gen for jack detect */
++	reg = wm8350_reg_read(wm8350, WM8350_POWER_MGMT_4);
++	wm8350_reg_write(wm8350, WM8350_POWER_MGMT_4, 
++		reg | WM8350_TOCLK_ENA);
++	/* enable jack detect */
++	reg = wm8350_reg_read(wm8350, WM8350_JACK_DETECT);
++	wm8350_reg_write(wm8350, WM8350_JACK_DETECT, 
++		reg | WM8350_JDR_ENA);
++	wm8350_register_irq(wm8350, WM8350_IRQ_CODEC_JCK_DET_R,
++			    imx37_3stack_jack_handler);
++	wm8350_unmask_irq(wm8350, WM8350_IRQ_CODEC_JCK_DET_R);
++
++	/* register card with ALSA upper layers */
++	ret = snd_soc_register_card(machine);
++	if (ret < 0) {
++		printk(KERN_ERR "%s: failed to register sound card\n",
++			__FUNCTION__);
++		goto link_err;
++	}
++	return 0;
++link_err:
++	snd_soc_machine_free(machine);
++	return ret;
++}
++
++struct snd_soc_machine_ops machine_ops = {
++	.mach_probe = mach_probe,	
++};
++
++static int __devinit imx37_3stack_wm8350_audio_probe(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine = platform_get_drvdata(pdev);
++	struct snd_soc_pcm_link *hifi;
++	int ret;
++
++	machine->owner = THIS_MODULE;
++	machine->pdev = pdev;
++	machine->name = "i.MX32ADS";
++	machine->longname = "WM8350";
++	machine->ops = &machine_ops;
++	
++	/* register card */
++	ret = snd_soc_new_card(machine, 1, SNDRV_DEFAULT_IDX1, SNDRV_DEFAULT_STR1);
++	if (ret < 0) {
++		printk(KERN_ERR "%s: failed to create pcms\n", __func__);
++		return ret;
++	}
++
++	/* i.MX32ADS WM8350 hifi interface */
++	ret = -ENODEV;
++	hifi = snd_soc_pcm_link_new(machine, "imx37_3stack-hifi", &imx37_3stack_pcm_ops,
++		imx_pcm, wm8350_codec, wm8350_hifi_dai, imx_ssi_1);
++	if (hifi == NULL) {
++		printk("failed to create HiFi PCM link\n");
++		goto link_err;
++	}
++	ret = snd_soc_pcm_link_attach(hifi);
++	if (ret < 0) {
++		printk(KERN_ERR "%s: failed to attach hifi pcm\n", __func__);
++		goto link_err;
++	}
++	return ret;
++	
++link_err:
++	snd_soc_machine_free(machine);
++	return ret;
++}
++
++static int __devexit imx37_3stack_wm8350_audio_remove(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine = platform_get_drvdata(pdev);
++	struct wm8350* wm8350 = to_wm8350_from_audio(machine);
++	struct snd_soc_codec *codec;
++	struct snd_soc_pcm_link *pcm_link;
++	
++	pcm_link = list_first_entry(&machine->active_list, 
++		struct snd_soc_pcm_link, active_list);
++	
++	codec = pcm_link->codec;
++	codec->ops->io_remove(codec, machine);
++	wm8350_mask_irq(wm8350, WM8350_IRQ_CODEC_JCK_DET_R);
++	wm8350_free_irq(wm8350, WM8350_IRQ_CODEC_JCK_DET_R);
++	
++	snd_soc_machine_free(machine);
++	return 0;
++}
++
++const char imx37_3stack_audio[32] = "wm8350-imx37-3stack-audio";
++EXPORT_SYMBOL_GPL(imx37_3stack_audio);
++
++static struct platform_driver imx37_3stack_wm8350_audio_driver = {
++	.probe		= imx37_3stack_wm8350_audio_probe,
++	.remove		= __devexit_p(imx37_3stack_wm8350_audio_remove),
++	.suspend	= imx37_3stack_wm8350_audio_suspend,
++	.resume		= imx37_3stack_wm8350_audio_resume,
++	.driver		= {
++		.name	= imx37_3stack_audio,
++	},
++};
++
++static int __init imx37_3stack_wm8350_audio_init(void)
++{
++	return platform_driver_register(&imx37_3stack_wm8350_audio_driver);
++}
++
++static void __exit imx37_3stack_wm8350_audio_exit(void)
++{
++	platform_driver_unregister(&imx37_3stack_wm8350_audio_driver);
++}
++
++module_init(imx37_3stack_wm8350_audio_init);
++module_exit(imx37_3stack_wm8350_audio_exit);
++
++MODULE_AUTHOR("Liam Girdwood");
++MODULE_DESCRIPTION("PMIC WM8350 Driver for i.MX37");
++MODULE_LICENSE("GPL");
+-- 
+1.5.4.4
+

@@ -1,0 +1,86 @@
+From 0e428f54b333d7e6e8805299384778cbc335b690 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 24 Jul 2008 14:42:05 +0300
+Subject: [PATCH] UBIFS: improve budgeting checks
+
+Budgeting is a crucial UBIFS subsystem - add more assertions
+to improve requests checking. This is not compiled in when
+UBIFS debugging is disabled.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |   12 ++++++++++++
+ fs/ubifs/ubifs.h  |   15 ++++++++++-----
+ 2 files changed, 22 insertions(+), 5 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index c6c9307..c18caf0 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -546,6 +546,12 @@ int ubifs_budget_space(struct ubifs_info *c, struct ubifs_budget_req *req)
+ 	int err, idx_growth, data_growth, dd_growth;
+ 	struct retries_info ri;
+ 
++	ubifs_assert(req->new_page <= 1);
++	ubifs_assert(req->dirtied_page <= 1);
++	ubifs_assert(req->new_dent <= 1);
++	ubifs_assert(req->mod_dent <= 1);
++	ubifs_assert(req->new_ino <= 1);
++	ubifs_assert(req->new_ino_d <= UBIFS_MAX_INO_DATA);
+ 	ubifs_assert(req->dirtied_ino <= 4);
+ 	ubifs_assert(req->dirtied_ino_d <= UBIFS_MAX_INO_DATA * 4);
+ 
+@@ -627,6 +633,12 @@ again:
+  */
+ void ubifs_release_budget(struct ubifs_info *c, struct ubifs_budget_req *req)
+ {
++	ubifs_assert(req->new_page <= 1);
++	ubifs_assert(req->dirtied_page <= 1);
++	ubifs_assert(req->new_dent <= 1);
++	ubifs_assert(req->mod_dent <= 1);
++	ubifs_assert(req->new_ino <= 1);
++	ubifs_assert(req->new_ino_d <= UBIFS_MAX_INO_DATA);
+ 	ubifs_assert(req->dirtied_ino <= 4);
+ 	ubifs_assert(req->dirtied_ino_d <= UBIFS_MAX_INO_DATA * 4);
+ 	if (!req->recalculate) {
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 3a3d065..990ecd1 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -811,23 +811,28 @@ struct ubifs_compressor {
+  * dirty by the re-name operation.
+  */
+ struct ubifs_budget_req {
++#ifdef UBIFS_COMPAT_USE_OLD_PREPARE_WRITE
++	unsigned int locked_pg:1;
++#endif
+ 	unsigned int fast:1;
+ 	unsigned int recalculate:1;
++#ifndef UBIFS_DEBUG
+ 	unsigned int new_page:1;
+ 	unsigned int dirtied_page:1;
+ 	unsigned int new_dent:1;
+ 	unsigned int mod_dent:1;
+ 	unsigned int new_ino:1;
+-/* TODO: remove compatibility stuff as late as possible */
+-#ifdef UBIFS_COMPAT_USE_OLD_PREPARE_WRITE
+-	unsigned int locked_pg:1;
+-#endif
+ 	unsigned int new_ino_d:13;
+-#ifndef UBIFS_DEBUG
+ 	unsigned int dirtied_ino:4;
+ 	unsigned int dirtied_ino_d:15;
+ #else
+ 	/* Not bit-fields to check for overflows */
++	unsigned int new_page;
++	unsigned int dirtied_page;
++	unsigned int new_dent;
++	unsigned int mod_dent;
++	unsigned int new_ino;
++	unsigned int new_ino_d;
+ 	unsigned int dirtied_ino;
+ 	unsigned int dirtied_ino_d;
+ #endif
+-- 
+1.5.6.3
+

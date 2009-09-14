@@ -1,0 +1,59 @@
+From 7c99baad23e649229bc6e70855409f1658bdb0b5 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 4 Nov 2008 20:02:19 +0800
+Subject: [PATCH] ENGR00097606 MX51: Add OSC_EN GPIO configuration for audio
+
+OSC_EN gpio is shared by spdif and audio codec, previously
+OSC_EN configuration is implemented in gpio_spdif_active, now
+this function is called in spdif driver module. When spdif
+module is not inserted, audio can't work.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx51/mx51_3stack_gpio.c |   16 +++++++++-------
+ 1 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index e2c864a..2664f64 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -521,6 +521,15 @@ void gpio_activate_audio_ports(void)
+ 	mxc_request_iomux(MX51_PIN_AUD3_BB_FS, IOMUX_CONFIG_ALT0);
+ 	mxc_iomux_set_pad(MX51_PIN_AUD3_BB_FS, pad_val);
+ 
++	/* EIM_D16 */
++	/* osc_en is shared by SPDIF */
++	mxc_request_iomux(MX51_PIN_EIM_D16, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D16,
++			  PAD_CTL_DRV_HIGH | PAD_CTL_100K_PU |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++	mxc_set_gpio_direction(MX51_PIN_EIM_D16, 0);
++	mxc_set_gpio_dataout(MX51_PIN_EIM_D16, 1);
++
+ }
+ 
+ EXPORT_SYMBOL(gpio_activate_audio_ports);
+@@ -1572,12 +1581,6 @@ void gpio_spdif_active(void)
+ 			  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_PULL |
+ 			  PAD_CTL_100K_PU | PAD_CTL_PKE_ENABLE |
+ 			  PAD_CTL_SRE_FAST);
+-	mxc_request_iomux(MX51_PIN_EIM_D16, IOMUX_CONFIG_ALT1);
+-	mxc_iomux_set_pad(MX51_PIN_EIM_D16,
+-			  PAD_CTL_DRV_HIGH | PAD_CTL_100K_PU |
+-			  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
+-	mxc_set_gpio_direction(MX51_PIN_EIM_D16, 0);
+-	mxc_set_gpio_dataout(MX51_PIN_EIM_D16, 1);
+ }
+ 
+ EXPORT_SYMBOL(gpio_spdif_active);
+@@ -1585,7 +1588,6 @@ EXPORT_SYMBOL(gpio_spdif_active);
+ void gpio_spdif_inactive(void)
+ {
+ 	mxc_free_iomux(MX51_PIN_GPIO1_7, IOMUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX51_PIN_EIM_D16, IOMUX_CONFIG_GPIO);
+ 
+ }
+ 
+-- 
+1.5.4.4
+

@@ -1,0 +1,52 @@
+From 9fe5e4d1a26f6fdec008b94221c7ce2cebfaf6c8 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 23 Dec 2008 14:39:14 +0200
+Subject: [PATCH] UBIFS: fix writing uncompressed files
+
+UBIFS does not disable compression if ui->flags is non-zero, e.g.
+if the file has "sync" flag. This is because of the typo which
+is fixed by this patch. The patch also adds a couple of useful
+debugging prints.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/ioctl.c   |    2 ++
+ fs/ubifs/journal.c |    2 +-
+ 2 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/fs/ubifs/ioctl.c b/fs/ubifs/ioctl.c
+index d6b19fc..cf3e69d 100644
+--- a/fs/ubifs/ioctl.c
++++ b/fs/ubifs/ioctl.c
+@@ -153,6 +153,7 @@ long ubifs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 	case FS_IOC_GETFLAGS:
+ 		flags = ubifs2ioctl(ubifs_inode(inode)->flags);
+ 
++		dbg_gen("get flags: %#x, i_flags %#x", flags, inode->i_flags);
+ 		return put_user(flags, (int __user *) arg);
+ 
+ 	case FS_IOC_SETFLAGS: {
+@@ -168,6 +169,7 @@ long ubifs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 		if (!S_ISDIR(inode->i_mode))
+ 			flags &= ~FS_DIRSYNC_FL;
+ 
++		dbg_gen("set flags: %#x, i_flags %#x", flags, inode->i_flags);
+ 		return setflags(inode, flags);
+ 	}
+ 
+diff --git a/fs/ubifs/journal.c b/fs/ubifs/journal.c
+index 3b0fa70..10ae25b 100644
+--- a/fs/ubifs/journal.c
++++ b/fs/ubifs/journal.c
+@@ -704,7 +704,7 @@ int ubifs_jnl_write_data(struct ubifs_info *c, const struct inode *inode,
+ 	data->size = cpu_to_le32(len);
+ 	zero_data_node_unused(data);
+ 
+-	if (!(ui->flags && UBIFS_COMPR_FL))
++	if (!(ui->flags & UBIFS_COMPR_FL))
+ 		/* Compression is disabled for this inode */
+ 		compr_type = UBIFS_COMPR_NONE;
+ 	else
+-- 
+1.5.6.3
+

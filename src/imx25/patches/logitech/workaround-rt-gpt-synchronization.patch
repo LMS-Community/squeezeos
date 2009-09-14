@@ -1,0 +1,33 @@
+Index: linux-2.6.26/arch/arm/plat-mxc/time.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/time.c	2009-08-27 07:54:13.000000000 -0700
++++ linux-2.6.26/arch/arm/plat-mxc/time.c	2009-08-27 09:49:21.000000000 -0700
+@@ -98,6 +98,7 @@
+ static int clocksource_initialised;
+ static unsigned long long nsecs_per_clock;
+ static DEFINE_RAW_SPINLOCK(sched_clock_lock);
++static cycle_t __xipram mxc_gpt_read(void);
+ 
+ static int mxc_gpt_set_next_event(unsigned long cycles,
+ 				  struct clock_event_device *evt)
+@@ -189,7 +190,19 @@
+ 
+ static cycle_t __xipram mxc_gpt_read(void)
+ {
+-	return __raw_readl(MXC_GPT_GPTCNT);
++	cycle_t a, b;
++	int c = 100;
++	do {
++		c--;
++		a = __raw_readl(MXC_GPT_GPTCNT);
++		b = __raw_readl(MXC_GPT_GPTCNT);
++	} while (!(
++			 (c==0)       ||
++			 (a==b)       ||    
++			 ((b-a) == 1) ||
++			 ((b-a) == 2)
++			 ));
++	return a;
+ }
+ 
+ static struct clocksource gpt_clocksrc = {

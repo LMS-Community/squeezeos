@@ -1,0 +1,55 @@
+This patch has been modified to back-port to the Freescale Linux
+2.6.26 BSP. Additionally the SSI is reset (by clearning SSIEN)
+in all cases. This is needed to prevent channel swapping when
+starting playback.
+
+Signed-off-by: Richard Titmuss <richard.titmuss@logitech.com>
+
+
+From 8a3421e1024baae4d66ce5ba4bcc091bec9a0768 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 14 Jul 2009 14:00:21 +0800
+Subject: [PATCH] ENGR00114140 SSI: TX fail if RX is enabled before TX
+
+Software workaround for ENGcm06222
+If RX and TX are working at same time, and RX is enabled before
+TX, tx can't run normally and there will be SSI TX underrun.
+The SW workaround is to clear SYN, RE, SSIEN and then re-enable
+SYN, RE, TE, SSIEN at the same time.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/soc/imx/imx-ssi.c |   13 ++++++++++---
+ 1 files changed, 10 insertions(+), 3 deletions(-)
+
+Index: linux-2.6.26/sound/soc/imx/imx-ssi.c
+===================================================================
+--- linux-2.6.26.orig/sound/soc/imx/imx-ssi.c	2009-09-07 13:49:38.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/imx-ssi.c	2009-09-07 14:27:40.000000000 +0100
+@@ -5,7 +5,7 @@
+  * Author: Liam Girdwood
+  *         liam.girdwood@wolfsonmicro.com or linux@wolfsonmicro.com
+  *
+- * Based on mxc-alsa-mc13783 (C) 2006-2008 Freescale Semiconductor, Inc.
++ * Based on mxc-alsa-mc13783 (C) 2006-2009 Freescale Semiconductor, Inc.
+  *
+  *  This program is free software; you can redistribute  it and/or modify it
+  *  under  the terms of  the GNU General  Public License as published by the
+@@ -559,9 +559,15 @@
+ 	case SNDRV_PCM_TRIGGER_START:
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+-		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+-			scr |= SSI_SCR_TE;
++		/* reset the SSI, this is needed to prevent channel swaps */
++		if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI1)
++			SSI1_SCR = 0;
+ 		else
++			SSI2_SCR = 0;
++
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++			scr |= SSI_SCR_TE;
++		} else
+ 			scr |= SSI_SCR_RE;
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:

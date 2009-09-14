@@ -4,9 +4,12 @@ LICENSE = "MIT"
 PACKAGES = ""
 RDEPENDS += "${IMAGE_INSTALL}"
 
+INHIBIT_DEFAULT_DEPS = "1"
+
 # "export IMAGE_BASENAME" not supported at this time
 IMAGE_BASENAME[export] = "1"
 export PACKAGE_INSTALL ?= "${IMAGE_INSTALL}"
+PACKAGE_INSTALL_ATTEMPTONLY ?= ""
 
 # We need to recursively follow RDEPENDS and RRECOMMENDS for images
 do_rootfs[recrdeptask] += "do_deploy do_populate_staging"
@@ -34,6 +37,7 @@ python () {
     bb.data.setVarFlag('do_rootfs', 'depends', deps, d)
 
     runtime_mapping_rename("PACKAGE_INSTALL", d)
+    runtime_mapping_rename("PACKAGE_INSTALL_ATTEMPTONLY", d)
 }
 
 #
@@ -105,13 +109,25 @@ fakeroot do_rootfs () {
 
 	insert_feed_uris
 
-	${IMAGE_PREPROCESS_COMMAND}
-
-	${@get_imagecmds(d)}
-
 	# Run ldconfig on the image to create a valid cache 
 	# (new format for cross arch compatibility)
 	ldconfig -r ${IMAGE_ROOTFS} -c new
+
+	# (re)create kernel modules dependencies
+	# This part is done by kernel-module-* postinstall scripts but if image do
+	# not contains modules at all there are few moments in boot sequence with
+	# "unable to open modules.dep" message.
+	if [ -e ${STAGING_KERNEL_DIR}/kernel-abiversion ]; then
+		KERNEL_VERSION=`cat ${STAGING_KERNEL_DIR}/kernel-abiversion`
+
+		mkdir -p ${IMAGE_ROOTFS}/lib/modules/$KERNEL_VERSION
+		${TARGET_SYS}-depmod-2.6 -a -b ${IMAGE_ROOTFS} -F ${STAGING_KERNEL_DIR}/System.map-$KERNEL_VERSION $KERNEL_VERSION
+	fi
+
+	${IMAGE_PREPROCESS_COMMAND}
+
+	ROOTFS_SIZE=`du -ks ${IMAGE_ROOTFS}|awk '{size = ${IMAGE_EXTRA_SPACE} + $1; print (size > ${IMAGE_ROOTFS_SIZE} ? size : ${IMAGE_ROOTFS_SIZE}) }'`
+	${@get_imagecmds(d)}
 
 	${IMAGE_POSTPROCESS_COMMAND}
 	
@@ -183,6 +199,13 @@ make_zimage_symlink_relative () {
 	fi
 }
 
+write_image_manifest () {
+	rootfs_${IMAGE_PKGTYPE}_write_manifest
+
+	rm -f ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.manifest
+        ln -s ${IMAGE_NAME}.rootfs.manifest ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.manifest
+}
+
 # Make login manager(s) enable automatic login.
 # Useful for devices where we do not want to log in at all (e.g. phones)
 set_image_autologin () {
@@ -195,7 +218,14 @@ rootfs_update_timestamp () {
 	date "+%m%d%H%M%Y" >${IMAGE_ROOTFS}/etc/timestamp
 }
 
+# Prevent X from being started
+rootfs_no_x_startup () {
+	if [ -f ${IMAGE_ROOTFS}/etc/init.d/xserver-nodm ]; then
+		chmod a-x ${IMAGE_ROOTFS}/etc/init.d/xserver-nodm
+	fi
+}
+
 # export the zap_root_password, create_etc_timestamp and remote_init_link
-EXPORT_FUNCTIONS zap_root_password create_etc_timestamp remove_init_link do_rootfs make_zimage_symlink_relative set_image_autologin rootfs_update_timestamp
+EXPORT_FUNCTIONS zap_root_password create_etc_timestamp remove_init_link do_rootfs make_zimage_symlink_relative set_image_autologin rootfs_update_timestamp rootfs_no_x_startup
 
 addtask rootfs before do_build after do_install

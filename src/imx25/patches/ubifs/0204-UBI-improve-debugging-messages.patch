@@ -1,0 +1,118 @@
+From 32ccdb21c2ee9b636ecf50b2bfd5dd5bb33096b5 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 7 May 2009 18:24:14 +0300
+Subject: [PATCH] UBI: improve debugging messages
+
+Various minor improvements to the debugging messages which
+I found useful while hunting problems.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |    6 ++++--
+ drivers/mtd/ubi/kapi.c |    9 ++++++---
+ drivers/mtd/ubi/vmt.c  |   10 +++++-----
+ 3 files changed, 15 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 1024c10..9a2b217 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -113,7 +113,8 @@ static int vol_cdev_open(struct inode *inode, struct file *file)
+ 	else
+ 		mode = UBI_READONLY;
+ 
+-	dbg_gen("open volume %d, mode %d", vol_id, mode);
++	dbg_gen("open device %d, volume %d, mode %d",
++	        ubi_num, vol_id, mode);
+ 
+ 	desc = ubi_open_volume(ubi_num, vol_id, mode);
+ 	if (IS_ERR(desc))
+@@ -128,7 +129,8 @@ static int vol_cdev_release(struct inode *inode, struct file *file)
+ 	struct ubi_volume_desc *desc = file->private_data;
+ 	struct ubi_volume *vol = desc->vol;
+ 
+-	dbg_gen("release volume %d, mode %d", vol->vol_id, desc->mode);
++	dbg_gen("release device %d, volume %d, mode %d",
++		vol->ubi->ubi_num, vol->vol_id, desc->mode);
+ 
+ 	if (vol->updating) {
+ 		ubi_warn("update of volume %d not finished, volume is damaged",
+diff --git a/drivers/mtd/ubi/kapi.c b/drivers/mtd/ubi/kapi.c
+index 5d9bcf1..0d6382d 100644
+--- a/drivers/mtd/ubi/kapi.c
++++ b/drivers/mtd/ubi/kapi.c
+@@ -106,7 +106,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
+ 	struct ubi_device *ubi;
+ 	struct ubi_volume *vol;
+ 
+-	dbg_gen("open device %d volume %d, mode %d", ubi_num, vol_id, mode);
++	dbg_gen("open device %d, volume %d, mode %d", ubi_num, vol_id, mode);
+ 
+ 	if (ubi_num < 0 || ubi_num >= UBI_MAX_DEVICES)
+ 		return ERR_PTR(-EINVAL);
+@@ -196,6 +196,8 @@ out_free:
+ 	kfree(desc);
+ out_put_ubi:
+ 	ubi_put_device(ubi);
++	dbg_err("cannot open device %d, volume %d, error %d",
++		ubi_num, vol_id, err);
+ 	return ERR_PTR(err);
+ }
+ EXPORT_SYMBOL_GPL(ubi_open_volume);
+@@ -215,7 +217,7 @@ struct ubi_volume_desc *ubi_open_volume_nm(int ubi_num, const char *name,
+ 	struct ubi_device *ubi;
+ 	struct ubi_volume_desc *ret;
+ 
+-	dbg_gen("open volume %s, mode %d", name, mode);
++	dbg_gen("open device %d, volume %s, mode %d", ubi_num, name, mode);
+ 
+ 	if (!name)
+ 		return ERR_PTR(-EINVAL);
+@@ -266,7 +268,8 @@ void ubi_close_volume(struct ubi_volume_desc *desc)
+ 	struct ubi_volume *vol = desc->vol;
+ 	struct ubi_device *ubi = vol->ubi;
+ 
+-	dbg_gen("close volume %d, mode %d", vol->vol_id, desc->mode);
++	dbg_gen("close device %d, volume %d, mode %d",
++		ubi->ubi_num, vol->vol_id, desc->mode);
+ 
+ 	spin_lock(&ubi->volumes_lock);
+ 	switch (desc->mode) {
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 86f2e5b..d149319 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -232,8 +232,8 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 		req->vol_id = vol_id;
+ 	}
+ 
+-	dbg_gen("volume ID %d, %llu bytes, type %d, name %s",
+-		vol_id, (unsigned long long)req->bytes,
++	dbg_gen("create device %d, volume %d, %llu bytes, type %d, name %s",
++		ubi->ubi_num, vol_id, (unsigned long long)req->bytes,
+ 		(int)req->vol_type, req->name);
+ 
+ 	/* Ensure that this volume does not exist */
+@@ -412,7 +412,7 @@ int ubi_remove_volume(struct ubi_volume_desc *desc, int no_vtbl)
+ 	struct ubi_device *ubi = vol->ubi;
+ 	int i, err, vol_id = vol->vol_id, reserved_pebs = vol->reserved_pebs;
+ 
+-	dbg_gen("remove UBI volume %d", vol_id);
++	dbg_gen("remove device %d, volume %d", ubi->ubi_num, vol_id);
+ 	ubi_assert(desc->mode == UBI_EXCLUSIVE);
+ 	ubi_assert(vol == ubi->volumes[vol_id]);
+ 
+@@ -498,8 +498,8 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
+ 	if (ubi->ro_mode)
+ 		return -EROFS;
+ 
+-	dbg_gen("re-size volume %d to from %d to %d PEBs",
+-		vol_id, vol->reserved_pebs, reserved_pebs);
++	dbg_gen("re-size device %d, volume %d to from %d to %d PEBs",
++		ubi->ubi_num, vol_id, vol->reserved_pebs, reserved_pebs);
+ 
+ 	if (vol->vol_type == UBI_STATIC_VOLUME &&
+ 	    reserved_pebs < vol->used_ebs) {
+-- 
+1.5.4.3
+

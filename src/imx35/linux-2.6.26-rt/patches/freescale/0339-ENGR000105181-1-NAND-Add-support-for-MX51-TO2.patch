@@ -1,0 +1,468 @@
+From c660034d55bff919d253fb283cac79b781613457 Mon Sep 17 00:00:00 2001
+From: Jason <r64343@freescale.com>
+Date: Tue, 20 Jan 2009 23:27:42 +0800
+Subject: [PATCH] ENGR000105181-1 NAND:Add support for MX51 TO2
+
+NAND driver support for MX51 TO2
+
+Signed-off-by:Jason Liu <r64343@freescale.com>
+---
+ drivers/mtd/nand/mxc_nd2.c   |   90 +++++++++++++++++++++++++-----------------
+ drivers/mtd/nand/mxc_nd2.h   |   83 +++++++++++++++++++++++++-------------
+ drivers/mtd/nand/nand_base.c |    3 +-
+ 3 files changed, 110 insertions(+), 66 deletions(-)
+
+diff --git a/drivers/mtd/nand/mxc_nd2.c b/drivers/mtd/nand/mxc_nd2.c
+index d6b5aa1..c47af62 100644
+--- a/drivers/mtd/nand/mxc_nd2.c
++++ b/drivers/mtd/nand/mxc_nd2.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -162,7 +162,6 @@ copy_spare(struct mtd_info *mtd, void *pbuf, void *pspare, int len, bool bfrom)
+  */
+ static void wait_op_done(int maxRetries, bool useirq)
+ {
+-
+ 	if (useirq) {
+ 		if ((raw_read(REG_NFC_OPS_STAT) & NFC_OPS_STAT) == 0) {
+ 			/* Enable Interuupt */
+@@ -183,10 +182,10 @@ static void wait_op_done(int maxRetries, bool useirq)
+ 				break;
+ 			}
+ 			udelay(1);
+-		}
+-		if (maxRetries <= 0) {
+-			DEBUG(MTD_DEBUG_LEVEL0, "%s(%d): INT not set\n",
+-			      __FUNCTION__, __LINE__);
++			if (maxRetries <= 0) {
++				DEBUG(MTD_DEBUG_LEVEL0, "%s(%d): INT not set\n",
++				      __func__, __LINE__);
++			}
+ 		}
+ 	}
+ }
+@@ -236,9 +235,9 @@ static void auto_cmd_interleave(struct mtd_info *mtd, u16 cmd)
+ 	else
+ 		page_addr *= this->numchips;
+ 
+-	for (i = 0; i < j; i++) {
+-		if (cmd == NAND_CMD_PAGEPROG) {
+-
++	switch (cmd) {
++	case NAND_CMD_PAGEPROG:
++		for (i = 0; i < j; i++) {
+ 			/* reset addr cycle */
+ 			if (j > 1)
+ 				mxc_do_addr_cycle(mtd, 0, page_addr++);
+@@ -252,25 +251,27 @@ static void auto_cmd_interleave(struct mtd_info *mtd, u16 cmd)
+ 			obuf += olen;
+ 
+ 			NFC_SET_RBA(0);
+-			raw_write(0, REG_NFC_OPS_STAT);
++			ACK_OPS;
+ 			raw_write(NFC_AUTO_PROG, REG_NFC_OPS);
+ 
+ 			/* wait auto_prog_done bit set */
+-			if (i < j - 1) {
+-				while (!
+-				       (raw_read(REG_NFC_OPS_STAT) & 1 << 30)) ;
+-			} else {
+-				wait_op_done(TROP_US_DELAY, true);
+-			}
+-		} else if (cmd == NAND_CMD_READSTART) {
++			while (!(raw_read(REG_NFC_OPS_STAT) & NFC_OP_DONE)) ;
++		}
++
++		wait_op_done(TROP_US_DELAY, false);
++		while (!(raw_read(REG_NFC_OPS_STAT) & NFC_RB)) ;
++
++		break;
++	case NAND_CMD_READSTART:
++		for (i = 0; i < j; i++) {
+ 			/* reset addr cycle */
+ 			if (j > 1)
+ 				mxc_do_addr_cycle(mtd, 0, page_addr++);
+ 
+ 			NFC_SET_RBA(0);
+-			raw_write(0, REG_NFC_OPS_STAT);
++			ACK_OPS;
+ 			raw_write(NFC_AUTO_READ, REG_NFC_OPS);
+-			wait_op_done(TROP_US_DELAY, true);
++			wait_op_done(TROP_US_DELAY, false);
+ 
+ 			/* check ecc error */
+ 			mxc_check_ecc_status(mtd);
+@@ -282,18 +283,29 @@ static void auto_cmd_interleave(struct mtd_info *mtd, u16 cmd)
+ 			/* update the value */
+ 			dbuf += dlen;
+ 			obuf += olen;
+-		} else if (cmd == NAND_CMD_ERASE2) {
++		}
++		break;
++	case NAND_CMD_ERASE2:
++		for (i = 0; i < j; i++) {
+ 			if (!i) {
+ 				page_addr = addr_low;
+ 				page_addr *= (j > 1 ? j : this->numchips);
+ 			}
+ 			mxc_do_addr_cycle(mtd, -1, page_addr++);
++			ACK_OPS;
+ 			raw_write(NFC_AUTO_ERASE, REG_NFC_OPS);
+ 			wait_op_done(TROP_US_DELAY, true);
+-		} else if (cmd == NAND_CMD_RESET) {
+-			NFC_SET_NFC_ACTIVE_CS(i);
+-			send_atomic_cmd(cmd, true);
+ 		}
++		break;
++	case NAND_CMD_RESET:
++		for (i = 0; i < j; i++) {
++			if (j > 1)
++				NFC_SET_NFC_ACTIVE_CS(i);
++			send_atomic_cmd(cmd, false);
++		}
++		break;
++	default:
++		break;
+ 	}
+ }
+ #endif
+@@ -390,7 +402,7 @@ static void send_prog_page(u8 buf_id)
+ 	raw_write(NFC_INPUT, REG_NFC_OPS);
+ 
+ 	/* Wait for operation to complete */
+-	wait_op_done(TROP_US_DELAY, true);
++	wait_op_done(TROP_US_DELAY, false);
+ #endif
+ }
+ 
+@@ -415,7 +427,7 @@ static void send_read_page(u8 buf_id)
+ 	raw_write(NFC_OUTPUT, REG_NFC_OPS);
+ 
+ 	/* Wait for operation to complete */
+-	wait_op_done(TROP_US_DELAY, true);
++	wait_op_done(TROP_US_DELAY, false);
+ #endif
+ }
+ 
+@@ -435,7 +447,7 @@ static void send_read_id(void)
+ 	raw_write(NFC_ID, REG_NFC_OPS);
+ 
+ 	/* Wait for operation to complete */
+-	wait_op_done(TROP_US_DELAY, true);
++	wait_op_done(TROP_US_DELAY, false);
+ 
+ }
+ 
+@@ -444,10 +456,14 @@ static inline void read_dev_status(u16 *status)
+ {
+ 	u32 mask = 0xFF << 16;
+ 
+-	/* send auto read status command */
+-	raw_write(NFC_AUTO_STATE, REG_NFC_OPS);
++	/* clear status */
++	ACK_OPS;
+ 
+ 	do {
++		/* send auto read status command */
++		raw_write(NFC_AUTO_STATE, REG_NFC_OPS);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) == 1)
++			wait_op_done(TROP_US_DELAY, false);
+ 		*status = (raw_read(NFC_CONFIG1) & mask) >> 16;
+ 	} while ((*status & NAND_STATUS_READY) == 0);
+ }
+@@ -495,7 +511,7 @@ static u16 get_dev_status(void)
+ 	raw_write(NFC_STATUS, REG_NFC_OPS);
+ 
+ 	/* Wait for operation to complete */
+-	wait_op_done(TROP_US_DELAY, true);
++	wait_op_done(TROP_US_DELAY, false);
+ 
+ 	/* Status is placed in first word of main buffer */
+ 	/* get status, then recovery area 1 data */
+@@ -823,7 +839,7 @@ static void mxc_do_addr_cycle(struct mtd_info *mtd, int column, int page_addr)
+ static void mxc_nand_command(struct mtd_info *mtd, unsigned command,
+ 			     int column, int page_addr)
+ {
+-	bool useirq = true;
++	bool useirq = false;
+ 
+ 	DEBUG(MTD_DEBUG_LEVEL3,
+ 	      "mxc_nand_command (cmd = 0x%x, col = 0x%x, page = 0x%x)\n",
+@@ -844,12 +860,10 @@ static void mxc_nand_command(struct mtd_info *mtd, unsigned command,
+ 
+ 	case NAND_CMD_READ0:
+ 		g_nandfc_info.colAddr = column;
+-		useirq = false;
+ 		break;
+ 
+ 	case NAND_CMD_READOOB:
+ 		g_nandfc_info.colAddr = column;
+-		useirq = false;
+ 		command = NAND_CMD_READ0;
+ 		break;
+ 
+@@ -875,7 +889,6 @@ static void mxc_nand_command(struct mtd_info *mtd, unsigned command,
+ 		}
+ 
+ 		g_nandfc_info.colAddr = column;
+-		useirq = false;
+ 		break;
+ 
+ 	case NAND_CMD_PAGEPROG:
+@@ -900,13 +913,15 @@ static void mxc_nand_command(struct mtd_info *mtd, unsigned command,
+ 		else
+ 			send_prog_page(0);
+ 
++		useirq = true;
++
+ 		break;
+ 
+ 	case NAND_CMD_ERASE1:
+-		useirq = false;
+ 		break;
+ 	case NAND_CMD_ERASE2:
+-		useirq = false;
++		useirq = true;
++
+ 		break;
+ 	}
+ 
+@@ -926,7 +941,7 @@ static void mxc_nand_command(struct mtd_info *mtd, unsigned command,
+ 	case NAND_CMD_READ0:
+ 		if (IS_LARGE_PAGE_NAND) {
+ 			/* send read confirm command */
+-			send_cmd(mtd, NAND_CMD_READSTART, true);
++			send_cmd(mtd, NAND_CMD_READSTART, false);
+ 			/* read for each AREA */
+ 			READ_PAGE();
+ 		} else {
+@@ -1114,6 +1129,7 @@ static void mxc_nfc_init(void)
+ 
+ 	/* Unlock Block Command for given address range */
+ 	raw_write(NFC_SET_WPC(NFC_WPC_UNLOCK), REG_NFC_WPC);
++
+ }
+ 
+ static int mxc_alloc_buf(void)
+@@ -1202,6 +1218,8 @@ static int __init mxcnd_probe(struct platform_device *pdev)
+ 		this->read_byte = mxc_nand_read_byte16;
+ 		this->options |= NAND_BUSWIDTH_16;
+ 		NFC_SET_NFMS(1 << NFMS_NF_DWIDTH);
++	} else {
++		NFC_SET_NFMS(0);
+ 	}
+ 
+ 	nfc_clk = clk_get(&pdev->dev, "nfc_clk");
+diff --git a/drivers/mtd/nand/mxc_nd2.h b/drivers/mtd/nand/mxc_nd2.h
+index 685af16..b1435e5 100644
+--- a/drivers/mtd/nand/mxc_nd2.h
++++ b/drivers/mtd/nand/mxc_nd2.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -31,6 +31,8 @@
+ 						== NAND_PAGESIZE_4KB)
+ #define IS_LARGE_PAGE_NAND      ((mtd->writesize / num_of_interleave) > 512)
+ 
++#define GET_NAND_OOB_SIZE	(mtd->oobsize / num_of_interleave)
++
+ #define NAND_PAGESIZE_2KB	2048
+ #define NAND_PAGESIZE_4KB	4096
+ 
+@@ -52,8 +54,8 @@
+ #define NFC_CONFIG2			(nfc_ip_base + 0x14)
+ #define NFC_IPC				(nfc_ip_base + 0x18)
+ #elif defined(CONFIG_ARCH_MXC_HAS_NFC_V3_2)	/* mx51 */
++#define MXC_INT_NANDFC			MXC_INT_NFC
+ #define NFC_AUTO_MODE_ENABLE
+-#define MXC_INT_NANDFC			MXC_INT_EMI
+ #define NFC_FLASH_CMD			(nfc_axi_base + 0x1E00)
+ #define NFC_FLASH_ADDR0      		(nfc_axi_base + 0x1E04)
+ #define NFC_FLASH_ADDR8			(nfc_axi_base + 0x1E24)
+@@ -102,24 +104,41 @@
+     defined(CONFIG_ARCH_MXC_HAS_NFC_V3_2)
+ #define NFC_SPAS_WIDTH 8
+ #define NFC_SPAS_SHIFT 16
+-#define IS_4BIT_ECC			\
+-	((raw_read(NFC_CONFIG2) & NFC_ECC_MODE_4) >> 6)
++
++#define IS_4BIT_ECC \
++( \
++	cpu_is_mx51_rev(CHIP_REV_2_0) == 1 ? \
++		!((raw_read(NFC_CONFIG2) & NFC_ECC_MODE_4) >> 6) : \
++		((raw_read(NFC_CONFIG2) & NFC_ECC_MODE_4) >> 6) \
++)
+ 
+ #define NFC_SET_SPAS(v)			\
+ 	raw_write((((raw_read(NFC_CONFIG2) & \
+ 	NFC_FIELD_RESET(NFC_SPAS_WIDTH, NFC_SPAS_SHIFT)) | ((v) << 16))), \
+ 	NFC_CONFIG2)
+ 
+-#define NFC_SET_ECC_MODE(v) 		 	\
+-	do {					\
+-		if ((v) == NFC_SPAS_218)  {	\
+-			raw_write((raw_read(NFC_CONFIG2) & NFC_ECC_MODE_8) , \
+-			 NFC_CONFIG2);	\
+-		} else {				\
+-			raw_write((raw_read(NFC_CONFIG2) | NFC_ECC_MODE_4) , \
+-			NFC_CONFIG2);	\
+-		}				\
+-	} while(0)
++#define NFC_SET_ECC_MODE(v)		\
++do { \
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) == 1) { \
++		if ((v) == NFC_SPAS_218 || (v) == NFC_SPAS_112) \
++			raw_write(((raw_read(NFC_CONFIG2) & \
++					NFC_ECC_MODE_MASK) | \
++					NFC_ECC_MODE_4), NFC_CONFIG2); \
++		else \
++			raw_write(((raw_read(NFC_CONFIG2) & \
++					NFC_ECC_MODE_MASK) & \
++					NFC_ECC_MODE_8), NFC_CONFIG2); \
++	} else { \
++		if ((v) == NFC_SPAS_218 || (v) == NFC_SPAS_112) \
++			raw_write(((raw_read(NFC_CONFIG2) & \
++					NFC_ECC_MODE_MASK) & \
++					NFC_ECC_MODE_8), NFC_CONFIG2); \
++		else \
++			raw_write(((raw_read(NFC_CONFIG2) & \
++					NFC_ECC_MODE_MASK) | \
++					NFC_ECC_MODE_4), NFC_CONFIG2); \
++	} \
++} while (0)
+ 
+ #define WRITE_NFC_IP_REG(val,reg) 			\
+ 	do {	 					\
+@@ -166,6 +185,7 @@
+ #define NFC_OPS_STAT			(1 << 31)
+ 
+ #ifdef CONFIG_ARCH_MXC_HAS_NFC_V3_2	/* mx51 */
++#define NFC_OP_DONE			(1 << 30)
+ #define NFC_RB				(1 << 28)
+ #define NFC_PS_WIDTH 			2
+ #define NFC_PS_SHIFT 			0
+@@ -240,6 +260,8 @@
+ #define NFC_ADD_OP_WIDTH		2
+ #define NFC_FW_8 			1
+ #define NFC_FW_16			0
++#define NFC_ST_CMD_SHITF		24
++#define NFC_ST_CMD_WIDTH		8
+ #endif
+ 
+ #define NFC_PPB_32			(0 << 7)
+@@ -260,9 +282,11 @@
+     defined(CONFIG_ARCH_MXC_HAS_NFC_V3_2)
+ #define NFC_ECC_MODE_4    		(1 << 6)
+ #define NFC_ECC_MODE_8			~(1 << 6)
++#define NFC_ECC_MODE_MASK 		~(1 << 6)
+ #define NFC_SPAS_16			8
+ #define NFC_SPAS_64		 	32
+ #define NFC_SPAS_128			64
++#define NFC_SPAS_112			56
+ #define NFC_SPAS_218		 	109
+ #define NFC_IPC_CREQ			(1 << 0)
+ #define NFC_IPC_ACK			(1 << 1)
+@@ -382,6 +406,12 @@
+ 	NFC_SET_NUM_OF_DEVICE(this->numchips - 1); \
+ }
+ 
++#define NFC_SET_ST_CMD(val) \
++	raw_write((raw_read(NFC_CONFIG2) & \
++	(NFC_FIELD_RESET(NFC_ST_CMD_WIDTH, \
++	NFC_ST_CMD_SHITF))) | \
++	((val) << NFC_ST_CMD_SHITF), NFC_CONFIG2);
++
+ #define NFMS_NF_DWIDTH 0
+ #define NFMS_NF_PG_SZ  1
+ #define NFC_CMD_1_SHIFT 8
+@@ -396,23 +426,23 @@ do {	\
+ 		NFC_SET_FW(NFC_FW_16);	\
+ 	if (((v) & (1 << NFMS_NF_PG_SZ))) {	\
+ 		if (IS_2K_PAGE_NAND) {	\
+-			NFC_SET_SPAS(NFC_SPAS_64);	\
+ 			NFC_SET_PS(NFC_PS_2K);	\
+ 			NFC_SET_NFC_NUM_ADDR_PHASE1(NUM_OF_ADDR_CYCLE); \
+ 			NFC_SET_NFC_NUM_ADDR_PHASE0(NFC_TWO_LESS_PHASE1); \
+ 		} else if (IS_4K_PAGE_NAND) {       \
+-			NFC_SET_SPAS(NFC_SPAS_128);	\
+ 			NFC_SET_PS(NFC_PS_4K);	\
+ 			NFC_SET_NFC_NUM_ADDR_PHASE1(NUM_OF_ADDR_CYCLE); \
+ 			NFC_SET_NFC_NUM_ADDR_PHASE0(NFC_TWO_LESS_PHASE1); \
+ 		} else {	\
+-			NFC_SET_SPAS(NFC_SPAS_16);	\
+ 			NFC_SET_PS(NFC_PS_512);	\
+ 			NFC_SET_NFC_NUM_ADDR_PHASE1(NUM_OF_ADDR_CYCLE - 1); \
+ 			NFC_SET_NFC_NUM_ADDR_PHASE0(NFC_ONE_LESS_PHASE1); \
+ 		}	\
+-		NFC_SET_ADD_CS_MODE(1) \
+-		NFC_SET_ECC_MODE(NFC_SPAS_128); \
++		NFC_SET_ADD_CS_MODE(1); \
++		NFC_SET_SPAS(GET_NAND_OOB_SIZE >> 1);	\
++		NFC_SET_ECC_MODE(GET_NAND_OOB_SIZE >> 1); \
++		NFC_SET_ST_CMD(0x70); \
++		raw_write(raw_read(NFC_CONFIG3) | 1 << 20, NFC_CONFIG3); \
+ 	} \
+ } while (0)
+ #endif
+@@ -506,7 +536,7 @@ do {	\
+ 
+ #define NFC_SET_ECC_MODE(v) 		 \
+ do {	\
+-	if ((v) == NFC_SPAS_218)  {	\
++	if ((v) == NFC_SPAS_218 || (v) == NFC_SPAS_112)  {	\
+ 		raw_write((raw_read(REG_NFC_ECC_MODE) & NFC_ECC_MODE_8), \
+ 							REG_NFC_ECC_MODE); \
+ 	} else {	\
+@@ -520,15 +550,9 @@ do {	\
+ do {	\
+ 	(NFMS |= (v));	\
+ 	if (((v) & (1 << NFMS_NF_PG_SZ))) {	\
+-		if (IS_2K_PAGE_NAND) {	\
+-			NFC_SET_SPAS(NFC_SPAS_64);	\
+-		} else if (IS_4K_PAGE_NAND) {       \
+-			NFC_SET_SPAS(NFC_SPAS_128);	\
+-		} else {	\
+-			NFC_SET_SPAS(NFC_SPAS_16);	\
+-		}	\
+-		NFC_SET_ECC_MODE(NFC_SPAS_128); \
+-	}	\
++		NFC_SET_SPAS(GET_NAND_OOB_SIZE >> 1);	\
++		NFC_SET_ECC_MODE(GET_NAND_OOB_SIZE >> 1); \
++	} \
+ } while (0)
+ #else
+ #define IS_4BIT_ECC			(1)
+@@ -578,6 +602,7 @@ do {	\
+ #define NFC_ECC_MODE_8			 ~(1<<0)
+ #define NFC_SPAS_16			 8
+ #define NFC_SPAS_64			 32
++#define NFC_SPAS_112			 56
+ #define NFC_SPAS_128			 64
+ #define NFC_SPAS_218			 109
+ #endif
+diff --git a/drivers/mtd/nand/nand_base.c b/drivers/mtd/nand/nand_base.c
+index ba1bdf7..a04af59 100644
+--- a/drivers/mtd/nand/nand_base.c
++++ b/drivers/mtd/nand/nand_base.c
+@@ -2288,7 +2288,8 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
+ 		mtd->writesize = 1024 << (extid & 0x3);
+ 		extid >>= 2;
+ 		/* Calc oobsize */
+-		mtd->oobsize = (8 << (extid & 0x01)) * (mtd->writesize >> 9);
++		mtd->oobsize = (*maf_id == 0x2c && dev_id == 0xd5) ?
++			218 : (8 << (extid & 0x01)) * (mtd->writesize >> 9);
+ 		extid >>= 2;
+ 		/* Calc blocksize. Blocksize is multiples of 64KiB */
+ 		mtd->erasesize = (64 * 1024) << (extid & 0x03);
+-- 
+1.5.4.4
+

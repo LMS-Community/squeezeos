@@ -1,0 +1,38 @@
+From 4f6cde4141a30a13fde66385439d57df49911011 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Thu, 16 Oct 2008 10:26:23 +0800
+Subject: [PATCH] ENGR00095456 mxc_i2c: fix return value of mxc_i2c_xfer
+
+mxc_i2c_xfer should return the number of i2c_msg structures which have been
+transferred or failure value.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ drivers/i2c/busses/mxc_i2c.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/i2c/busses/mxc_i2c.c b/drivers/i2c/busses/mxc_i2c.c
+index 4f25000..fe5c29e 100644
+--- a/drivers/i2c/busses/mxc_i2c.c
++++ b/drivers/i2c/busses/mxc_i2c.c
+@@ -511,7 +511,7 @@ static int mxc_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+ 	 * Decrease by 1 as we do not want Start message to be included in
+ 	 * the count
+ 	 */
+-	return (i - 1);
++	return (i < 0 ? ret : i);
+ }
+ 
+ /*!
+@@ -705,7 +705,7 @@ static int mxci2c_probe(struct platform_device *pdev)
+ 	/*
+ 	 * Set the adapter information
+ 	 */
+-	strcpy(mxc_i2c->adap.name, pdev->name);
++	strlcpy(mxc_i2c->adap.name, pdev->name, 48);
+ 	mxc_i2c->adap.id = mxc_i2c->adap.nr = id;
+ 	mxc_i2c->adap.algo = &mxc_i2c_algorithm;
+ 	mxc_i2c->adap.timeout = 1;
+-- 
+1.5.4.4
+

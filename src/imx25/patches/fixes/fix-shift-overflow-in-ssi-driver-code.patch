@@ -1,0 +1,53 @@
+Fix the rx/tx fifo-counter code
+
+The rx_fifo_counter and tx_fifo_counter code wants to read 4 bits
+from a 32 bits register and shift it back to 8 bits, but it does 
+the shifting on a 8 bits type (wider than its size) instead of
+on the 32 bit register value.
+The net outcome was always zero in these routines. 
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ drivers/mxc/ssi/ssi.c |    8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+Index: linux-2.6.26/drivers/mxc/ssi/ssi.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/ssi/ssi.c	2009-07-26 14:39:08.000000000 +0200
++++ linux-2.6.26/drivers/mxc/ssi/ssi.c	2009-07-26 14:41:23.000000000 +0200
+@@ -577,7 +577,7 @@ void ssi_rx_early_frame_sync(ssi_mod mod
+  */
+ unsigned char ssi_rx_fifo_counter(ssi_mod module, fifo_nb fifo)
+ {
+-	unsigned char result;
++	unsigned long result;
+ 	result = 0;
+ 
+ 	if (ssi_fifo_0 == fifo) {
+@@ -590,7 +590,7 @@ unsigned char ssi_rx_fifo_counter(ssi_mo
+ 		result = result >> SSI_RX_FIFO_1_COUNT_SHIFT;
+ 	}
+ 
+-	return result;
++	return (unsigned char)(result & 0xff);
+ }
+ 
+ /*!
+@@ -949,7 +949,7 @@ void ssi_tx_early_frame_sync(ssi_mod mod
+  */
+ unsigned char ssi_tx_fifo_counter(ssi_mod module, fifo_nb fifo)
+ {
+-	unsigned char result = 0;
++	unsigned long result = 0;
+ 
+ 	if (ssi_fifo_0 == fifo) {
+ 		result = getreg_value(MXC_SSISFCSR, module);
+@@ -961,7 +961,7 @@ unsigned char ssi_tx_fifo_counter(ssi_mo
+ 		result >>= SSI_TX_FIFO_1_COUNT_SHIFT;
+ 	}
+ 
+-	return result;
++	return (unsigned char)(result & 0xff);
+ }
+ 
+ /*!

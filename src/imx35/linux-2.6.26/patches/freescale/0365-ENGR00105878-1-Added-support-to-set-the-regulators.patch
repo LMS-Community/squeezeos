@@ -1,0 +1,101 @@
+From bf1e784bfbcd70aa13281669ebc7dd0f04ef29de Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+Date: Thu, 29 Jan 2009 14:31:58 -0600
+Subject: [PATCH] ENGR00105878-1: Added support to set the regulators to standby voltage
+
+Atlas-APlite needs the STANDBYSECPIN to be interpreted as active low for STANDBY mode to be activated.
+Also changed cpufreq code to complete the driver initialisation completely, so that
+the driver does not fail when the system is entering standby.
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c             |    5 +++--
+ drivers/regulator/mc13892/reg-mc13892.c |   17 +++++++++++------
+ 2 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 1ad367a..dea89bf 100644
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -82,6 +82,9 @@ static int set_cpu_freq(int freq)
+ 	if (org_cpu_rate == freq)
+ 		return ret;
+ 
++	if (!axi_c_clk_support)
++		return ret;
++
+ 	for (i = 0; i < cpu_wp_nr; i++) {
+ 		if (freq == cpu_wp_tbl[i].cpu_rate)
+ 			gp_volt = cpu_wp_tbl[i].cpu_voltage;
+@@ -337,8 +340,6 @@ static int __init mxc_cpufreq_driver_init(struct cpufreq_policy *policy)
+ 	if (IS_ERR(axi_c_clk)) {
+ 		axi_c_clk_support = 0;
+ 		printk(KERN_ERR "%s: failed to get axi_c_clk\n", __func__);
+-		if (cpu_is_mx51_rev(CHIP_REV_2_0) >= 0)
+-			return PTR_ERR(axi_c_clk);
+ 	} else {
+ 		axi_c_clk_support = 1;
+ 		main_bus_clk = clk_get(NULL, "main_bus_clk");
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index c63b5e7..f480abe 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -128,6 +128,9 @@ enum {
+ 	VVIDEO_2_6V,
+ } regulator_voltage_vvideo;
+ 
++#define STANDBYSECINV_LSH 11
++#define STANDBYSECINV_WID 1
++
+ #define VAUDIO_LSH	4
+ #define VAUDIO_WID	2
+ #define VAUDIO_EN_LSH	15
+@@ -422,10 +425,8 @@ static int mc13892_sw_stby_set_voltage(struct regulator *reg, int uV)
+ 	unsigned int register_val = 0, register_mask = 0;
+ 	unsigned int register1 = 0;
+ 	int voltage, sw = reg->id, mV = uV / 1000, hi;
+-
+ 	hi = mc13892_get_sw_hi_bit(sw);
+ 	voltage = mc13892_get_voltage_value(&hi, mV);
+-
+ 	switch (sw) {
+ 	case MC13892_SW1:
+ 		register1 = REG_SW_0;
+@@ -450,11 +451,9 @@ static int mc13892_sw_stby_set_voltage(struct regulator *reg, int uV)
+ 	default:
+ 		return -EINVAL;
+ 	}
+-
+ 	register_val |= (hi << SWXHI_LSH);
+ 	register_mask |= (1 << SWXHI_LSH);
+-
+-	return (pmic_write_reg(register1, register_val, register_mask));
++       return (pmic_write_reg(register1, register_val, register_mask));
+ }
+ 
+ static int mc13892_sw_stby_get_voltage(struct regulator *reg)
+@@ -1971,6 +1970,7 @@ int reg_mc13892_probe(void)
+ {
+ 	int ret11 = 0;
+ 	int i = 0;
++	int register_val = 0, register_mask = 0;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(reg_mc13892); i++) {
+ 		ret11 = regulator_register(&reg_mc13892[i].regulator);
+@@ -1989,7 +1989,12 @@ int reg_mc13892_probe(void)
+ 			return ret11;
+ 		}
+ 	}
+-
++	/* Set the STANDBYSECINV bit, so that STANDBY pin is
++	 * interpreted as active low.
++	 */
++	register_val = BITFVAL(STANDBYSECINV, 1);
++	register_mask = BITFMASK(STANDBYSECINV);
++	pmic_write_reg(REG_POWER_CTL2, register_val, register_mask);
+ 	printk(KERN_INFO "MC13892 regulator successfully probed\n");
+ 
+ 	return 0;
+-- 
+1.5.4.4
+

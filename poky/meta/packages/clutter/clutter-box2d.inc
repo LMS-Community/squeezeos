@@ -2,13 +2,12 @@ DESCRIPTION = "Clutter Box2D"
 HOMEPAGE = "http://www.clutter-project.org/"
 LICENSE = "GPLv2"
 
-DEPENDS = "clutter"
+DEPENDS = "clutter-0.8"
 
-inherit autotools pkgconfig gtk-doc
+# The main clutter lib is machine specific so we need to be too
+PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-do_stage () {
-        autotools_stage_all
-}
+inherit autotools_stage pkgconfig gtk-doc
 
 do_install_append () {
 	install -d ${D}${bindir}

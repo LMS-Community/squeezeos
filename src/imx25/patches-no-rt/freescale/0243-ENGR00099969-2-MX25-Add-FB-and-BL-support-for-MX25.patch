@@ -1,0 +1,230 @@
+From 2ed89180931ee36d334060851c3055a41aaff0c6 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Fri, 21 Nov 2008 14:42:34 -0700
+Subject: [PATCH] ENGR00099969-2 MX25: Add FB and BL support for MX25 3stack
+
+Add framebuffer and backlight support for MX25 stack board,
+including support for CPT-VGA LCD display.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |   16 +++++++--
+ arch/arm/mach-mx25/mx25_3stack.c        |   51 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx25/mx25_3stack_gpio.c   |   45 +++++++++++++--------------
+ 3 files changed, 84 insertions(+), 28 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 0cafea2..47dfccc 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -820,9 +820,9 @@ CONFIG_DAB=y
+ CONFIG_FB=y
+ # CONFIG_FIRMWARE_EDID is not set
+ # CONFIG_FB_DDC is not set
+-# CONFIG_FB_CFB_FILLRECT is not set
+-# CONFIG_FB_CFB_COPYAREA is not set
+-# CONFIG_FB_CFB_IMAGEBLIT is not set
++CONFIG_FB_CFB_FILLRECT=y
++CONFIG_FB_CFB_COPYAREA=y
++CONFIG_FB_CFB_IMAGEBLIT=y
+ # CONFIG_FB_CFB_REV_PIXELS_IN_BYTE is not set
+ # CONFIG_FB_SYS_FILLRECT is not set
+ # CONFIG_FB_SYS_COPYAREA is not set
+@@ -838,6 +838,13 @@ CONFIG_FB=y
+ #
+ # Frame buffer hardware drivers
+ #
++CONFIG_FB_MXC=y
++CONFIG_FB_MXC_SYNC_PANEL=y
++# CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL is not set
++# CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
++# CONFIG_FB_MXC_TVOUT is not set
++# CONFIG_FB_MXC_TVOUT_CH7024 is not set
++# CONFIG_FB_MXC_ASYNC_PANEL is not set
+ # CONFIG_FB_UVESA is not set
+ # CONFIG_FB_S1D13XXX is not set
+ # CONFIG_FB_VIRTUAL is not set
+@@ -845,7 +852,8 @@ CONFIG_BACKLIGHT_LCD_SUPPORT=y
+ # CONFIG_LCD_CLASS_DEVICE is not set
+ CONFIG_BACKLIGHT_CLASS_DEVICE=y
+ # CONFIG_BACKLIGHT_CORGI is not set
+-# CONFIG_BACKLIGHT_MXC is not set
++CONFIG_BACKLIGHT_MXC=y
++CONFIG_BACKLIGHT_MXC_LCDC=y
+ 
+ #
+ # Display device support
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index 0ef4094..0480cc7 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -160,6 +160,55 @@ static inline void mxc_init_nand_mtd(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_FB_MXC_SYNC_PANEL) || \
++    defined(CONFIG_FB_MXC_SYNC_PANEL_MODULE)
++static const char fb_default_mode[] = "CPT-VGA";
++
++/* mxc lcd driver */
++static struct platform_device mxc_fb_device = {
++	.name = "mxc_sdc_fb",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &fb_default_mode,
++		.coherent_dma_mask = 0xFFFFFFFF,
++		},
++};
++
++static void mxc_init_fb(void)
++{
++	(void)platform_device_register(&mxc_fb_device);
++}
++#else
++static inline void mxc_init_fb(void)
++{
++}
++#endif
++
++#if defined(CONFIG_BACKLIGHT_MXC)
++static struct platform_device mxcbl_devices[] = {
++#if defined(CONFIG_BACKLIGHT_MXC_LCDC) || \
++    defined(CONFIG_BACKLIGHT_MXC_LCDC_MODULE)
++	{
++	 .name = "mxc_lcdc_bl",
++	 .id = 0,
++	 },
++#endif
++};
++
++static inline void mxc_init_bl(void)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(mxcbl_devices); i++)
++		platform_device_register(&mxcbl_devices[i]);
++}
++#else
++static inline void mxc_init_bl(void)
++{
++}
++#endif
++
+ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	{
+ 	 .modalias = "cpld_spi",
+@@ -263,6 +312,8 @@ static void __init mxc_board_init(void)
+ #endif
+ 	spi_register_board_info(mxc_spi_board_info,
+ 				ARRAY_SIZE(mxc_spi_board_info));
++	mxc_init_fb();
++	mxc_init_bl();
+ 	mxc_init_nand_mtd();
+ }
+ 
+diff --git a/arch/arm/mach-mx25/mx25_3stack_gpio.c b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+index 9690fc9..9b8afdf 100644
+--- a/arch/arm/mach-mx25/mx25_3stack_gpio.c
++++ b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+@@ -655,7 +655,7 @@ EXPORT_SYMBOL(gpio_spi_inactive);
+ /*!
+  * Activate LCD
+  */
+-void gpio_lcd_active(void)
++void gpio_lcdc_active(void)
+ {
+ 	mxc_request_iomux(MX25_PIN_LD0, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_LD1, MUX_CONFIG_FUNC);
+@@ -680,7 +680,6 @@ void gpio_lcd_active(void)
+ 	mxc_request_iomux(MX25_PIN_LSCLK, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_OE_ACD, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_CONTRAST, MUX_CONFIG_FUNC);
+-	mxc_request_iomux(MX25_PIN_PWM, MUX_CONFIG_ALT5); /*DEBUG_INT_B*/
+ 
+ #define LCD_PAD_CTL (PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD | PAD_CTL_100K_PU)
+ 	mxc_iomux_set_pad(MX25_PIN_LD0, LCD_PAD_CTL);
+@@ -706,14 +705,13 @@ void gpio_lcd_active(void)
+ 	mxc_iomux_set_pad(MX25_PIN_LSCLK, LCD_PAD_CTL | PAD_CTL_SRE_FAST);
+ 	mxc_iomux_set_pad(MX25_PIN_OE_ACD, LCD_PAD_CTL);
+ 	mxc_iomux_set_pad(MX25_PIN_CONTRAST, LCD_PAD_CTL);
+-	mxc_iomux_set_pad(MX25_PIN_PWM, 0);
+ }
+-EXPORT_SYMBOL(gpio_lcd_active);
++EXPORT_SYMBOL(gpio_lcdc_active);
+ 
+ /*!
+  * Inactivate LCD
+  */
+-void gpio_lcd_inactive(void)
++void gpio_lcdc_inactive(void)
+ {
+ 	mxc_request_gpio(MX25_PIN_LD0);
+ 	mxc_request_gpio(MX25_PIN_LD1);
+@@ -723,21 +721,12 @@ void gpio_lcd_inactive(void)
+ 	mxc_request_gpio(MX25_PIN_LD5);
+ 	mxc_request_gpio(MX25_PIN_LD6);
+ 	mxc_request_gpio(MX25_PIN_LD7);
+-	mxc_request_gpio(MX25_PIN_LD8);
+-	mxc_request_gpio(MX25_PIN_LD9);
+-	mxc_request_gpio(MX25_PIN_LD10);
+-	mxc_request_gpio(MX25_PIN_LD11);
+-	mxc_request_gpio(MX25_PIN_LD12);
+-	mxc_request_gpio(MX25_PIN_LD13);
+-	mxc_request_gpio(MX25_PIN_LD14);
+-	mxc_request_gpio(MX25_PIN_LD15);
+ 	mxc_request_gpio(MX25_PIN_GPIO_E); /*D16*/
+ 	mxc_request_gpio(MX25_PIN_GPIO_F); /*D17*/
+ 	mxc_request_gpio(MX25_PIN_HSYNC);
+ 	mxc_request_gpio(MX25_PIN_VSYNC);
+ 	mxc_request_gpio(MX25_PIN_LSCLK);
+ 	mxc_request_gpio(MX25_PIN_OE_ACD);
+-	mxc_request_gpio(MX25_PIN_CONTRAST);
+ 
+ 	mxc_free_iomux(MX25_PIN_LD0, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_LD1, MUX_CONFIG_GPIO);
+@@ -747,23 +736,31 @@ void gpio_lcd_inactive(void)
+ 	mxc_free_iomux(MX25_PIN_LD5, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_LD6, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_LD7, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD8, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD9, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD10, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD11, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD12, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD13, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD14, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_LD15, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_LD8, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD9, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD10, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD11, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD12, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD13, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD14, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX25_PIN_LD15, MUX_CONFIG_FUNC);
+ 	mxc_free_iomux(MX25_PIN_GPIO_E, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_GPIO_F, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_HSYNC, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_VSYNC, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_LSCLK, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_OE_ACD, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_CONTRAST, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_CONTRAST, MUX_CONFIG_FUNC);
+ }
+-EXPORT_SYMBOL(gpio_lcd_inactive);
++EXPORT_SYMBOL(gpio_lcdc_inactive);
++
++/*
++ * Power on/off CPT VGA panel.
++ */
++void board_power_lcd(int on)
++{
++}
++EXPORT_SYMBOL(board_power_lcd);
+ 
+ /*!
+  * Activate SDHC
+-- 
+1.5.4.4
+

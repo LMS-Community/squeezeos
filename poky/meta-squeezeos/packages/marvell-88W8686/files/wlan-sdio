@@ -1,0 +1,82 @@
+#!/bin/sh
+
+
+# Read network config
+if [ -r /etc/network/config ]
+then
+    . /etc/network/config
+fi
+
+
+case "$1" in
+    start)
+	/usr/bin/logger -s "Starting wlan"
+
+	# Load wlan drivers
+	# insmod in Busybox 1.13.3 needs absolute pathes to the modules to be happy
+	/sbin/insmod /lib/modules/`uname -r`/sd8686.ko helper_name=helper_sd.bin fw_name=sd8686.bin
+
+
+	# Set MAC address to the same as Ethernet
+	ethaddr=`/sbin/ifconfig eth0 | sed -ne 's/.*\(..:..:..:..:..:..\).*/\1/p'`
+	if [ "x${ethaddr}" != "x" ]
+	    then
+	    echo "Setting wlan0 ethaddr: ${ethaddr}"
+	    /sbin/ifconfig wlan0 hw ether ${ethaddr}
+	fi
+
+
+	# Set region code
+	if [ "x${REGIONCODE}" != "x" ]
+	    then
+	    echo "Setting region: ${REGIONCODE}"
+	    /sbin/iwpriv wlan0 setregioncode ${REGIONCODE}
+	fi
+
+	# Start wpa supplicant
+	/usr/bin/logger "Starting wpa_supplicant"
+	/usr/sbin/wpa_supplicant -B -Dmarvell -iwlan0 -c/etc/wpa_supplicant.conf
+	/usr/sbin/wpa_cli -B -a/etc/network/wpa_action
+	/usr/bin/logger "Started wpa_supplicant"
+
+	/usr/bin/logger -s "wlan started"
+	;;
+
+    stop)
+	/usr/bin/logger -s "Stopping wlan"
+
+	# Stop wpa supplicant
+	killall wpa_cli
+	killall wpa_supplicant
+	
+	# Make sure udhcpc is killed
+	if [ -r /var/run/udhcpc.wlan0.pid ]
+	then
+	    PID=`cat /var/run/udhcpc.wlan0.pid`
+	    kill -TERM $PID
+	    
+	    # Wait until udhcpc is dead
+	    kill -0 $PID >/dev/null 2>&1
+	    while [ $? == 0 ]; do
+	        sleep 1
+	        kill -0 $PID >/dev/null 2>&1
+	    done
+	fi
+	
+	/usr/bin/logger -s "Taking down wlan0..."
+	ifconfig wlan0 down
+
+	/bin/rm -rf /var/run/ifstate
+
+	# Remove wlan drivers
+	rmmod sd8686
+
+	/usr/bin/logger -s "wlan stopped"
+	;;
+
+    *)
+	echo "Usage: $0 {start|stop}"
+	exit 1
+esac
+
+exit 0

@@ -1,0 +1,541 @@
+From 4ab722e775d51b0b501739ebeb420f535780a955 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 8 Sep 2008 13:39:51 -0500
+Subject: [PATCH] ENGR00069687-2 mx51: add usb host mach support
+
+Required to support MX51 USB Host function on USBOTG and Host1 ports.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |  166 ++++++++++++++++++++++++++++-
+ arch/arm/mach-mx51/Makefile             |    2 +
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |  177 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx51/usb.h                |    4 +
+ arch/arm/mach-mx51/usb_h1.c             |   54 ++++++++++
+ 5 files changed, 400 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index bf99fa8..2cf5d95 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Mon Aug 25 17:40:21 2008
++# Mon Aug 25 17:37:03 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -465,6 +465,7 @@ CONFIG_MTD_NAND_MXC_V3=y
+ # CONFIG_MTD_NAND_MXC_FORCE_CE is not set
+ # CONFIG_MXC_NAND_LOW_LEVEL_ERASE is not set
+ # CONFIG_MTD_NAND_PLATFORM is not set
++# CONFIG_MTD_ALAUDA is not set
+ # CONFIG_MTD_ONENAND is not set
+ 
+ #
+@@ -487,6 +488,7 @@ CONFIG_BLK_DEV=y
+ CONFIG_BLK_DEV_LOOP=y
+ # CONFIG_BLK_DEV_CRYPTOLOOP is not set
+ # CONFIG_BLK_DEV_NBD is not set
++# CONFIG_BLK_DEV_UB is not set
+ # CONFIG_BLK_DEV_RAM is not set
+ # CONFIG_CDROM_PKTCDVD is not set
+ # CONFIG_ATA_OVER_ETH is not set
+@@ -597,6 +599,15 @@ CONFIG_NET_PCI=y
+ #
+ # CONFIG_WLAN_PRE80211 is not set
+ # CONFIG_WLAN_80211 is not set
++
++#
++# USB Network Adapters
++#
++# CONFIG_USB_CATC is not set
++# CONFIG_USB_KAWETH is not set
++# CONFIG_USB_PEGASUS is not set
++# CONFIG_USB_RTL8150 is not set
++# CONFIG_USB_USBNET is not set
+ # CONFIG_WAN is not set
+ CONFIG_PPP=m
+ # CONFIG_PPP_MULTILINK is not set
+@@ -721,6 +732,7 @@ CONFIG_I2C_MXC=y
+ # CONFIG_I2C_SIMTEC is not set
+ # CONFIG_I2C_TAOS_EVM is not set
+ # CONFIG_I2C_STUB is not set
++# CONFIG_I2C_TINY_USB is not set
+ # CONFIG_I2C_PCA_ISA is not set
+ 
+ #
+@@ -783,6 +795,11 @@ CONFIG_MXC_WATCHDOG=y
+ # CONFIG_WDT is not set
+ 
+ #
++# USB-based Watchdog Cards
++#
++# CONFIG_USBPCWATCHDOG is not set
++
++#
+ # Sonics Silicon Backplane
+ #
+ CONFIG_SSB_POSSIBLE=y
+@@ -811,9 +828,28 @@ CONFIG_VIDEO_MXC_IPU_OUTPUT=y
+ # CONFIG_VIDEO_MXC_IPUV1_WVGA_OUTPUT is not set
+ # CONFIG_VIDEO_MXC_OPL is not set
+ # CONFIG_VIDEO_CPIA is not set
++# CONFIG_VIDEO_CPIA2 is not set
+ # CONFIG_VIDEO_SAA5246A is not set
+ # CONFIG_VIDEO_SAA5249 is not set
+ # CONFIG_TUNER_3036 is not set
++CONFIG_V4L_USB_DRIVERS=y
++# CONFIG_VIDEO_PVRUSB2 is not set
++# CONFIG_VIDEO_EM28XX is not set
++# CONFIG_VIDEO_USBVISION is not set
++# CONFIG_USB_VICAM is not set
++# CONFIG_USB_IBMCAM is not set
++# CONFIG_USB_KONICAWC is not set
++# CONFIG_USB_QUICKCAM_MESSENGER is not set
++# CONFIG_USB_ET61X251 is not set
++# CONFIG_VIDEO_OVCAMCHIP is not set
++# CONFIG_USB_W9968CF is not set
++# CONFIG_USB_OV511 is not set
++# CONFIG_USB_SE401 is not set
++# CONFIG_USB_SN9C102 is not set
++# CONFIG_USB_STV680 is not set
++# CONFIG_USB_ZC0301 is not set
++# CONFIG_USB_PWC is not set
++# CONFIG_USB_ZR364XX is not set
+ # CONFIG_RADIO_ADAPTERS is not set
+ # CONFIG_DVB_CORE is not set
+ # CONFIG_DAB is not set
+@@ -933,6 +969,12 @@ CONFIG_SND_VERBOSE_PROCFS=y
+ #
+ 
+ #
++# USB devices
++#
++# CONFIG_SND_USB_AUDIO is not set
++# CONFIG_SND_USB_CAIAQ is not set
++
++#
+ # System on Chip audio support
+ #
+ CONFIG_SND_SOC=y
+@@ -953,18 +995,136 @@ CONFIG_SND_SOC_WM8903=y
+ # Open Sound System
+ #
+ # CONFIG_SOUND_PRIME is not set
+-# CONFIG_HID_SUPPORT is not set
++CONFIG_HID_SUPPORT=y
++CONFIG_HID=y
++# CONFIG_HID_DEBUG is not set
++# CONFIG_HIDRAW is not set
++
++#
++# USB Input Devices
++#
++CONFIG_USB_HID=m
++# CONFIG_USB_HIDINPUT_POWERBOOK is not set
++# CONFIG_HID_FF is not set
++# CONFIG_USB_HIDDEV is not set
++
++#
++# USB HID Boot Protocol drivers
++#
++# CONFIG_USB_KBD is not set
++# CONFIG_USB_MOUSE is not set
+ CONFIG_USB_SUPPORT=y
+ CONFIG_USB_ARCH_HAS_HCD=y
+ # CONFIG_USB_ARCH_HAS_OHCI is not set
+ CONFIG_USB_ARCH_HAS_EHCI=y
+-# CONFIG_USB is not set
++CONFIG_USB=y
++# CONFIG_USB_DEBUG is not set
++
++#
++# Miscellaneous USB options
++#
++# CONFIG_USB_DEVICEFS is not set
++CONFIG_USB_DEVICE_CLASS=y
++# CONFIG_USB_DYNAMIC_MINORS is not set
++# CONFIG_USB_SUSPEND is not set
++# CONFIG_USB_PERSIST is not set
++# CONFIG_USB_OTG is not set
++
++#
++# USB Host Controller Drivers
++#
++CONFIG_USB_EHCI_HCD=m
++CONFIG_USB_EHCI_ARC=y
++CONFIG_USB_EHCI_ARC_H1=y
++CONFIG_USB_EHCI_ARC_OTG=y
++# CONFIG_USB_STATIC_IRAM is not set
++# CONFIG_USB_EHCI_FSL_MC13783 is not set
++# CONFIG_USB_EHCI_FSL_1301 is not set
++# CONFIG_USB_EHCI_FSL_1504 is not set
++CONFIG_USB_EHCI_FSL_UTMI=y
++# CONFIG_USB_EHCI_SPLIT_ISO is not set
++CONFIG_USB_EHCI_ROOT_HUB_TT=y
++# CONFIG_USB_EHCI_TT_NEWSCHED is not set
++# CONFIG_USB_ISP116X_HCD is not set
++# CONFIG_USB_SL811_HCD is not set
++# CONFIG_USB_R8A66597_HCD is not set
++
++#
++# USB Device Class drivers
++#
++# CONFIG_USB_ACM is not set
++# CONFIG_USB_PRINTER is not set
+ 
+ #
+ # NOTE: USB_STORAGE enables SCSI, and 'SCSI disk support'
+ #
+ 
+ #
++# may also be needed; see USB_STORAGE Help for more information
++#
++CONFIG_USB_STORAGE=y
++# CONFIG_USB_STORAGE_DEBUG is not set
++# CONFIG_USB_STORAGE_DATAFAB is not set
++# CONFIG_USB_STORAGE_FREECOM is not set
++# CONFIG_USB_STORAGE_ISD200 is not set
++# CONFIG_USB_STORAGE_DPCM is not set
++# CONFIG_USB_STORAGE_USBAT is not set
++# CONFIG_USB_STORAGE_SDDR09 is not set
++# CONFIG_USB_STORAGE_SDDR55 is not set
++# CONFIG_USB_STORAGE_JUMPSHOT is not set
++# CONFIG_USB_STORAGE_ALAUDA is not set
++# CONFIG_USB_STORAGE_KARMA is not set
++# CONFIG_USB_LIBUSUAL is not set
++
++#
++# USB Imaging devices
++#
++# CONFIG_USB_MDC800 is not set
++# CONFIG_USB_MICROTEK is not set
++CONFIG_USB_MON=y
++
++#
++# Belcarra USBLAN Networking for USB
++#
++# CONFIG_USB_USBLAN is not set
++
++#
++# USB port drivers
++#
++
++#
++# USB Serial Converter support
++#
++# CONFIG_USB_SERIAL is not set
++
++#
++# USB Miscellaneous drivers
++#
++# CONFIG_USB_EMI62 is not set
++# CONFIG_USB_EMI26 is not set
++# CONFIG_USB_ADUTUX is not set
++# CONFIG_USB_AUERSWALD is not set
++# CONFIG_USB_RIO500 is not set
++# CONFIG_USB_LEGOTOWER is not set
++# CONFIG_USB_LCD is not set
++# CONFIG_USB_BERRY_CHARGE is not set
++# CONFIG_USB_LED is not set
++# CONFIG_USB_CYPRESS_CY7C63 is not set
++# CONFIG_USB_CYTHERM is not set
++# CONFIG_USB_PHIDGET is not set
++# CONFIG_USB_IDMOUSE is not set
++# CONFIG_USB_FTDI_ELAN is not set
++# CONFIG_USB_APPLEDISPLAY is not set
++# CONFIG_USB_SISUSBVGA is not set
++# CONFIG_USB_LD is not set
++# CONFIG_USB_TRANCEVIBRATOR is not set
++# CONFIG_USB_IOWARRIOR is not set
++
++#
++# USB DSL modem support
++#
++
++#
+ # USB Gadget Support
+ #
+ CONFIG_USB_GADGET=m
+diff --git a/arch/arm/mach-mx51/Makefile b/arch/arm/mach-mx51/Makefile
+index 4a2b4f0..412f642 100644
+--- a/arch/arm/mach-mx51/Makefile
++++ b/arch/arm/mach-mx51/Makefile
+@@ -8,6 +8,8 @@ obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o
+ 
+ obj-$(CONFIG_MACH_MX51_3STACK) += mx51_3stack.o mx51_3stack_gpio.o
+ 
++obj-$(CONFIG_USB_EHCI_ARC_H1)   += usb_h1.o
++
+ ifneq ($(strip $(CONFIG_USB_GADGET_ARC) $(CONFIG_USB_EHCI_ARC_OTG)),)
+ 	obj-y	+= usb_dr.o
+ endif
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 270df2f..b6014c9 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -1011,6 +1011,183 @@ void gpio_usbotg_hs_inactive(void)
+ 
+ EXPORT_SYMBOL(gpio_usbotg_hs_inactive);
+ 
++/*
++ * USB Host1 HS port
++ */
++int gpio_usbh1_active(void)
++{
++	/* Set USBH1_STP to GPIO and toggle it */
++	mxc_request_iomux(MX51_PIN_USBH1_STP, IOMUX_CONFIG_GPIO |
++			  IOMUX_CONFIG_SION);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_STP, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++	mxc_set_gpio_direction(MX51_PIN_USBH1_STP, 0);
++	mxc_set_gpio_dataout(MX51_PIN_USBH1_STP, 1);
++
++	msleep(100);
++
++	/* USBH1_CLK */
++	mxc_request_iomux(MX51_PIN_USBH1_CLK, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_CLK, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++
++	/* USBH1_DIR */
++	mxc_request_iomux(MX51_PIN_USBH1_DIR, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DIR, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++
++	/* USBH1_NXT */
++	mxc_request_iomux(MX51_PIN_USBH1_NXT, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_NXT, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++
++	/* USBH1_DATA0 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA0, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA0, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA1 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA1, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA1, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA2 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA2, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA2, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA3 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA3, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA3, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA4 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA4, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA4, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA5 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA5, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA5, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA6 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA6, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA6, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USBH1_DATA7 */
++	mxc_request_iomux(MX51_PIN_USBH1_DATA7, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_DATA7, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_100K_PU | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_HYS_ENABLE);
++
++	/* USB_PWR */
++	mxc_request_iomux(MX51_PIN_GPIO1_8, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_GPIO1_8, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PKE_NONE | PAD_CTL_HYS_ENABLE);
++
++	/* USB_OC */
++	mxc_request_iomux(MX51_PIN_GPIO1_9, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_GPIO1_9, PAD_CTL_SRE_SLOW |
++			  PAD_CTL_DRV_LOW | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE);
++
++	/* FPGA_USBOTG_RST_B */
++	mxc_request_iomux(MX51_PIN_EIM_D17, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_EIM_D17, PAD_CTL_DRV_HIGH |
++			  PAD_CTL_HYS_NONE | PAD_CTL_PUE_KEEPER |
++			  PAD_CTL_100K_PU | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++	mxc_set_gpio_direction(MX51_PIN_EIM_D17, 0);
++	mxc_set_gpio_dataout(MX51_PIN_EIM_D17, 1);
++
++	msleep(100);
++
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_usbh1_active);
++
++void gpio_usbh1_setback_stp(void)
++{
++	/* setback USBH1_STP to be function */
++	mxc_request_iomux(MX51_PIN_USBH1_STP, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_USBH1_STP, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE | PAD_CTL_DDR_INPUT_CMOS |
++			  PAD_CTL_DRV_VOT_LOW);
++}
++
++EXPORT_SYMBOL(gpio_usbh1_setback_stp);
++
++void gpio_usbh1_inactive(void)
++{
++	mxc_request_gpio(MX51_PIN_USBH1_CLK);
++	mxc_request_gpio(MX51_PIN_USBH1_DIR);
++	mxc_request_gpio(MX51_PIN_USBH1_NXT);
++	mxc_request_gpio(MX51_PIN_USBH1_STP);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA0);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA1);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA2);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA3);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA4);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA5);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA6);
++	mxc_request_gpio(MX51_PIN_USBH1_DATA7);
++	mxc_request_gpio(MX51_PIN_GPIO1_8);
++	mxc_request_gpio(MX51_PIN_GPIO1_9);
++
++	mxc_free_iomux(MX51_PIN_USBH1_CLK, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DIR, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_NXT, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_STP, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA0, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA1, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA2, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA3, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA4, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA5, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA6, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_USBH1_DATA7, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_GPIO1_8, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_GPIO1_9, IOMUX_CONFIG_GPIO);
++
++	mxc_free_iomux(MX51_PIN_EIM_D17, IOMUX_CONFIG_GPIO);
++}
++
++EXPORT_SYMBOL(gpio_usbh1_inactive);
++
+ /*!
+  * Setup GPIO for PCMCIA interface
+  *
+diff --git a/arch/arm/mach-mx51/usb.h b/arch/arm/mach-mx51/usb.h
+index 3542866..929933f 100644
+--- a/arch/arm/mach-mx51/usb.h
++++ b/arch/arm/mach-mx51/usb.h
+@@ -19,6 +19,10 @@ extern void gpio_usbotg_hs_inactive(void);
+ extern struct platform_device *host_pdev_register(struct resource *res,
+ 		  int n_res, struct fsl_usb2_platform_data *config);
+ 
++extern int fsl_usb_host_init(struct platform_device *pdev);
++extern void fsl_usb_host_uninit(struct fsl_usb2_platform_data *pdata);
++extern int gpio_usbh1_active(void);
++extern void gpio_usbh1_inactive(void);
+ extern int gpio_usbotg_utmi_active(void);
+ extern void gpio_usbotg_utmi_inactive(void);
+ static int usbotg_init_ext(struct platform_device *pdev);
+diff --git a/arch/arm/mach-mx51/usb_h1.c b/arch/arm/mach-mx51/usb_h1.c
+new file mode 100644
+index 0000000..3cf955d
+--- /dev/null
++++ b/arch/arm/mach-mx51/usb_h1.c
+@@ -0,0 +1,54 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <asm/arch/arc_otg.h>
++#include "usb.h"
++
++static struct fsl_usb2_platform_data usbh1_config = {
++	.name = "Host 1",
++	.platform_init = fsl_usb_host_init,
++	.platform_uninit = fsl_usb_host_uninit,
++	.operating_mode = FSL_USB2_MPH_HOST,
++	.phy_mode = FSL_USB2_PHY_ULPI,
++	.power_budget = 150,	/* 150 mA max power */
++	.gpio_usb_active = gpio_usbh1_active,
++	.gpio_usb_inactive = gpio_usbh1_inactive,
++	.transceiver = "isp1504",
++};
++
++static struct resource usbh1_resources[] = {
++	[0] = {
++	       .start = (u32) (USB_H1REGS_BASE),
++	       .end = (u32) (USB_H1REGS_BASE + 0x1ff),
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_USB_H1,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++static int __init usbh1_init(void)
++{
++	pr_debug("%s: \n", __func__);
++
++	host_pdev_register(usbh1_resources, ARRAY_SIZE(usbh1_resources),
++			   &usbh1_config);
++	return 0;
++}
++
++module_init(usbh1_init);
+-- 
+1.5.4.4
+

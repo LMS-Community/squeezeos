@@ -1,0 +1,128 @@
+From 4d5c689d6dd3b5f0213a534a1fc1bad18383e2e6 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 00:44:44 -0400
+Subject: [PATCH] Unionfs: minor coding style updates
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c  |    6 ++++--
+ fs/unionfs/dentry.c |    2 +-
+ fs/unionfs/inode.c  |   14 ++++++++------
+ fs/unionfs/main.c   |    4 ++--
+ fs/unionfs/union.h  |    2 +-
+ 5 files changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index f678534..2d15fb0 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -467,7 +467,8 @@ void __show_dinode_times(const struct dentry *dentry,
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (!lower_inode)
+ 			continue;
+-		printk("DT(%s:%lu:%d): ", dentry->d_name.name, inode->i_ino, bindex);
++		printk("DT(%s:%lu:%d): ", dentry->d_name.name, inode->i_ino,
++		       bindex);
+ 		printk("%s:%s:%d ",file,fxn,line);
+ 		printk("um=%lu/%lu lm=%lu/%lu ",
+ 		       inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
+@@ -490,7 +491,8 @@ void __show_inode_counts(const struct inode *inode,
+ 		printk("SiC: Null inode\n");
+ 		return;
+ 	}
+-	for (bindex=sbstart(inode->i_sb); bindex <= sbend(inode->i_sb); bindex++) {
++	for (bindex=sbstart(inode->i_sb); bindex <= sbend(inode->i_sb);
++	     bindex++) {
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (!lower_inode)
+ 			continue;
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 08b5722..d9bb199 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -26,7 +26,7 @@
+  * Returns true if valid, false otherwise.
+  */
+ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+-				      struct nameidata *nd)
++				       struct nameidata *nd)
+ {
+ 	bool valid = true;	/* default is valid */
+ 	struct dentry *lower_dentry;
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 9638b64..de78e26 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -99,7 +99,8 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 		 * if lower_dentry is NULL, create the entire
+ 		 * dentry directory structure in branch 0.
+ 		 */
+-		lower_dentry = create_parents(parent, dentry, dentry->d_name.name, 0);
++		lower_dentry = create_parents(parent, dentry,
++					      dentry->d_name.name, 0);
+ 		if (IS_ERR(lower_dentry)) {
+ 			err = PTR_ERR(lower_dentry);
+ 			goto out;
+@@ -447,9 +448,8 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 
+ 		if (!(err = is_robranch_super(dentry->d_sb, bindex))) {
+ 			mode = S_IALLUGO;
+-			err =
+-				vfs_symlink(lower_dir_dentry->d_inode,
+-					    lower_dentry, symname, mode);
++			err = vfs_symlink(lower_dir_dentry->d_inode,
++					  lower_dentry, symname, mode);
+ 		}
+ 		unlock_dir(lower_dir_dentry);
+ 
+@@ -884,9 +884,11 @@ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+  *       readonly, to allow copyup to work.
+  *   (3) we do call security_inode_permission, and therefore security inside
+  *       SELinux, etc. are performed.
++ *
++ * @inode: the lower inode we're checking permission on
+  */
+-static int inode_permission(struct super_block *sb, struct inode *inode, int mask,
+-			    struct nameidata *nd, int bindex)
++static int inode_permission(struct super_block *sb, struct inode *inode,
++			    int mask, struct nameidata *nd, int bindex)
+ {
+ 	int retval, submask;
+ 
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 4faae44..8595750 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -275,14 +275,14 @@ int __parse_branch_mode(const char *name)
+  */
+ int parse_branch_mode(const char *name)
+ {
+-	int perms =  __parse_branch_mode(name);
++	int perms = __parse_branch_mode(name);
+ 
+ 	if (perms == 0)
+ 		perms = MAY_READ | MAY_WRITE;
+ 	return perms;
+ }
+ 
+-/* 
++/*
+  * parse the dirs= mount argument
+  *
+  * We don't need to lock the superblock private data's rwsem, as we get
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 9ec5f82..178bdfc 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -553,7 +553,7 @@ extern void __show_inode_counts(const struct inode *inode,
+ 
+ /* we leave useful hooks for these check functions throughout the code */
+ #define unionfs_check_inode(i)		do { } while(0)
+-#define unionfs_check_dentry(d)	do { } while(0)
++#define unionfs_check_dentry(d)		do { } while(0)
+ #define unionfs_check_file(f)		do { } while(0)
+ #define show_branch_counts(sb)		do { } while(0)
+ #define show_inode_times(i)		do { } while(0)
+-- 
+1.5.4.3
+

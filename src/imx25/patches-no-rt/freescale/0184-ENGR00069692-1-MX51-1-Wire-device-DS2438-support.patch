@@ -1,0 +1,141 @@
+From 14a7e2ff977e74e458b01a3a1a1cc062f37cc500 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Thu, 30 Oct 2008 12:03:54 +0800
+Subject: [PATCH] ENGR00069692-1 MX51: 1-Wire device DS2438 support
+
+support MX51 1-Wire function
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |   22 ++++++++++++++++++++--
+ arch/arm/mach-mx51/clock.c              |   10 ++++++++++
+ arch/arm/mach-mx51/devices.c            |   11 ++++++++++-
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |    7 +++++--
+ 4 files changed, 45 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index bcf7b05..b7461e0 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Wed Oct 22 10:08:31 2008
++# Thu Oct 30 11:58:08 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -781,7 +781,25 @@ CONFIG_SPI_MXC_SELECT1=y
+ # CONFIG_SPI_AT25 is not set
+ # CONFIG_SPI_SPIDEV is not set
+ # CONFIG_SPI_TLE62X0 is not set
+-# CONFIG_W1 is not set
++CONFIG_W1=m
++CONFIG_W1_CON=y
++
++#
++# 1-wire Bus Masters
++#
++# CONFIG_W1_MASTER_DS2490 is not set
++# CONFIG_W1_MASTER_DS2482 is not set
++CONFIG_W1_MASTER_MXC=m
++# CONFIG_W1_MASTER_DS1WM is not set
++
++#
++# 1-wire Slaves
++#
++# CONFIG_W1_SLAVE_THERM is not set
++# CONFIG_W1_SLAVE_SMEM is not set
++# CONFIG_W1_SLAVE_DS2751 is not set
++# CONFIG_W1_SLAVE_DS2433 is not set
++# CONFIG_W1_SLAVE_DS2760 is not set
+ # CONFIG_POWER_SUPPLY is not set
+ CONFIG_HWMON=y
+ # CONFIG_HWMON_VID is not set
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 0c44da4..2929c86 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -2392,6 +2392,15 @@ static struct clk ata_clk = {
+ 	.disable = _clk_disable,
+ };
+ 
++static struct clk owire_clk = {
++	.name = "owire_clk",
++	.parent = &ipg_perclk,
++	.enable = _clk_enable,
++	.enable_reg = MXC_CCM_CCGR2,
++	.enable_shift = MXC_CCM_CCGR2_CG11_OFFSET,
++	.disable = _clk_disable,
++};
++
+ static struct clk fec_clk = {
+ 	.name = "fec_clk",
+ 	.parent = &ipg_clk,
+@@ -2513,6 +2522,7 @@ static struct clk *mxc_clks[] = {
+ 	&pgc_clk,
+ 	&rtc_clk,
+ 	&ata_clk,
++	&owire_clk,
+ 	&fec_clk,
+ 	&mipi_hsc1_clk,
+ 	&mipi_hsc2_clk,
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index bbb1fec..8897e58 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -99,8 +99,15 @@ static void mxc_nop_release(struct device *dev)
+ }
+ 
+ #if defined(CONFIG_W1_MASTER_MXC) || defined(CONFIG_W1_MASTER_MXC_MODULE)
++static struct resource w1_resources[] = {
++	{
++	 .start = MXC_INT_OWIRE,
++	 .flags = IORESOURCE_IRQ,
++	 }
++};
++
+ static struct mxc_w1_config mxc_w1_data = {
+-	.search_rom_accelerator = 0,
++	.search_rom_accelerator = 1,
+ };
+ 
+ static struct platform_device mxc_w1_devices = {
+@@ -109,6 +116,8 @@ static struct platform_device mxc_w1_devices = {
+ 		.release = mxc_nop_release,
+ 		.platform_data = &mxc_w1_data,
+ 		},
++	.num_resources = ARRAY_SIZE(w1_resources),
++	.resource = w1_resources,
+ 	.id = 0
+ };
+ 
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index b3e1105..e2c864a 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -326,7 +326,10 @@ EXPORT_SYMBOL(gpio_spi_inactive);
+  */
+ void gpio_owire_active(void)
+ {
+-
++	mxc_request_iomux(MX51_PIN_OWIRE_LINE, IOMUX_CONFIG_ALT0);
++	mxc_iomux_set_pad(MX51_PIN_OWIRE_LINE, PAD_CTL_HYS_ENABLE |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_ODE_OPENDRAIN_ENABLE |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
+ }
+ 
+ EXPORT_SYMBOL(gpio_owire_active);
+@@ -336,7 +339,7 @@ EXPORT_SYMBOL(gpio_owire_active);
+  */
+ void gpio_owire_inactive(void)
+ {
+-
++	mxc_free_iomux(MX51_PIN_OWIRE_LINE, IOMUX_CONFIG_ALT0);
+ }
+ 
+ EXPORT_SYMBOL(gpio_owire_inactive);
+-- 
+1.5.4.4
+

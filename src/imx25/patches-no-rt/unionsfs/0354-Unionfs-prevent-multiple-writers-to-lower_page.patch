@@ -1,0 +1,30 @@
+From 505e7c316459398ec08aea98173496b660023e79 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 25 Nov 2007 14:51:56 -0500
+Subject: [PATCH] Unionfs: prevent multiple writers to lower_page
+
+Without this patch, the LTP fs test "rwtest04" triggers a
+BUG_ON(PageWriteback(page)) in fs/buffer.c:1706.
+
+CC: Hugh Dickins <hugh@veritas.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 623a913..ea5ef3d 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -73,6 +73,7 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 
+ 	BUG_ON(!lower_mapping->a_ops->writepage);
+ 	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
++	wait_on_page_writeback(lower_page); /* prevent multiple writers */
+ 	err = lower_mapping->a_ops->writepage(lower_page, wbc);
+ 	if (err < 0)
+ 		goto out_release;
+-- 
+1.5.4.3
+

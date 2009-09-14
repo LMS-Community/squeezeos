@@ -1,0 +1,45 @@
+From 98d399df92660d56f8f39d564b00d1c097bf53ff Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 28 May 2007 19:18:45 -0400
+Subject: [PATCH] bug fix: get lower mnt from root dentry instead of lower dentry
+
+While copying-up a file, the union object hasn't been fully formed yet, so
+we don't have all the lower dentries/mnts to use (the caller will have them
+later on).  Therefore, we should use the sb->s_root's lower mnt here.  This
+fixes a "NULL mnt" warning message that came from unionfs_mntget.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 18203a3..ab9f67a 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -184,6 +184,7 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 	struct super_block *sb = dentry->d_sb;
+ 	struct file *input_file;
+ 	struct file *output_file;
++	struct vfsmount *output_mnt;
+ 	mm_segment_t old_fs;
+ 	char *buf = NULL;
+ 	ssize_t read_bytes, write_bytes;
+@@ -211,12 +212,11 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 
+ 	/* open new file */
+ 	dget(new_hidden_dentry);
+-	unionfs_mntget(dentry, new_bindex);
++	output_mnt = unionfs_mntget(sb->s_root, new_bindex);
+ 	unionfs_read_lock(sb);
+ 	branchget(sb, new_bindex);
+ 	unionfs_read_unlock(sb);
+-	output_file = dentry_open(new_hidden_dentry,
+-				  unionfs_lower_mnt_idx(dentry, new_bindex),
++	output_file = dentry_open(new_hidden_dentry, output_mnt,
+ 				  O_WRONLY | O_LARGEFILE);
+ 	if (IS_ERR(output_file)) {
+ 		err = PTR_ERR(output_file);
+-- 
+1.5.4.3
+

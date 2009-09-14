@@ -1,0 +1,120 @@
+From d65df95cb60c9bc8393d4ca9fa85526fd50aeea2 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 1 Nov 2007 20:33:12 -0400
+Subject: [PATCH] Unionfs: cleanup permission checking code
+
+Use vfs helpers and avoid redundant checks performed by the VFS already.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    4 ---
+ fs/unionfs/inode.c      |   70 +++++++++--------------------------------------
+ 2 files changed, 13 insertions(+), 61 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 7654bcb..50e5775 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -669,10 +669,6 @@ static long do_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 
+ 	lower_file = unionfs_lower_file(file);
+ 
+-	err = security_file_ioctl(lower_file, cmd, arg);
+-	if (err)
+-		goto out;
+-
+ 	err = -ENOTTY;
+ 	if (!lower_file || !lower_file->f_op)
+ 		goto out;
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index f4facf4..169365c 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -914,59 +914,6 @@ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ }
+ 
+ /*
+- * Basically copied from the kernel vfs permission(), but we've changed
+- * the following:
+- *   (1) the IS_RDONLY check is skipped, and
+- *   (2) We return 0 (success) if the non-leftmost branch is mounted
+- *       readonly, to allow copyup to work.
+- *   (3) we do call security_inode_permission, and therefore security inside
+- *       SELinux, etc. are performed.
+- *
+- * @inode: the lower inode we're checking permission on
+- */
+-static int inode_permission(struct super_block *sb, struct inode *inode,
+-			    int mask, struct nameidata *nd, int bindex)
+-{
+-	int retval, submask;
+-
+-	if (mask & MAY_WRITE) {
+-		umode_t mode = inode->i_mode;
+-		/* The first branch is allowed to be really readonly. */
+-		if (bindex == 0 &&
+-		    IS_RDONLY(inode) &&
+-		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+-			return -EROFS;
+-		/*
+-		 * Nobody gets write access to an immutable file.
+-		 */
+-		if (IS_IMMUTABLE(inode))
+-			return -EACCES;
+-		/*
+-		 * For all other branches than the first one, we ignore
+-		 * EROFS or if the branch is mounted as readonly, to let
+-		 * copyup take place.
+-		 */
+-		if (bindex > 0 &&
+-		    is_robranch_super(sb, bindex) &&
+-		    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
+-			return 0;
+-	}
+-
+-	/* Ordinary permission routines do not understand MAY_APPEND. */
+-	submask = mask & ~MAY_APPEND;
+-	if (inode->i_op && inode->i_op->permission)
+-		retval = inode->i_op->permission(inode, submask, nd);
+-	else
+-		retval = generic_permission(inode, submask, NULL);
+-
+-	if (retval && retval != -EROFS)	/* ignore EROFS */
+-		return retval;
+-
+-	retval = security_inode_permission(inode, mask, nd);
+-	return ((retval == -EROFS) ? 0 : retval);	/* ignore EROFS */
+-}
+-
+-/*
+  * Don't grab the superblock read-lock in unionfs_permission, which prevents
+  * a deadlock with the branch-management "add branch" code (which grabbed
+  * the write lock).  It is safe to not grab the read lock here, because even
+@@ -1011,11 +958,20 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 			continue;
+ 
+ 		/*
+-		 * We use our own special version of permission, such that
+-		 * only the first branch returns -EROFS.
++		 * We check basic permissions, but we ignore any conditions
++		 * such as readonly file systems or branches marked as
++		 * readonly, because those conditions should lead to a
++		 * copyup taking place later on.
+ 		 */
+-		err = inode_permission(inode->i_sb, lower_inode, mask, nd,
+-				       bindex);
++		err = permission(lower_inode, mask, nd);
++		if (err && bindex > 0) {
++			umode_t mode = lower_inode->i_mode;
++			if (is_robranch_super(inode->i_sb, bindex) &&
++			    (S_ISREG(mode) || S_ISDIR(mode) || S_ISLNK(mode)))
++				err = 0;
++			if (IS_COPYUP_ERR(err))
++				err = 0;
++		}
+ 
+ 		/*
+ 		 * The permissions are an intersection of the overall directory
+-- 
+1.5.4.3
+

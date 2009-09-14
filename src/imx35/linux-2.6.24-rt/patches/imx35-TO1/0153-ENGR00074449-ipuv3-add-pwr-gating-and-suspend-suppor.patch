@@ -1,0 +1,278 @@
+From 77a5c7584dbf67de5eb4efc382759a6cf8ae8619 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Thu, 24 Apr 2008 16:58:44 -0500
+Subject: [PATCH] ENGR00074449 ipuv3 add pwr gating and suspend support
+
+Add support for IPUv3 power gating during suspend.
+Add support for framebuffer suspend and resume.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ arch/arm/mach-mx37/crm_regs.h    |    8 +++++++
+ arch/arm/mach-mx37/system.c      |   39 ++++++++++++++++++++++++++++++++-
+ drivers/mxc/ipu3/ipu_common.c    |   35 ++++++++++++++++++++++-------
+ drivers/video/mxc/mxc_ipuv3_fb.c |   44 +++++++------------------------------
+ include/asm-arm/arch-mxc/mxc.h   |    4 +++
+ 5 files changed, 85 insertions(+), 45 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/crm_regs.h b/arch/arm/mach-mx37/crm_regs.h
+index 5213146..28c6c8f 100644
+--- a/arch/arm/mach-mx37/crm_regs.h
++++ b/arch/arm/mach-mx37/crm_regs.h
+@@ -534,13 +534,21 @@
+ #define MXC_EMPGC0_ARM_EMPGCR	(MXC_EMPGC0_ARM_BASE + 0x0)
+ #define MXC_EMPGC1_ARM_EMPGCR	(MXC_EMPGC1_ARM_BASE + 0x0)
+ 
++#define MXC_PGC_IPU_PGCR	(MXC_PGC_IPU_BASE + 0x0)
++#define MXC_PGC_IPU_PGSR	(MXC_PGC_IPU_BASE + 0xC)
++#define MXC_PGC_VPU_PGCR	(MXC_PGC_VPU_BASE + 0x0)
++#define MXC_PGC_VPU_PGSR	(MXC_PGC_VPU_BASE + 0xC)
++
+ #define MXC_ARM1176_PLAT_LPC_DSM	(1 << 16)
+ #define MXC_ARM1176_PLAT_LPC_DBG_DSM	(1 << 17)
+ 
+ #define MXC_GPC_PGR_ARMPG_OFFSET	8
+ #define MXC_GPC_PGR_ARMPG_MASK		(3 << 8)
+ 
++#define MXC_PGCR_PCR			1
+ #define MXC_SRPGCR_PCR			1
+ #define MXC_EMPGCR_PCR			1
+ 
++#define MXC_PGSR_PSR			1
++
+ #endif				/* __ARCH_ARM_MACH_MX37_CRM_REGS_H__ */
+diff --git a/arch/arm/mach-mx37/system.c b/arch/arm/mach-mx37/system.c
+index 8f866e2..0664f90 100644
+--- a/arch/arm/mach-mx37/system.c
++++ b/arch/arm/mach-mx37/system.c
+@@ -10,9 +10,10 @@
+  * http://www.opensource.org/licenses/gpl-license.html
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+-
++#define DEBUG
+ #include <linux/kernel.h>
+ #include <linux/clk.h>
++#include <linux/platform_device.h>
+ #include <asm/io.h>
+ #include <asm/hardware.h>
+ #include <asm/proc-fns.h>
+@@ -66,6 +67,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		arm_srpgcr |= MXC_SRPGCR_PCR;
+ 		empgcr0 |= MXC_EMPGCR_PCR;
+ 		empgcr1 |= MXC_EMPGCR_PCR;
++
+ 		if (tzic_enable_wake(1) != 0)
+ 			return;
+ 		break;
+@@ -84,6 +86,41 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 	__raw_writel(empgcr1, MXC_EMPGC1_ARM_EMPGCR);
+ }
+ 
++void mxc_pg_enable(struct platform_device *pdev)
++{
++	if (pdev == NULL)
++		return;
++
++	if (strcmp(pdev->name, "mxc_ipu") == 0) {
++		__raw_writel(MXC_PGCR_PCR, MXC_PGC_IPU_PGCR);
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_IPU_PGSR);
++	} else if (strcmp(pdev->name, "mxc_vpu") == 0) {
++		__raw_writel(MXC_PGCR_PCR, MXC_PGC_VPU_PGCR);
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_VPU_PGSR);
++	}
++
++}
++EXPORT_SYMBOL(mxc_pg_enable);
++
++void mxc_pg_disable(struct platform_device *pdev)
++{
++	if (pdev == NULL)
++		return;
++
++	if (strcmp(pdev->name, "mxc_ipu") == 0) {
++		__raw_writel(0x0, MXC_PGC_IPU_PGCR);
++		if (__raw_readl(MXC_PGC_IPU_PGSR) & MXC_PGSR_PSR)
++			dev_dbg(&pdev->dev, "power gating successful\n");
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_IPU_PGSR);
++	} else if (strcmp(pdev->name, "mxc_vpu") == 0) {
++		__raw_writel(0x0, MXC_PGC_VPU_PGCR);
++		if (__raw_readl(MXC_PGC_VPU_PGSR) & MXC_PGSR_PSR)
++			dev_dbg(&pdev->dev, "power gating successful\n");
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_VPU_PGSR);
++	}
++}
++EXPORT_SYMBOL(mxc_pg_disable);
++
+ /* To change the idle power mode, need to set arch_idle_mode to a different
+  * power mode as in enum mxc_cpu_pwr_mode.
+  * May allow dynamically changing the idle mode.
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index c4d2fea..4d88b18 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -105,6 +105,17 @@ static struct clk di_clk[] = {
+ 	 .rate = 27000000,},
+ };
+ 
++static void _ipu_dmfc_init(void)
++{
++	__raw_writel(0x2, DMFC_IC_CTRL);
++	/* 1 - segment 0 and 1; 2, 1C and 2C unused */
++	__raw_writel(0x00000090, DMFC_WR_CHAN);
++	__raw_writel(0x20202000, DMFC_WR_CHAN_DEF);
++	/* 5B - segment 2 and 3; 5F - segment 4 and 5; */
++	/* 6B - segment 6; 6F - segment 7 */
++	__raw_writel(0x1F1E9492, DMFC_DP_CHAN);
++}
++
+ /*!
+  * This function is called by the driver framework to initialize the IPU
+  * hardware.
+@@ -198,13 +209,7 @@ static int ipu_probe(struct platform_device *pdev)
+ 	__raw_writel(0xFFFFFFFF, IPU_INT_CTRL(10));
+ 
+ 	/* DMFC Init */
+-	__raw_writel(0x2, DMFC_IC_CTRL);
+-	/* 1 - segment 0 and 1; 2, 1C and 2C unused */
+-	__raw_writel(0x00000090, DMFC_WR_CHAN);
+-	__raw_writel(0x20202000, DMFC_WR_CHAN_DEF);
+-	/* 5B - segment 2 and 3; 5F - segment 4 and 5; */
+-	/* 6B - segment 6; 6F - segment 7 */
+-	__raw_writel(0x1F1E9492, DMFC_DP_CHAN);
++	_ipu_dmfc_init();
+ 
+ 	/* Set sync refresh channels as high priority */
+ 	__raw_writel(0x18800000L, IDMAC_CHA_PRI(0));
+@@ -1439,11 +1444,23 @@ ipu_color_space_t format_to_colorspace(uint32_t fmt)
+ 
+ static int ipu_suspend(struct platform_device *pdev, pm_message_t state)
+ {
++	mxc_pg_enable(pdev);
+ 	return 0;
+ }
+ 
+ static int ipu_resume(struct platform_device *pdev)
+ {
++	mxc_pg_disable(pdev);
++
++	clk_enable(g_ipu_clk);
++
++	_ipu_dmfc_init();
++	_ipu_init_dc_mappings();
++
++	/* Set sync refresh channels as high priority */
++	__raw_writel(0x18800000L, IDMAC_CHA_PRI(0));
++
++	clk_disable(g_ipu_clk);
+ 	return 0;
+ }
+ 
+@@ -1456,8 +1473,8 @@ static struct platform_driver mxcipu_driver = {
+ 		   },
+ 	.probe = ipu_probe,
+ 	.remove = ipu_remove,
+-	.suspend = ipu_suspend,
+-	.resume = ipu_resume,
++	.suspend_late = ipu_suspend,
++	.resume_early = ipu_resume,
+ };
+ 
+ int32_t __init ipu_gen_init(void)
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 46084f8..32f1421 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -26,6 +26,7 @@
+ /*!
+  * Include files
+  */
++#define DEBUG
+ #include <linux/module.h>
+ #include <linux/kernel.h>
+ #include <linux/platform_device.h>
+@@ -748,32 +749,18 @@ static int mxcfb_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	struct fb_info *fbi = platform_get_drvdata(pdev);
+ 	struct mxcfb_info *mxc_fbi = (struct mxcfb_info *)fbi->par;
++	int saved_blank;
+ #ifdef CONFIG_FB_MXC_LOW_PWR_DISPLAY
+ 	void *fbmem;
+ #endif
+ 
+ 	acquire_console_sem();
+ 	fb_set_suspend(fbi, 1);
++	saved_blank = mxc_fbi->blank;
++	mxcfb_blank(FB_BLANK_POWERDOWN, fbi);
++	mxc_fbi->blank = saved_blank;
+ 	release_console_sem();
+ 
+-	if (mxc_fbi->blank == FB_BLANK_UNBLANK) {
+-#ifdef CONFIG_FB_MXC_LOW_PWR_DISPLAY
+-		if (drv_data->fbi->fix.smem_start != FB_RAM_BASE_ADDR) {
+-			fbmem = ioremap(FB_RAM_BASE_ADDR, FB_RAM_SIZE);
+-			memcpy(fbmem, drv_data->fbi->screen_base, FB_RAM_SIZE);
+-			iounmap(fbmem);
+-			mxc_fbi->cur_ipu_buf = !mxc_fbi->cur_ipu_buf;
+-			ipu_update_channel_buffer(MEM_SDC_BG, IPU_INPUT_BUFFER,
+-						  mxc_fbi->cur_ipu_buf,
+-						  FB_RAM_BASE_ADDR);
+-			ipu_select_buffer(MEM_SDC_BG, IPU_INPUT_BUFFER,
+-					  mxc_fbi->cur_ipu_buf);
+-		}
+-		ipu_lowpwr_display_enable();
+-#else
+-		ipu_disable_channel(mxc_fbi->ipu_ch, true);
+-#endif
+-	}
+ 	return 0;
+ }
+ 
+@@ -784,25 +771,12 @@ static int mxcfb_resume(struct platform_device *pdev)
+ {
+ 	struct fb_info *fbi = platform_get_drvdata(pdev);
+ 	struct mxcfb_info *mxc_fbi = (struct mxcfb_info *)fbi->par;
+-
+-	if (mxc_fbi->blank == FB_BLANK_UNBLANK) {
+-#ifdef CONFIG_FB_MXC_LOW_PWR_DISPLAY
+-		ipu_lowpwr_display_disable();
+-		if (drv_data->fbi->fix.smem_start != FB_RAM_BASE_ADDR) {
+-			mxc_fbi->cur_ipu_buf = !mxc_fbi->cur_ipu_buf;
+-			ipu_update_channel_buffer(MEM_SDC_BG, IPU_INPUT_BUFFER,
+-						  mxc_fbi->cur_ipu_buf,
+-						  drv_data->fbi->fix.
+-						  smem_start);
+-			ipu_select_buffer(MEM_SDC_BG, IPU_INPUT_BUFFER,
+-					  mxc_fbi->cur_ipu_buf);
+-		}
+-#else
+-		ipu_enable_channel(MEM_BG_SYNC);
+-#endif
+-	}
++	int saved_blank;
+ 
+ 	acquire_console_sem();
++	saved_blank = mxc_fbi->blank;
++	mxc_fbi->blank = FB_BLANK_POWERDOWN;
++	mxcfb_blank(saved_blank, fbi);
+ 	fb_set_suspend(fbi, 0);
+ 	release_console_sem();
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 89156cf..a97049f 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -163,6 +163,10 @@ unsigned long board_get_ckih_rate(void);
+ int mxc_snoop_set_config(u32 num, unsigned long base, int size);
+ int mxc_snoop_get_status(u32 num, u32 * statl, u32 * stath);
+ 
++struct platform_device;
++void mxc_pg_enable(struct platform_device *pdev);
++void mxc_pg_disable(struct platform_device *pdev);
++
+ #endif				/* __ASSEMBLY__ */
+ 
+ #define IOMUX_TO_GPIO(pin) 	((((unsigned int)pin >> MUX_IO_P) * GPIO_NUM_PIN) + ((pin >> MUX_IO_I) & ((1 << (MUX_IO_P - MUX_IO_I)) -1)))
+-- 
+1.5.4.4
+

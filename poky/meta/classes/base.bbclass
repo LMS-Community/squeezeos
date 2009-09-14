@@ -167,6 +167,14 @@ def base_both_contain(variable1, variable2, checkvalue, d):
 
 DEPENDS_prepend="${@base_dep_prepend(d)} "
 
+def base_prune_suffix(var, suffixes, d):
+    # See if var ends with any of the suffixes listed and 
+    # remove it if found
+    for suffix in suffixes:
+        if var.endswith(suffix):
+            return var.replace(suffix, "")
+    return var
+
 def base_set_filespath(path, d):
 	import os, bb
 	filespath = []
@@ -177,7 +185,7 @@ def base_set_filespath(path, d):
 			filespath.append(os.path.join(p, o))
 	return ":".join(filespath)
 
-FILESPATH = "${@base_set_filespath([ "${FILE_DIRNAME}/${PF}", "${FILE_DIRNAME}/${P}", "${FILE_DIRNAME}/${PN}", "${FILE_DIRNAME}/files", "${FILE_DIRNAME}" ], d)}"
+FILESPATH = "${@base_set_filespath([ "${FILE_DIRNAME}/${PF}", "${FILE_DIRNAME}/${P}", "${FILE_DIRNAME}/${PN}", "${FILE_DIRNAME}/${BP}", "${FILE_DIRNAME}/${BPN}", "${FILE_DIRNAME}/files", "${FILE_DIRNAME}" ], d)}"
 
 def oe_filter(f, str, d):
 	from re import match
@@ -636,12 +644,12 @@ def oe_unpack_file(file, data, url = None):
 		cmd = 'gzip -dc %s > %s' % (file, efile)
 	elif file.endswith('.bz2'):
 		cmd = 'bzip2 -dc %s > %s' % (file, efile)
-	elif file.endswith('.zip'):
-		cmd = 'unzip -q'
+	elif file.endswith('.zip') or file.endswith('.jar'):
+		cmd = 'unzip -q -o'
 		(type, host, path, user, pswd, parm) = bb.decodeurl(url)
 		if 'dos' in parm:
 			cmd = '%s -a' % cmd
-		cmd = '%s %s' % (cmd, file)
+		cmd = "%s '%s'" % (cmd, file)
 	elif os.path.isdir(file):
 		filesdir = os.path.realpath(bb.data.getVar("FILESDIR", data, 1))
 		destdir = "."
@@ -673,9 +681,20 @@ def oe_unpack_file(file, data, url = None):
 		if os.path.samefile(file, dest):
 			return True
 
+	# Change to subdir before executing command
+	save_cwd = os.getcwd();
+	parm = bb.decodeurl(url)[5]
+	if 'subdir' in parm:
+		newdir = ("%s/%s" % (os.getcwd(), parm['subdir']))
+		bb.mkdirhier(newdir)
+		os.chdir(newdir)
+
 	cmd = "PATH=\"%s\" %s" % (bb.data.getVar('PATH', data, 1), cmd)
 	bb.note("Unpacking %s to %s/" % (file, os.getcwd()))
 	ret = os.system(cmd)
+
+	os.chdir(save_cwd)
+
 	return ret == 0
 
 addtask unpack after do_fetch
@@ -686,10 +705,10 @@ python base_do_unpack() {
 	localdata = bb.data.createCopy(d)
 	bb.data.update_data(localdata)
 
-	src_uri = bb.data.getVar('SRC_URI', localdata)
+	src_uri = bb.data.getVar('SRC_URI', localdata, True)
 	if not src_uri:
 		return
-	src_uri = bb.data.expand(src_uri, localdata)
+
 	for url in src_uri.split():
 		try:
 			local = bb.data.expand(bb.fetch.localpath(url, localdata), localdata)
@@ -705,6 +724,17 @@ def base_get_scmbasepath(d):
 	import bb
 	path_to_bbfiles = bb.data.getVar( 'BBFILES', d, 1 ).split()
 	return path_to_bbfiles[0][:path_to_bbfiles[0].rindex( "packages" )]
+
+def base_get_metadata_monotone_branch(d):
+	monotone_branch = "<unknown>"
+	try:
+		monotone_branch = file( "%s/_MTN/options" % base_get_scmbasepath(d) ).read().strip()
+		if monotone_branch.startswith( "database" ):
+			monotone_branch_words = monotone_branch.split()
+			monotone_branch = monotone_branch_words[ monotone_branch_words.index( "branch" )+1][1:-1]
+	except:
+		pass
+	return monotone_branch
 
 def base_get_metadata_monotone_revision(d):
 	monotone_revision = "<unknown>"
@@ -725,7 +755,69 @@ def base_get_metadata_svn_revision(d):
 		pass
 	return revision
 
-METADATA_REVISION ?= "${@base_get_metadata_monotone_revision(d)}"
+def base_get_metadata_git_branch(d):
+	import os
+	branch = os.popen('cd %s; git branch | grep "^* " | tr -d "* "' % base_get_scmbasepath(d)).read()
+
+	if len(branch) != 0:
+		return branch
+	return "<unknown>"
+
+def base_get_metadata_git_revision(d):
+	import os
+	rev = os.popen("cd %s; git log -n 1 --pretty=oneline --" % base_get_scmbasepath(d)).read().split(" ")[0]
+	if len(rev) != 0:
+		return rev
+	return "<unknown>"
+
+def base_detect_revision(d):
+	scms = [base_get_metadata_git_revision, \
+			base_get_metadata_svn_revision]
+
+	for scm in scms:
+		rev = scm(d)
+		if rev <> "<unknown>":
+			return rev
+
+	return "<unknown>"	
+
+def base_detect_branch(d):
+	scms = [base_get_metadata_git_branch]
+
+	for scm in scms:
+		rev = scm(d)
+		if rev <> "<unknown>":
+			return rev.strip()
+
+	return "<unknown>"	
+	
+	
+
+METADATA_BRANCH ?= "${@base_detect_branch(d)}"
+METADATA_REVISION ?= "${@base_detect_revision(d)}"
+
+GIT_CONFIG = "${STAGING_DIR_NATIVE}/usr/etc/gitconfig"
+
+def generate_git_config(e):
+        import bb
+        import os
+        from bb import data
+
+        if data.getVar('GIT_CORE_CONFIG', e.data, True):
+                gitconfig_path = bb.data.getVar('GIT_CONFIG', e.data, True)
+                proxy_command = "    gitproxy = %s\n" % data.getVar('GIT_PROXY_COMMAND', e.data, True)
+
+                bb.mkdirhier(bb.data.expand("${STAGING_DIR_NATIVE}/usr/etc/", e.data))
+                if (os.path.exists(gitconfig_path)):
+                        os.remove(gitconfig_path)
+
+                f = open(gitconfig_path, 'w')
+                f.write("[core]\n")
+                ignore_hosts = data.getVar('GIT_PROXY_IGNORE', e.data, True).split()
+                for ignore_host in ignore_hosts:
+                        f.write("    gitproxy = none for %s\n" % ignore_host)
+                f.write(proxy_command)
+                f.close
 
 addhandler base_eventhandler
 python base_eventhandler() {
@@ -752,12 +844,16 @@ python base_eventhandler() {
 		msg += messages.get(name[5:]) or name[5:]
 	elif name == "UnsatisfiedDep":
 		msg += "package %s: dependency %s %s" % (e.pkg, e.dep, name[:-3].lower())
-	if msg:
-		note(msg)
+
+	# Only need to output when using 1.8 or lower, the UI code handles it
+	# otherwise
+	if (int(bb.__version__.split(".")[0]) <= 1 and int(bb.__version__.split(".")[1]) <= 8):
+		if msg:
+			note(msg)
 
 	if name.startswith("BuildStarted"):
 		bb.data.setVar( 'BB_VERSION', bb.__version__, e.data )
-		statusvars = ['BB_VERSION', 'METADATA_REVISION', 'TARGET_ARCH', 'TARGET_OS', 'MACHINE', 'DISTRO', 'DISTRO_VERSION','TARGET_FPU']
+		statusvars = ['BB_VERSION', 'METADATA_BRANCH', 'METADATA_REVISION', 'TARGET_ARCH', 'TARGET_OS', 'MACHINE', 'DISTRO', 'DISTRO_VERSION','TARGET_FPU']
 		statuslines = ["%-17s = \"%s\"" % (i, bb.data.getVar(i, e.data, 1) or '') for i in statusvars]
 		statusmsg = "\nOE Build Configuration:\n%s\n" % '\n'.join(statuslines)
 		print statusmsg
@@ -782,6 +878,9 @@ python base_eventhandler() {
 				bb.note("Removing stamps: " + dir)
 				os.system('rm -f '+ dir)
 				os.system('touch ' + e.stampPrefix[fn] + '.needclean')
+
+        if name == "ConfigParsed":
+                generate_git_config(e)
 
 	if not data in e.__dict__:
 		return NotHandled
@@ -847,95 +946,6 @@ addtask build after do_populate_staging
 do_build = ""
 do_build[func] = "1"
 
-# Functions that update metadata based on files outputted
-# during the build process.
-
-def explode_deps(s):
-	r = []
-	l = s.split()
-	flag = False
-	for i in l:
-		if i[0] == '(':
-			flag = True
-			j = []
-		if flag:
-			j.append(i)
-			if i.endswith(')'):
-				flag = False
-				r[-1] += ' ' + ' '.join(j)
-		else:
-			r.append(i)
-	return r
-
-def packaged(pkg, d):
-	import os, bb
-	return os.access(get_subpkgedata_fn(pkg, d) + '.packaged', os.R_OK)
-
-def read_pkgdatafile(fn):
-	pkgdata = {}
-
-	def decode(str):
-		import codecs
-		c = codecs.getdecoder("string_escape")
-		return c(str)[0]
-
-	import os
-	if os.access(fn, os.R_OK):
-		import re
-		f = file(fn, 'r')
-		lines = f.readlines()
-		f.close()
-		r = re.compile("([^:]+):\s*(.*)")
-		for l in lines:
-			m = r.match(l)
-			if m:
-				pkgdata[m.group(1)] = decode(m.group(2))
-
-	return pkgdata
-
-def get_subpkgedata_fn(pkg, d):
-	import bb, os
-	archs = bb.data.expand("${PACKAGE_ARCHS}", d).split(" ")
-	archs.reverse()
-	pkgdata = bb.data.expand('${STAGING_DIR}/pkgdata/', d)
-	targetdir = bb.data.expand('${TARGET_VENDOR}-${TARGET_OS}/runtime/', d)
-	for arch in archs:
-		fn = pkgdata + arch + targetdir + pkg
-		if os.path.exists(fn):
-			return fn
-	return bb.data.expand('${PKGDATA_DIR}/runtime/%s' % pkg, d)
-
-def has_subpkgdata(pkg, d):
-	import bb, os
-	return os.access(get_subpkgedata_fn(pkg, d), os.R_OK)
-
-def read_subpkgdata(pkg, d):
-	import bb
-	return read_pkgdatafile(get_subpkgedata_fn(pkg, d))
-
-def has_pkgdata(pn, d):
-	import bb, os
-	fn = bb.data.expand('${PKGDATA_DIR}/%s' % pn, d)
-	return os.access(fn, os.R_OK)
-
-def read_pkgdata(pn, d):
-	import bb
-	fn = bb.data.expand('${PKGDATA_DIR}/%s' % pn, d)
-	return read_pkgdatafile(fn)
-
-python read_subpackage_metadata () {
-	import bb
-	data = read_pkgdata(bb.data.getVar('PN', d, 1), d)
-
-	for key in data.keys():
-		bb.data.setVar(key, data[key], d)
-
-	for pkg in bb.data.getVar('PACKAGES', d, 1).split():
-		sdata = read_subpkgdata(pkg, d)
-		for key in sdata.keys():
-			bb.data.setVar(key, sdata[key], d)
-}
-
 # Make sure MACHINE isn't exported
 # (breaks binutils at least)
 MACHINE[unexport] = "1"
@@ -987,6 +997,13 @@ def base_after_parse(d):
         depends = depends + " git-native:do_populate_staging"
         bb.data.setVarFlag('do_fetch', 'depends', depends, d)
 
+    # OSC packages should DEPEND on osc-native
+    srcuri = bb.data.getVar('SRC_URI', d, 1)
+    if "osc://" in srcuri:
+        depends = bb.data.getVarFlag('do_fetch', 'depends', d) or ""
+        depends = depends + " osc-native:do_populate_staging"
+        bb.data.setVarFlag('do_fetch', 'depends', depends, d)
+
     # bb.utils.sha256_file() will fail if hashlib isn't present, so we fallback
     # on shasum-native.  We need to ensure that it is staged before we fetch.
     if bb.data.getVar('PN', d, True) != "shasum-native":
@@ -997,10 +1014,12 @@ def base_after_parse(d):
             depends = depends + " shasum-native:do_populate_staging"
             bb.data.setVarFlag('do_fetch', 'depends', depends, d)
 
+    # 'multimachine' handling
     mach_arch = bb.data.getVar('MACHINE_ARCH', d, 1)
-    old_arch = bb.data.getVar('PACKAGE_ARCH', d, 1)
-    if (old_arch == mach_arch):
-        # Nothing to do
+    pkg_arch = bb.data.getVar('PACKAGE_ARCH', d, 1)
+
+    if (pkg_arch == mach_arch):
+        # Already machine specific - nothing further to do
         return
 
     #
@@ -1008,26 +1027,38 @@ def base_after_parse(d):
     # unless the package sets SRC_URI_OVERRIDES_PACKAGE_ARCH=0
     #
     override = bb.data.getVar('SRC_URI_OVERRIDES_PACKAGE_ARCH', d, 1)
-    if override == '0':
-        return
+    if override != '0':
+        paths = []
+        for p in [ "${PF}", "${P}", "${PN}", "files", "" ]:
+            path = bb.data.expand(os.path.join("${FILE_DIRNAME}", p, "${MACHINE}"), d)
+            if os.path.isdir(path):
+                paths.append(path)
+        if len(paths) != 0:
+            for s in srcuri.split():
+                if not s.startswith("file://"):
+                    continue
+                local = bb.data.expand(bb.fetch.localpath(s, d), d)
+                for mp in paths:
+                    if local.startswith(mp):
+                        #bb.note("overriding PACKAGE_ARCH from %s to %s" % (pkg_arch, mach_arch))
+                        bb.data.setVar('PACKAGE_ARCH', "${MACHINE_ARCH}", d)
+                        bb.data.setVar('MULTIMACH_ARCH', mach_arch, d)
+                        return
 
-    paths = []
-    for p in [ "${PF}", "${P}", "${PN}", "files", "" ]:
-        path = bb.data.expand(os.path.join("${FILE_DIRNAME}", p, "${MACHINE}"), d)
-        if os.path.isdir(path):
-            paths.append(path)
-    if len(paths) == 0:
-        return
+    multiarch = pkg_arch
 
-    for s in srcuri.split():
-        if not s.startswith("file://"):
-            continue
-        local = bb.data.expand(bb.fetch.localpath(s, d), d)
-        for mp in paths:
-            if local.startswith(mp):
-                #bb.note("overriding PACKAGE_ARCH from %s to %s" % (old_arch, mach_arch))
-                bb.data.setVar('PACKAGE_ARCH', "${MACHINE_ARCH}", d)
-                return
+    packages = bb.data.getVar('PACKAGES', d, 1).split()
+    for pkg in packages:
+        pkgarch = bb.data.getVar("PACKAGE_ARCH_%s" % pkg, d, 1)
+
+        # We could look for != PACKAGE_ARCH here but how to choose 
+        # if multiple differences are present?
+        # Look through PACKAGE_ARCHS for the priority order?
+        if pkgarch and pkgarch == mach_arch:
+            multiarch = mach_arch
+            break
+
+    bb.data.setVar('MULTIMACH_ARCH', multiarch, d)
 
 python () {
     base_after_parse(d)

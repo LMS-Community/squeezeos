@@ -215,6 +215,8 @@ SOC_SINGLE("ZC Timeout Switch", WM8750_ADCTL1, 0, 1, 0),
 SOC_SINGLE("Playback Invert Switch", WM8750_ADCTL1, 1, 1, 0),
 
 SOC_SINGLE("Right Speaker Playback Invert Switch", WM8750_ADCTL2, 4, 1, 0),
+SOC_SINGLE("Headphone Switch Polarity", WM8750_ADCTL2, 5, 1, 0),
+SOC_SINGLE("Headphone Switch Enable", WM8750_ADCTL2, 6, 1, 0),
 
 /* Unimplemented */
 /* ADCDAC Bit 0 - ADCHPD */

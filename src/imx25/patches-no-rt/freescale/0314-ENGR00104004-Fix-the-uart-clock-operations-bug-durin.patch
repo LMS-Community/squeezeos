@@ -1,0 +1,64 @@
+From 8878a8bdb80449eba933fa1c929cf865eabb0daf Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Mon, 12 Jan 2009 15:29:03 +0800
+Subject: [PATCH] ENGR00104004 Fix the uart clock operations bug during suspend/resume
+
+In despite of uart port is disabled, the clock will be enabled after
+uart leave from suspend mode.
+Solution is the enabled ports will be enter suspend mode. when uart
+leaves suspend , only suspend ports will be resumed.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ drivers/serial/mxc_uart.c |   17 ++++++++---------
+ 1 files changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/serial/mxc_uart.c b/drivers/serial/mxc_uart.c
+index 68b6b45..69d657c 100644
+--- a/drivers/serial/mxc_uart.c
++++ b/drivers/serial/mxc_uart.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1801,11 +1801,11 @@ static int mxcuart_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	uart_mxc_port *umxc = platform_get_drvdata(pdev);
+ 
+-	if (umxc == NULL) {
++	if (umxc == NULL)
+ 		return 0;	/* skip disabled ports */
+-	}
+-	uart_suspend_port(&mxc_reg, &umxc->port);
++
+ 	if (umxc->port.info && umxc->port.info->flags & UIF_INITIALIZED) {
++		uart_suspend_port(&mxc_reg, &umxc->port);
+ 		umxc->port.info->tty->hw_stopped = 1;
+ 	}
+ 
+@@ -1826,15 +1826,14 @@ static int mxcuart_resume(struct platform_device *pdev)
+ {
+ 	uart_mxc_port *umxc = platform_get_drvdata(pdev);
+ 
+-	if (umxc == NULL) {
++	if (umxc == NULL)
+ 		return 0;	/* skip disabled ports */
+-	}
+-	if (umxc->port.info && umxc->port.info->flags & UIF_INITIALIZED) {
++
++	if (umxc->port.info && umxc->port.info->flags & UIF_SUSPENDED) {
+ 		umxc->port.info->tty->hw_stopped = 0;
++		uart_resume_port(&mxc_reg, &umxc->port);
+ 	}
+ 
+-	uart_resume_port(&mxc_reg, &umxc->port);
+-
+ 	return 0;
+ }
+ 
+-- 
+1.5.4.4
+

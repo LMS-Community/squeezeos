@@ -1,0 +1,221 @@
+#
+# @(#) sp/root@belcarra.com/debian-black.(none)|otg/platform/zasevb/Kconfig-zasevb|20070829214932|07457
+# Copyright (c) 2005 Belcarra
+# Copyright (c) 2005-2006 Belcarra Technologies 2005 Corp
+#
+
+# CONFIG_OTG_PLATFORM_OTG       # Offer OTG Configuration
+
+# CONFIG_OTG_ZASEVB             # Make
+# CONFIG_OTG_ISP1301            # Make ISP1301 driver
+
+# CONFIG_OTG_ISP1301_ZASEVB     # Compile ISP1301 ZASEVB
+# CONFIG_OTG_MC13738_ZASEVB       # Compile MC13783 ZASEVB
+
+# CONFIG_OTG_ZASEVB             # ZASEVB
+# CONFIG_OTG_ZASEVB_ISP1301     # Use ISP1301
+# CONFIG_OTG_ZASEVB_MC13783_CONNECTIVITY    # Use MC13783
+# CONFIG_OTG_ZASEVB_MC13783_POWERIC         # Use MC13783
+# CONFIG_OTG_PLATFORM           # Compile as OTG Dual-role Device
+# CONFIG_OTG_TRADITIONAL        # Compile as Traditional USB Peripheral
+
+config OTG_ZASEVB
+	tristate "Freescale ZAS Evaluation Board using TDI FS USB"
+	depends on OTG && (MACH_MXC27530EVB || MACH_MXC30030EVB || MACH_MXC30030ADS || \
+                MACH_MXC91131EVB || MACH_I30030ADS || MACH_I30030EVB)
+
+        ---help---
+        This implements On-The-Go USB Support for the ZAS EVB using the TDI Full Speed USB Device Controller.
+
+choice
+	prompt "Select OTG Transceiver"
+	depends on OTG_ZASEVB
+        config OTG_ZASEVB_ISP1301
+		bool 'Use the BaseBoard ISP1301 (S2.1 on S2.2 on)'
+		depends on OTG_ZASEVB !=n
+		---help---
+		This will use the ISP1301 on the EVB Base Board.
+		Switch 2-1 and  switch 2-2 should both be in the ON position.
+
+                SW2.1 ON
+                SW2.2 ON
+
+
+        config OTG_ZASEVB_MC13783_LEGACY
+                bool 'Use the MC13783 Transceiver (legacy API)'
+		depends on OTG_ZASEVB && (MACH_MXC30030ADS || MACH_MXC30030EVB || MACH_I30030ADS || \
+                        MACH_I30030EVB || MACH_MXC27530EVB) && (MXC_MC13783_CONNECTIVITY || MC13783_CONNECTIVITY) && \
+                        (!(MXC_MC13783_PMIC || MXC_PMIC_MC13783))
+                ---help---
+                This will use the Freescale MC13783 and the Freescale Connectivity driver.
+                For BrassBoard works without any special settings.
+
+                For ZAS EVB with MC13783 daughter card, Switch 2-1 should be on, Switch 2-2
+                should be off.
+                If you are using MC13783 daughter card with MXC91231 or MXC275-30 EVB, you
+		should set S6.1: OFF and S6.2: ON.
+		If you are using MC13783 daughter card with MXC91321 or MXC91331 or i.300-30 EVB
+		or MXC300-30 EVB, you should set S6.1: ON and S6.2: OFF.
+
+
+        config OTG_ZASEVB_MC13783_PMIC
+                bool 'Use the MC13783 Transceiver (PMIC API)'
+		depends on OTG_ZASEVB && (MACH_MXC30030ADS || MACH_MXC30030EVB || MACH_I30030ADS || \
+                        MACH_I30030EVB || MACH_MXC27530EVB) && (MXC_MC13783_CONNECTIVITY || MC13783_CONNECTIVITY ) && \
+                        (MXC_MC13783_PMIC || MXC_PMIC_MC13783)
+                ---help---
+                This will use the Freescale MC13783 and the Freescale Connectivity driver.
+                For BrassBoard works without any special settings.
+
+                For ZAS EVB with MC13783 daughter card, Switch 2-1 should be on, Switch 2-2
+                should be off.
+                If you are using MC13783 daughter card with MXC91231 or MXC275-30 EVB, you
+		should set S6.1: OFF and S6.2: ON.
+		If you are using MC13783 daughter card with MXC91321 or MXC91331 or i.300-30 EVB
+		or MXC300-30 EVB, you should set S6.1: ON and S6.2: OFF.
+
+endchoice
+choice
+        prompt "Select OTG Transceiver Configuration"
+        depends on OTG && OTG_ZASEVB
+
+        config OTG_ZASEVB_DIFFERENTIAL_UNIDIRECTIONAL
+                bool 'Differential Unidirectional (6 wire)'
+		depends on (ARCH_MXC91331 || ARCH_MXC91321)
+                ---help---
+                Both the USBOTG HWMODE and Transceiver need to be configured
+                for the data transceiver connection.
+
+                This selects a Differential unidirectional 6 wire connection.
+
+		On MC13783 daughter board
+                SW4.1 = OFF
+                SW4.2 = OFF
+                SW4.3 = OFF
+                SW4.4 = ON
+
+
+        config OTG_ZASEVB_DIFFERENTIAL_BIDIRECTIONAL
+                bool 'Differential Bidirectional (4 wire)'
+		depends on ARCH_MXC91231 || ARCH_MXC91131
+                ---help---
+                Both the USBOTG HWMODE and Transceiver need to be configured
+                for the data transceiver connection.
+
+                This selects a Differential bidirectional 4 wire connection.
+
+        config OTG_ZASEVB_SINGLE_ENDED_UNIDIRECTIONAL
+                bool 'Singled Ended Unidirectional (6 wire)'
+		depends on (ARCH_MXC91331 || ARCH_MXC91321)
+                ---help---
+                Both the USBOTG HWMODE and Transceiver need to be configured
+                for the data transceiver connection.
+
+                This selects a Single-Ended unidirectional 6 wire connection.
+
+        config OTG_ZASEVB_SINGLE_ENDED_BIDIRECTIONAL
+                bool 'Singled Ended Bidirectional (3 wire)'
+		depends on ARCH_MXC91231 || ARCH_MXC91131
+                ---help---
+                Both the USBOTG HWMODE and Transceiver need to be configured
+                for the data transceiver connection.
+
+		On MC13783 daughter board
+		SW4.1 = OFF
+		SW4.2 = OFF or ON (different from data sheet !!)
+		SW4.3 = OFF
+		SW4.4 = ON
+
+                This selects a Single-Ended bidirectional 3 wire connection.
+
+endchoice
+choice
+        prompt "Select Timer"
+        depends on OTG && OTG_ZASEVB
+		---help---
+		Select OTG timer according to platform structure
+
+	config OTG_HRT
+#		depends on HIGH_RES_TIMERS
+		bool 'High Resolution Timer'
+		---help---
+		Using high resolution timer, if present and enabled (preferred)
+
+        config OTG_TIMER_NONE
+		bool 'No OTG Timer -- certain features will not work properly'
+		---help---
+		Select this option to have no timer source available to OTG
+
+#	config OTG_GPTR
+#		depends on (HIGH_RES_TIMERS=n)
+#		bool 'General Purpose Timer'
+#		---help---
+#		Using the shared or non-shared general purpose timer
+#		Warning: this option is DEPRECATED. Please enable HIGH_RES_TIMERS
+
+endchoice
+
+if ( OTG_ZASEVB != 'n')
+
+        config OTG_PLATFORM_OTG
+                bool
+                default OTG_ZASEVB
+
+        config OTG_PLATFORM_USB
+                bool
+                default OTG_ZASEVB
+
+        config OTG_PLATFORM_USBD
+                bool
+                default OTG_ZASEVB
+
+        #config OTG_HIGH_SPEED_CAPABLE
+        #        bool
+        #        default OTG_ZASEVB
+
+        config OTG_REMOTE_WAKEUP_CAPABLE
+                bool
+                default OTG_ZASEVB
+
+        config OTG_BUS_POWERED_CAPABLE
+                bool
+                default OTG_ZASEVB
+
+        config OTG_FREESCALE_TDI
+                bool
+                default OTG_ZASEVB
+
+        config OTG_ISP1301
+                bool
+                depends on OTG_ZASEVB_ISP1301
+                default OTG_ZASEVB
+
+        config OTG_ZASEVB_MC13783_CONNECTIVITY
+                bool
+                depends on OTG_ZASEVB_MC13783_LEGACY
+                default OTG_ZASEVB
+
+        config OTG_ZASEVB_MC13783_POWERIC
+                bool
+                depends on OTG_ZASEVB_MC13783_LEGACY
+                default OTG_ZASEVB
+
+       # config OTG_MXC_SELF_POWERED
+       #         bool 'Enable if device is Self-Powered'
+       #         default y
+
+       #if ( OTG_MXC_SELF_POWERED = 'n')
+       #        config OTG_MXC_SELF_BMAXPOWER
+       #                int 'bMaxPower - 2mA units'
+       #                default 1
+       #                ---help---
+       #                The amount of power the device will draw in 2mA units.
+       #                Must be non-zero even for self powered device.
+       #endif
+
+       # config OTG_MXC_REMOTE_WAKEUP
+       #         bool 'Enable if you want device to implement Remote Wakeup'
+       #         default y
+
+
+endif

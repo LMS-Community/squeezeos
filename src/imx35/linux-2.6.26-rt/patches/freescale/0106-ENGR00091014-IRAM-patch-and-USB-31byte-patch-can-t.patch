@@ -1,0 +1,91 @@
+From da73c43fa4cbf79508e5ecade5c50068628bc72d Mon Sep 17 00:00:00 2001
+From: Albert Chen <R65187@freescale.com>
+Date: Thu, 25 Sep 2008 09:34:35 +0800
+Subject: [PATCH] ENGR00091014 : IRAM patch and USB 31byte patch can't co-exist
+
+Mx37: USB peripheral driver
+  sometimes, driver will clear T bit of dtd when this dtd is running.
+
+Signed-off-by: Albert Chen <r65187@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |    4 ++--
+ drivers/usb/gadget/arcotg_udc.c         |   26 +++++++++++++++++---------
+ 2 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 07e6885..5fbfee5 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Fri Sep 19 14:05:49 2008
++# Thu Sep 25 09:32:52 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1258,7 +1258,7 @@ CONFIG_USB_GADGET_SELECTED=y
+ # CONFIG_USB_GADGET_LH7A40X is not set
+ # CONFIG_USB_GADGET_OMAP is not set
+ CONFIG_USB_GADGET_ARC=y
+-# CONFIG_USB_STATIC_IRAM_PPH is not set
++CONFIG_USB_STATIC_IRAM_PPH=y
+ CONFIG_USB_ARC=m
+ # CONFIG_USB_GADGET_S3C2410 is not set
+ # CONFIG_USB_GADGET_AT91 is not set
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 1269953..c380721 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -738,14 +738,18 @@ static int fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
+ 		/* Add td to the end */
+ 		struct fsl_req *lastreq;
+ 		lastreq = list_entry(ep->queue.prev, struct fsl_req, queue);
+-		lastreq->tail->next_td_ptr =
+-			cpu_to_hc32(req->head->td_dma & DTD_ADDR_MASK);
++		if (NEED_IRAM(ep)) {
++			/* only one dtd in dqh */
++			lastreq->tail->next_td_ptr =
++			    cpu_to_hc32(req->head->td_dma | DTD_NEXT_TERMINATE);
++			goto out;
++		} else {
++			lastreq->tail->next_td_ptr =
++			    cpu_to_hc32(req->head->td_dma & DTD_ADDR_MASK);
++		}
+ 		/* Read prime bit, if 1 goto done */
+ 		if (fsl_readl(&dr_regs->endpointprime) & bitmask)
+ 			goto out;
+-		if (NEED_IRAM(ep))
+-			goto out;
+-
+ 		do {
+ 			/* Set ATDTW bit in USBCMD */
+ 			temp = fsl_readl(&dr_regs->usbcmd);
+@@ -852,9 +856,13 @@ static int fsl_req_to_dtd(struct fsl_req *req)
+ 		/* here, replace user buffer to iram buffer */
+ 		if (ep_is_in(req->ep)) {
+ 			req->req.dma = req->ep->udc->iram_buffer[1];
+-			/* copy data to iram */
+-			memcpy((char *)req->ep->udc->iram_buffer_v[1],
+-			       req->req.buf, min(req->req.length, g_iram_size));
++			if ((list_empty(&req->ep->queue))) {
++				/* copy data only when no bulk in transfer is
++				   running */
++				memcpy((char *)req->ep->udc->iram_buffer_v[1],
++				       req->req.buf, min(req->req.length,
++							 g_iram_size));
++			}
+ 		} else {
+ 			req->req.dma = req->ep->udc->iram_buffer[0];
+ 		}
+-- 
+1.5.4.4
+

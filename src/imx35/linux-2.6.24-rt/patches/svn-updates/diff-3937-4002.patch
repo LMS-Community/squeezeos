@@ -1,0 +1,59 @@
+---
+ drivers/i2c/chips/tsl2569.c |   12 +++++++-----
+ drivers/video/mxc/mxcfb.c   |    2 +-
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+Index: linux-2.6.24/drivers/i2c/chips/tsl2569.c
+===================================================================
+--- linux-2.6.24.orig/drivers/i2c/chips/tsl2569.c	2009-01-31 18:16:08.000000000 +0100
++++ linux-2.6.24/drivers/i2c/chips/tsl2569.c	2009-01-31 18:16:21.000000000 +0100
+@@ -685,6 +685,12 @@ unsigned int CalculateLux(unsigned int i
+ 	unsigned long chScale;
+ 	unsigned long channel1;
+ 	unsigned long channel0;
++	unsigned long ratio1 = 0;
++	unsigned long ratio;
++	unsigned int b, m;
++	unsigned long temp;
++	unsigned long lux;
++
+ 	switch (tInt)
+ 	{
+ 		case 0: // 13.7 msec
+@@ -707,13 +713,11 @@ unsigned int CalculateLux(unsigned int i
+ 
+ 	// find the ratio of the channel values (Channel1/Channel0)
+ 	// protect against divide by zero
+-	unsigned long ratio1 = 0;
+ 	if (channel0 != 0) ratio1 = (channel1 << (RATIO_SCALE+1)) / channel0;
+ 	// round the ratio value
+-	unsigned long ratio = (ratio1 + 1) >> 1;
++	ratio = (ratio1 + 1) >> 1;
+ 
+ 	// is ratio <= eachBreak ?
+-	unsigned int b, m;
+ 	switch (iType)
+ 	{
+ 		case 0: // T package
+@@ -746,8 +750,6 @@ unsigned int CalculateLux(unsigned int i
+ 			break;
+ 	}
+ 
+-	unsigned long temp;
+-	unsigned long lux;
+ 	temp = ((channel0 * b) - (channel1 * m));
+ 
+ 	// scale CS or T package
+Index: linux-2.6.24/drivers/video/mxc/mxcfb.c
+===================================================================
+--- linux-2.6.24.orig/drivers/video/mxc/mxcfb.c	2009-01-31 18:16:08.000000000 +0100
++++ linux-2.6.24/drivers/video/mxc/mxcfb.c	2009-01-31 18:16:21.000000000 +0100
+@@ -88,7 +88,7 @@ static struct mxcfb_data mxcfb_drv_data;
+ 
+ static char *fb_mode = NULL;
+ #if CONFIG_MACH_FAB4
+-static unsigned long default_bpp = 24;
++static unsigned long default_bpp = 32;
+ #else
+ static unsigned long default_bpp = 16;
+ #endif

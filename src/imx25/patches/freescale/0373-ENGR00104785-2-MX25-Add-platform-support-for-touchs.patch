@@ -1,0 +1,95 @@
+From 2b47504508f1e56e9b6ed06583b053b45d0aaec3 Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Thu, 29 Jan 2009 19:17:12 -0700
+Subject: [PATCH] ENGR00104785-2 MX25: Add platform support for touchscreen and ADC drivers
+
+Adds platform hooks and defconfig for the MX25 ADC and touchscreen.
+This uses the new imx_adc and imx_adc_ts drivers.
+
+Signed-off-by: Quinn Jensen <quinn.jensen@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    6 +++++
+ arch/arm/mach-mx25/devices.c            |   36 +++++++++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 4f6a5d0..18c803c 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -684,6 +684,7 @@ CONFIG_INPUT_TOUCHSCREEN=y
+ # CONFIG_TOUCHSCREEN_ELO is not set
+ # CONFIG_TOUCHSCREEN_MTOUCH is not set
+ # CONFIG_TOUCHSCREEN_MK712 is not set
++CONFIG_TOUCHSCREEN_IMX_ADC=y
+ # CONFIG_TOUCHSCREEN_PENMOUNT is not set
+ # CONFIG_TOUCHSCREEN_TOUCHRIGHT is not set
+ # CONFIG_TOUCHSCREEN_TOUCHWIN is not set
+@@ -1130,6 +1131,11 @@ CONFIG_MXC_PMIC_CHARDEV=y
+ #
+ 
+ #
++# i.MX ADC support
++#
++CONFIG_IMX_ADC=y
++
++#
+ # File systems
+ #
+ CONFIG_EXT2_FS=y
+diff --git a/arch/arm/mach-mx25/devices.c b/arch/arm/mach-mx25/devices.c
+index 1d87e40..45e1095 100644
+--- a/arch/arm/mach-mx25/devices.c
++++ b/arch/arm/mach-mx25/devices.c
+@@ -448,6 +448,41 @@ static inline void mxc_init_dma(void)
+ 	(void)platform_device_register(&mxc_dma_device);
+ }
+ 
++/* imx adc driver */
++#if defined(CONFIG_IMX_ADC) || defined(CONFIG_IMX_ADC_MODULE)
++
++static struct resource imx_adc_resources[] = {
++	[0] = {
++	       .start = MXC_INT_TSC,
++	       .end = MXC_INT_TSC,
++	       .flags = IORESOURCE_IRQ,
++	       },
++	[1] = {
++	       .start = TSC_BASE_ADDR,
++	       .end = TSC_BASE_ADDR + PAGE_SIZE,
++	       .flags = IORESOURCE_MEM,
++	       }
++};
++
++static struct platform_device imx_adc_device = {
++	.name = "imx_adc",
++	.id = 0,
++	.num_resources = ARRAY_SIZE(imx_adc_resources),
++	.resource = imx_adc_resources,
++	.dev = {
++		.release = NULL,
++		},
++};
++static void imx_init_adc(void)
++{
++	(void)platform_device_register(&imx_adc_device);
++}
++#else
++static void imx_init_adc(void)
++{
++}
++#endif
++
+ static int __init mxc_init_devices(void)
+ {
+ 	mxc_init_wdt();
+@@ -456,6 +491,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_dma();
+ 	mxc_init_ssi();
+ 	mxc_init_rtc();
++	imx_init_adc();
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

@@ -1,0 +1,45 @@
+From b4054b4e2149017efbe24be412fc49c5f8fe37de Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Thu, 21 Aug 2008 13:13:52 +0800
+Subject: [PATCH] ENGR00088051 SPDIF: SPDIF TX keeps output signal after stop playing
+
+SPDIF TX keeps output zero, there is no register in the SPDIF module
+to reset the SPDIF TX module. Select the unused clock source can disable
+the output signal.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/arm/Kconfig          |    2 +-
+ sound/arm/mxc-alsa-spdif.c |    3 +++
+ 2 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/sound/arm/Kconfig b/sound/arm/Kconfig
+index 7cd013b..116ac17 100644
+--- a/sound/arm/Kconfig
++++ b/sound/arm/Kconfig
+@@ -4,7 +4,7 @@ menu "ALSA ARM devices"
+ 	depends on SND!=n && ARM
+ 
+ config SND_MXC_SPDIF
+-        tristate "MXC SPDIF sound card spports"
++        tristate "MXC SPDIF sound card support"
+         select SND_PCM
+         help
+           Say Y here to enable SPDIF sound card
+diff --git a/sound/arm/mxc-alsa-spdif.c b/sound/arm/mxc-alsa-spdif.c
+index 5070817..e2e00ea 100644
+--- a/sound/arm/mxc-alsa-spdif.c
++++ b/sound/arm/mxc-alsa-spdif.c
+@@ -752,6 +752,9 @@ static void spdif_tx_uninit(void)
+ 	regval = __raw_readl(SPDIF_REG_SCR + spdif_base_addr) & 0xffffe3;
+ 	regval |= SCR_TXSEL_OFF;
+ 	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++	regval = __raw_readl(SPDIF_REG_STC + spdif_base_addr) & ~0x7FF;
++	regval |= (0x7 << STC_TXCLK_SRC_OFFSET);
++	__raw_writel(regval, SPDIF_REG_STC + spdif_base_addr);
+ 
+ }
+ 
+-- 
+1.5.4.4
+

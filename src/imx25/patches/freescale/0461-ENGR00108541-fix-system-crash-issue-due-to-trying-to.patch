@@ -1,0 +1,38 @@
+From 364c3799cf6c8b51ab8d52f144cdc3ef5514d8f1 Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Thu, 5 Mar 2009 16:12:20 +0800
+Subject: [PATCH] ENGR00108541 fix system crash issue due to trying to display 1 frame on the LCD
+
+System is crash in vpu decoder unit test if decoded 1 frame and display
+on the LCD once after boot.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index 76900d5..e0ac6a5 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -306,7 +306,8 @@ static void timer_work_func(struct work_struct *work)
+ 	if (index != -1) {
+ 		/* if timestamp is 0, then default to 30fps */
+ 		if ((vout->v4l2_bufs[index].timestamp.tv_sec == 0)
+-		    && (vout->v4l2_bufs[index].timestamp.tv_usec == 0))
++		    && (vout->v4l2_bufs[index].timestamp.tv_usec == 0)
++		    && vout->start_jiffies)
+ 			timeout =
+ 			    vout->start_jiffies + vout->frame_count * HZ / 30;
+ 		else
+@@ -1180,7 +1181,6 @@ static int mxc_v4l2out_close(struct inode *inode, struct file *file)
+ 		/* capture off */
+ 		wake_up_interruptible(&vout->v4l_bufq);
+ 
+-		schedule_work(&vout->timer_work);
+ 		flush_scheduled_work();
+ 	}
+ 
+-- 
+1.5.4.4
+

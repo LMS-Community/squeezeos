@@ -1,0 +1,109 @@
+From fbc10bed5895cacda53645a7f0c514c3fc5086d8 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Fri, 9 Jan 2009 12:42:52 +0800
+Subject: [PATCH] ENGR00103801 [MX51] SD card can't be recognized when it is inserted
+
+Don't enable the esdhc clock in the probe slot func,
+do it in the set ios func.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ drivers/mmc/host/mx_sdhci.c |   32 +++++++++++++++-----------------
+ 1 files changed, 15 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index d71e09c..3fc6e2c 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -438,9 +438,7 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 	host->data_early = 0;
+ 	if (host->data->flags & MMC_DATA_READ)
+ 		writel(readl(host->ioaddr + SDHCI_CLOCK_CONTROL) |
+-		       SDHCI_CLOCK_HLK_EN,
+-		       host->ioaddr + SDHCI_CLOCK_CONTROL);
+-
++		       SDHCI_CLOCK_HLK_EN, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	/* timeout in us */
+ 	target_timeout = data->timeout_ns / 1000 +
+@@ -860,7 +858,7 @@ static void sdhci_set_power(struct sdhci_host *host, unsigned short power)
+ 
+ 			if (regulator_enable(host->regulator_mmc) == 0) {
+ 				DBG("mmc power on\n");
+-				msleep(300);
++				msleep(1);
+ 			}
+ 		}
+ 	}
+@@ -995,6 +993,9 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	} else if (ios->bus_width == MMC_BUS_WIDTH_8) {
+ 		tmp &= ~SDHCI_CTRL_4BITBUS;
+ 		tmp |= SDHCI_CTRL_8BITBUS;
++	} else if (ios->bus_width == MMC_BUS_WIDTH_1) {
++		tmp &= ~SDHCI_CTRL_4BITBUS;
++		tmp &= ~SDHCI_CTRL_8BITBUS;
+ 	}
+ 
+ 	if (host->flags & SDHCI_USE_DMA)
+@@ -1565,8 +1566,6 @@ static int sdhci_suspend(struct platform_device *pdev, pm_message_t state)
+ 		if (!chip->hosts[i])
+ 			continue;
+ 		free_irq(chip->hosts[i]->irq, chip->hosts[i]);
+-		clk_disable(chip->hosts[i]->clk);
+-		chip->hosts[i]->plat_data->clk_flg = 0;
+ 	}
+ 
+ 	gpio_sdhc_inactive(pdev->id);
+@@ -1589,8 +1588,6 @@ static int sdhci_resume(struct platform_device *pdev)
+ 	gpio_sdhc_active(pdev->id);
+ 
+ 	for (i = 0; i < chip->num_slots; i++) {
+-		clk_enable(chip->hosts[i]->clk);
+-		chip->hosts[i]->plat_data->clk_flg = 1;
+ 		if (!chip->hosts[i])
+ 			continue;
+ 		ret = request_irq(chip->hosts[i]->irq, sdhci_irq,
+@@ -1664,9 +1661,6 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	host->chip = chip;
+ 	chip->hosts[slot] = host;
+ 
+-	/* Active the eSDHC bus */
+-	gpio_sdhc_active(pdev->id);
+-
+ 	/* Get pwr supply for eSDHC */
+ 	if (NULL != mmc_plat->power_mmc) {
+ 		host->regulator_mmc =
+@@ -1675,14 +1669,18 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 			ret = PTR_ERR(host->regulator_mmc);
+ 			goto out1;
+ 		}
++		if (regulator_enable(host->regulator_mmc) == 0) {
++			DBG("mmc power on\n");
++			msleep(1);
++		}
+ 	}
++
++	/* Active the eSDHC bus */
++	gpio_sdhc_active(pdev->id);
++
+ 	/* Get the SDHC clock from clock system APIs */
+ 	host->clk = clk_get(&pdev->dev, mmc_plat->clock_mmc);
+-	if (NULL != host->clk) {
+-		if (clk_enable(host->clk))
+-			printk(KERN_ERR "MXC MMC enable clock error.\n");
+-		host->plat_data->clk_flg = 1;
+-	} else
++	if (NULL == host->clk)
+ 		printk(KERN_ERR "MXC MMC can't get clock.\n");
+ 	DBG("SDHC:%d clock:%lu\n", pdev->id, clk_get_rate(host->clk));
+ 
+-- 
+1.5.4.4
+

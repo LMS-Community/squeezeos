@@ -1,0 +1,122 @@
+From 9073c09057fb75fc86ef4ac4bee5771948cde405 Mon Sep 17 00:00:00 2001
+From: Sammy <r62914@freescale.com>
+Date: Fri, 10 Jul 2009 11:44:25 +0800
+Subject: [PATCH] CT37891278 MX25: Enable CONFIG_SND_MXC_SOC_IRAM and CONFIG_SDMA_IRAM option
+
+Enable CONFIG_SND_MXC_SOC_IRAM and CONFIG_SDMA_IRAM option default on MX25
+This patch is done based on ER3.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |   10 ++++++++--
+ arch/arm/mach-mx25/Kconfig              |   18 ++++++++++++++++++
+ arch/arm/mach-mx25/dma.c                |    6 +++++-
+ include/asm-arm/arch-mxc/mx25.h         |    6 +++++-
+ 4 files changed, 36 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 2b849d0..8b502dc 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Thu Apr 30 15:00:38 2009
++# Fri Jul 10 11:43:24 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -185,6 +185,12 @@ CONFIG_MX25_OPTIONS=y
+ CONFIG_MACH_MX25_3DS=y
+ # CONFIG_MX25_DOZE_DURING_IDLE is not set
+ CONFIG_MXC_SDMA_API=y
++
++#
++# SDMA options
++#
++CONFIG_SDMA_IRAM=y
++CONFIG_SDMA_IRAM_SIZE=0x1000
+ CONFIG_ARCH_MXC_HAS_NFC_V2=y
+ CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ 
+@@ -1048,7 +1054,7 @@ CONFIG_SND_SOC=y
+ CONFIG_SND_MXC_SOC=y
+ CONFIG_SND_MXC_SOC_SSI=y
+ CONFIG_SND_MXC_SOC_ESAI=m
+-# CONFIG_SND_MXC_SOC_IRAM is not set
++CONFIG_SND_MXC_SOC_IRAM=y
+ # CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_AK4647 is not set
+ CONFIG_SND_SOC_IMX_3STACK_WM8580=m
+diff --git a/arch/arm/mach-mx25/Kconfig b/arch/arm/mach-mx25/Kconfig
+index 6454987..3f404ee 100644
+--- a/arch/arm/mach-mx25/Kconfig
++++ b/arch/arm/mach-mx25/Kconfig
+@@ -28,6 +28,24 @@ config MXC_SDMA_API
+            This selects the Freescale MXC SDMA API.
+            If unsure, say N.
+ 
++menu "SDMA options"
++        depends on MXC_SDMA_API
++
++config SDMA_IRAM
++        bool "Use Internal RAM for SDMA transfer"
++        default n
++        help
++           Support Internal RAM as SDMA buffer or control structures
++
++config SDMA_IRAM_SIZE
++        hex "Reserved bytes of IRAM for SDMA (0x800-0x1000)"
++        range 0x800 0x1000
++        depends on SDMA_IRAM
++        default "0x1000"
++        help
++           Set the size of IRAM for SDMA. It must be a multiple of 512bytes.
++endmenu
++
+ config ARCH_MXC_HAS_NFC_V2
+         bool "MXC NFC Hardware Version 2"
+         depends on ARCH_MX25
+diff --git a/arch/arm/mach-mx25/dma.c b/arch/arm/mach-mx25/dma.c
+index 25f11eb..2198306 100644
+--- a/arch/arm/mach-mx25/dma.c
++++ b/arch/arm/mach-mx25/dma.c
+@@ -654,6 +654,10 @@ EXPORT_SYMBOL(mxc_sdma_get_channel_params);
+  */
+ void mxc_get_static_channels(mxc_dma_channel_t *chnl)
+ {
+-	/* No channels statically allocated for MX25 */
++#ifdef CONFIG_SDMA_IRAM
++	int i;
++	for (i = MXC_DMA_CHANNEL_IRAM; i < MAX_DMA_CHANNELS; i++)
++		chnl[i].dynamic = 0;
++#endif
+ }
+ EXPORT_SYMBOL(mxc_get_static_channels);
+diff --git a/include/asm-arm/arch-mxc/mx25.h b/include/asm-arm/arch-mxc/mx25.h
+index 6402e59..8f1767a 100644
+--- a/include/asm-arm/arch-mxc/mx25.h
++++ b/include/asm-arm/arch-mxc/mx25.h
+@@ -95,13 +95,17 @@
+ #define IRAM_BASE_ADDR_VIRT  0xFC500000
+ #define IRAM_SIZE            SZ_128K
+ 
++#ifndef CONFIG_SDMA_IRAM
++#define CONFIG_SDMA_IRAM_SIZE 0
++#endif
++
+ #ifdef CONFIG_SND_MXC_SOC_IRAM
+ #define SND_RAM_SIZE 0x10000
+ #else
+ #define SND_RAM_SIZE 0
+ #endif
+ 
+-#define SND_RAM_BASE_ADDR	IRAM_BASE_ADDR
++#define SND_RAM_BASE_ADDR	(IRAM_BASE_ADDR + CONFIG_SDMA_IRAM_SIZE)
+ 
+ /*
+  * AIPS 1
+-- 
+1.6.2
+

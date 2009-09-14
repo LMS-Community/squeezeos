@@ -1,0 +1,83 @@
+From 6e935cbc022197c070f0fd39de7a09d4bb99e326 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Tue, 23 Sep 2008 13:28:31 -0500
+Subject: [PATCH] ENGR00092675 srtc: speed up init time
+
+Speeds up init from 121 mSec to 9 mSec.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ drivers/rtc/rtc-mxc_v2.c |   29 +++++++++++++++++++----------
+ 1 files changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/rtc/rtc-mxc_v2.c b/drivers/rtc/rtc-mxc_v2.c
+index 905d369..d9dc243 100644
+--- a/drivers/rtc/rtc-mxc_v2.c
++++ b/drivers/rtc/rtc-mxc_v2.c
+@@ -179,6 +179,14 @@ static inline void rtc_write_sync_lp(void __iomem *ioaddr)
+ 		msleep(1);
+ }
+ 
++static inline void rtc_write_sync_lp_no_wait(void __iomem *ioaddr)
++{
++	while ((__raw_readl(ioaddr + SRTC_HPISR) & SRTC_ISR_WPLP) != 0);
++	while ((__raw_readl(ioaddr + SRTC_HPISR) & SRTC_ISR_WDLP) == 0);
++	__raw_writel(SRTC_ISR_WDLP, ioaddr + SRTC_HPISR);
++	while ((__raw_readl(ioaddr + SRTC_HPISR) & SRTC_ISR_WPHP) != 0);
++}
++
+ /*!
+  * This function updates the RTC alarm registers and then clears all the
+  * interrupt status bits.
+@@ -551,11 +559,11 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 
+ 	/* initialize glitch detect */
+ 	__raw_writel(SRTC_LPPDR_INIT, ioaddr + SRTC_LPPDR);
+-	rtc_write_sync_lp(ioaddr);
++	rtc_write_sync_lp_no_wait(ioaddr);
+ 
+ 	/* clear lp interrupt status */
+ 	__raw_writel(0xFFFFFFFF, ioaddr + SRTC_LPSR);
+-	rtc_write_sync_lp(ioaddr);
++	rtc_write_sync_lp_no_wait(ioaddr);
+ 
+ 	plat_data = (struct mxc_srtc_platform_data *)pdev->dev.platform_data;
+ 	clk = clk_get(NULL, "iim_clk");
+@@ -567,25 +575,26 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 	    SRTC_SECMODE_LOW) {
+ 		/* Low security mode */
+ 		__raw_writel(SRTC_LPCR_EN_LP, ioaddr + SRTC_LPCR);
+-		rtc_write_sync_lp(ioaddr);
++		rtc_write_sync_lp_no_wait(ioaddr);
+ 	} else {
+ 		/* move out of init state */
+ 		__raw_writel((SRTC_LPCR_IE | SRTC_LPCR_NSA),
+ 			     ioaddr + SRTC_LPCR);
+-		rtc_write_sync_lp(ioaddr);
+-		while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_IES) == 0)
+-			msleep(1);
++
++		rtc_write_sync_lp_no_wait(ioaddr);
++
++		while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_IES) == 0);
+ 
+ 		/* move out of non-valid state */
+ 		__raw_writel((SRTC_LPCR_IE | SRTC_LPCR_NVE | SRTC_LPCR_NSA |
+ 			      SRTC_LPCR_EN_LP), ioaddr + SRTC_LPCR);
+-		rtc_write_sync_lp(ioaddr);
+ 
+-		while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_NVES) == 0)
+-			msleep(1);
++		rtc_write_sync_lp_no_wait(ioaddr);
++
++		while ((__raw_readl(ioaddr + SRTC_LPSR) & SRTC_LPSR_NVES) == 0);
+ 
+ 		__raw_writel(0xFFFFFFFF, ioaddr + SRTC_LPSR);
+-		rtc_write_sync_lp(ioaddr);
++		rtc_write_sync_lp_no_wait(ioaddr);
+ 	}
+ 	clk_disable(clk);
+ 	clk_put(clk);
+-- 
+1.5.4.4
+

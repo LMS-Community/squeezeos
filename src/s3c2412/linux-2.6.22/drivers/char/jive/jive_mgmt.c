@@ -532,6 +532,7 @@ static int jive_mgmt_probe(struct platform_device *dev) {
 
 	// GPG14 <= HEADPHONE_DETECT
 	s3c2410_gpio_pullup(S3C2410_GPG14, 1);
+	s3c2410_gpio_pullup(S3C2410_GPG14, 1);
 
         if (request_irq(IRQ_EINT22, headphone_irq,
 			IRQF_TRIGGER_BOTH | IRQF_SAMPLE_RANDOM,
@@ -646,7 +647,8 @@ bool jive_is_battery_flat(int *pbat) {
 
 	battery_flat = (bat < BATTERY_FLAT_LEVEL) && nacpr;
 
-	printk("battery flat? %s (level=%d nacpr=%d)\n", battery_flat?"yes":"no", bat, nacpr);
+	// Don't print here, this is called during the low level resume
+	//printk("battery flat? %s (level=%d nacpr=%d)\n", battery_flat?"yes":"no", bat, nacpr);
 
 	if (pbat) {
 		*pbat = bat;

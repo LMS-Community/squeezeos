@@ -1,0 +1,69 @@
+From 874cba1025d953f9f687347e1df7cf7b06251aa4 Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Mon, 16 Jun 2008 14:01:01 +0800
+Subject: [PATCH] ENGR00080414 Fixed MX51 CSPI2 conflict with NAND problem
+
+CSPI2 changed to be default disabled.
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |    2 +-
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |   29 +++++++++++++++++++++++++++++
+ 2 files changed, 30 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index ac20822..2b4a02a 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -681,7 +681,7 @@ CONFIG_SPI_BITBANG=y
+ CONFIG_SPI_MXC=y
+ # CONFIG_SPI_MXC_TEST_LOOPBACK is not set
+ CONFIG_SPI_MXC_SELECT1=y
+-CONFIG_SPI_MXC_SELECT2=y
++# CONFIG_SPI_MXC_SELECT2 is not set
+ # CONFIG_SPI_MXC_SELECT3 is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 666c531..a4625c3 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -283,6 +283,35 @@ EXPORT_SYMBOL(gpio_spi_active);
+  */
+ void gpio_spi_inactive(int cspi_mod)
+ {
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		break;
++	case 1:
++		/* SPI2 */
++		mxc_request_iomux(MX51_PIN_NANDF_RB2, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB2, PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_PKE_ENABLE);
++
++		mxc_request_iomux(MX51_PIN_NANDF_RB3, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB3, PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_PKE_ENABLE);
++
++		mxc_request_iomux(MX51_PIN_NANDF_RB4, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB4, PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_PKE_ENABLE);
++
++		mxc_request_iomux(MX51_PIN_NANDF_RB7, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB7, PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_100K_PU);
++		break;
++	case 2:
++		/* SPI3 */
++		break;
++	default:
++		break;
++	}
+ 
+ }
+ EXPORT_SYMBOL(gpio_spi_inactive);
+-- 
+1.5.4.4
+

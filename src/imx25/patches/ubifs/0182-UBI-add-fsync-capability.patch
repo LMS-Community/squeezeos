@@ -1,0 +1,45 @@
+From e6ce2ff85f23ef7a9cc362398ae880294c4ebfaf Mon Sep 17 00:00:00 2001
+From: Corentin Chary <corentincj@iksaif.net>
+Date: Thu, 5 Feb 2009 22:25:52 +0100
+Subject: [PATCH] UBI: add fsync capability
+
+Now, we can call fsync() on an UBI volume.
+
+Signed-off-by: Corentin Chary <corentincj@iksaif.net>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index e63c8fc..f8e0f68 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -186,6 +186,16 @@ static loff_t vol_cdev_llseek(struct file *file, loff_t offset, int origin)
+ 	return new_offset;
+ }
+ 
++static int vol_cdev_fsync(struct file *file, struct dentry *dentry,
++			  int datasync)
++{
++	struct ubi_volume_desc *desc = file->private_data;
++	struct ubi_device *ubi = desc->vol->ubi;
++
++	return ubi_sync(ubi->ubi_num);
++}
++
++
+ static ssize_t vol_cdev_read(struct file *file, __user char *buf, size_t count,
+ 			     loff_t *offp)
+ {
+@@ -1073,6 +1083,7 @@ const struct file_operations ubi_vol_cdev_operations = {
+ 	.llseek         = vol_cdev_llseek,
+ 	.read           = vol_cdev_read,
+ 	.write          = vol_cdev_write,
++	.fsync		= vol_cdev_fsync,
+ 	.unlocked_ioctl = vol_cdev_ioctl,
+ 	.compat_ioctl   = vol_cdev_compat_ioctl,
+ };
+-- 
+1.5.4.3
+

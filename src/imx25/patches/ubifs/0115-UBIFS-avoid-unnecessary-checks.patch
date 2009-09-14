@@ -1,0 +1,84 @@
+From 7859ba1991115f3d84f78e8e876cedda1caa43e6 Mon Sep 17 00:00:00 2001
+From: Kukkonen Mika <mika.kukkonen@nokia.com>
+Date: Tue, 2 Dec 2008 11:32:49 +0200
+Subject: [PATCH] UBIFS: avoid unnecessary checks
+
+I have a habit of compiling kernel with
+EXTRA_CFLAGS="-Wextra -Wno-unused -Wno-sign-compare -Wno-missing-field-initializers"
+and so fs/ubifs/key.h give lots (~10) of these every time:
+
+CC      fs/ubifs/tnc_misc.o
+In file included from fs/ubifs/ubifs.h:1725,
+from fs/ubifs/tnc_misc.c:30:
+fs/ubifs/key.h: In function 'key_r5_hash':
+fs/ubifs/key.h:64: warning: comparison of unsigned expression >= 0 is always true
+fs/ubifs/key.h: In function 'key_test_hash':
+fs/ubifs/key.h:81: warning: comparison of unsigned expression >= 0 is always true
+
+This patch fixes the warnings.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/key.h |   32 ++++++++++++++++++--------------
+ 1 files changed, 18 insertions(+), 14 deletions(-)
+
+diff --git a/fs/ubifs/key.h b/fs/ubifs/key.h
+index 3f1f16b..efb3430 100644
+--- a/fs/ubifs/key.h
++++ b/fs/ubifs/key.h
+@@ -38,6 +38,22 @@
+ #define __UBIFS_KEY_H__
+ 
+ /**
++ * key_mask_hash - mask a valid hash value.
++ * @val: value to be masked
++ *
++ * We use hash values as offset in directories, so values %0 and %1 are
++ * reserved for "." and "..". %2 is reserved for "end of readdir" marker. This
++ * function makes sure the reserved values are not used.
++ */
++static inline uint32_t key_mask_hash(uint32_t hash)
++{
++	hash &= UBIFS_S_KEY_HASH_MASK;
++	if (unlikely(hash <= 2))
++		hash += 3;
++	return hash;
++}
++
++/**
+  * key_r5_hash - R5 hash function (borrowed from reiserfs).
+  * @s: direntry name
+  * @len: name length
+@@ -54,16 +70,7 @@ static inline uint32_t key_r5_hash(const char *s, int len)
+ 		str++;
+ 	}
+ 
+-	a &= UBIFS_S_KEY_HASH_MASK;
+-
+-	/*
+-	 * We use hash values as offset in directories, so values %0 and %1 are
+-	 * reserved for "." and "..". %2 is reserved for "end of readdir"
+-	 * marker.
+-	 */
+-	if (unlikely(a >= 0 && a <= 2))
+-		a += 3;
+-	return a;
++	return key_mask_hash(a);
+ }
+ 
+ /**
+@@ -77,10 +84,7 @@ static inline uint32_t key_test_hash(const char *str, int len)
+ 
+ 	len = min_t(uint32_t, len, 4);
+ 	memcpy(&a, str, len);
+-	a &= UBIFS_S_KEY_HASH_MASK;
+-	if (unlikely(a >= 0 && a <= 2))
+-		a += 3;
+-	return a;
++	return key_mask_hash(a);
+ }
+ 
+ /**
+-- 
+1.5.4.3
+

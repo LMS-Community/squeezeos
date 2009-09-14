@@ -1,0 +1,32 @@
+From 1f4642b4b058d048497acc846441555c3d990861 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 22 Dec 2008 11:09:04 +0200
+Subject: [PATCH] UBIFS: re-calculate min_idx_size after the commit
+
+When we commit, but before we try to write anything to the flash
+media, @c->min_idx_size is inaccurate, because we do not re-calculate
+it after the commit. Do not forget to do this.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/tnc_commit.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/fs/ubifs/tnc_commit.c b/fs/ubifs/tnc_commit.c
+index 3c0af45..fde8d12 100644
+--- a/fs/ubifs/tnc_commit.c
++++ b/fs/ubifs/tnc_commit.c
+@@ -802,8 +802,10 @@ int ubifs_tnc_start_commit(struct ubifs_info *c, struct ubifs_zbranch *zroot)
+ 	 * budgeting subsystem to assume the index is already committed,
+ 	 * even though it is not.
+ 	 */
++	ubifs_assert(c->min_idx_lebs == ubifs_calc_min_idx_lebs(c));
+ 	c->old_idx_sz = c->calc_idx_sz;
+ 	c->budg_uncommitted_idx = 0;
++	c->min_idx_lebs = ubifs_calc_min_idx_lebs(c);
+ 	spin_unlock(&c->space_lock);
+ 	mutex_unlock(&c->tnc_mutex);
+ 
+-- 
+1.5.6.3
+

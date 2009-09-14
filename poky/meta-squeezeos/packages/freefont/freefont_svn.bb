@@ -2,10 +2,10 @@ DESCRIPTION = "Freefont"
 SECTION = "libs"
 LICENSE = "GPLv2"
 
-BV = "20060126"
+BV = "20090104"
 
 PV = "${BV}+svnr${SRCREV}"
-#PR="r0"
+PR="r1"
 
 SRC_URI="${SQUEEZEPLAY_SCM};module=freefont-${BV}"
 

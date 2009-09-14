@@ -1,0 +1,94 @@
+From 6c9ea823a1bdde83af494b09e9632e46d7c3f592 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 22:14:43 -0400
+Subject: [PATCH] Unionfs: use poison.h for safe poison pointers
+
+This also fixes a compile warning on 64-bit systems.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |   16 ++++++----------
+ fs/unionfs/union.h |    1 +
+ 2 files changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 09b52ce..b103eb9 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -25,14 +25,6 @@
+ 		}							\
+ 	} while (0)
+ 
+-#if BITS_PER_LONG == 32
+-#define POISONED_PTR		((void*) 0x5a5a5a5a)
+-#elif BITS_PER_LONG == 64
+-#define POISONED_PTR		((void*) 0x5a5a5a5a5a5a5a5a)
+-#else
+-#error Unknown BITS_PER_LONG value
+-#endif /* BITS_PER_LONG != known */
+-
+ /*
+  * __unionfs_check_{inode,dentry,file} perform exhaustive sanity checking on
+  * the fan-out of various Unionfs objects.  We check that no lower objects
+@@ -50,6 +42,7 @@ void __unionfs_check_inode(const struct inode *inode,
+ 	struct inode *lower_inode;
+ 	struct super_block *sb;
+ 	int printed_caller = 0;
++	void *poison_ptr;
+ 
+ 	/* for inodes now */
+ 	BUG_ON(!inode);
+@@ -88,12 +81,13 @@ void __unionfs_check_inode(const struct inode *inode,
+ 		}
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (lower_inode) {
++			memset(&poison_ptr, POISON_INUSE, sizeof(void *));
+ 			if (unlikely(bindex < istart || bindex > iend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" Ci5: inode/linode=%p:%p bindex=%d "
+ 				       "istart/end=%d:%d\n", inode,
+ 				       lower_inode, bindex, istart, iend);
+-			} else if (unlikely(lower_inode == POISONED_PTR)) {
++			} else if (unlikely(lower_inode == poison_ptr)) {
+ 				/* freed inode! */
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" Ci6: inode/linode=%p:%p bindex=%d "
+@@ -131,6 +125,7 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	struct super_block *sb;
+ 	struct vfsmount *lower_mnt;
+ 	int printed_caller = 0;
++	void *poison_ptr;
+ 
+ 	BUG_ON(!dentry);
+ 	sb = dentry->d_sb;
+@@ -257,12 +252,13 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	for (bindex = sbstart(sb); bindex < sbmax(sb); bindex++) {
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (lower_inode) {
++			memset(&poison_ptr, POISON_INUSE, sizeof(void *));
+ 			if (unlikely(bindex < istart || bindex > iend)) {
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CI5: dentry/linode=%p:%p bindex=%d "
+ 				       "istart/end=%d:%d\n", dentry,
+ 				       lower_inode, bindex, istart, iend);
+-			} else if (unlikely(lower_inode == POISONED_PTR)) {
++			} else if (unlikely(lower_inode == poison_ptr)) {
+ 				/* freed inode! */
+ 				PRINT_CALLER(fname, fxn, line);
+ 				printk(" CI6: dentry/linode=%p:%p bindex=%d "
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index c371bef..cfecf55 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -43,6 +43,7 @@
+ #include <linux/fs_stack.h>
+ #include <linux/magic.h>
+ #include <linux/log2.h>
++#include <linux/poison.h>
+ 
+ #include <asm/mman.h>
+ #include <asm/system.h>
+-- 
+1.5.4.3
+

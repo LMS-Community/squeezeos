@@ -1,0 +1,34 @@
+Fix these warnings:
+
+arch/arm/plat-mxc/sdma/sdma_malloc.c: In function 'sdma_iram_malloc':                                                                                                          
+arch/arm/plat-mxc/sdma/sdma_malloc.c:326: warning: assignment makes pointer from integer without a cast                                                                        
+arch/arm/plat-mxc/sdma/sdma_malloc.c:291: warning: 'buf' may be used uninitialized in this function     
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ arch/arm/plat-mxc/sdma/sdma_malloc.c |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+Index: linux-2.6.26/arch/arm/plat-mxc/sdma/sdma_malloc.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/sdma/sdma_malloc.c	2009-07-26 15:18:11.000000000 +0200
++++ linux-2.6.26/arch/arm/plat-mxc/sdma/sdma_malloc.c	2009-07-26 15:20:04.000000000 +0200
+@@ -288,7 +288,7 @@ void sdma_free(void *buf)
+  */
+ void *sdma_iram_malloc(size_t size)
+ {
+-	void *buf;
++	void *buf = NULL;
+ 	int index = -1;
+ 	unsigned long flags;
+ 	if (size > IRAM_UNIT_SIZE) {
+@@ -323,7 +323,8 @@ void *sdma_iram_malloc(size_t size)
+ 			       "the start address is not align of %d, buffer offset %ld\n",
+ 			       IRAM_UNIT_SIZE, (unsigned long)buf);
+ 
+-			buf = (unsigned long)buf & (~(IRAM_UNIT_SIZE - 1));
++			buf = (void*)
++				((unsigned long)buf & (~(IRAM_UNIT_SIZE - 1)));
+ 		}
+ 	}
+ 	return buf;

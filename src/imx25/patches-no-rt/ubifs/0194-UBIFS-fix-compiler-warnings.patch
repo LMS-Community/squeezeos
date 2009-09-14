@@ -1,0 +1,57 @@
+From 955f2074ea6810e37eb7d21b638379bbafdcfcb6 Mon Sep 17 00:00:00 2001
+From: Hunter Adrian <adrian.hunter@nokia.com>
+Date: Wed, 18 Mar 2009 12:29:39 +0100
+Subject: [PATCH] UBIFS: fix compiler warnings
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+fs/ubifs/super.c: In function ‘ubifs_show_options’:
+fs/ubifs/super.c:425: warning: format not a string literal and no format arguments
+fs/ubifs/super.c: In function ‘mount_ubifs’:
+fs/ubifs/super.c:1204: warning: format not a string literal and no format arguments
+fs/ubifs/super.c: In function ‘ubifs_remount_rw’:
+fs/ubifs/super.c:1557: warning: format not a string literal and no format arguments
+
+Signed-off-by: Adrian Hunter <adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index bb6871a..974bb27 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -419,8 +419,8 @@ static int ubifs_show_options(struct seq_file *s, struct vfsmount *mnt)
+ 		seq_printf(s, ",no_chk_data_crc");
+ 
+ 	if (c->mount_opts.override_compr) {
+-		seq_printf(s, ",compr=");
+-		seq_printf(s, ubifs_compr_name(c->mount_opts.compr_type));
++		seq_printf(s, ",compr=%s",
++			   ubifs_compr_name(c->mount_opts.compr_type));
+ 	}
+ 
+ 	return 0;
+@@ -1202,7 +1202,7 @@ static int mount_ubifs(struct ubifs_info *c)
+ 			goto out_cbuf;
+ 
+ 		/* Create background thread */
+-		c->bgt = kthread_create(ubifs_bg_thread, c, c->bgt_name);
++		c->bgt = kthread_create(ubifs_bg_thread, c, "%s", c->bgt_name);
+ 		if (IS_ERR(c->bgt)) {
+ 			err = PTR_ERR(c->bgt);
+ 			c->bgt = NULL;
+@@ -1559,7 +1559,7 @@ static int ubifs_remount_rw(struct ubifs_info *c)
+ 	ubifs_create_buds_lists(c);
+ 
+ 	/* Create background thread */
+-	c->bgt = kthread_create(ubifs_bg_thread, c, c->bgt_name);
++	c->bgt = kthread_create(ubifs_bg_thread, c, "%s", c->bgt_name);
+ 	if (IS_ERR(c->bgt)) {
+ 		err = PTR_ERR(c->bgt);
+ 		c->bgt = NULL;
+-- 
+1.5.4.3
+

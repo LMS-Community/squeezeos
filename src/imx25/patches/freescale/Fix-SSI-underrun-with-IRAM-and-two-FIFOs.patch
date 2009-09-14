@@ -1,0 +1,586 @@
+From f99160f9dcda96770fe9c8edefca13ce27de1eea Mon Sep 17 00:00:00 2001
+From: Sammy <r62914@freescale.com>
+Date: Thu, 9 Jul 2009 20:20:20 +0800
+Subject: [PATCH] Fix SSI underrun with IRAM and two FIFOs
+
+---
+ arch/arm/mach-mx25/Kconfig            |   18 ++
+ arch/arm/mach-mx25/devices.c          |    3 +
+ arch/arm/mach-mx25/dma.c              |   18 +-
+ arch/arm/mach-mx25/sdma_script_code.h |  289 +++++++++++++++++++--------------
+ arch/arm/plat-mxc/sdma/sdma.c         |   25 +++-
+ include/asm-arm/arch-mxc/mx25.h       |    5 +-
+ include/asm-arm/arch-mxc/sdma.h       |    5 +
+ sound/soc/imx/imx-ssi.c               |    9 +-
+ 8 files changed, 234 insertions(+), 138 deletions(-)
+
+diff --git a/arch/arm/mach-mx25/Kconfig b/arch/arm/mach-mx25/Kconfig
+index 6454987..3f404ee 100644
+--- a/arch/arm/mach-mx25/Kconfig
++++ b/arch/arm/mach-mx25/Kconfig
+@@ -28,6 +28,24 @@ config MXC_SDMA_API
+            This selects the Freescale MXC SDMA API.
+            If unsure, say N.
+ 
++menu "SDMA options"
++        depends on MXC_SDMA_API
++
++config SDMA_IRAM
++        bool "Use Internal RAM for SDMA transfer"
++        default n
++        help
++           Support Internal RAM as SDMA buffer or control structures
++
++config SDMA_IRAM_SIZE
++        hex "Reserved bytes of IRAM for SDMA (0x800-0x1000)"
++        range 0x800 0x1000
++        depends on SDMA_IRAM
++        default "0x1000"
++        help
++           Set the size of IRAM for SDMA. It must be a multiple of 512bytes.
++endmenu
++
+ config ARCH_MXC_HAS_NFC_V2
+         bool "MXC NFC Hardware Version 2"
+         depends on ARCH_MX25
+diff --git a/arch/arm/mach-mx25/devices.c b/arch/arm/mach-mx25/devices.c
+index 5311999..d09c1a9 100644
+--- a/arch/arm/mach-mx25/devices.c
++++ b/arch/arm/mach-mx25/devices.c
+@@ -59,6 +59,9 @@ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+ 	sdma_script_addr->mxc_sdma_shp_2_per_addr = shp_2_per_ADDR;
+ 	sdma_script_addr->mxc_sdma_shp_2_mcu_addr = shp_2_mcu_ADDR;
+ 
++	sdma_script_addr->mxc_sdma_mcu_2_ssish_addr = mcu_2_ssish_ADDR;
++	sdma_script_addr->mxc_sdma_per_2_ssish_addr = per_2_ssish_ADDR;
++
+ 	sdma_script_addr->mxc_sdma_mshc_2_mcu_addr = -1;
+ 	sdma_script_addr->mxc_sdma_mcu_2_mshc_addr = -1;
+ 
+diff --git a/arch/arm/mach-mx25/dma.c b/arch/arm/mach-mx25/dma.c
+index 25f11eb..d178c6a 100644
+--- a/arch/arm/mach-mx25/dma.c
++++ b/arch/arm/mach-mx25/dma.c
+@@ -28,7 +28,7 @@
+ #define MXC_SSI_TX1_REG           0x4
+ #define MXC_SSI_RX0_REG           0x8
+ #define MXC_SSI_RX1_REG           0xC
+-#define MXC_SSI_TXFIFO_WML        0x4
++#define MXC_SSI_TXFIFO_WML        0x8
+ #define MXC_SSI_RXFIFO_WML        0x6
+ 
+ #define MXC_ESAI_TX_REG	0x00
+@@ -224,7 +224,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi1_16bit_rx0_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi1_16bit_tx0_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 2, /* bytes counter */
+ 			.per_address = SSI1_BASE_ADDR + MXC_SSI_TX0_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = soc_trans_type,
+@@ -252,7 +252,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi1_24bit_rx0_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi1_24bit_tx0_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 4, /* bytes counter */
+ 			.per_address = SSI1_BASE_ADDR + MXC_SSI_TX0_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = soc_trans_type,
+@@ -308,7 +308,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi1_16bit_rx1_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi1_16bit_tx1_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 2, /* bytes counter */
+ 			.per_address = SSI1_BASE_ADDR + MXC_SSI_TX1_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = soc_trans_type,
+@@ -336,7 +336,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi1_24bit_rx1_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi1_24bit_tx1_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 4, /* bytes counter */
+ 			.per_address = SSI1_BASE_ADDR + MXC_SSI_TX1_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = soc_trans_type,
+@@ -392,7 +392,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi2_16bit_rx0_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi2_16bit_tx0_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 2, /* bytes counter */
+ 			.per_address = SSI2_BASE_ADDR + MXC_SSI_TX0_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = emi_2_per,
+@@ -420,7 +420,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi2_24bit_rx0_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi2_24bit_tx0_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 4, /* bytes counter */
+ 			.per_address = SSI2_BASE_ADDR + MXC_SSI_TX0_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = emi_2_per,
+@@ -476,7 +476,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi2_16bit_rx1_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi2_16bit_tx1_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 2, /* bytes counter */
+ 			.per_address = SSI2_BASE_ADDR + MXC_SSI_TX1_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = emi_2_per,
+@@ -504,7 +504,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi2_24bit_rx1_params = {
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_ssi2_24bit_tx1_params = {
+ 	.chnl_params = {
+-			.watermark_level = MXC_SSI_TXFIFO_WML,
++			.watermark_level = MXC_SSI_TXFIFO_WML * 4, /* bytes counter */
+ 			.per_address = SSI2_BASE_ADDR + MXC_SSI_TX1_REG,
+ 			.peripheral_type = SSI_SP,
+ 			.transfer_type = emi_2_per,
+diff --git a/arch/arm/mach-mx25/sdma_script_code.h b/arch/arm/mach-mx25/sdma_script_code.h
+index 86789dd..f1312cf 100644
+--- a/arch/arm/mach-mx25/sdma_script_code.h
++++ b/arch/arm/mach-mx25/sdma_script_code.h
+@@ -1,7 +1,6 @@
+ 
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.  */
+ 
+ /*
+  * This program is free software; you can redistribute it and/or modify
+@@ -16,144 +15,186 @@
+  *
+  * You should have received a copy of the GNU General Public License
+  * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+- */
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA  */
+ 
+ /*!
+  * @file sdma_script_code.h
+  * @brief This file contains functions of SDMA scripts code initialization
+- *
++ * 
+  * The file was generated automatically. Based on sdma scripts library.
+- *
++ * 
+  * @ingroup SDMA
+  */
+-/************************************************************************
+-
+-			SDMA RELEASE LABEL: 	"SS15_SENNA"
++/************************************************************************************
+ 
+-************************************************************************/
++           SDMA RELEASE LABEL:     "S1"
+ 
++*************************************************************************************/
++ 
+ #ifndef SDMA_SCRIPT_CODE_H
+ #define SDMA_SCRIPT_CODE_H
+ 
+-/*!
+- * SDMA ROM scripts start addresses and sizes
+- */
+-#define start_ADDR	0
+-#define start_SIZE	22
+-
+-#define core_ADDR	80
+-#define core_SIZE	233
+-
+-#define common_ADDR	313
+-#define common_SIZE	416
+-
+-#define ap_2_ap_ADDR	729
+-#define ap_2_ap_SIZE	41
+-
+-#define app_2_mcu_ADDR	770
+-#define app_2_mcu_SIZE	64
+-
+-#define mcu_2_app_ADDR	834
+-#define mcu_2_app_SIZE	70
+-
+-#define uart_2_mcu_ADDR	904
+-#define uart_2_mcu_SIZE	75
+-
+-#define shp_2_mcu_ADDR	979
+-#define shp_2_mcu_SIZE	69
+-
+-#define mcu_2_shp_ADDR	1048
+-#define mcu_2_shp_SIZE	72
+-
+-#define uartsh_2_mcu_ADDR	1120
+-#define uartsh_2_mcu_SIZE	69
+-
+-#define app_2_per_ADDR	1189
+-#define app_2_per_SIZE	66
+-
+-#define per_2_app_ADDR	1255
+-#define per_2_app_SIZE	74
+-
+-#define per_2_shp_ADDR	1329
+-#define per_2_shp_SIZE	78
+-
+-#define shp_2_per_ADDR	1407
+-#define shp_2_per_SIZE	72
+-
+-#define mcu_2_ata_ADDR	1479
+-#define mcu_2_ata_SIZE	81
+-
+-#define ata_2_mcu_ADDR	1560
+-#define ata_2_mcu_SIZE	96
+-
+-#define loop_DMAs_routines_ADDR	1656
+-#define loop_DMAs_routines_SIZE	227
+-
+-#define test_ADDR	1883
+-#define test_SIZE	63
+-
+-#define signature_ADDR	1022
+-#define signature_SIZE	1
+ 
+ /*!
+- * SDMA RAM scripts start addresses and sizes
+- */
+-#define ext_mem__ipu_ram_ADDR	6144
+-#define ext_mem__ipu_ram_SIZE	123
+-
+-#define uart_2_per_ADDR	6267
+-#define uart_2_per_SIZE	73
+-
+-#define uartsh_2_per_ADDR	6340
+-#define uartsh_2_per_SIZE	67
+-
++* SDMA ROM scripts start addresses and sizes
++*/
++
++#define start_ADDR   0
++#define start_SIZE   22
++ 
++#define core_ADDR   80
++#define core_SIZE   233
++ 
++#define common_ADDR   313
++#define common_SIZE   416
++ 
++#define ap_2_ap_ADDR   729
++#define ap_2_ap_SIZE   41
++ 
++#define app_2_mcu_ADDR   770
++#define app_2_mcu_SIZE   64
++ 
++#define mcu_2_app_ADDR   834
++#define mcu_2_app_SIZE   70
++ 
++#define uart_2_mcu_ADDR   904
++#define uart_2_mcu_SIZE   75
++ 
++#define shp_2_mcu_ADDR   979
++#define shp_2_mcu_SIZE   69
++ 
++#define mcu_2_shp_ADDR   1048
++#define mcu_2_shp_SIZE   72
++ 
++#define uartsh_2_mcu_ADDR   1120
++#define uartsh_2_mcu_SIZE   69
++ 
++#define app_2_per_ADDR   1189
++#define app_2_per_SIZE   66
++ 
++#define per_2_app_ADDR   1255
++#define per_2_app_SIZE   74
++ 
++#define per_2_shp_ADDR   1329
++#define per_2_shp_SIZE   78
++ 
++#define shp_2_per_ADDR   1407
++#define shp_2_per_SIZE   72
++ 
++#define mcu_2_ata_ADDR   1479
++#define mcu_2_ata_SIZE   81
++ 
++#define ata_2_mcu_ADDR   1560
++#define ata_2_mcu_SIZE   96
++ 
++#define loop_DMAs_routines_ADDR   1656
++#define loop_DMAs_routines_SIZE   227
++ 
++#define test_ADDR   1883
++#define test_SIZE   63
++ 
++#define signature_ADDR   1022
++#define signature_SIZE   1
++ 
+ /*!
+- * SDMA RAM image start address and size
+- */
+-#define RAM_CODE_START_ADDR		6144
+-#define RAM_CODE_SIZE			263
++* SDMA RAM scripts start addresses and sizes
++*/
++
++#define ext_mem__ipu_ram_ADDR   6144
++#define ext_mem__ipu_ram_SIZE   123
++ 
++#define mcu_2_mcu_rotation_ADDR   6267
++#define mcu_2_mcu_rotation_SIZE   55
++ 
++#define mcu_2_ssish_ADDR   6322
++#define mcu_2_ssish_SIZE   95
++ 
++#define per_2_ssish_ADDR   6417
++#define per_2_ssish_SIZE   102
++ 
++#define uart_2_per_ADDR   6519
++#define uart_2_per_SIZE   73
++ 
++#define uartsh_2_per_ADDR   6592
++#define uartsh_2_per_SIZE   67
++ 
++/*!
++* SDMA RAM image start address and size
++*/
++
++#define RAM_CODE_START_ADDR     6144
++#define RAM_CODE_SIZE           515
+ 
+ /*!
+- * Buffer that holds the SDMA RAM image
+- */
+-__attribute__ ((__aligned__(4)))
+-#ifndef CONFIG_XIP_KERNEL
+-const
+-#endif
+-static const short sdma_code[] = {
+-	0x0e70, 0x0611, 0x5616, 0xc18a, 0x7d2a, 0x5ade, 0x008e, 0xc19c,
+-	0x7c26, 0x5be0, 0x5ef0, 0x5ce8, 0x0688, 0x08ff, 0x0011, 0x28ff,
+-	0x00bc, 0x53f6, 0x05df, 0x7d0b, 0x6dc5, 0x03df, 0x7d03, 0x6bd5,
+-	0xd84f, 0x982b, 0x6b05, 0xc6d8, 0x7e27, 0x7f29, 0x982b, 0x6d01,
+-	0x03df, 0x7d05, 0x6bd5, 0xc702, 0x7e18, 0x7f1a, 0x982b, 0x6b05,
+-	0xc678, 0x7e07, 0x7f06, 0x52de, 0x53e6, 0xc1a8, 0x7dd7, 0x0200,
+-	0x9803, 0x0007, 0x6004, 0x680c, 0x53f6, 0x028e, 0x00a3, 0xc2ad,
+-	0x048b, 0x0498, 0x0454, 0x068a, 0x982b, 0x0207, 0x680c, 0x6ddf,
+-	0x0107, 0x68ff, 0x60d0, 0x9834, 0x0207, 0x68ff, 0x6d28, 0x0107,
+-	0x6004, 0x680c, 0x9834, 0x0007, 0x68ff, 0x60d0, 0x9834, 0x0288,
+-	0x03a5, 0x3b03, 0x3d03, 0x4d00, 0x7d0a, 0x0804, 0x00a5, 0x00da,
+-	0x7d1a, 0x02a0, 0x7b01, 0x65d8, 0x7eee, 0x65ff, 0x7eec, 0x0804,
+-	0x02d0, 0x7d11, 0x4b00, 0x7c0f, 0x008a, 0x3003, 0x6dcf, 0x6bdf,
+-	0x0015, 0x0015, 0x7b02, 0x65d8, 0x0000, 0x7edd, 0x63ff, 0x7edb,
+-	0x3a03, 0x6dcd, 0x6bdd, 0x008a, 0x7b02, 0x65d8, 0x0000, 0x7ed3,
+-	0x65ff, 0x7ed1, 0x0006, 0xc23a, 0x57db, 0x52f3, 0x6ad5, 0x56fb,
+-	0x028e, 0x1a94, 0x6ac3, 0x62c8, 0x0269, 0x7d1e, 0x1e94, 0x6ee3,
+-	0x62d0, 0x5aeb, 0x62c8, 0x0248, 0x6ed3, 0x6ac8, 0x2694, 0x52eb,
+-	0x6ad5, 0x6ee3, 0x62c8, 0x026e, 0x7d27, 0x6ac8, 0x7f23, 0x2501,
+-	0x4d00, 0x7d26, 0x028e, 0x1a98, 0x6ac3, 0x62c8, 0x6ec3, 0x0260,
+-	0x7df1, 0x62d0, 0xc2d1, 0x98c0, 0x6ee3, 0x008f, 0x2001, 0x00d5,
+-	0x7d01, 0x008d, 0x05a0, 0x62c8, 0x026e, 0x7d0e, 0x6ac8, 0x7f0a,
+-	0x2001, 0x7cf9, 0x6add, 0x7f06, 0x0000, 0x4d00, 0x7d09, 0xc251,
+-	0x57db, 0x987f, 0x0007, 0x6aff, 0x62d0, 0xc2d1, 0x0458, 0x0454,
+-	0x6add, 0x7ff8, 0xc261, 0x987c, 0xc230, 0xc23a, 0x57db, 0x52f3,
+-	0x6ad5, 0x56fb, 0x028e, 0x1a94, 0x5202, 0x0269, 0x7d17, 0x1e94,
+-	0x5206, 0x0248, 0x5a06, 0x2694, 0x5206, 0x026e, 0x7d26, 0x6ac8,
+-	0x7f22, 0x2501, 0x4d00, 0x7d27, 0x028e, 0x1a98, 0x5202, 0x0260,
+-	0x7df3, 0x6add, 0x7f18, 0x62d0, 0xc2d1, 0x9903, 0x008f, 0x2001,
+-	0x00d5, 0x7d01, 0x008d, 0x05a0, 0x5206, 0x026e, 0x7d0e, 0x6ac8,
+-	0x7f0a, 0x2001, 0x7cf9, 0x6add, 0x7f06, 0x0000, 0x4d00, 0x7d0b,
+-	0xc251, 0x57db, 0x98c9, 0x0007, 0x6aff, 0x6add, 0x7ffc, 0x62d0,
+-	0xc2d1, 0x0458, 0x0454, 0x6add, 0x7ff6, 0xc261, 0x98c6
++* Buffer that holds the SDMA RAM image
++*/
++
++static const short sdma_code[] =
++{
++0x0e70, 0x0611, 0x5616, 0xc18a, 0x7d2a, 0x5ade, 0x008e, 0xc19c,
++0x7c26, 0x5be0, 0x5ef0, 0x5ce8, 0x0688, 0x08ff, 0x0011, 0x28ff,
++0x00bc, 0x53f6, 0x05df, 0x7d0b, 0x6dc5, 0x03df, 0x7d03, 0x6bd5,
++0xd84f, 0x982b, 0x6b05, 0xc6d8, 0x7e27, 0x7f29, 0x982b, 0x6d01,
++0x03df, 0x7d05, 0x6bd5, 0xc702, 0x7e18, 0x7f1a, 0x982b, 0x6b05,
++0xc678, 0x7e07, 0x7f06, 0x52de, 0x53e6, 0xc1a8, 0x7dd7, 0x0200,
++0x9803, 0x0007, 0x6004, 0x680c, 0x53f6, 0x028e, 0x00a3, 0xc2ad,
++0x048b, 0x0498, 0x0454, 0x068a, 0x982b, 0x0207, 0x680c, 0x6ddf,
++0x0107, 0x68ff, 0x60d0, 0x9834, 0x0207, 0x68ff, 0x6d28, 0x0107,
++0x6004, 0x680c, 0x9834, 0x0007, 0x68ff, 0x60d0, 0x9834, 0x0288,
++0x03a5, 0x3b03, 0x3d03, 0x4d00, 0x7d0a, 0x0804, 0x00a5, 0x00da,
++0x7d1a, 0x02a0, 0x7b01, 0x65d8, 0x7eee, 0x65ff, 0x7eec, 0x0804,
++0x02d0, 0x7d11, 0x4b00, 0x7c0f, 0x008a, 0x3003, 0x6dcf, 0x6bdf,
++0x0015, 0x0015, 0x7b02, 0x65d8, 0x0000, 0x7edd, 0x63ff, 0x7edb,
++0x3a03, 0x6dcd, 0x6bdd, 0x008a, 0x7b02, 0x65d8, 0x0000, 0x7ed3,
++0x65ff, 0x7ed1, 0x0006, 0x0e70, 0x0611, 0x5716, 0x5af7, 0x5bff,
++0xc18a, 0x7d2d, 0x5ac7, 0x5bcf, 0xc19c, 0x5de7, 0x5eef, 0x7d02,
++0x0200, 0x9883, 0x09ff, 0x0111, 0x29ff, 0x01bc, 0x6d00, 0x4900,
++0x7d18, 0x52f7, 0x0217, 0x01a2, 0x56ef, 0x6e04, 0x50f7, 0x53ff,
++0x0317, 0x620a, 0x6a2a, 0xd8a4, 0x069b, 0x6e04, 0x2001, 0x7cf9,
++0x56ef, 0x2602, 0x5eef, 0x988f, 0x7f02, 0x7e01, 0x0006, 0xc2ce,
++0x98b1, 0x52c7, 0x53cf, 0xc1a8, 0x7dd6, 0x0200, 0x9883, 0x0200,
++0x9880, 0x0454, 0xc230, 0xc23a, 0x57db, 0x52f3, 0x6a01, 0x008f,
++0x00d5, 0x7d01, 0x008d, 0x05a0, 0x5deb, 0x56fb, 0x0478, 0x7d03,
++0x0479, 0x7d32, 0x7c39, 0x0479, 0x7c28, 0x0b70, 0x0311, 0x53eb,
++0x0f00, 0x0360, 0x7d05, 0x6509, 0x7e3f, 0x620a, 0x7e3d, 0x98d4,
++0x620a, 0x7e3a, 0x6509, 0x7e38, 0x0512, 0x0512, 0x02ad, 0x0760,
++0x7d0a, 0x5a06, 0x7f31, 0x1f01, 0x2003, 0x4800, 0x7cea, 0x0b70,
++0x0311, 0x5313, 0x9905, 0x5a26, 0x7f27, 0x1f01, 0x2003, 0x4800,
++0x7ce0, 0x0b70, 0x0311, 0x5313, 0x9905, 0x0015, 0x7804, 0x6209,
++0x5a06, 0x6209, 0x5a26, 0x9904, 0x0015, 0x0015, 0x7804, 0x620a,
++0x5a06, 0x620a, 0x5a26, 0x9904, 0x0015, 0x0015, 0x0015, 0x7804,
++0x620b, 0x5a06, 0x620b, 0x5a26, 0x7c07, 0x0000, 0x55eb, 0x4d00,
++0x7d06, 0xc251, 0x57db, 0x98b7, 0x0007, 0x680c, 0xc26a, 0xc261,
++0x98b4, 0xc230, 0xc23a, 0x57db, 0x52f3, 0x6ac5, 0x008f, 0x00d5,
++0x7d01, 0x008d, 0x05a0, 0x5deb, 0x56fb, 0x0478, 0x7d03, 0x0479,
++0x7d37, 0x7c3f, 0x0479, 0x7c2d, 0x59e3, 0x0b70, 0x0311, 0x53eb,
++0x0f00, 0x61c8, 0x7e47, 0x62c8, 0x7e45, 0x65c8, 0x7e43, 0x0360,
++0x7d03, 0x0112, 0x0112, 0x9936, 0x0512, 0x0512, 0x0211, 0x02a9,
++0x02ad, 0x0760, 0x7d0b, 0x5a06, 0x7f35, 0x1f01, 0x2003, 0x4800,
++0x7ce8, 0x0b70, 0x0311, 0x5313, 0x51e3, 0x996b, 0x5a26, 0x7f2a,
++0x1f01, 0x2003, 0x4800, 0x7cdd, 0x0b70, 0x0311, 0x5313, 0x51e3,
++0x996b, 0x0015, 0x7804, 0x62c8, 0x5a06, 0x62c8, 0x5a26, 0x996a,
++0x6dce, 0x0015, 0x0015, 0x7804, 0x62c8, 0x5a06, 0x62c8, 0x5a26,
++0x996a, 0x6dcf, 0x0015, 0x0015, 0x0015, 0x7804, 0x62c8, 0x5a06,
++0x62c8, 0x5a26, 0x7c07, 0x0000, 0x55eb, 0x4d00, 0x7d06, 0xc251,
++0x57db, 0x9916, 0x0007, 0x68ff, 0xc26a, 0xc261, 0x9913, 0xc23a,
++0x57db, 0x52f3, 0x6ad5, 0x56fb, 0x028e, 0x1a94, 0x6ac3, 0x62c8,
++0x0269, 0x7d1e, 0x1e94, 0x6ee3, 0x62d0, 0x5aeb, 0x62c8, 0x0248,
++0x6ed3, 0x6ac8, 0x2694, 0x52eb, 0x6ad5, 0x6ee3, 0x62c8, 0x026e,
++0x7d27, 0x6ac8, 0x7f23, 0x2501, 0x4d00, 0x7d26, 0x028e, 0x1a98,
++0x6ac3, 0x62c8, 0x6ec3, 0x0260, 0x7df1, 0x62d0, 0xc2d1, 0x99bc,
++0x6ee3, 0x008f, 0x2001, 0x00d5, 0x7d01, 0x008d, 0x05a0, 0x62c8,
++0x026e, 0x7d0e, 0x6ac8, 0x7f0a, 0x2001, 0x7cf9, 0x6add, 0x7f06,
++0x0000, 0x4d00, 0x7d09, 0xc251, 0x57db, 0x997b, 0x0007, 0x6aff,
++0x62d0, 0xc2d1, 0x0458, 0x0454, 0x6add, 0x7ff8, 0xc261, 0x9978,
++0xc230, 0xc23a, 0x57db, 0x52f3, 0x6ad5, 0x56fb, 0x028e, 0x1a94,
++0x5202, 0x0269, 0x7d17, 0x1e94, 0x5206, 0x0248, 0x5a06, 0x2694,
++0x5206, 0x026e, 0x7d26, 0x6ac8, 0x7f22, 0x2501, 0x4d00, 0x7d27,
++0x028e, 0x1a98, 0x5202, 0x0260, 0x7df3, 0x6add, 0x7f18, 0x62d0,
++0xc2d1, 0x99ff, 0x008f, 0x2001, 0x00d5, 0x7d01, 0x008d, 0x05a0,
++0x5206, 0x026e, 0x7d0e, 0x6ac8, 0x7f0a, 0x2001, 0x7cf9, 0x6add,
++0x7f06, 0x0000, 0x4d00, 0x7d0b, 0xc251, 0x57db, 0x99c5, 0x0007,
++0x6aff, 0x6add, 0x7ffc, 0x62d0, 0xc2d1, 0x0458, 0x0454, 0x6add,
++0x7ff6, 0xc261, 0x99c2
+ };
+ #endif
+diff --git a/arch/arm/plat-mxc/sdma/sdma.c b/arch/arm/plat-mxc/sdma/sdma.c
+index 819666a..0058e40 100644
+--- a/arch/arm/plat-mxc/sdma/sdma.c
++++ b/arch/arm/plat-mxc/sdma/sdma.c
+@@ -322,7 +322,7 @@ static unsigned short sdma_get_pc(sdma_periphT peripheral_type,
+ 		default:
+ 			res = -EINVAL;
+ 		}
+-	} else if (peripheral_type == SSI_SP || peripheral_type == MMC ||
++	} else if (peripheral_type == MMC ||
+ 		   peripheral_type == SDHC || peripheral_type == CSPI_SP ||
+ 		   peripheral_type == ESAI || peripheral_type == MSHC_SP) {
+ 		switch (transfer_type) {
+@@ -341,6 +341,29 @@ static unsigned short sdma_get_pc(sdma_periphT peripheral_type,
+ 		default:
+ 			res = -EINVAL;
+ 		}
++	} else if (peripheral_type == SSI_SP) {
++		switch (transfer_type) {
++		case int_2_per:
++			if (cpu_is_mx25())
++				res = sdma_script_addrs.mxc_sdma_per_2_ssish_addr;
++			else
++				res = sdma_script_addrs.mxc_sdma_per_2_shp_addr;
++			break;
++		case emi_2_per:
++			if (cpu_is_mx25())
++				res = sdma_script_addrs.mxc_sdma_mcu_2_ssish_addr;
++			else
++				res = sdma_script_addrs.mxc_sdma_mcu_2_shp_addr;
++			break;
++		case per_2_int:
++			res = sdma_script_addrs.mxc_sdma_shp_2_per_addr;
++			break;
++		case per_2_emi:
++			res = sdma_script_addrs.mxc_sdma_shp_2_mcu_addr;
++			break;
++		default:
++			res = -EINVAL;
++		}
+ 	} else if (peripheral_type == ASRC) {
+ 		switch (transfer_type) {
+ 		case per_2_emi:
+diff --git a/include/asm-arm/arch-mxc/mx25.h b/include/asm-arm/arch-mxc/mx25.h
+index 6402e59..6b44779 100644
+--- a/include/asm-arm/arch-mxc/mx25.h
++++ b/include/asm-arm/arch-mxc/mx25.h
+@@ -95,13 +95,16 @@
+ #define IRAM_BASE_ADDR_VIRT  0xFC500000
+ #define IRAM_SIZE            SZ_128K
+ 
++#ifndef CONFIG_SDMA_IRAM
++#define CONFIG_SDMA_IRAM_SIZE 0
++#endif
+ #ifdef CONFIG_SND_MXC_SOC_IRAM
+ #define SND_RAM_SIZE 0x10000
+ #else
+ #define SND_RAM_SIZE 0
+ #endif
+ 
+-#define SND_RAM_BASE_ADDR	IRAM_BASE_ADDR
++#define SND_RAM_BASE_ADDR	(IRAM_BASE_ADDR + CONFIG_SDMA_IRAM_SIZE)
+ 
+ /*
+  * AIPS 1
+diff --git a/include/asm-arm/arch-mxc/sdma.h b/include/asm-arm/arch-mxc/sdma.h
+index 2da75ef..ef67e41 100644
+--- a/include/asm-arm/arch-mxc/sdma.h
++++ b/include/asm-arm/arch-mxc/sdma.h
+@@ -261,6 +261,11 @@ typedef struct {
+ 	/*! address of mcu_2_spdif script */
+ 	int mxc_sdma_mcu_2_spdif_addr;
+ 
++	/*! address of mcu_2_ssish script */
++	int mxc_sdma_mcu_2_ssish_addr;
++	/*! address of per_2_ssish script */
++	int mxc_sdma_per_2_ssish_addr;
++
+ 	/*! address of asrc_2_mcu script */
+ 	int mxc_sdma_asrc_2_mcu_addr;
+ 
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 83dc4e3..9fd9f17 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -300,6 +300,9 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 		break;
+ 	}
+ 
++	if (cpu_is_mx25())
++		scr |= SSI_SCR_TCH_EN; /* Two channel operation enable */
++
+ 	/* sync */
+ 	if (!(fmt & SND_SOC_DAIFMT_ASYNC))
+ 		scr |= SSI_SCR_SYN;
+@@ -406,10 +409,10 @@ static int imx_ssi_hw_tx_params(struct snd_pcm_substream *substream,
+ 
+ 	/* enable interrupts */
+ 	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI2)
+-		stcr |= SSI_STCR_TFEN0;
++		stcr |= SSI_STCR_TFEN0 | SSI_STCR_TFEN1;
+ 	else
+ 		stcr |= SSI_STCR_TFEN1;
+-	sier |= SSI_SIER_TDMAE | SSI_SIER_TIE | SSI_SIER_TUE0_EN;
++	sier |= SSI_SIER_TDMAE | SSI_SIER_TIE | SSI_SIER_TUE0_EN | SSI_SIER_TUE1_EN;
+ 
+ 	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI1) {
+ 		SSI1_STCR = stcr;
+@@ -719,7 +722,7 @@ static irqreturn_t ssi1_irq(int irq, void *dev_id)
+ 	if (fifo_err_counter++ % 1000 == 0)
+ 		printk(KERN_ERR "ssi1_irq SISR %x SIER %x fifo_errs=%d\n",
+ 		       SSI1_SISR, SSI1_SIER, fifo_err_counter);
+-	SSI1_SISR = SSI_SIER_TUE0_EN | SSI_SIER_ROE0_EN;
++	SSI1_SISR = SSI_SIER_TUE0_EN | SSI_SIER_ROE0_EN | SSI_SIER_TUE1_EN;
+ 	return IRQ_HANDLED;
+ }
+ 
+-- 
+1.6.2
+

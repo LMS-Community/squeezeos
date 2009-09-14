@@ -1,0 +1,157 @@
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2009-07-11 14:34:33.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-07-11 14:34:33.000000000 +0100
+@@ -43,6 +43,10 @@
+ 	}
+ 	data->i2c_failures = 0;
+ 
++	if ((flags & (1<<5)) != 0) {
++		printk("GOING DOWN NOW!\n");
++	}
++
+ 	/* rotary encoders */
+ 	if ((flags & (I2C_FLAGS_NAV|I2C_FLAGS_VOL)) != 0) {
+ 		int nav, vol;
+@@ -65,7 +69,7 @@
+ 		unsigned long code;
+ 
+ 		i2c_smbus_read_i2c_block_data(client, I2C_IR_REGISTER, 4, val);
+-		code = (val[0] << 24) | (val[1] << 16) | (val[2] << 8) | val[3];
++		code = (val[3] << 24) | (val[2] << 16) | (val[1] << 8) | val[0];
+ 
+ 		input_event(data->input_dev, EV_MSC, MSC_RAW, code);
+ 		input_sync(data->input_dev);
+@@ -151,7 +155,7 @@
+ 			    msp430_i2c_show, NULL, 2, I2C_IR_REGISTER);
+ 
+ static SENSOR_DEVICE_ATTR_2(ambient, S_IRUGO,
+-			    msp430_i2c_show, NULL, 2, I2C_ALS_REGISTER);
++			    msp430_i2c_show, NULL, 4, I2C_ALS_REGISTER);
+ 
+ static SENSOR_DEVICE_ATTR_2(battery_charge, S_IRUGO,
+ 			    msp430_i2c_show, NULL, 2, I2C_BATT_STATE_OF_CHARGE);
+@@ -168,27 +172,15 @@
+ static SENSOR_DEVICE_ATTR_2(time, S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 8, I2C_TIME_REGISTER);
+ 
+-static SENSOR_DEVICE_ATTR_2(battery_voltage, S_IRUGO,
+-			    msp430_i2c_show, NULL, 2, I2C_BATT_VOLTAGE_REGISTER);
+-
+-static SENSOR_DEVICE_ATTR_2(sys_voltage,     S_IRUGO,
+-			    msp430_i2c_show, NULL, 2, I2C_BATT_SYS_POWER_REGISTER);
+-
+-static SENSOR_DEVICE_ATTR_2(vmon1_voltage,   S_IRUGO,
+-			    msp430_i2c_show, NULL, 2, I2C_BATT_VMON1_REGISTER);
+-
+-static SENSOR_DEVICE_ATTR_2(vmon2_voltage,   S_IRUGO,
+-			    msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER);
+-
+-static SENSOR_DEVICE_ATTR_2(wall_voltage,    S_IRUGO,
+-			    msp430_i2c_show, NULL, 2, I2C_BATT_DC_JACK_REGISTER);
+-
+ static SENSOR_DEVICE_ATTR_2(test_1,         S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 1, I2C_TEST_1);
++
+ static SENSOR_DEVICE_ATTR_2(test_2,         S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 2, I2C_TEST_2);
++
+ static SENSOR_DEVICE_ATTR_2(test_4,         S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 4, I2C_TEST_4);
++
+ static SENSOR_DEVICE_ATTR_2(test_8,         S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 8, I2C_TEST_8);
+ 
+@@ -198,6 +190,30 @@
+ static SENSOR_DEVICE_ATTR_2(gp_register,      S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 8, I2C_GP_REGISTER);
+ 
++static SENSOR_DEVICE_ATTR_2(battery_voltage      ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VOLTAGE_REGISTER  );
++static SENSOR_DEVICE_ATTR_2(sys_voltage          ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_SYS_POWER_REGISTER);
++static SENSOR_DEVICE_ATTR_2(battery_vmon1_voltage,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON1_REGISTER	   );
++static SENSOR_DEVICE_ATTR_2(battery_vmon2_voltage,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER	   );
++static SENSOR_DEVICE_ATTR_2(battery_temperature  ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER	   );
++static SENSOR_DEVICE_ATTR_2(wall_voltage         ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_DC_JACK_REGISTER  );
++
++static SENSOR_DEVICE_ATTR_2(adc_0 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+0 );
++static SENSOR_DEVICE_ATTR_2(adc_1 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+1 );
++static SENSOR_DEVICE_ATTR_2(adc_2 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+2 );
++static SENSOR_DEVICE_ATTR_2(adc_3 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+3 );
++static SENSOR_DEVICE_ATTR_2(adc_4 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+4 );
++static SENSOR_DEVICE_ATTR_2(adc_5 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+5 );
++static SENSOR_DEVICE_ATTR_2(adc_6 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+6 );
++static SENSOR_DEVICE_ATTR_2(adc_7 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+7 );
++static SENSOR_DEVICE_ATTR_2(adc_8 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+8 );
++static SENSOR_DEVICE_ATTR_2(adc_9 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+9 );
++static SENSOR_DEVICE_ATTR_2(adc_10		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+10);
++static SENSOR_DEVICE_ATTR_2(adc_11		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+11);
++static SENSOR_DEVICE_ATTR_2(adc_12		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+12);
++static SENSOR_DEVICE_ATTR_2(adc_13		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+13);
++static SENSOR_DEVICE_ATTR_2(adc_14		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+14);
++static SENSOR_DEVICE_ATTR_2(adc_15		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+15);
++
+ 
+ 
+ static const struct attribute_group msp430_i2c_group = {
+@@ -212,8 +228,9 @@
+                 &sensor_dev_attr_time.dev_attr.attr,
+ 		&sensor_dev_attr_battery_voltage.dev_attr.attr,
+ 		&sensor_dev_attr_sys_voltage.dev_attr.attr,
+-		&sensor_dev_attr_vmon1_voltage.dev_attr.attr,
+-		&sensor_dev_attr_vmon2_voltage.dev_attr.attr,
++		&sensor_dev_attr_battery_vmon1_voltage.dev_attr.attr,
++		&sensor_dev_attr_battery_vmon2_voltage.dev_attr.attr,
++		&sensor_dev_attr_battery_temperature.dev_attr.attr,
+ 		&sensor_dev_attr_wall_voltage.dev_attr.attr,
+ 		&sensor_dev_attr_test_1.dev_attr.attr,
+ 		&sensor_dev_attr_test_2.dev_attr.attr,
+@@ -221,6 +238,22 @@
+ 		&sensor_dev_attr_test_8.dev_attr.attr,
+ 		&sensor_dev_attr_msp_buffer.dev_attr.attr,
+ 		&sensor_dev_attr_gp_register.dev_attr.attr,
++		&sensor_dev_attr_adc_0 .dev_attr.attr,
++		&sensor_dev_attr_adc_1 .dev_attr.attr,
++		&sensor_dev_attr_adc_2 .dev_attr.attr,
++		&sensor_dev_attr_adc_3 .dev_attr.attr,
++		&sensor_dev_attr_adc_4 .dev_attr.attr,
++		&sensor_dev_attr_adc_5 .dev_attr.attr,
++		&sensor_dev_attr_adc_6 .dev_attr.attr,
++		&sensor_dev_attr_adc_7 .dev_attr.attr,
++		&sensor_dev_attr_adc_8 .dev_attr.attr,
++		&sensor_dev_attr_adc_9 .dev_attr.attr,
++		&sensor_dev_attr_adc_10.dev_attr.attr,
++		&sensor_dev_attr_adc_11.dev_attr.attr,
++		&sensor_dev_attr_adc_12.dev_attr.attr,
++		&sensor_dev_attr_adc_13.dev_attr.attr,
++		&sensor_dev_attr_adc_14.dev_attr.attr,
++		&sensor_dev_attr_adc_15.dev_attr.attr,
+                 NULL,
+         },
+ };
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430.h
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430.h	2009-07-11 14:34:33.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430.h	2009-07-11 15:02:50.000000000 +0100
+@@ -16,6 +16,8 @@
+         struct work_struct      irq_work;
+ 
+ 	int			i2c_failures;
++
++	char                    firmware[18];
+ };
+ 
+ #define irq_work_to_data(_w) container_of(_w, struct msp430_i2c_data, irq_work)
+@@ -55,6 +57,7 @@
+ #define I2C_BATT_SYS_POWER_REGISTER     57
+ #define I2C_BATT_VMON1_REGISTER         59
+ #define I2C_BATT_VMON2_REGISTER         61
++#define I2C_BATT_TEMP_REGISTER          62
+ #define I2C_BATT_DC_JACK_REGISTER       63
+ #define I2C_TIME_REGISTER               70
+ #define I2C_KILL_REGISTER               99
+@@ -67,3 +70,5 @@
+ #define I2C_TEST_8                      123 /* result should be 12345678901234567890 0xAB54A98CEB1F0AD2 */
+ #define I2C_READ_BUFFER                 124 /* Read back the contents of the msp430's buffer */
+ #define I2C_GP_REGISTER                 125 /* General purpose, 8-byte register.. */
++
++#define I2C_ADC_BASE                    130 /* ADC Registers */

@@ -1,0 +1,34 @@
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2009-09-04 20:15:07.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-09-04 20:17:04.000000000 +0100
+@@ -46,8 +46,19 @@
+ 	}
+ 	data->i2c_failures = 0;
+ 
+-	if ((flags & (1<<5)) != 0) {
+-		printk("GOING DOWN NOW!\n");
++	if ((flags & I2C_FLAGS_BATTERY) != 0) {
++		/* hack: use INPUT events to report battery status changes by
++		 * toggling POWER2 key. the application is already looking for
++		 * knob/ir input events from this driver, so this is a
++		 * convient inteface to re-use.
++		 */
++
++		static int power_toggle = 0;
++
++		power_toggle = !power_toggle;
++
++		input_report_switch(data->input_dev, 1 /* SW_1 */, power_toggle);
++		input_sync(data->input_dev);
+ 	}
+ 
+ 	/* rotary encoders */
+@@ -449,6 +460,7 @@
+ 	input_set_capability(data->input_dev, EV_MSC, MSC_RAW);
+ 	input_set_capability(data->input_dev, EV_REL, REL_WHEEL);
+ 	input_set_capability(data->input_dev, EV_REL, REL_MISC);
++	input_set_capability(data->input_dev, EV_SW, 1 /* SW_1 */);
+ 
+ 	err = input_register_device(data->input_dev);
+ 	if (err) {

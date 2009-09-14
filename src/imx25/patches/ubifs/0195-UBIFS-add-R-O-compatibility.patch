@@ -1,0 +1,216 @@
+From f1d6b5c7011aee4342355da1de619e8249d86556 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 26 Mar 2009 12:51:21 +0200
+Subject: [PATCH] UBIFS: add R/O compatibility
+
+Now UBIFS is supported by u-boot. If we ever decide to change the
+media format, then people will have to upgrade their u-boots to
+mount new format images. However, very often it is possible to
+preserve R/O forward-compatibility, even though the write
+forward-compatibility is not preserved.
+
+This patch introduces a new super-block field which stores the
+R/O compatibility version.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Acked-by: Adrian Hunter <Adrian.Hunter@nokia.com>
+---
+ fs/ubifs/sb.c          |   35 +++++++++++++++++++++++++++++------
+ fs/ubifs/super.c       |   14 ++++++++++++--
+ fs/ubifs/ubifs-media.h |   30 +++++++++++++++++++++++++++---
+ fs/ubifs/ubifs.h       |    4 ++++
+ 4 files changed, 72 insertions(+), 11 deletions(-)
+
+diff --git a/fs/ubifs/sb.c b/fs/ubifs/sb.c
+index 0dec47c..57085e4 100644
+--- a/fs/ubifs/sb.c
++++ b/fs/ubifs/sb.c
+@@ -193,6 +193,7 @@ static int create_default_filesystem(struct ubifs_info *c)
+ 	if (tmp64 > DEFAULT_MAX_RP_SIZE)
+ 		tmp64 = DEFAULT_MAX_RP_SIZE;
+ 	sup->rp_size = cpu_to_le64(tmp64);
++	sup->ro_compat_version = cpu_to_le32(UBIFS_RO_COMPAT_VERSION);
+ 
+ 	err = ubifs_write_node(c, sup, UBIFS_SB_NODE_SZ, 0, 0, UBI_LONGTERM);
+ 	kfree(sup);
+@@ -532,17 +533,39 @@ int ubifs_read_superblock(struct ubifs_info *c)
+ 	if (IS_ERR(sup))
+ 		return PTR_ERR(sup);
+ 
++	c->fmt_version = le32_to_cpu(sup->fmt_version);
++	c->ro_compat_version = le32_to_cpu(sup->ro_compat_version);
++
+ 	/*
+ 	 * The software supports all previous versions but not future versions,
+ 	 * due to the unavailability of time-travelling equipment.
+ 	 */
+-	c->fmt_version = le32_to_cpu(sup->fmt_version);
+ 	if (c->fmt_version > UBIFS_FORMAT_VERSION) {
+-		ubifs_err("on-flash format version is %d, but software only "
+-			  "supports up to version %d", c->fmt_version,
+-			  UBIFS_FORMAT_VERSION);
+-		err = -EINVAL;
+-		goto out;
++		struct super_block *sb = c->vfs_sb;
++		int mounting_ro = sb->s_flags & MS_RDONLY;
++
++		ubifs_assert(!c->ro_media || mounting_ro);
++		if (!mounting_ro ||
++		    c->ro_compat_version > UBIFS_RO_COMPAT_VERSION) {
++			ubifs_err("on-flash format version is w%d/r%d, but "
++				  "software only supports up to version "
++				  "w%d/r%d", c->fmt_version,
++				  c->ro_compat_version, UBIFS_FORMAT_VERSION,
++				  UBIFS_RO_COMPAT_VERSION);
++			if (c->ro_compat_version <= UBIFS_RO_COMPAT_VERSION) {
++				ubifs_msg("only R/O mounting is possible");
++				err = -EROFS;
++			} else
++				err = -EINVAL;
++			goto out;
++		}
++
++		/*
++		 * The FS is mounted R/O, and the media format is
++		 * R/O-compatible with the UBIFS implementation, so we can
++		 * mount.
++		 */
++		c->rw_incompat = 1;
+ 	}
+ 
+ 	if (c->fmt_version < 3) {
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 974bb27..de2d61d 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1349,8 +1349,9 @@ static int mount_ubifs(struct ubifs_info *c)
+ 	x = (long long)c->log_lebs * c->leb_size + c->max_bud_bytes;
+ 	ubifs_msg("journal size:       %lld bytes (%lld KiB, %lld MiB, %d "
+ 		  "LEBs)", x, x >> 10, x >> 20, c->log_lebs + c->max_bud_cnt);
+-	ubifs_msg("media format:       %d (latest is %d)",
+-		  c->fmt_version, UBIFS_FORMAT_VERSION);
++	ubifs_msg("media format:       w%d/r%d (latest is w%d/r%d)",
++		  c->fmt_version, c->ro_compat_version,
++		  UBIFS_FORMAT_VERSION, UBIFS_RO_COMPAT_VERSION);
+ 	ubifs_msg("default compressor: %s", ubifs_compr_name(c->default_compr));
+ 	ubifs_msg("reserved for root:  %llu bytes (%llu KiB)",
+ 		c->report_rp_size, c->report_rp_size >> 10);
+@@ -1490,6 +1491,15 @@ static int ubifs_remount_rw(struct ubifs_info *c)
+ {
+ 	int err, lnum;
+ 
++	if (c->rw_incompat) {
++		ubifs_err("the file-system is not R/W-compatible");
++		ubifs_msg("on-flash format version is w%d/r%d, but software "
++			  "only supports up to version w%d/r%d", c->fmt_version,
++			  c->ro_compat_version, UBIFS_FORMAT_VERSION,
++			  UBIFS_RO_COMPAT_VERSION);
++		return -EROFS;
++	}
++
+ 	mutex_lock(&c->umount_mutex);
+ 	dbg_save_space_info(c);
+ 	c->remounting_rw = 1;
+diff --git a/fs/ubifs/ubifs-media.h b/fs/ubifs/ubifs-media.h
+index b25fc36..3eee07e 100644
+--- a/fs/ubifs/ubifs-media.h
++++ b/fs/ubifs/ubifs-media.h
+@@ -36,9 +36,31 @@
+ /* UBIFS node magic number (must not have the padding byte first or last) */
+ #define UBIFS_NODE_MAGIC  0x06101831
+ 
+-/* UBIFS on-flash format version */
++/*
++ * UBIFS on-flash format version. This version is increased when the on-flash
++ * format is changing. If this happens, UBIFS is will support older versions as
++ * well. But older UBIFS code will not support newer formats. Format changes
++ * will be rare and only when absolutely necessary, e.g. to fix a bug or to add
++ * a new feature.
++ *
++ * UBIFS went into mainline kernel with format version 4. The older formats
++ * were development formats.
++ */
+ #define UBIFS_FORMAT_VERSION 4
+ 
++/*
++ * Read-only compatibility version. If the UBIFS format is changed, older UBIFS
++ * implementations will not be able to mount newer formats in read-write mode.
++ * However, depending on the change, it may be possible to mount newer formats
++ * in R/O mode. This is indicated by the R/O compatibility version which is
++ * stored in the super-block.
++ *
++ * This is needed to support boot-loaders which only need R/O mounting. With
++ * this flag it is possible to do UBIFS format changes without a need to update
++ * boot-loaders.
++ */
++#define UBIFS_RO_COMPAT_VERSION 0
++
+ /* Minimum logical eraseblock size in bytes */
+ #define UBIFS_MIN_LEB_SZ (15*1024)
+ 
+@@ -53,7 +75,7 @@
+ 
+ /*
+  * If compressed data length is less than %UBIFS_MIN_COMPRESS_DIFF bytes
+- * shorter than uncompressed data length, UBIFS preferes to leave this data
++ * shorter than uncompressed data length, UBIFS prefers to leave this data
+  * node uncompress, because it'll be read faster.
+  */
+ #define UBIFS_MIN_COMPRESS_DIFF 64
+@@ -586,6 +608,7 @@ struct ubifs_pad_node {
+  * @padding2: reserved for future, zeroes
+  * @time_gran: time granularity in nanoseconds
+  * @uuid: UUID generated when the file system image was created
++ * @ro_compat_version: UBIFS R/O compatibility version
+  */
+ struct ubifs_sb_node {
+ 	struct ubifs_ch ch;
+@@ -612,7 +635,8 @@ struct ubifs_sb_node {
+ 	__le64 rp_size;
+ 	__le32 time_gran;
+ 	__u8 uuid[16];
+-	__u8 padding2[3972];
++	__le32 ro_compat_version;
++	__u8 padding2[3968];
+ } __attribute__ ((packed));
+ 
+ /**
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index e93790a..56e057b 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -930,6 +930,7 @@ struct ubifs_debug_info;
+  * @cmt_no: commit number (last successfully completed commit)
+  * @cnt_lock: protects @highest_inum and @max_sqnum counters
+  * @fmt_version: UBIFS on-flash format version
++ * @ro_compat_version: R/O compatibility version
+  * @uuid: UUID from super block
+  *
+  * @lhead_lnum: log head logical eraseblock number
+@@ -962,6 +963,7 @@ struct ubifs_debug_info;
+  *                   recovery)
+  * @bulk_read: enable bulk-reads
+  * @default_compr: default compression algorithm (%UBIFS_COMPR_LZO, etc)
++ * @rw_incompat: the media is not R/W compatible
+  *
+  * @tnc_mutex: protects the Tree Node Cache (TNC), @zroot, @cnext, @enext, and
+  *             @calc_idx_sz
+@@ -1175,6 +1177,7 @@ struct ubifs_info {
+ 	unsigned long long cmt_no;
+ 	spinlock_t cnt_lock;
+ 	int fmt_version;
++	int ro_compat_version;
+ 	unsigned char uuid[16];
+ 
+ 	int lhead_lnum;
+@@ -1203,6 +1206,7 @@ struct ubifs_info {
+ 	unsigned int no_chk_data_crc:1;
+ 	unsigned int bulk_read:1;
+ 	unsigned int default_compr:2;
++	unsigned int rw_incompat:1;
+ 
+ 	struct mutex tnc_mutex;
+ 	struct ubifs_zbranch zroot;
+-- 
+1.5.4.3
+

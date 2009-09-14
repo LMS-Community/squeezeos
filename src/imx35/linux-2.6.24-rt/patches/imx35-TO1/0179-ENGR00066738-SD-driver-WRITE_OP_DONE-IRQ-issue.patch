@@ -1,0 +1,160 @@
+From 05e84989d23f05fe6149bd9fc77fa3b2357fcef4 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 20 May 2008 10:27:40 +0800
+Subject: [PATCH] ENGR00066738 SD driver WRITE_OP_DONE IRQ issue
+
+Use the WRITE_OP_DONE IRQ mechanism to instead of the polling
+the responsed bit in the status reg.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ drivers/mmc/host/mxc_mmc.c |  100 ++++++++++++++++++++++---------------------
+ 1 files changed, 51 insertions(+), 49 deletions(-)
+
+diff --git a/drivers/mmc/host/mxc_mmc.c b/drivers/mmc/host/mxc_mmc.c
+index 2796030..ce013c0 100644
+--- a/drivers/mmc/host/mxc_mmc.c
++++ b/drivers/mmc/host/mxc_mmc.c
+@@ -803,6 +803,7 @@ static irqreturn_t mxcmci_gpio_irq(int irq, void *devid)
+ static irqreturn_t mxcmci_irq(int irq, void *devid)
+ {
+ 	struct mxcmci_host *host = devid;
++	struct mmc_data *data = host->data;
+ 	unsigned int status = 0;
+ 	u32 intctrl;
+ 
+@@ -811,9 +812,52 @@ static irqreturn_t mxcmci_irq(int irq, void *devid)
+ 	}
+ 
+ 	status = __raw_readl(host->base + MMC_STATUS);
++	pr_debug("MXC MMC IRQ status is 0x%x.\n", status);
+ #ifdef CONFIG_MMC_DEBUG
+ 	dump_status(__FUNCTION__, status);
+ #endif
++	if (status & (STATUS_WRITE_OP_DONE | STATUS_READ_OP_DONE)) {
++		pr_debug(KERN_INFO "MXC MMC IO OP DONE INT.\n");
++		intctrl = __raw_readl(host->base + MMC_INT_CNTR);
++		__raw_writel((~(INT_CNTR_WRITE_OP_DONE | INT_CNTR_READ_OP_DONE)
++			      & intctrl), host->base + MMC_INT_CNTR);
++
++		pr_debug("%s:READ/WRITE OPERATION DONE\n", DRIVER_NAME);
++		/* check for time out and CRC errors */
++		status = __raw_readl(host->base + MMC_STATUS);
++		if (status & STATUS_READ_OP_DONE) {
++			if (status & STATUS_TIME_OUT_READ) {
++				pr_debug("%s: Read time out occurred\n",
++					 DRIVER_NAME);
++				data->error = -ETIMEDOUT;
++				__raw_writel(STATUS_TIME_OUT_READ,
++					     host->base + MMC_STATUS);
++			} else if (status & STATUS_READ_CRC_ERR) {
++				pr_debug("%s: Read CRC error occurred\n",
++					 DRIVER_NAME);
++				data->error = -EILSEQ;
++				__raw_writel(STATUS_READ_CRC_ERR,
++					     host->base + MMC_STATUS);
++			}
++			__raw_writel(STATUS_READ_OP_DONE,
++				     host->base + MMC_STATUS);
++		}
++
++		/* check for CRC errors */
++		if (status & STATUS_WRITE_OP_DONE) {
++			if (status & STATUS_WRITE_CRC_ERR) {
++				pr_debug("%s: Write CRC error occurred\n",
++					 DRIVER_NAME);
++				data->error = -EILSEQ;
++				__raw_writel(STATUS_WRITE_CRC_ERR,
++					     host->base + MMC_STATUS);
++			}
++			__raw_writel(STATUS_WRITE_OP_DONE,
++				     host->base + MMC_STATUS);
++		}
++
++		mxcmci_data_done(host, status);
++	}
+ 	if (status & STATUS_END_CMD_RESP) {
+ 		__raw_writel(STATUS_END_CMD_RESP, host->base + MMC_STATUS);
+ 		mxcmci_cmd_done(host, status);
+@@ -1044,7 +1088,6 @@ static struct mmc_host_ops mxcmci_ops = {
+ static void mxcmci_dma_irq(void *devid, int error, unsigned int cnt)
+ {
+ 	struct mxcmci_host *host = devid;
+-	struct mmc_data *data = host->data;
+ 	u32 status;
+ 	ulong nob, blk_size, i, blk_len;
+ 
+@@ -1066,54 +1109,11 @@ static void mxcmci_dma_irq(void *devid, int error, unsigned int cnt)
+ 	pr_debug("%s: REM_NOB:%lu REM_BLK_SIZE:%lu\n", DRIVER_NAME, nob,
+ 		 blk_size);
+ 	i = 0;
+-	do {
+-		status = __raw_readl(host->base + MMC_STATUS);
+-		udelay(1);
+-	} while (!(status & (STATUS_READ_OP_DONE | STATUS_WRITE_OP_DONE)));
+-#ifdef CONFIG_MMC_DEBUG
+-	dump_status(__FUNCTION__, status);
+-#endif
+-	if (status & (STATUS_READ_OP_DONE | STATUS_WRITE_OP_DONE)) {
+-		pr_debug("%s:READ/WRITE OPERATION DONE\n", DRIVER_NAME);
+-		/* check for time out and CRC errors */
+-		status = __raw_readl(host->base + MMC_STATUS);
+-		if (status & STATUS_READ_OP_DONE) {
+-			if (status & STATUS_TIME_OUT_READ) {
+-				pr_debug("%s: Read time out occurred\n",
+-					 DRIVER_NAME);
+-				data->error = -ETIMEDOUT;
+-				__raw_writel(STATUS_TIME_OUT_READ,
+-					     host->base + MMC_STATUS);
+-			} else if (status & STATUS_READ_CRC_ERR) {
+-				pr_debug("%s: Read CRC error occurred\n",
+-					 DRIVER_NAME);
+-				data->error = -EILSEQ;
+-				__raw_writel(STATUS_READ_CRC_ERR,
+-					     host->base + MMC_STATUS);
+-			}
+-			__raw_writel(STATUS_READ_OP_DONE,
+-				     host->base + MMC_STATUS);
+-		}
+-
+-		/* check for CRC errors */
+-		if (status & STATUS_WRITE_OP_DONE) {
+-			if (status & STATUS_WRITE_CRC_ERR) {
+-				pr_debug("%s: Write CRC error occurred\n",
+-					 DRIVER_NAME);
+-				data->error = -EILSEQ;
+-				__raw_writel(STATUS_WRITE_CRC_ERR,
+-					     host->base + MMC_STATUS);
+-			}
+-			__raw_writel(STATUS_WRITE_OP_DONE,
+-				     host->base + MMC_STATUS);
+-		}
+-	} else {
+-		data->error = -EIO;
+-		pr_debug("%s:%d: MXC MMC DMA transfer failed.\n", __FUNCTION__,
+-			 __LINE__);
+-	}
+ 
+-	mxcmci_data_done(host, status);
++	/* Enable the WRITE OP Done INT */
++	status = __raw_readl(host->base + MMC_INT_CNTR);
++	__raw_writel((INT_CNTR_READ_OP_DONE | INT_CNTR_WRITE_OP_DONE | status),
++		     host->base + MMC_INT_CNTR);
+ }
+ #endif
+ 
+@@ -1380,8 +1380,10 @@ static int mxcmci_resume(struct platform_device *pdev)
+ 	gpio_sdhc_active(pdev->id);
+ 
+ 	/* enable pwr supply for SDHC */
+-	if (host->regulator_mmc)
++	if (host->regulator_mmc) {
+ 		regulator_enable(host->regulator_mmc);
++		msleep(300);
++	}
+ 
+ 	clk_enable(host->clk);
+ 
+-- 
+1.5.4.4
+

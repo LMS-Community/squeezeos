@@ -2,6 +2,8 @@ require autoconf.inc
 
 PR = "r1"
 
+LICENSE = "GPLv2"
+
 PARALLEL_MAKE = ""
 
 DEPENDS += "m4-native"

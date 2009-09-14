@@ -1,0 +1,49 @@
+From 377a3f8b6a71a988514404dda6cb9032c68085e5 Mon Sep 17 00:00:00 2001
+From: Robby Cai <r63905@freescale.com>
+Date: Thu, 25 Dec 2008 14:26:15 +0800
+Subject: [PATCH] ENGR00103608: Fix MX32/MX27 VPU Build Error
+
+Fix MX32/MX27 VPU Build Error, due to mxc_pg_disable/mxc_pg_enable
+un-implemented on these two platforms.
+
+Signed-off-by: Robby Cai <r63905@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |    9 ++++++---
+ 1 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index b765608..833fd45 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -607,7 +607,7 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ static int vpu_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	if (codec_done == 1)
+-		return -EINVAL;
++		return -EAGAIN;
+ 
+ 	clk_enable(vpu_clk);
+ 	if (bitwork_mem.cpu_addr != 0) {
+@@ -622,14 +622,17 @@ static int vpu_suspend(struct platform_device *pdev, pm_message_t state)
+ 	}
+ 
+ 	clk_disable(vpu_clk);
+-	mxc_pg_enable(pdev);
++
++	if (cpu_is_mx37() || cpu_is_mx51())
++		mxc_pg_enable(pdev);
+ 
+ 	return 0;
+ }
+ 
+ static int vpu_resume(struct platform_device *pdev)
+ {
+-	mxc_pg_disable(pdev);
++	if (cpu_is_mx37() || cpu_is_mx51())
++		mxc_pg_disable(pdev);
+ 
+ 	clk_enable(vpu_clk);
+ 
+-- 
+1.5.4.4
+

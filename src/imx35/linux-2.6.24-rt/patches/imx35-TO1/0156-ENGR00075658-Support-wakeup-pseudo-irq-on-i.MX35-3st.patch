@@ -1,0 +1,80 @@
+From 2fbfde491869008237a7030174043bb7e1682dc6 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Thu, 8 May 2008 16:10:49 +0800
+Subject: [PATCH] ENGR00075658 Support wakeup pseudo irq on i.MX35 3stack
+
+Add set_wake function to enable or disable parent irq as wakeup irq
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/mach-mx35/clock.c           |    2 +-
+ arch/arm/mach-mx35/mx35_3stack_irq.c |   27 +++++++++++++++++++++++++++
+ 2 files changed, 28 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/clock.c b/arch/arm/mach-mx35/clock.c
+index f493145..6860f3a 100644
+--- a/arch/arm/mach-mx35/clock.c
++++ b/arch/arm/mach-mx35/clock.c
+@@ -1259,7 +1259,7 @@ static int _clk_cko1_set_parent(struct clk *clk, struct clk *parent)
+ 		reg |= 0x11 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+ 	else if (parent == &uart_clk[1])
+ 		reg |= 0x12 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+-	else if (parent == &asrc_clk[0])
++	else if (parent == &asrc_clk[1])
+ 		reg |= 0x13 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+ 	else
+ 		return -EINVAL;
+diff --git a/arch/arm/mach-mx35/mx35_3stack_irq.c b/arch/arm/mach-mx35/mx35_3stack_irq.c
+index e7beabf..b5d3305 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_irq.c
++++ b/arch/arm/mach-mx35/mx35_3stack_irq.c
+@@ -45,6 +45,7 @@
+  */
+ static unsigned long pseudo_irq_pending;
+ static unsigned long pseudo_irq_enable;
++static unsigned long pseudo_irq_wakeup;
+ static atomic_t pseudo_irq_state = ATOMIC_INIT(0);
+ 
+ /*
+@@ -132,12 +133,38 @@ static void pseudo_enable_irq(u32 irq)
+ 	schedule_work(&mcu_state_ws);
+ }
+ 
++/*
++ * set pseudo irq as a wake-up source.
++ * @param irq           a pseudo virtual irq number
++ * @param enable	enable as wake-up if equal to non-ero
++ * @return 	This function return 0 on success
++ */
++static int pseudo_set_wake_irq(u32 irq, u32 enable)
++{
++	int index = irq - MXC_PSEUDO_IO_BASE;
++
++	if (index >= MXC_MAX_PSEUDO_IO_LINES)
++		return -ENODEV;
++
++	if (enable) {
++		if (!pseudo_irq_wakeup)
++			enable_irq_wake(MXC_PSEUDO_PARENT);
++		pseudo_irq_wakeup |= (1 << index);
++	} else {
++		pseudo_irq_wakeup &= ~(1 << index);
++		if (!pseudo_irq_wakeup)
++			disable_irq_wake(MXC_PSEUDO_PARENT);
++	}
++	return 0;
++}
++
+ static struct irq_chip pseudo_irq_chip = {
+ 	.ack = pseudo_ack_irq,
+ 	.mask = pseudo_mask_irq,
+ 	.disable = pseudo_disable_irq,
+ 	.unmask = pseudo_unmask_irq,
+ 	.enable = pseudo_enable_irq,
++	.set_wake = pseudo_set_wake_irq,
+ };
+ 
+ static void mxc_pseudo_irq_handler(u32 irq, struct irq_desc *desc)
+-- 
+1.5.4.4
+

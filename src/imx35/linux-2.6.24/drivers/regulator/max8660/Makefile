@@ -1,0 +1,1 @@
+obj-$(CONFIG_REGULATOR_MAX8660) += reg-max8660.o

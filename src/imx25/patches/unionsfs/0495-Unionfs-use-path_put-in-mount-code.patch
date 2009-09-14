@@ -1,0 +1,68 @@
+From d22181e83ceea60cb20af1896d81080f43df1ac3 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Jan 2009 23:10:33 -0500
+Subject: [PATCH] Unionfs: use path_put in mount code
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/main.c |   27 ++++-----------------------
+ 1 files changed, 4 insertions(+), 23 deletions(-)
+
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index fea670b..8b5714a 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -415,11 +415,7 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ out:
+ 	if (err) {
+ 		for (i = 0; i < branches; i++)
+-			if (lower_root_info->lower_paths[i].dentry) {
+-				dput(lower_root_info->lower_paths[i].dentry);
+-				/* initialize: can't use unionfs_mntput here */
+-				mntput(lower_root_info->lower_paths[i].mnt);
+-			}
++			path_put(&lower_root_info->lower_paths[i]);
+ 
+ 		kfree(lower_root_info->lower_paths);
+ 		kfree(UNIONFS_SB(sb)->data);
+@@ -510,17 +506,8 @@ out_error:
+ 	if (lower_root_info && lower_root_info->lower_paths) {
+ 		for (bindex = lower_root_info->bstart;
+ 		     bindex >= 0 && bindex <= lower_root_info->bend;
+-		     bindex++) {
+-			struct dentry *d;
+-			struct vfsmount *m;
+-
+-			d = lower_root_info->lower_paths[bindex].dentry;
+-			m = lower_root_info->lower_paths[bindex].mnt;
+-
+-			dput(d);
+-			/* initializing: can't use unionfs_mntput here */
+-			mntput(m);
+-		}
++		     bindex++)
++			path_put(&lower_root_info->lower_paths[bindex]);
+ 	}
+ 
+ 	kfree(lower_root_info->lower_paths);
+@@ -679,16 +666,10 @@ out_dput:
+ 		for (bindex = lower_root_info->bstart;
+ 		     bindex <= lower_root_info->bend; bindex++) {
+ 			struct dentry *d;
+-			struct vfsmount *m;
+-
+ 			d = lower_root_info->lower_paths[bindex].dentry;
+-			m = lower_root_info->lower_paths[bindex].mnt;
+-
+-			dput(d);
+-			/* initializing: can't use unionfs_mntput here */
+-			mntput(m);
+ 			/* drop refs we took earlier */
+ 			atomic_dec(&d->d_sb->s_active);
++			path_put(&lower_root_info->lower_paths[bindex]);
+ 		}
+ 		kfree(lower_root_info->lower_paths);
+ 		kfree(lower_root_info);
+-- 
+1.5.4.3
+

@@ -3,14 +3,16 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-PR = "r1"
+PR = "r6"
 
 PROVIDES = "marvell-gspi-module"
 
 DEPENDS = "virtual/kernel"
 RDEPENDS = "wireless-tools marvell-wlan-tools"
 
-SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686"
+SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686 \
+	file://wlan-gspi \
+	"
 
 S = "${WORKDIR}/src_gspi8686"
 
@@ -36,9 +38,13 @@ do_install() {
 	install -m 0755 -d ${D}/${base_libdir}/firmware
 	install -m 0644 ${S}/FwImage/gspi8686.bin ${D}/${base_libdir}/firmware/gspi8686.bin
 	install -m 0644 ${S}/FwImage/helper_gspi.bin ${D}/${base_libdir}/firmware/helper_gspi.bin
+
+	# Install init script
+	install -m 0755 -d ${D}${sysconfdir}/init.d
+	install -m 0755 ${WORKDIR}/wlan-gspi ${D}${sysconfdir}/init.d/wlan
 }
 
 PACKAGES = "marvell-gspi-module-dbg marvell-gspi-module"
 
-FILES_marvell-gspi-module = "${base_libdir}/modules/${KERNEL_VERSION} ${base_libdir}/firmware"
+FILES_marvell-gspi-module = "${base_libdir}/modules/${KERNEL_VERSION} ${base_libdir}/firmware ${sysconfdir}"
 FILES_marvell-gspi-module-dbg = "${base_libdir}/modules/${KERNEL_VERSION}/.debug"

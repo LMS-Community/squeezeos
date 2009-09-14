@@ -1,0 +1,68 @@
+From fd5d2eb0cdc07cbaa9f89e22f735d413b429ebb0 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+Date: Thu, 26 Feb 2009 11:36:05 -0600
+Subject: [PATCH] ENGR00108591: MX51: Revert STOP mode voltage change.
+
+Since some TO2.0 parts fail inconsistently when the STOP mode voltage is dropped
+to 0.9V, leave the LP domain voltage at 1.2V in STOP mode.
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+---
+ arch/arm/mach-mx51/mx51_3stack.c |   39 ++++++++++++++++++++-----------------
+ 1 files changed, 21 insertions(+), 18 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 8b5e025..60ac37f 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -163,26 +163,29 @@ static int __init mc13892_reg_int(void)
+ 
+ 	gp = regulator_get(NULL, "SW1_STBY");
+ 	lp = regulator_get(NULL, "SW2_STBY");
+-	regulator_enable(gp);
+-	regulator_enable(lp);
+-
+-	if (regulator_set_voltage(gp, 700000))
+-		printk(KERN_INFO "cannot set GP STBY voltage\n");
+-
+-	if ((mxc_cpu_is_rev(CHIP_REV_2_0)) < 0) {
+-		if (regulator_set_voltage(lp, 1100000))
+-			printk(KERN_INFO "cannot set LP STBY voltage\n");
+-	} else {
+-		/* Cannot drop voltage for TO2.0 */
+-		if (regulator_set_voltage(lp, 900000))
+-			printk(KERN_INFO "cannot set LP STBY voltage\n");
++	if (gp != NULL) {
++		regulator_enable(gp);
++		if (regulator_set_voltage(gp, 700000))
++			printk(KERN_INFO "cannot set GP STBY voltage\n");
++		regulator_disable(gp);
++		regulator_put(gp, NULL);
+ 	}
+ 
+-	regulator_disable(gp);
+-	regulator_disable(lp);
+-
+-	regulator_put(gp, NULL);
+-	regulator_put(lp, NULL);
++	if (lp != NULL) {
++		regulator_enable(lp);
++		if ((mxc_cpu_is_rev(CHIP_REV_2_0)) < 0) {
++			if (regulator_set_voltage(lp, 1100000))
++				printk(KERN_INFO
++					"cannot set LP STBY voltage\n");
++		} else {
++			/* Cannot drop voltage for TO2.0 */
++			if (regulator_set_voltage(lp, 1200000))
++				printk(KERN_INFO
++					"cannot set LP STBY voltage\n");
++		}
++		regulator_disable(lp);
++		regulator_put(lp, NULL);
++	}
+ 
+ 	/* subscribe PWRON1 event to enable ON_OFF key */
+ 	power_key_event.param = NULL;
+-- 
+1.5.4.4
+

@@ -1,0 +1,172 @@
+Create an accurate timestamp for sched_clock() and printk_clock().
+
+Without this patch the tools like 'top' will display a far too low CPU-load usage.
+This is because the sched_clock() routine is used for these kind of statistics by
+the scheduler. The scheduler even uses it to schedule 'fair' between tasks.
+If this is not available, the kernel will count CPU-usage in jiffies. 
+Tasks that never use more CPU time than a jiffy continuously (without rescheduling) will
+be accounted for CPU-time 0. Using a sub-microsecond clock this administration
+will become much more accurate.
+
+For accurate timestamps in the printk logging this routine is also used.
+Usefull for detecting with logging is produced by the kernel and how much
+time there is between each line printed.
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ arch/arm/plat-mxc/time.c |  104 +++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 100 insertions(+), 4 deletions(-)
+
+Index: linux-2.6.26/arch/arm/plat-mxc/time.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/time.c	2009-08-25 20:28:51.000000000 +0200
++++ linux-2.6.26/arch/arm/plat-mxc/time.c	2009-08-25 23:21:25.000000000 +0200
+@@ -36,6 +36,7 @@
+ #include <linux/clocksource.h>
+ #include <linux/clockchips.h>
+ #include <linux/mtd/xip.h>
++#include <linux/sched.h> /* for sched_clock() prototype */
+ #include <asm/hardware.h>
+ #include <asm/mach/time.h>
+ 
+@@ -94,6 +95,12 @@
+ 
+ extern unsigned long clk_early_get_timer_rate(void);
+ 
++static int clocksource_initialised;
++static unsigned long long nsecs_per_clock;
++static DEFINE_RAW_SPINLOCK(gptcnt_reg_lock);
++
++static cycle_t __xipram mxc_gpt_read(void);
++
+ static int mxc_gpt_set_next_event(unsigned long cycles,
+ 				  struct clock_event_device *evt)
+ {
+@@ -101,7 +108,7 @@ static int mxc_gpt_set_next_event(unsign
+ 
+ 	raw_local_irq_save(flags);
+ 
+-	now = __raw_readl(MXC_GPT_GPTCNT);
++	now = (unsigned long)mxc_gpt_read();
+ 	expires = now + cycles;
+ 	__raw_writel(expires, MXC_GPT_GPTOCR1);
+ 
+@@ -184,14 +191,69 @@ static struct irqaction timer_irq = {
+ 
+ static cycle_t __xipram mxc_gpt_read(void)
+ {
+-	return __raw_readl(MXC_GPT_GPTCNT);
++        unsigned long                   flags;
++        unsigned long long              cycles, tmp_cycles;
++        u32                             cycles32;
++        static unsigned long long       upper64, prev_cycles;
++	int				rollover_before, rollover_after;
++
++	/*
++	 * On iMX25 there is a bug that time jumps backwards.
++	 * So, we add some logging in case that happens.
++	 * Since this code is used for sched_clock() as well
++	 * we first convert it to a 64 bits counter, and take
++	 * the rollover bit in hardware into account.
++	 */
++	spin_lock_irqsave(&gptcnt_reg_lock, flags);
++
++	/* This code depends on being read faster then every 356 seconds */
++	rollover_before = __raw_readl(MXC_GPT_GPTSR) & GPTSR_ROV;
++	cycles32 = __raw_readl(MXC_GPT_GPTCNT);
++	rollover_after = __raw_readl(MXC_GPT_GPTSR) & GPTSR_ROV;
++
++	/*
++	 * Check if it rolled over while reading the time. If so, read the
++         * the counter again
++	 */
++	if (unlikely(!rollover_before && rollover_after))
++		cycles32 = __raw_readl(MXC_GPT_GPTCNT);
++
++	/* Check the rollover bit */
++	if (unlikely(rollover_after)) {
++		/*
++		 * Counter has overflowed. Reset this flag.
++		 * Happens once in 356 seconds (if rate is 12Mhz)
++		 */
++		__raw_writel(GPTSR_ROV, MXC_GPT_GPTSR);
++
++		/* Count the overflows */
++		upper64 += 1LLU << 32;
++	}
++ 	cycles = upper64 | (unsigned long long)cycles32;
++
++	/*
++	 * Store the previous cycles in a tmp-var, to allow to check it
++	 * outside the spinlock/interrupt lock (printk will be recursive
++	 * if CONFIG_PRINTK_TIME is set and that would result in
++	 * the spinlock being recursively locked.)
++	 */
++	tmp_cycles = prev_cycles;
++	prev_cycles = cycles;
++
++	spin_unlock_irqrestore(&gptcnt_reg_lock, flags);
++
++	if (unlikely(cycles <= tmp_cycles)) {
++		printk(KERN_ERR "%s: GPT-count went backwards! now:%llx, prev:%llx\n",
++			__func__, cycles, tmp_cycles);
++	}
++	return cycles;
+ }
+ 
+ static struct clocksource gpt_clocksrc = {
+ 	.name = "mxc_gpt",
+ 	.rating = 300,
+ 	.read = mxc_gpt_read,
+-	.mask = CLOCKSOURCE_MASK(32),
++	.mask = CLOCKSOURCE_MASK(64),
+ 	.shift = 24,
+ 	.flags = CLOCK_SOURCE_IS_CONTINUOUS | CLOCK_SOURCE_VALID_FOR_HRES,
+ };
+@@ -251,11 +313,45 @@ void __init mxc_init_time(void)
+ 	}
+ 
+ 	pr_info("MXC GPT timer initialized, rate = %lu\n", rate);
++
++	/* Calculate the time per clocktick. Needed for sched_clock() */
++	nsecs_per_clock = (1000 * 1000 * 1000) / rate;
++	if ((nsecs_per_clock * rate) != (1000 * 1000 * 1000)) {
++		unsigned int error = ((1000 * 1000 * 1000) -
++					(nsecs_per_clock * rate));
++		error /= (rate / 1000);
++		/* Clock rate should be chosen such that there no rounding errors */
++		pr_info("WARNING: Clock divider has been truncated, "
++			"clock error %u [ps] per %llu [ns]\n",
++			error, nsecs_per_clock);
++	}
++	clocksource_initialised = 1;
++
+ 	return;
+-      err:
++err:
+ 	panic("Unable to initialize timer\n");
+ }
+ 
+ struct sys_timer mxc_timer = {
+ 	.init = mxc_init_time,
+ };
++
++/*
++ * Overload the sched_clock() implementation, because the scheduler
++ * requires an accurate timestamp for proper scheduling, it is also
++ * very useful for tools like latency_trace, top etc. Without this,
++ * jiffies will be used, which is updated at a low frequency
++ * (dependant on the timertick frequency which is about
++ * 100Hz ... 1000Hz.
++ * The scheduler will NOT notice small timeslices
++ * for threads only active for a very short time, and therefor top
++ * will display bogus (much too low) CPU load for all tasks.
++ */
++unsigned long long sched_clock(void)
++{
++	if (likely(clocksource_initialised))
++		return mxc_gpt_read() * nsecs_per_clock;
++
++	return 0;
++}
++

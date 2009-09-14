@@ -5,7 +5,7 @@ SRCREV_FORMAT = "webcore-rwebkit"
 
 # Yes, this is wrong...
 PV = "0.1+svnr${SRCREV}"
-PR = "r5"
+PR = "r6"
 
 SRC_URI = "\
   svn://svn.webkit.org/repository/webkit/trunk/;module=JavaScriptCore;proto=http \
@@ -23,12 +23,13 @@ SRC_URI = "\
 
 S = "${WORKDIR}/"
 
-inherit autotools pkgconfig
+inherit autotools_stage pkgconfig
 
 EXTRA_OECONF = "\
                 --enable-debug=no \
                 --enable-svg \
                 --enable-icon-database=yes \
+		--disable-fast-malloc \
                "
 
 do_compile_prepend() {
@@ -45,10 +46,6 @@ do_compile_prepend() {
         cp dftables ${S}/WebKitBuilds/Debug/JavaScriptCore/pcre/tmp/
         cp dftables ${S}/Programs/        
 	cd ${S}
-}
-
-do_stage() {
-	autotools_stage_all
 }
 
 PACKAGES =+ "${PN}launcher-dbg ${PN}launcher libjavascriptcore"

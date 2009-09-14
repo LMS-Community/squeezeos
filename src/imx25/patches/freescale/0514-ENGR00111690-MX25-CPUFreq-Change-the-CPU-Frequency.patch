@@ -1,0 +1,294 @@
+From e7ca4e4986a9eb56dfcec7f7479fe728955d71a4 Mon Sep 17 00:00:00 2001
+From: Xie Xiaobo <X.Xie@freescale.com>
+Date: Tue, 28 Apr 2009 12:46:25 +0800
+Subject: [PATCH] ENGR00111690 MX25 CPUFreq: Change the CPU Frequency and Core Voltage
+
+Change the CPU Frequency and Core Voltage for i.MX25.
+
+Signed-off-by: Niu Xule <b23300@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |   19 +++++-
+ arch/arm/mach-mx25/Makefile             |    2 +-
+ arch/arm/mach-mx25/bus_freq.c           |  102 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx25/clock.c              |   37 +++++++++++-
+ arch/arm/mach-mx25/crm_regs.h           |    1 +
+ arch/arm/mach-mx25/mx25_3stack.c        |   25 ++++++++
+ 6 files changed, 181 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index af1ac5e..b0e43bc 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Tue Apr 28 11:45:20 2009
++# Tue Apr 28 11:57:01 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -271,7 +271,22 @@ CONFIG_CMDLINE="noinitrd console=ttymxc0 root=/dev/mtdblock2 rw ip=off"
+ #
+ # CPU Frequency scaling
+ #
+-# CONFIG_CPU_FREQ is not set
++CONFIG_CPU_FREQ=y
++CONFIG_CPU_FREQ_TABLE=y
++# CONFIG_CPU_FREQ_DEBUG is not set
++CONFIG_CPU_FREQ_STAT=y
++# CONFIG_CPU_FREQ_STAT_DETAILS is not set
++# CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE is not set
++# CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE is not set
++CONFIG_CPU_FREQ_DEFAULT_GOV_USERSPACE=y
++# CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND is not set
++# CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE is not set
++CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
++CONFIG_CPU_FREQ_GOV_POWERSAVE=y
++CONFIG_CPU_FREQ_GOV_USERSPACE=y
++# CONFIG_CPU_FREQ_GOV_ONDEMAND is not set
++# CONFIG_CPU_FREQ_GOV_CONSERVATIVE is not set
++CONFIG_CPU_FREQ_IMX=y
+ 
+ #
+ # Floating point emulation
+diff --git a/arch/arm/mach-mx25/Makefile b/arch/arm/mach-mx25/Makefile
+index a7da089..50d3673 100644
+--- a/arch/arm/mach-mx25/Makefile
++++ b/arch/arm/mach-mx25/Makefile
+@@ -4,7 +4,7 @@
+ 
+ # Object file lists.
+ 
+-obj-y		:= system.o iomux.o cpu.o mm.o clock.o devices.o serial.o
++obj-y		:= system.o iomux.o cpu.o mm.o clock.o bus_freq.o devices.o serial.o
+ obj-$(CONFIG_MXC_SDMA_API) 	+= dma.o
+ obj-$(CONFIG_SPI_MXC)		+= mx25_3stack_cpld.o
+ obj-$(CONFIG_MACH_MX25_3DS)	+= mx25_3stack.o mx25_3stack_gpio.o
+diff --git a/arch/arm/mach-mx25/bus_freq.c b/arch/arm/mach-mx25/bus_freq.c
+new file mode 100644
+index 0000000..9fd8b43
+--- /dev/null
++++ b/arch/arm/mach-mx25/bus_freq.c
+@@ -0,0 +1,102 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file bus_freq.c
++ *
++ * @brief A common API for the Freescale Semiconductor i.MXC CPUfreq module
++ * and DVFS CORE module.
++ *
++ * The APIs are for setting bus frequency to low or high.
++ *
++ * @ingroup PM
++ */
++
++#include <linux/proc_fs.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/platform_device.h>
++#include <asm/arch/clock.h>
++#include <asm/arch/hardware.h>
++
++int low_bus_freq_mode;
++int high_bus_freq_mode;
++char *gp_reg_id = "REG3_CORE";
++
++int set_low_bus_freq(void)
++{
++	return 0;
++}
++
++int set_high_bus_freq(void)
++{
++	return 0;
++}
++
++int low_freq_bus_used(void)
++{
++	return 0;
++}
++
++/*!
++ * This is the probe routine for the bus frequency driver.
++ *
++ * @param   pdev   The platform device structure
++ *
++ * @return         The function returns 0 on success
++ *
++ */
++static int __devinit busfreq_probe(struct platform_device *pdev)
++{
++	low_bus_freq_mode = 0;
++	high_bus_freq_mode = 0;
++
++	return 0;
++}
++
++static struct platform_driver busfreq_driver = {
++	.driver = {
++		   .name = "busfreq",
++		   },
++	.probe = busfreq_probe,
++};
++
++/*!
++ * Initialise the busfreq_driver.
++ *
++ * @return  The function always returns 0.
++ */
++
++static int __init busfreq_init(void)
++{
++	if (platform_driver_register(&busfreq_driver) != 0) {
++		printk(KERN_ERR "busfreq_driver register failed\n");
++		return -ENODEV;
++	}
++
++	printk(KERN_INFO "Bus freq driver module loaded\n");
++	return 0;
++}
++
++static void __exit busfreq_cleanup(void)
++{
++	/* Unregister the device structure */
++	platform_driver_unregister(&busfreq_driver);
++}
++
++module_init(busfreq_init);
++module_exit(busfreq_cleanup);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("BusFreq driver");
++MODULE_LICENSE("GPL");
+diff --git a/arch/arm/mach-mx25/clock.c b/arch/arm/mach-mx25/clock.c
+index d4d9d4f..7ff85ee 100644
+--- a/arch/arm/mach-mx25/clock.c
++++ b/arch/arm/mach-mx25/clock.c
+@@ -23,10 +23,16 @@
+ #define OSC24M_CLK_FREQ     24000000	/* 24M reference clk */
+ #define OSC32K_CLK_FREQ     32768	/* 32.768k oscillator in */
+ 
++#if defined CONFIG_CPU_FREQ_IMX
++#define AHB_CLK_DEFAULT 133000000
++#define ARM_SRC_DEFAULT 532000000
++#endif
++
+ static struct clk mpll_clk;
+ static struct clk upll_clk;
+ static struct clk ahb_clk;
+ static struct clk upll_24610k_clk;
++int cpu_wp_nr;
+ 
+ static int _clk_enable(struct clk *clk)
+ {
+@@ -145,9 +151,36 @@ static unsigned long _clk_cpu_round_rate(struct clk *clk, unsigned long rate)
+ 
+ static int _clk_cpu_set_rate(struct clk *clk, unsigned long rate)
+ {
+-	int div, reg;
++	unsigned long div = 0x0, reg = 0x0;
+ 	unsigned long cctl = __raw_readl(MXC_CCM_CCTL);
+ 
++#if defined CONFIG_CPU_FREQ_IMX
++	struct cpu_wp *cpu_wp;
++	unsigned long ahb_clk_div = 0;
++	unsigned long arm_src = 0;
++	int i;
++
++	cpu_wp = get_cpu_wp(&cpu_wp_nr);
++	for (i = 0; i < cpu_wp_nr; i++) {
++		if (cpu_wp[i].cpu_rate == rate) {
++			div = cpu_wp[i].cpu_podf;
++			ahb_clk_div = cpu_wp[i].cpu_rate / AHB_CLK_DEFAULT - 1;
++			arm_src =
++			    (cpu_wp[i].pll_rate == ARM_SRC_DEFAULT) ? 0 : 1;
++			break;
++		}
++	}
++	if (i == cpu_wp_nr)
++		return -EINVAL;
++	reg = (cctl & ~MXC_CCM_CCTL_ARM_MASK) |
++	    (div << MXC_CCM_CCTL_ARM_OFFSET);
++	reg = (reg & ~MXC_CCM_CCTL_AHB_MASK) |
++	    (ahb_clk_div << MXC_CCM_CCTL_AHB_OFFSET);
++	reg = (reg & ~MXC_CCM_CCTL_ARM_SRC) |
++	    (arm_src << MXC_CCM_CCTL_ARM_SRC_OFFSET);
++	__raw_writel(reg, MXC_CCM_CCTL);
++	clk->rate = rate;
++#else
+ 	div = clk->parent->rate / rate;
+ 
+ 	if (div > 4 || div < 1 || ((clk->parent->rate / div) != rate))
+@@ -158,7 +191,7 @@ static int _clk_cpu_set_rate(struct clk *clk, unsigned long rate)
+ 	    (cctl & ~MXC_CCM_CCTL_ARM_MASK) | (div << MXC_CCM_CCTL_ARM_OFFSET);
+ 	__raw_writel(MXC_CCM_CCTL, reg);
+ 	clk->rate = rate;
+-
++#endif
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-mx25/crm_regs.h b/arch/arm/mach-mx25/crm_regs.h
+index 4cf074c..bf70bad 100644
+--- a/arch/arm/mach-mx25/crm_regs.h
++++ b/arch/arm/mach-mx25/crm_regs.h
+@@ -86,6 +86,7 @@
+ #define MXC_CCM_CCTL_USB_DIV_MASK   (0x3 << 16)
+ #define MXC_CCM_CCTL_CG_CTRL        (1 << 15)
+ #define MXC_CCM_CCTL_ARM_SRC        (1 << 14)
++#define MXC_CCM_CCTL_ARM_SRC_OFFSET	14
+ 
+ #define MXC_CCM_CGCR0_HCLK_ATA_OFFSET    16
+ #define MXC_CCM_CGCR0_HCLK_BROM_OFFSET   17
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index 5e97606..33e3c76 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -54,6 +54,31 @@
+ 
+ unsigned int mx25_3stack_board_io;
+ 
++/* working point(wp): 0 - 399MHz; 1 - 266MHz; 2 - 133MHz; */
++/* 24MHz input clock table */
++static struct cpu_wp cpu_wp_mx25[] = {
++	{
++	 .pll_rate = 399000000,
++	 .cpu_rate = 399000000,
++	 .cpu_podf = 0x0,
++	 .cpu_voltage = 1450000},
++	{
++	 .pll_rate = 532000000,
++	 .cpu_rate = 266000000,
++	 .cpu_podf = 0x1,
++	 .cpu_voltage = 1340000},
++	{
++	 .pll_rate = 532000000,
++	 .cpu_rate = 133000000,
++	 .cpu_podf = 0x3,
++	 .cpu_voltage = 1340000},
++};
++struct cpu_wp *get_cpu_wp(int *wp)
++{
++	*wp = 3;
++	return cpu_wp_mx25;
++}
++
+ static void mxc_nop_release(struct device *dev)
+ {
+ 	/* Nothing */
+-- 
+1.5.4.4
+

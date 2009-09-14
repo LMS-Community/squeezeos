@@ -1,0 +1,80 @@
+From 28691908d4f86e6528220bee4784b0dd49448542 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 4 Dec 2008 20:52:44 +0200
+Subject: [PATCH] UBI: fix deadlock
+
+We cannot call 'ubi_wl_get_peb()' with @ubi->buf_mutex locked,
+because 'ubi_wl_get_peb()' may force erasure, which, in turn,
+may call 'torture_peb()' which also locks the @ubi->buf_mutex
+and deadlocks.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c |   14 +++++++-------
+ 1 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index d8966ba..2e4d6bf 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -504,12 +504,9 @@ static int recover_peb(struct ubi_device *ubi, int pnum, int vol_id, int lnum,
+ 	if (!vid_hdr)
+ 		return -ENOMEM;
+ 
+-	mutex_lock(&ubi->buf_mutex);
+-
+ retry:
+ 	new_pnum = ubi_wl_get_peb(ubi, UBI_UNKNOWN);
+ 	if (new_pnum < 0) {
+-		mutex_unlock(&ubi->buf_mutex);
+ 		ubi_free_vid_hdr(ubi, vid_hdr);
+ 		return new_pnum;
+ 	}
+@@ -529,20 +526,23 @@ retry:
+ 		goto write_error;
+ 
+ 	data_size = offset + len;
++	mutex_lock(&ubi->buf_mutex);
+ 	memset(ubi->peb_buf1 + offset, 0xFF, len);
+ 
+ 	/* Read everything before the area where the write failure happened */
+ 	if (offset > 0) {
+ 		err = ubi_io_read_data(ubi, ubi->peb_buf1, pnum, 0, offset);
+ 		if (err && err != UBI_IO_BITFLIPS)
+-			goto out_put;
++			goto out_unlock;
+ 	}
+ 
+ 	memcpy(ubi->peb_buf1 + offset, buf, len);
+ 
+ 	err = ubi_io_write_data(ubi, ubi->peb_buf1, new_pnum, 0, data_size);
+-	if (err)
++	if (err) {
++		mutex_unlock(&ubi->buf_mutex);
+ 		goto write_error;
++	}
+ 
+ 	mutex_unlock(&ubi->buf_mutex);
+ 	ubi_free_vid_hdr(ubi, vid_hdr);
+@@ -553,8 +553,9 @@ retry:
+ 	ubi_msg("data was successfully recovered");
+ 	return 0;
+ 
+-out_put:
++out_unlock:
+ 	mutex_unlock(&ubi->buf_mutex);
++out_put:
+ 	ubi_wl_put_peb(ubi, new_pnum, 1);
+ 	ubi_free_vid_hdr(ubi, vid_hdr);
+ 	return err;
+@@ -567,7 +568,6 @@ write_error:
+ 	ubi_warn("failed to write to PEB %d", new_pnum);
+ 	ubi_wl_put_peb(ubi, new_pnum, 1);
+ 	if (++tries > UBI_IO_RETRIES) {
+-		mutex_unlock(&ubi->buf_mutex);
+ 		ubi_free_vid_hdr(ubi, vid_hdr);
+ 		return err;
+ 	}
+-- 
+1.5.4.3
+

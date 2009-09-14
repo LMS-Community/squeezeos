@@ -1,0 +1,74 @@
+From b74c569121a32df246a0c5df5d1209e19b038047 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 5 May 2007 19:27:33 -0400
+Subject: [PATCH] mmap: proper locking to interoperate with branch-management code
+
+Include proper read un/lock calls as in file.c.  Make unionfs_do_readpage
+static as no one else should call this helper function.
+---
+ fs/unionfs/mmap.c |   14 ++++++++++++--
+ 1 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 5302dcd..ade8c92 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -73,7 +73,7 @@ out:
+  *
+  * Readpage expects a locked page, and must unlock it.
+  */
+-int unionfs_do_readpage(struct file *file, struct page *page)
++static int unionfs_do_readpage(struct file *file, struct page *page)
+ {
+ 	int err = -EIO;
+ 	struct dentry *dentry;
+@@ -162,6 +162,7 @@ int unionfs_readpage(struct file *file, struct page *page)
+ {
+ 	int err;
+ 
++	unionfs_read_lock(file->f_dentry->d_sb);
+ 	if ((err = unionfs_file_revalidate(file, 0)))
+ 		goto out_err;
+ 
+@@ -175,6 +176,7 @@ int unionfs_readpage(struct file *file, struct page *page)
+ 
+ out_err:
+ 	unlock_page(page);
++	unionfs_read_unlock(file->f_dentry->d_sb);
+ 
+ 	return err;
+ }
+@@ -182,7 +184,13 @@ out_err:
+ int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
+ 			  unsigned to)
+ {
+-	return unionfs_file_revalidate(file, 1);
++	int err;
++
++	unionfs_read_lock(file->f_dentry->d_sb);
++	err = unionfs_file_revalidate(file, 1);
++	unionfs_read_unlock(file->f_dentry->d_sb);
++
++	return err;
+ }
+ 
+ int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
+@@ -198,6 +206,7 @@ int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
+ 
+ 	BUG_ON(file == NULL);
+ 
++	unionfs_read_lock(file->f_dentry->d_sb);
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
+ 
+@@ -247,6 +256,7 @@ out:
+ 	if (err < 0)
+ 		ClearPageUptodate(page);
+ 
++	unionfs_read_unlock(file->f_dentry->d_sb);
+ 	return err;		/* assume all is ok */
+ }
+ 
+-- 
+1.5.4.3
+

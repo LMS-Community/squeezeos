@@ -1,0 +1,87 @@
+From f4287543c966cfb510145ee62aed6f277827081a Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 19 Jan 2009 19:57:27 +0200
+Subject: [PATCH] UBIFS: document dark_wm and dead_wm better
+
+Just add more commentaries. Also some commentary fixes for
+lprops flags.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/gc.c    |   20 ++++++++++++++++++++
+ fs/ubifs/super.c |   11 ++---------
+ fs/ubifs/ubifs.h |    4 ++--
+ 3 files changed, 24 insertions(+), 11 deletions(-)
+
+diff --git a/fs/ubifs/gc.c b/fs/ubifs/gc.c
+index 0bef650..ada1be7 100644
+--- a/fs/ubifs/gc.c
++++ b/fs/ubifs/gc.c
+@@ -31,6 +31,26 @@
+  * to be reused. Garbage collection will cause the number of dirty index nodes
+  * to grow, however sufficient space is reserved for the index to ensure the
+  * commit will never run out of space.
++ *
++ * Notes about dead watermark. At current UBIFS implementation we assume that
++ * LEBs which have less than @c->dead_wm bytes of free + dirty space are full
++ * and not worth garbage-collecting. The dead watermark is one min. I/O unit
++ * size, or min. UBIFS node size, depending on what is greater. Indeed, UBIFS
++ * Garbage Collector has to synchronize the GC head's write buffer before
++ * returning, so this is about wasting one min. I/O unit. However, UBIFS GC can
++ * actually reclaim even very small pieces of dirty space by garbage collecting
++ * enough dirty LEBs, but we do not bother doing this at this implementation.
++ *
++ * Notes about dark watermark. The results of GC work depends on how big are
++ * the UBIFS nodes GC deals with. Large nodes make GC waste more space. Indeed,
++ * if GC move data from LEB A to LEB B and nodes in LEB A are large, GC would
++ * have to waste large pieces of free space at the end of LEB B, because nodes
++ * from LEB A would not fit. And the worst situation is when all nodes are of
++ * maximum size. So dark watermark is the amount of free + dirty space in LEB
++ * which are guaranteed to be reclaimable. If LEB has less space, the GC migh
++ * be unable to reclaim it. So, LEBs with free + dirty greater than dark
++ * watermark are "good" LEBs from GC's point of few. The other LEBs are not so
++ * good, and GC takes extra care when moving them.
+  */
+ 
+ #include <linux/pagemap.h>
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 6696065..89445c4 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -571,15 +571,8 @@ static int init_constants_early(struct ubifs_info *c)
+ 	c->ranges[UBIFS_IDX_NODE].max_len = INT_MAX;
+ 
+ 	/*
+-	 * Initialize dead and dark LEB space watermarks.
+-	 *
+-	 * Dead space is the space which cannot be used. Its watermark is
+-	 * equivalent to min. I/O unit or minimum node size if it is greater
+-	 * then min. I/O unit.
+-	 *
+-	 * Dark space is the space which might be used, or might not, depending
+-	 * on which node should be written to the LEB. Its watermark is
+-	 * equivalent to maximum UBIFS node size.
++	 * Initialize dead and dark LEB space watermarks. See gc.c for comments
++	 * about these values.
+ 	 */
+ 	c->dead_wm = ALIGN(MIN_WRITE_SZ, c->min_io_size);
+ 	c->dark_wm = ALIGN(UBIFS_MAX_NODE_SZ, c->min_io_size);
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index b6af172..62e99f1 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -423,9 +423,9 @@ struct ubifs_unclean_leb {
+  * LEB properties flags.
+  *
+  * LPROPS_UNCAT: not categorized
+- * LPROPS_DIRTY: dirty > 0, not index
++ * LPROPS_DIRTY: dirty > free, dirty >= @c->dead_wm, not index
+  * LPROPS_DIRTY_IDX: dirty + free > @c->min_idx_node_sze and index
+- * LPROPS_FREE: free > 0, not empty, not index
++ * LPROPS_FREE: free > 0, dirty < @c->dead_wm, not empty, not index
+  * LPROPS_HEAP_CNT: number of heaps used for storing categorized LEBs
+  * LPROPS_EMPTY: LEB is empty, not taken
+  * LPROPS_FREEABLE: free + dirty == leb_size, not index, not taken
+-- 
+1.5.4.3
+

@@ -1,0 +1,150 @@
+From ae0649e5809de3f059f65e24ae88134af7f19580 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Fri, 25 Jan 2008 21:09:05 -0600
+Subject: [PATCH] ENGR00066550 Modify Epson VGA panel to use regulator api
+
+This patch modifies the 3-stack Epson VGA panel driver to use the regulator
+API.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack.c      |   10 +++++++-
+ drivers/video/mxc/mxcfb_epson_vga.c |   38 +++++++++++++++++-----------------
+ include/asm-arm/arch-mxc/mxc.h      |    6 +++++
+ 3 files changed, 33 insertions(+), 21 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 274fbfa..d1a69c7 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -1,7 +1,7 @@
+ /*
+  *  Copyright (C) 2000 Deep Blue Solutions Ltd
+  *  Copyright (C) 2002 Shane Nay (shane@minirl.com)
+- *  Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -200,6 +200,12 @@ static void lcd_reset(void)
+ 	msleep(60);
+ }
+ 
++static struct mxc_lcd_platform_data lcd_data = {
++	.io_reg = "VGEN",
++	.core_reg = "VMMC1",
++	.reset = lcd_reset,
++};
++
+ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	{
+ 	 .modalias = "pmic_spi",
+@@ -209,7 +215,7 @@ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	 .chip_select = 2,},
+ 	{
+ 	 .modalias = "lcd_spi",
+-	 .platform_data = (void *)lcd_reset,
++	 .platform_data = (void *)&lcd_data,
+ 	 .max_speed_hz = 5000000,
+ 	 .bus_num = 1,
+ 	 .chip_select = 2,},
+diff --git a/drivers/video/mxc/mxcfb_epson_vga.c b/drivers/video/mxc/mxcfb_epson_vga.c
+index 276e861..b2338ee 100644
+--- a/drivers/video/mxc/mxcfb_epson_vga.c
++++ b/drivers/video/mxc/mxcfb_epson_vga.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -33,9 +33,9 @@
+ #include <linux/errno.h>
+ #include <linux/fb.h>
+ #include <linux/init.h>
++#include <linux/regulator/regulator.h>
+ #include <linux/spi/spi.h>
+ #include <asm/arch/mxcfb.h>
+-#include <asm/arch/pmic_power.h>
+ 
+ static struct spi_device *lcd_spi;
+ 
+@@ -44,6 +44,8 @@ static void lcd_poweron(void);
+ static void lcd_poweroff(void);
+ 
+ static void (*lcd_reset) (void);
++static struct regulator *io_reg;
++static struct regulator *core_reg;
+ 
+ static struct fb_videomode video_modes[] = {
+ 	{
+@@ -114,26 +116,21 @@ static struct notifier_block nb = {
+ static int __devinit lcd_spi_probe(struct spi_device *spi)
+ {
+ 	int i;
+-	t_regulator_voltage voltage;
+-	t_regulator_lp_mode lpmode = LOW_POWER_CTRL_BY_PIN;
++	struct mxc_lcd_platform_data *plat = spi->dev.platform_data;
+ 
+ 	lcd_spi = spi;
+ 
+-	/* open the VGEN of pmic to supply VDDI */
+-	voltage.vgen = VGEN_1_8V;
+-	pmic_power_regulator_set_voltage(REGU_VGEN, voltage);
+-	pmic_power_regulator_set_lp_mode(REGU_VGEN, lpmode);
+-	pmic_power_regulator_on(REGU_VGEN);
+-
+-	/* open the VMMC1 of pmic to supply VDDI */
+-	voltage.vmmc1 = VMMC_2_8V;
+-	pmic_power_regulator_set_voltage(REGU_VMMC1, voltage);
+-	pmic_power_regulator_set_lp_mode(REGU_VMMC1, lpmode);
+-	pmic_power_regulator_on(REGU_VMMC1);
+-
+-	if (spi->dev.platform_data) {
+-		lcd_reset = (void (*)(void))spi->dev.platform_data;
+-		lcd_reset();
++	if (plat) {
++		lcd_reset = plat->reset;
++		if (lcd_reset)
++			lcd_reset();
++
++		io_reg = regulator_get(&spi->dev, plat->io_reg);
++		regulator_set_voltage(io_reg, 1800000);
++		regulator_enable(io_reg);
++		core_reg = regulator_get(&spi->dev, plat->core_reg);
++		regulator_set_voltage(core_reg, 2800000);
++		regulator_enable(core_reg);
+ 	}
+ 
+ 	spi->bits_per_word = 9;
+@@ -158,6 +155,9 @@ static int __devexit lcd_spi_remove(struct spi_device *spi)
+ {
+ 	fb_unregister_client(&nb);
+ 	lcd_poweroff();
++	regulator_put(io_reg, &spi->dev);
++	regulator_put(core_reg, &spi->dev);
++
+ 	return 0;
+ }
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 2c0c4e8..d351945 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -86,6 +86,12 @@ struct mxc_audio_platform_data {
+ 	char *regulator2;
+ };
+ 
++struct mxc_lcd_platform_data {
++	char *io_reg;
++	char *core_reg;
++	void (*reset) (void);
++};
++
+ extern void mxc_wd_reset(void);
+ extern void mxc_kick_wd(void);
+ unsigned long board_get_ckih_rate(void);
+-- 
+1.5.4.4
+

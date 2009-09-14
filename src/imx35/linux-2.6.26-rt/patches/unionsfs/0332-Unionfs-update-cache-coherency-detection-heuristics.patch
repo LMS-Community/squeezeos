@@ -1,0 +1,118 @@
+From 0dfd05d9441bf4710ae755950f04dfc6af0cb56b Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 10 Nov 2007 20:20:58 -0500
+Subject: [PATCH] Unionfs: update cache-coherency detection heuristics
+
+Use a small delay to reduce the number of times unionfs has to detect
+changed mtime's/ctime's, and also reduce the potential for false positives.
+See Documentation/filesystems/unionfs/concepts.txt for a detailed
+discussion.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ Documentation/filesystems/unionfs/concepts.txt |   18 ++++++++++++++
+ fs/unionfs/dentry.c                            |   29 ++++++++++++++---------
+ fs/unionfs/union.h                             |    3 ++
+ 3 files changed, 39 insertions(+), 11 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/concepts.txt b/Documentation/filesystems/unionfs/concepts.txt
+index 37a62d8..7654ccc 100644
+--- a/Documentation/filesystems/unionfs/concepts.txt
++++ b/Documentation/filesystems/unionfs/concepts.txt
+@@ -177,5 +177,23 @@ would be really nice if the VFS would export an optional file system hook
+ ->file_revalidate (similarly to dentry->d_revalidate) that will be called
+ before each VFS op that has a "struct file" in it.
+ 
++Certain file systems have micro-second granularity (or better) for inode
++times, and asynchronous actions could cause those times to change with some
++small delay.  In such cases, Unionfs may see a changed inode time that only
++differs by a tiny fraction of a second: such a change may be a false
++positive indication that the lower object has changed, whereas if unionfs
++waits a little longer, that false indication will not be seen.  (These false
++positives are harmless, because they would at most cause unionfs to
++re-validate an object that may need no revalidation, and print a debugging
++message that clutters the console/logs.)  Therefore, to minimize the chances
++of these situations, we delay the detection of changed times by a small
++factor of a few seconds, called UNIONFS_MIN_CC_TIME (which defaults to 3
++seconds, as does NFS).  This means that we will detect the change, only a
++couple of seconds later, if indeed the time change persists in the lower
++file object.  This delayed detection has an added performance benefit: we
++reduce the number of times that unionfs has to revalidate objects, in case
++there's a lot of concurrent activity on both the upper and lower objects,
++for the same file(s).  Lastly, this delayed time attribute detection is
++similar to how NFS clients operate (e.g., acregmin).
+ 
+ For more information, see <http://unionfs.filesystems.org/>.
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index a3d7b6e..aed4d39 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -192,6 +192,16 @@ out:
+ /*
+  * Determine if the lower inode objects have changed from below the unionfs
+  * inode.  Return true if changed, false otherwise.
++ *
++ * We check if the mtime or ctime have changed.  However, the inode times
++ * can be changed by anyone without much protection, including
++ * asynchronously.  This can sometimes cause unionfs to find that the lower
++ * file system doesn't change its inode times quick enough, resulting in a
++ * false positive indication (which is harmless, it just makes unionfs do
++ * extra work in re-validating the objects).  To minimize the chances of
++ * these situations, we delay the detection of changed times by
++ * UNIONFS_MIN_CC_TIME (which defaults to 3 seconds, as with NFS's
++ * acregmin).
+  */
+ bool is_newer_lower(const struct dentry *dentry)
+ {
+@@ -211,26 +221,23 @@ bool is_newer_lower(const struct dentry *dentry)
+ 		lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 		if (!lower_inode)
+ 			continue;
+-		/*
+-		 * We may want to apply other tests to determine if the
+-		 * lower inode's data has changed, but checking for changed
+-		 * ctime and mtime on the lower inode should be enough.
+-		 */
+-		if (unlikely(timespec_compare(&inode->i_mtime,
+-					      &lower_inode->i_mtime) < 0)) {
++
++		/* check if mtime/ctime have changed */
++		if (unlikely((lower_inode->i_mtime.tv_sec -
++			      inode->i_mtime.tv_sec) > UNIONFS_MIN_CC_TIME)) {
+ 			pr_info("unionfs: new lower inode mtime "
+ 				"(bindex=%d, name=%s)\n", bindex,
+ 				dentry->d_name.name);
+ 			show_dinode_times(dentry);
+-			return true; /* mtime changed! */
++			return true;
+ 		}
+-		if (unlikely(timespec_compare(&inode->i_ctime,
+-					      &lower_inode->i_ctime) < 0)) {
++		if (unlikely((lower_inode->i_ctime.tv_sec -
++			      inode->i_ctime.tv_sec) > UNIONFS_MIN_CC_TIME)) {
+ 			pr_info("unionfs: new lower inode ctime "
+ 				"(bindex=%d, name=%s)\n", bindex,
+ 				dentry->d_name.name);
+ 			show_dinode_times(dentry);
+-			return true; /* ctime changed! */
++			return true;
+ 		}
+ 	}
+ 	return false;		/* default: lower is not newer */
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 8d19b2e..ddb9b8b 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -63,6 +63,9 @@
+ /* maximum number of branches we support, to avoid memory blowup */
+ #define UNIONFS_MAX_BRANCHES	128
+ 
++/* minimum time (seconds) required for time-based cache-coherency */
++#define UNIONFS_MIN_CC_TIME	3
++
+ /* Operations vectors defined in specific files. */
+ extern struct file_operations unionfs_main_fops;
+ extern struct file_operations unionfs_dir_fops;
+-- 
+1.5.4.3
+

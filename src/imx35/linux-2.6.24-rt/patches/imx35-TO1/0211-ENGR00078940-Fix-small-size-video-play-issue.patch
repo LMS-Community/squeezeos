@@ -1,0 +1,126 @@
+From 8116f7b00d7715c2fa69259c452bff69a6523257 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 13 Jun 2008 11:09:11 +0800
+Subject: [PATCH] ENGR00078940 Fix small size video play issue
+
+Add wait4eot control for DMFC, it influence
+the display of small size video.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |   13 +--------
+ drivers/mxc/ipu3/ipu_disp.c   |   53 +++++++++++++++++++++++++++++++++++++++++
+ drivers/mxc/ipu3/ipu_prv.h    |    2 +
+ 3 files changed, 57 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 4d88b18..85de798 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -105,17 +105,6 @@ static struct clk di_clk[] = {
+ 	 .rate = 27000000,},
+ };
+ 
+-static void _ipu_dmfc_init(void)
+-{
+-	__raw_writel(0x2, DMFC_IC_CTRL);
+-	/* 1 - segment 0 and 1; 2, 1C and 2C unused */
+-	__raw_writel(0x00000090, DMFC_WR_CHAN);
+-	__raw_writel(0x20202000, DMFC_WR_CHAN_DEF);
+-	/* 5B - segment 2 and 3; 5F - segment 4 and 5; */
+-	/* 6B - segment 6; 6F - segment 7 */
+-	__raw_writel(0x1F1E9492, DMFC_DP_CHAN);
+-}
+-
+ /*!
+  * This function is called by the driver framework to initialize the IPU
+  * hardware.
+@@ -652,6 +641,8 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 		_ipu_ch_param_set_block_mode(dma_chan);
+ 	}
+ 
++	_ipu_dmfc_set_wait4eot(dma_chan, width);
++
+ 	if (_ipu_chan_is_interlaced(channel))
+ 		_ipu_ch_param_set_interlaced_scan(dma_chan);
+ 
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 8b34955..41149ae 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -31,6 +31,59 @@
+ 
+ #define SYNC_WAVE 0
+ 
++/* all value below is determined by fix reg setting in _ipu_dmfc_init*/
++#define DMFC_FIFO_SIZE_28	(128*4)
++#define DMFC_FIFO_SIZE_29	(64*4)
++#define DMFC_FIFO_SIZE_24	(64*4)
++#define DMFC_FIFO_SIZE_27	(128*4)
++#define DMFC_FIFO_SIZE_23	(128*4)
++
++void _ipu_dmfc_init(void)
++{
++	/* disable DMFC-IC channel*/
++	__raw_writel(0x2, DMFC_IC_CTRL);
++	/* 1 - segment 0 and 1; 2, 1C and 2C unused */
++	__raw_writel(0x00000090, DMFC_WR_CHAN);
++	__raw_writel(0x20202000, DMFC_WR_CHAN_DEF);
++	/* 5B - segment 2 and 3; 5F - segment 4 and 5; */
++	/* 6B - segment 6; 6F - segment 7 */
++	__raw_writel(0x1F1E9492, DMFC_DP_CHAN);
++}
++
++void _ipu_dmfc_set_wait4eot(int dma_chan, int width)
++{
++	u32 dmfc_gen1 = __raw_readl(DMFC_GENERAL1);
++
++	if (dma_chan == 23) { /*5B*/
++		if (DMFC_FIFO_SIZE_23/width > 3)
++			dmfc_gen1 |= 1UL << 20;
++		else
++			dmfc_gen1 &= ~(1UL << 20);
++	} else if (dma_chan == 24) { /*6B*/
++		if (DMFC_FIFO_SIZE_24/width > 1)
++			dmfc_gen1 |= 1UL << 22;
++		else
++			dmfc_gen1 &= ~(1UL << 22);
++	} else if (dma_chan == 27) { /*5F*/
++		if (DMFC_FIFO_SIZE_27/width > 2)
++			dmfc_gen1 |= 1UL << 21;
++		else
++			dmfc_gen1 &= ~(1UL << 21);
++	} else if (dma_chan == 28) { /*1*/
++		if (DMFC_FIFO_SIZE_28/width > 2)
++			dmfc_gen1 |= 1UL << 16;
++		else
++			dmfc_gen1 &= ~(1UL << 16);
++	} else if (dma_chan == 29) { /*6F*/
++		if (DMFC_FIFO_SIZE_29/width > 1)
++			dmfc_gen1 |= 1UL << 23;
++		else
++			dmfc_gen1 &= ~(1UL << 23);
++	}
++
++	__raw_writel(dmfc_gen1, DMFC_GENERAL1);
++}
++
+ static void _ipu_di_data_wave_config(int di,
+ 				     int wave_gen,
+ 				     int access_size, int component_size)
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index bc7424e..5a872c1 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -52,6 +52,8 @@ void _ipu_dc_init(int dc_chan, int di, bool interlaced);
+ void _ipu_dc_uninit(int dc_chan);
+ void _ipu_dp_dc_enable(ipu_channel_t channel);
+ void _ipu_dp_dc_disable(ipu_channel_t channel);
++void _ipu_dmfc_init(void);
++void _ipu_dmfc_set_wait4eot(int dma_chan, int width);
+ int _ipu_chan_is_interlaced(ipu_channel_t channel);
+ 
+ void _ipu_ic_enable_task(ipu_channel_t channel);
+-- 
+1.5.4.4
+

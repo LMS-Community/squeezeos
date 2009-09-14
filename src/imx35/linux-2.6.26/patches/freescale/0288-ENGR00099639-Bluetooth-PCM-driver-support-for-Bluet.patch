@@ -1,0 +1,948 @@
+From 41140ab04e82bbb280e67dd52aa63697e2f8bdc1 Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Thu, 18 Dec 2008 16:56:37 +0800
+Subject: [PATCH] ENGR00099639 Bluetooth: PCM driver support for Bluetooth handfree
+
+1. create a bluetooth PCM sound card driver
+2. modify the imx-ssi driver to support playback and capture simultaneously
+3. modify the imx-pcm driver to be able to choose internal or external
+ram by input platform data
+4. in spdif, add one more gpio active pin which choose the switcher between
+spdif and bluetooth pcm
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |    4 +-
+ arch/arm/mach-mx35/devices.c            |   21 ++
+ arch/arm/mach-mx35/mx35_3stack_gpio.c   |   38 ++++
+ include/asm-arm/arch-mxc/mxc.h          |    1 +
+ sound/soc/codecs/Kconfig                |    5 +
+ sound/soc/codecs/Makefile               |    2 +
+ sound/soc/codecs/bluetooth.c            |  133 +++++++++++++
+ sound/soc/imx/Kconfig                   |    8 +
+ sound/soc/imx/Makefile                  |    3 +
+ sound/soc/imx/imx-3stack-bt.c           |  320 +++++++++++++++++++++++++++++++
+ sound/soc/imx/imx-3stack-bt.h           |   23 +++
+ sound/soc/imx/imx-pcm.c                 |   32 +++-
+ sound/soc/imx/imx-ssi.c                 |   77 ++++----
+ 13 files changed, 626 insertions(+), 41 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 4485de1..e3b81f7 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Mon Dec 22 21:58:18 2008
++# Tue Dec 23 10:13:23 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1113,6 +1113,7 @@ CONFIG_SND_SOC_IMX_3STACK_AK4647=y
+ CONFIG_SND_SOC_IMX_3STACK_WM8580=y
+ # CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_SGTL5000 is not set
++CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH=y
+ 
+ #
+ # ALSA SoC audio for Freescale SOCs
+@@ -1123,6 +1124,7 @@ CONFIG_SND_SOC_IMX_3STACK_WM8580=y
+ #
+ CONFIG_SND_SOC_AK4647=y
+ CONFIG_SND_SOC_WM8580=y
++CONFIG_SND_SOC_BLUETOOTH=y
+ 
+ #
+ # Open Sound System
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index eaa6926..fb80c5f 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -592,6 +592,26 @@ static void mxc_init_surround_audio(void)
+ 	platform_device_register(&mxc_alsa_surround_device);
+ }
+ 
++static struct mxc_audio_platform_data mxc_bt_audio_data;
++
++static struct platform_device mxc_bt_alsa_device = {
++	.name = "imx-3stack-bt",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_bt_audio_data,
++		},
++
++};
++
++static void mxc_init_bt_audio(void)
++{
++	mxc_bt_audio_data.src_port = 2;
++	mxc_bt_audio_data.ext_port = 5;
++	mxc_bt_audio_data.ext_ram = 1;
++	platform_device_register(&mxc_bt_alsa_device);
++}
++
+ static struct resource asrc_resources[] = {
+ 	{
+ 	 .start = ASRC_BASE_ADDR,
+@@ -693,6 +713,7 @@ int __init mxc_init_devices(void)
+ 	pmic_init_rtc();
+ 	mxc_init_rtc();
+ 	mxc_init_dma();
++	mxc_init_bt_audio();
+ 	mxc_init_spdif();
+ 	mxc_init_audio();
+ 	mxc_init_surround_audio();
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 2d70e48..d2d4608 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -832,6 +832,7 @@ void gpio_spdif_active(void)
+ 			  | PAD_CTL_100K_PU | PAD_CTL_HYS_SCHMITZ);
+ 	/* SPDIF ext clock */
+ 	mxc_request_iomux(MX35_PIN_SCK5, MUX_CONFIG_ALT1);
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_2, 0, 1);
+ }
+ 
+ EXPORT_SYMBOL(gpio_spdif_active);
+@@ -875,6 +876,43 @@ void gpio_activate_audio_ports(void)
+ EXPORT_SYMBOL(gpio_activate_audio_ports);
+ 
+ /*!
++ * This function activates DAM ports 5 to enable
++ * audio I/O.
++ */
++void gpio_activate_bt_audio_port(void)
++{
++	unsigned int pad_val;
++
++	mxc_request_iomux(MX35_PIN_STXD5, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_SRXD5, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_SCK5, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_STXFS5, MUX_CONFIG_FUNC);
++
++	pad_val = PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PU |
++	    PAD_CTL_PUE_PUD;
++	mxc_iomux_set_pad(MX35_PIN_STXD5, pad_val);
++	mxc_iomux_set_pad(MX35_PIN_SRXD5, pad_val);
++	mxc_iomux_set_pad(MX35_PIN_SCK5, pad_val);
++	mxc_iomux_set_pad(MX35_PIN_STXFS5, pad_val);
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_2, 0, 0);
++}
++
++EXPORT_SYMBOL(gpio_activate_bt_audio_port);
++
++/*!
++ * Setup GPIO for bluetooth audio to be inactive
++ */
++void gpio_inactivate_bt_audio_port(void)
++{
++	mxc_free_iomux(MX35_PIN_STXD5, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX35_PIN_SRXD5, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX35_PIN_SCK5, MUX_CONFIG_FUNC);
++	mxc_free_iomux(MX35_PIN_STXFS5, MUX_CONFIG_FUNC);
++}
++
++EXPORT_SYMBOL(gpio_inactivate_bt_audio_port);
++
++/*!
+  * Setup GPIO for ATA interface
+  *
+  */
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 8964212..774d5aa 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -84,6 +84,7 @@ struct mxc_audio_platform_data {
+ 	int src_port;
+ 	int ext_port;
+ 	int intr_id_hp;
++	int ext_ram;
+ 	struct clk *ssi_clk[2];
+ 	char *regulator1;
+ 	char *regulator2;
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 1e85e38..2647b85 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -64,3 +64,8 @@ config SND_SOC_WM8580
+ config SND_SOC_SGTL5000
+ 	tristate
+ 	depends on SND_SOC
++
++config SND_SOC_BLUETOOTH
++	tristate
++	depends on SND_SOC
++
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 79c3d50..7aad400 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -11,6 +11,7 @@ snd-soc-ak4647-objs := ak4647.o
+ snd-soc-tlv320aic3x-objs := tlv320aic3x.o
+ snd-soc-wm8580-objs := wm8580.o
+ snd-soc-sgtl5000-objs := sgtl5000.o
++snd-soc-bluetooth-objs := bluetooth.o
+ 
+ obj-$(CONFIG_SND_SOC_AC97_CODEC)	+= snd-soc-ac97.o
+ obj-$(CONFIG_SND_SOC_WM8350)	+= snd-soc-wm8350.o
+@@ -25,3 +26,4 @@ obj-$(CONFIG_SND_SOC_AK4647)	+= snd-soc-ak4647.o
+ obj-$(CONFIG_SND_SOC_TLV320AIC3X)	+= snd-soc-tlv320aic3x.o
+ obj-$(CONFIG_SND_SOC_WM8580)    += snd-soc-wm8580.o
+ obj-$(CONFIG_SND_SOC_SGTL5000)	+= snd-soc-sgtl5000.o
++obj-$(CONFIG_SND_SOC_BLUETOOTH)	+= snd-soc-bluetooth.o
+diff --git a/sound/soc/codecs/bluetooth.c b/sound/soc/codecs/bluetooth.c
+new file mode 100644
+index 0000000..7c159a8
+--- /dev/null
++++ b/sound/soc/codecs/bluetooth.c
+@@ -0,0 +1,133 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file bluetooth.c
++ * @brief Driver for bluetooth PCM interface
++ *
++ * @ingroup Sound
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/platform_device.h>
++
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++#include <sound/tlv.h>
++
++#define AUDIO_NAME "bluetooth"
++
++#define BLUETOOTH_RATES SNDRV_PCM_RATE_8000
++
++#define BLUETOOTH_FORMATS SNDRV_PCM_FMTBIT_S16_LE
++
++static const struct snd_soc_pcm_stream bt_dai_playback = {
++	.stream_name = "Playback",
++	.channels_min = 1,
++	.channels_max = 2,
++	.rates = BLUETOOTH_RATES,
++	.formats = BLUETOOTH_FORMATS,
++};
++
++static const struct snd_soc_pcm_stream bt_dai_capture = {
++	.stream_name = "Capture",
++	.channels_min = 1,
++	.channels_max = 2,
++	.rates = BLUETOOTH_RATES,
++	.formats = BLUETOOTH_FORMATS,
++};
++
++static int bt_codec_probe(struct device *dev)
++{
++	struct snd_soc_codec *codec = to_snd_soc_codec(dev);
++	codec->owner = THIS_MODULE;
++	snd_soc_register_codec(codec);
++	return 0;
++}
++
++static int bt_codec_remove(struct device *dev)
++{
++	return 0;
++}
++
++static int bt_dai_probe(struct device *dev)
++{
++	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
++	dai->capture = &bt_dai_capture;
++	dai->playback = &bt_dai_playback;
++	snd_soc_register_codec_dai(dai);
++	return 0;
++}
++
++const char bt_codec[SND_SOC_CODEC_NAME_SIZE] = "bt-codec";
++EXPORT_SYMBOL_GPL(bt_codec);
++
++static struct snd_soc_device_driver bt_codec_driver = {
++	.type = SND_SOC_BUS_TYPE_CODEC,
++	.driver = {
++		   .name = bt_codec,
++		   .owner = THIS_MODULE,
++		   .bus = &asoc_bus_type,
++		   .probe = bt_codec_probe,
++		   .remove = __devexit_p(bt_codec_remove),
++		   },
++};
++
++const char bt_dai[SND_SOC_CODEC_NAME_SIZE] = "bt-dai";
++EXPORT_SYMBOL_GPL(bt_dai);
++
++static struct snd_soc_device_driver bt_dai_driver = {
++	.type = SND_SOC_BUS_TYPE_DAI,
++	.driver = {
++		   .name = bt_dai,
++		   .owner = THIS_MODULE,
++		   .bus = &asoc_bus_type,
++		   .probe = bt_dai_probe,
++		   },
++};
++
++static __init int bt_codec_init(void)
++{
++	int ret = 0;
++
++	ret = driver_register(&bt_codec_driver.driver);
++	if (ret < 0)
++		return ret;
++	ret = driver_register(&bt_dai_driver.driver);
++	if (ret < 0) {
++		driver_unregister(&bt_codec_driver.driver);
++		return ret;
++	}
++
++	return ret;
++}
++
++static __exit void bt_codec_exit(void)
++{
++	driver_unregister(&bt_dai_driver.driver);
++	driver_unregister(&bt_codec_driver.driver);
++}
++
++subsys_initcall(bt_codec_init);
++module_exit(bt_codec_exit);
++
++MODULE_DESCRIPTION("ASoC bluetooth codec driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+index bb43200..be26077 100644
+--- a/sound/soc/imx/Kconfig
++++ b/sound/soc/imx/Kconfig
+@@ -58,3 +58,11 @@ config SND_SOC_IMX_3STACK_SGTL5000
+  help
+    Say Y if you want to add support for SoC audio on IMX 3STACK
+    with the SGTL5000.
++
++config SND_SOC_IMX_3STACK_BLUETOOTH
++ tristate "SoC Audio support for IMX - BLUETOOTH"
++ select SND_MXC_SOC_SSI
++ select SND_SOC_BLUETOOTH
++ help
++   Say Y if you want to add support for SoC audio on IMX 3STACK
++   with the BLUETOOTH.
+diff --git a/sound/soc/imx/Makefile b/sound/soc/imx/Makefile
+index 09abba3..6eeca64 100644
+--- a/sound/soc/imx/Makefile
++++ b/sound/soc/imx/Makefile
+@@ -18,3 +18,6 @@ snd-soc-imx-3stack-wm8903-objs := imx-3stack-wm8903.o
+ obj-$(CONFIG_SND_SOC_IMX_3STACK_WM8903) += snd-soc-imx-3stack-wm8903.o
+ snd-soc-imx-3stack-sgtl5000-objs := imx-3stack-sgtl5000.o
+ obj-$(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) += snd-soc-imx-3stack-sgtl5000.o
++snd-soc-imx-3stack-bt-objs := imx-3stack-bt.o
++obj-$(CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH) += snd-soc-imx-3stack-bt.o
++
+diff --git a/sound/soc/imx/imx-3stack-bt.c b/sound/soc/imx/imx-3stack-bt.c
+new file mode 100644
+index 0000000..7dc9cf5
+--- /dev/null
++++ b/sound/soc/imx/imx-3stack-bt.c
+@@ -0,0 +1,320 @@
++/*
++ * imx-3stack-bt.c  --  SoC bluetooth audio for imx_3stack
++ *
++ * Copyright 2008 Freescale  Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/device.h>
++#include <linux/i2c.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++
++#include <asm/hardware.h>
++#include <asm/arch/clock.h>
++#include <asm/arch/mxc.h>
++#include <asm/arch/pmic_external.h>
++
++#include "imx-pcm.h"
++#include "imx-ssi.h"
++#include "imx-3stack-bt.h"
++
++#define BT_SSI_MASTER	1
++
++struct bt_pcm_state {
++	int active;
++};
++
++static struct snd_soc_machine *imx_3stack_mach;
++
++static void imx_3stack_init_dam(int ssi_port, int dai_port)
++{
++	/* bt uses SSI1 or SSI2 via AUDMUX port dai_port for audio */
++
++	/* reset port ssi_port & dai_port */
++	DAM_PTCR(ssi_port) = 0;
++	DAM_PDCR(ssi_port) = 0;
++	DAM_PTCR(dai_port) = 0;
++	DAM_PDCR(dai_port) = 0;
++
++	/* set to synchronous */
++	DAM_PTCR(ssi_port) |= AUDMUX_PTCR_SYN;
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_SYN;
++
++#if BT_SSI_MASTER
++	/* set Rx sources ssi_port <--> dai_port */
++	DAM_PDCR(ssi_port) |= AUDMUX_PDCR_RXDSEL(dai_port);
++	DAM_PDCR(dai_port) |= AUDMUX_PDCR_RXDSEL(ssi_port);
++
++	/* set Tx frame direction and source  dai_port--> ssi_port output */
++	DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TFSDIR;
++	DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, dai_port);
++
++	/* set Tx Clock direction and source dai_port--> ssi_port output */
++	DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TCLKDIR;
++	DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, dai_port);
++#else
++	/* set Rx sources ssi_port <--> dai_port */
++	DAM_PDCR(ssi_port) |= AUDMUX_PDCR_RXDSEL(dai_port);
++	DAM_PDCR(dai_port) |= AUDMUX_PDCR_RXDSEL(ssi_port);
++
++	/* set Tx frame direction and source  ssi_port --> dai_port output */
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TFSDIR;
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, ssi_port);
++
++	/* set Tx Clock direction and source ssi_port--> dai_port output */
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TCLKDIR;
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, ssi_port);
++#endif
++
++}
++
++static int imx_3stack_bt_startup(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct bt_pcm_state *state = pcm_link->private_data;
++
++	if (!state->active)
++		gpio_activate_bt_audio_port();
++	state->active++;
++	return 0;
++}
++
++static int imx_3stack_bt_hw_params(struct snd_pcm_substream *substream,
++				   struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct mxc_audio_platform_data *dev_data =
++	    pcm_link->machine->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	unsigned int channels = params_channels(params);
++	u32 dai_format;
++
++	imx_3stack_init_dam(dev_data->src_port, dev_data->ext_port);
++#if BT_SSI_MASTER
++	dai_format = SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_IB_IF |
++	    SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_SYNC;
++#else
++	dai_format = SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_IB_IF |
++	    SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_SYNC;
++#endif
++	if (channels == 2)
++		dai_format |= SND_SOC_DAIFMT_TDM;
++
++	/* set cpu DAI configuration */
++	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
++
++	/* set i.MX active slot mask */
++	cpu_dai->ops->set_tdm_slot(cpu_dai,
++				   channels == 1 ? 0xfffffffe : 0xfffffffc,
++				   channels);
++
++	/* set the SSI system clock as input (unused) */
++	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_IN);
++
++	return 0;
++}
++
++static void imx_3stack_bt_shutdown(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct bt_pcm_state *state = pcm_link->private_data;
++
++	state->active--;
++	if (!state->active)
++		gpio_inactivate_bt_audio_port();
++}
++
++/*
++ * imx_3stack bt DAI opserations.
++ */
++static struct snd_soc_ops imx_3stack_bt_ops = {
++	.startup = imx_3stack_bt_startup,
++	.hw_params = imx_3stack_bt_hw_params,
++	.shutdown = imx_3stack_bt_shutdown,
++};
++
++static int bt_pcm_new(struct snd_soc_pcm_link *pcm_link)
++{
++	struct bt_pcm_state *state;
++	int ret;
++
++	state = kzalloc(sizeof(struct bt_pcm_state), GFP_KERNEL);
++	if (state == NULL)
++		return -ENOMEM;
++
++	pcm_link->audio_ops = &imx_3stack_bt_ops;
++	state->active = 0;
++	pcm_link->private_data = state;
++
++	ret = snd_soc_pcm_new(pcm_link, 1, 1);
++	if (ret < 0) {
++		pr_err("%s: Failed to create bt pcm\n", __func__);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int bt_pcm_free(struct snd_soc_pcm_link *pcm_link)
++{
++	kfree(pcm_link->private_data);
++	return 0;
++}
++struct snd_soc_pcm_link_ops bt_pcm = {
++	.new = bt_pcm_new,
++	.free = bt_pcm_free,
++};
++
++static int imx_3stack_mach_probe(struct snd_soc_machine
++				 *machine)
++{
++	int ret;
++
++	/* register card with ALSA upper layers */
++	ret = snd_soc_register_card(machine);
++	if (ret < 0) {
++		pr_err("%s: failed to register sound card\n", __func__);
++		return ret;
++	}
++
++	return 0;
++}
++
++static struct snd_soc_machine_ops imx_3stack_mach_ops = {
++	.mach_probe = imx_3stack_mach_probe,
++};
++
++/*
++ * This function will register the snd_soc_pcm_link drivers.
++ * It also registers devices for platform DMA, I2S, SSP and registers an
++ * I2C driver to probe the codec.
++ */
++static int __init imx_3stack_bt_probe(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine;
++	struct mxc_audio_platform_data *dev_data = pdev->dev.platform_data;
++	struct snd_soc_pcm_link *bt_audio;
++	const char *ssi_port;
++	int ret;
++
++	machine = kzalloc(sizeof(struct snd_soc_machine), GFP_KERNEL);
++	if (machine == NULL)
++		return -ENOMEM;
++
++	machine->owner = THIS_MODULE;
++	machine->pdev = pdev;
++	machine->name = "imx_3stack";
++	machine->longname = "bluetooth";
++	machine->ops = &imx_3stack_mach_ops;
++	machine->private_data = dev_data;
++	pdev->dev.driver_data = machine;
++
++	/* register card */
++	imx_3stack_mach = machine;
++	ret =
++	    snd_soc_new_card(machine, 1, SNDRV_DEFAULT_IDX1,
++			     SNDRV_DEFAULT_STR1);
++	if (ret < 0) {
++		pr_err("%s: failed to create bt sound card\n", __func__);
++		goto err;
++	}
++
++	/* imx_3stack bluetooth audio interface */
++	if (dev_data->src_port == 1)
++		ssi_port = imx_ssi_1;
++	else
++		ssi_port = imx_ssi_3;
++	bt_audio =
++	    snd_soc_pcm_link_new(machine,
++				 "imx_3stack-bt", &bt_pcm,
++				 imx_pcm, bt_codec, bt_dai, ssi_port);
++	if (bt_audio == NULL) {
++		pr_err("Failed to create bt PCM link\n");
++		goto err;
++	}
++	ret = snd_soc_pcm_link_attach(bt_audio);
++
++	if (ret < 0)
++		goto link_err;
++
++	return ret;
++
++link_err:
++	snd_soc_machine_free(machine);
++err:
++	kfree(machine);
++	return ret;
++}
++
++static int __devexit imx_3stack_bt_remove(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine = pdev->dev.driver_data;
++
++	imx_3stack_mach = NULL;
++	kfree(machine);
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int imx_3stack_bt_suspend(struct platform_device
++				 *pdev, pm_message_t state)
++{
++	struct snd_soc_machine *machine = pdev->dev.driver_data;
++	return snd_soc_suspend(machine, state);
++}
++
++static int imx_3stack_bt_resume(struct platform_device
++				*pdev)
++{
++	struct snd_soc_machine *machine = pdev->dev.driver_data;
++	return snd_soc_resume(machine);
++}
++
++#else
++#define imx_3stack_bt_suspend NULL
++#define imx_3stack_bt_resume  NULL
++#endif
++
++static struct platform_driver imx_3stack_bt_driver = {
++	.probe = imx_3stack_bt_probe,
++	.remove = __devexit_p(imx_3stack_bt_remove),
++	.suspend = imx_3stack_bt_suspend,
++	.resume = imx_3stack_bt_resume,
++	.driver = {
++		   .name = "imx-3stack-bt",
++		   .owner = THIS_MODULE,
++		   },
++};
++
++static int __init imx_3stack_asoc_init(void)
++{
++	return platform_driver_register(&imx_3stack_bt_driver);
++}
++
++static void __exit imx_3stack_asoc_exit(void)
++{
++	platform_driver_unregister(&imx_3stack_bt_driver);
++}
++
++module_init(imx_3stack_asoc_init);
++module_exit(imx_3stack_asoc_exit);
++
++/* Module information */
++MODULE_DESCRIPTION("ALSA SoC bluetooth imx_3stack");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-3stack-bt.h b/sound/soc/imx/imx-3stack-bt.h
+new file mode 100644
+index 0000000..0a95fb4
+--- /dev/null
++++ b/sound/soc/imx/imx-3stack-bt.h
+@@ -0,0 +1,23 @@
++/*
++ * imx-3stack-bt.h  --  Bluetooth PCM driver header file for Freescale IMX
++ *
++ * Copyright 2008 Freescale  Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef _MXC_BTPCM_H
++#define _MXC_BTPCM_H
++
++extern void gpio_activate_bt_audio_port(void);
++extern void gpio_inactivate_bt_audio_port(void);
++extern const char bt_codec[SND_SOC_CODEC_NAME_SIZE];
++extern const char bt_dai[SND_SOC_CODEC_NAME_SIZE];
++#endif
+diff --git a/sound/soc/imx/imx-pcm.c b/sound/soc/imx/imx-pcm.c
+index 2d27cdc..fdcdb07 100644
+--- a/sound/soc/imx/imx-pcm.c
++++ b/sound/soc/imx/imx-pcm.c
+@@ -460,6 +460,9 @@ static int
+ imx_pcm_mmap(struct snd_pcm_substream *substream, struct vm_area_struct *vma)
+ {
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct snd_soc_machine *machine = substream->pcm->card->private_data;
++	struct mxc_audio_platform_data *dev_data = machine->private_data;
++	int ext_ram = 0;
+ 	int ret = 0;
+ 
+ 	dbg("+imx_pcm_mmap:"
+@@ -467,7 +470,11 @@ imx_pcm_mmap(struct snd_pcm_substream *substream, struct vm_area_struct *vma)
+ 	    UseIram, (unsigned int)runtime->dma_addr,
+ 	    runtime->dma_area, runtime->dma_bytes);
+ 
+-	if ((substream->stream == SNDRV_PCM_STREAM_CAPTURE) || !UseIram) {
++	if (dev_data)
++		ext_ram = dev_data->ext_ram;
++
++	if ((substream->stream == SNDRV_PCM_STREAM_CAPTURE) || ext_ram
++	    || !UseIram) {
+ 		ret = dma_mmap_writecombine(substream->pcm->card->dev, vma,
+ 					    runtime->dma_area,
+ 					    runtime->dma_addr,
+@@ -493,17 +500,24 @@ static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
+ {
+ 	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
+ 	struct snd_dma_buffer *buf = &substream->dma_buffer;
++	struct snd_soc_machine *machine = pcm->card->private_data;
++	struct mxc_audio_platform_data *dev_data = machine->private_data;
++	int ext_ram = 0;
+ 	size_t size = imx_pcm_hardware.buffer_bytes_max;
++
++	if (dev_data)
++		ext_ram = dev_data->ext_ram;
++
+ 	buf->dev.type = SNDRV_DMA_TYPE_DEV;
+ 	buf->dev.dev = pcm->card->dev;
+ 	buf->private_data = NULL;
+ 
+-	if ((stream == SNDRV_PCM_STREAM_CAPTURE) || !UseIram) {
++	if ((stream == SNDRV_PCM_STREAM_CAPTURE) || ext_ram || !UseIram)
+ 		buf->area = dma_alloc_writecombine(pcm->card->dev, size,
+ 						   &buf->addr, GFP_KERNEL);
+-	} else {
++	else
+ 		buf->area = imx_iram_init(&buf->addr, size);
+-	}
++
+ 	if (!buf->area)
+ 		return -ENOMEM;
+ 	buf->bytes = size;
+@@ -517,8 +531,14 @@ static void imx_pcm_free_dma_buffers(struct snd_pcm *pcm)
+ {
+ 	struct snd_pcm_substream *substream;
+ 	struct snd_dma_buffer *buf;
++	struct snd_soc_machine *machine = pcm->card->private_data;
++	struct mxc_audio_platform_data *dev_data = machine->private_data;
++	int ext_ram = 0;
+ 	int stream;
+ 
++	if (dev_data)
++		ext_ram = dev_data->ext_ram;
++
+ 	for (stream = 0; stream < 2; stream++) {
+ 		substream = pcm->streams[stream].substream;
+ 		if (!substream)
+@@ -528,10 +548,10 @@ static void imx_pcm_free_dma_buffers(struct snd_pcm *pcm)
+ 		if (!buf->area)
+ 			continue;
+ 
+-		if ((stream == SNDRV_PCM_STREAM_CAPTURE) || !UseIram) {
++		if ((stream == SNDRV_PCM_STREAM_CAPTURE) || ext_ram || !UseIram)
+ 			dma_free_writecombine(pcm->card->dev, buf->bytes,
+ 					      buf->area, buf->addr);
+-		} else
++		else
+ 			imx_iram_free();
+ 		buf->area = NULL;
+ 	}
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 9ddc002..83dc4e3 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -50,17 +50,19 @@
+ #define IMX_SSI_DUMP 0
+ #if IMX_SSI_DUMP
+ #define SSI_DUMP() \
+-	printk("dump @ %s\n", __FUNCTION__); \
+-	printk("scr %x\n", SSI1_SCR); \
+-	printk("sisr %x\n", SSI1_SISR); \
+-	printk("stcr %x\n", SSI1_STCR); \
+-	printk("srcr %x\n", SSI1_SRCR); \
+-	printk("stccr %x\n", SSI1_STCCR); \
+-	printk("srccr %x\n", SSI1_SRCCR); \
+-	printk("sfcsr %x\n", SSI1_SFCSR); \
+-	printk("stmsk %x\n", SSI1_STMSK); \
+-	printk("srmsk %x\n", SSI1_SRMSK); \
+-	printk("sier %x\n", SSI1_SIER);
++	do { \
++		printk(KERN_INFO "dump @ %s\n", __func__); \
++		printk(KERN_INFO "scr %x\t, %x\n", SSI1_SCR, SSI2_SCR); \
++		printk(KERN_INFO "sisr %x\t, %x\n", SSI1_SISR, SSI2_SISR); \
++		printk(KERN_INFO "stcr %x\t, %x\n", SSI1_STCR, SSI2_STCR); \
++		printk(KERN_INFO "srcr %x\t, %x\n", SSI1_SRCR, SSI2_SRCR); \
++		printk(KERN_INFO "stccr %x\t, %x\n", SSI1_STCCR, SSI2_STCCR); \
++		printk(KERN_INFO "srccr %x\t, %x\n", SSI1_SRCCR, SSI2_SRCCR); \
++		printk(KERN_INFO "sfcsr %x\t, %x\n", SSI1_SFCSR, SSI2_SFCSR); \
++		printk(KERN_INFO "stmsk %x\t, %x\n", SSI1_STMSK, SSI2_STMSK); \
++		printk(KERN_INFO "srmsk %x\t, %x\n", SSI1_SRMSK, SSI2_SRMSK); \
++		printk(KERN_INFO "sier %x\t, %x\n", SSI1_SIER, SSI2_SIER); \
++	} while (0);
+ #else
+ #define SSI_DUMP()
+ #endif
+@@ -319,7 +321,8 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 	return 0;
+ }
+ 
+-static struct clk *ssi_clk;
++static struct clk *ssi1_clk;
++static struct clk *ssi2_clk;
+ 
+ static int imx_ssi_startup(struct snd_pcm_substream *substream)
+ {
+@@ -338,8 +341,8 @@ static int imx_ssi_startup(struct snd_pcm_substream *substream)
+ 			return 0;
+ 
+ 		SSI1_SCR = 0;
+-		ssi_clk = clk_get(NULL, "ssi_clk.0");
+-		clk_enable(ssi_clk);
++		ssi1_clk = clk_get(NULL, "ssi_clk.0");
++		clk_enable(ssi1_clk);
+ 
+ 		/* BIG FAT WARNING
+ 		 * SDMA FIFO watermark must == SSI FIFO watermark for
+@@ -356,8 +359,8 @@ static int imx_ssi_startup(struct snd_pcm_substream *substream)
+ 			return 0;
+ 
+ 		SSI2_SCR = 0;
+-		ssi_clk = clk_get(NULL, "ssi_clk.1");
+-		clk_enable(ssi_clk);
++		ssi2_clk = clk_get(NULL, "ssi_clk.1");
++		clk_enable(ssi2_clk);
+ 
+ 		/* above warning applies here too */
+ 		SSI2_SFCSR = SSI_SFCSR_RFWM1(SSI_RXFIFO_WATERMARK) |
+@@ -497,20 +500,24 @@ static int imx_ssi_hw_params(struct snd_pcm_substream *substream,
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		/* cant change any parameters when SSI is running */
+ 		if (id == IMX_DAI_SSI0 || id == IMX_DAI_SSI1) {
+-			if (SSI1_SCR & SSI_SCR_SSIEN)
++			if ((SSI1_SCR & SSI_SCR_SSIEN) &&
++			    (SSI1_SCR & SSI_SCR_TE))
+ 				return 0;
+ 		} else {
+-			if (SSI2_SCR & SSI_SCR_SSIEN)
++			if ((SSI2_SCR & SSI_SCR_SSIEN) &&
++			    (SSI2_SCR & SSI_SCR_TE))
+ 				return 0;
+ 		}
+ 		return imx_ssi_hw_tx_params(substream, params);
+ 	} else {
+ 		/* cant change any parameters when SSI is running */
+ 		if (id == IMX_DAI_SSI0 || id == IMX_DAI_SSI1) {
+-			if (SSI1_SCR & SSI_SCR_SSIEN)
++			if ((SSI1_SCR & SSI_SCR_SSIEN) &&
++			    (SSI1_SCR & SSI_SCR_RE))
+ 				return 0;
+ 		} else {
+-			if (SSI2_SCR & SSI_SCR_SSIEN)
++			if ((SSI2_SCR & SSI_SCR_SSIEN) &&
++			    (SSI2_SCR & SSI_SCR_RE))
+ 				return 0;
+ 		}
+ 		return imx_ssi_hw_rx_params(substream, params);
+@@ -596,15 +603,15 @@ static void imx_ssi_shutdown(struct snd_pcm_substream *substream)
+ 
+ 		SSI1_SCR = 0;
+ 
+-		clk_disable(ssi_clk);
+-		clk_put(ssi_clk);
++		clk_disable(ssi1_clk);
++		clk_put(ssi1_clk);
+ 
+ 	} else {
+ 		if (--ssi_active[SSI2_PORT])
+ 			return;
+ 		SSI2_SCR = 0;
+-		clk_disable(ssi_clk);
+-		clk_put(ssi_clk);
++		clk_disable(ssi2_clk);
++		clk_put(ssi2_clk);
+ 	}
+ }
+ 
+@@ -749,17 +756,19 @@ static int imx_ssi_probe(struct device *dev)
+ 	dai->playback = &imx_ssi_playback;
+ 	snd_soc_register_cpu_dai(dai);
+ 
+-	if (request_irq(MXC_INT_SSI1, ssi1_irq, 0, "ssi1", dai)) {
+-		printk(KERN_ERR "%s: failure requesting irq %s\n",
+-		       __func__, "ssi1");
+-		return -EBUSY;
+-	}
++	if ((!strcmp(imx_ssi_1, dai->name)) || (!strcmp(imx_ssi_2, dai->name)))
++		if (request_irq(MXC_INT_SSI1, ssi1_irq, 0, "ssi1", dai)) {
++			printk(KERN_ERR "%s: failure requesting irq %s\n",
++			       __func__, "ssi1");
++			return -EBUSY;
++		}
+ 
+-	if (request_irq(MXC_INT_SSI2, ssi2_irq, 0, "ssi2", dai)) {
+-		printk(KERN_ERR "%s: failure requesting irq %s\n",
+-		       __func__, "ssi2");
+-		return -EBUSY;
+-	}
++	if ((!strcmp(imx_ssi_3, dai->name)) || (!strcmp(imx_ssi_4, dai->name)))
++		if (request_irq(MXC_INT_SSI2, ssi2_irq, 0, "ssi2", dai)) {
++			printk(KERN_ERR "%s: failure requesting irq %s\n",
++			       __func__, "ssi2");
++			return -EBUSY;
++		}
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

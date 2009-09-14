@@ -1,0 +1,39 @@
+From 798a6f2315c6a5b3def53d9848a2bfe6c72f5de4 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 25 Sep 2007 00:44:44 -0400
+Subject: [PATCH] Unionfs: cast page->index loff_t before shifting
+
+Fixes bugs in number promotion/demotion computation, as per
+<http://lkml.org/lkml/2007/9/20/17>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 88ef6a6..37af979 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -179,7 +179,8 @@ static int unionfs_do_readpage(struct file *file, struct page *page)
+ 	 * may be a little slower, but a lot safer, as the VFS does a lot of
+ 	 * the necessary magic for us.
+ 	 */
+-	offset = lower_file->f_pos = (page->index << PAGE_CACHE_SHIFT);
++	offset = lower_file->f_pos =
++		((loff_t) page->index << PAGE_CACHE_SHIFT);
+ 	old_fs = get_fs();
+ 	set_fs(KERNEL_DS);
+ 	err = vfs_read(lower_file, page_data, PAGE_CACHE_SIZE,
+@@ -289,7 +290,7 @@ static int unionfs_commit_write(struct file *file, struct page *page,
+ 	BUG_ON(lower_file == NULL);
+ 
+ 	page_data = (char *)kmap(page);
+-	lower_file->f_pos = (page->index << PAGE_CACHE_SHIFT) + from;
++	lower_file->f_pos = ((loff_t) page->index << PAGE_CACHE_SHIFT) + from;
+ 
+ 	/*
+ 	 * SP: I use vfs_write instead of copying page data and the
+-- 
+1.5.4.3
+

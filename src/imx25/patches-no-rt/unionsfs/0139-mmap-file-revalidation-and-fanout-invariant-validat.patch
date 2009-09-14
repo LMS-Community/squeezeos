@@ -1,0 +1,212 @@
+From 6483077285049e620814b3c9425d6c75a469342e Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 19 May 2007 19:59:13 -0400
+Subject: [PATCH] mmap: file revalidation and fanout invariant validation
+
+Added the newer checks to file revalidation and fanout invariants to the
+newly merged mmap code.  Also minor mmap related comments added.
+---
+ fs/unionfs/commonfops.c |   10 +++-------
+ fs/unionfs/copyup.c     |    3 ++-
+ fs/unionfs/file.c       |   24 +++++++++++++++++-------
+ fs/unionfs/inode.c      |    1 +
+ fs/unionfs/mmap.c       |   18 ++++++++++++++----
+ 5 files changed, 37 insertions(+), 19 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index b0ec71b..0ae465a 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -609,13 +609,6 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	int bindex, bstart, bend;
+ 	int fgen, err = 0;
+ 
+-	unionfs_read_lock(sb);
+-	if ((err = unionfs_file_revalidate(file, 1)))
+-		goto out;
+-	fileinfo = UNIONFS_F(file);
+-	BUG_ON(file->f_dentry->d_inode != inode);
+-	inodeinfo = UNIONFS_I(inode);
+-
+ 	unionfs_check_file(file);
+ 	unionfs_read_lock(sb);
+ 	/*
+@@ -625,6 +618,9 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	 */
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
++	fileinfo = UNIONFS_F(file);
++	BUG_ON(file->f_dentry->d_inode != inode);
++	inodeinfo = UNIONFS_I(inode);
+ 
+ 	/* fput all the hidden files */
+ 	fgen = atomic_read(&fileinfo->generation);
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index ea8f24e..18203a3 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -275,7 +275,8 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 	kfree(buf);
+ 
+ 	if (!err)
+-		err = output_file->f_op->fsync(output_file, new_hidden_dentry, 0);
++		err = output_file->f_op->fsync(output_file,
++					       new_hidden_dentry, 0);
+ 
+ 	if (err)
+ 		goto out_close_out;
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 1c20844..59b1c91 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -28,6 +28,7 @@ static ssize_t unionfs_read(struct file *file, char __user *buf,
+ 	int err;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	if ((err = unionfs_file_revalidate(file, 0)))
+ 		goto out;
+ 
+@@ -46,30 +47,35 @@ out:
+ static ssize_t unionfs_aio_read(struct kiocb *iocb, const struct iovec *iov,
+ 				unsigned long nr_segs, loff_t pos)
+ {
+-	int err;
+-#error fixme fxn check_file? read_unlock?
++	int err = 0;
++	struct file *file = iocb->ki_filp;
++
++	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
++	if ((err = unionfs_file_revalidate(file, 0)))
++		goto out;
++
+ 	err = generic_file_aio_read(iocb, iov, nr_segs, pos);
+ 
+ 	if (err == -EIOCBQUEUED)
+ 		err = wait_on_sync_kiocb(iocb);
+ 
+ 	if (err >= 0)
+-		touch_atime(unionfs_lower_mnt(iocb->ki_filp->f_path.dentry),
+-			    unionfs_lower_dentry(iocb->ki_filp->f_path.dentry));
++		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
++			    unionfs_lower_dentry(file->f_path.dentry));
+ 
+-#if 0
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 	unionfs_check_file(file);
+-#endif
+ 	return err;
+ }
+ static ssize_t unionfs_write(struct file * file, const char __user * buf,
+-			size_t count, loff_t * ppos)
++			     size_t count, loff_t *ppos)
+ {
+ 	int err = 0;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
+ 
+@@ -93,6 +99,10 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 	int willwrite;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
++	if ((err = unionfs_file_revalidate(file, 1)))
++		goto out;
++
+ 	/* This might be deferred to mmap's writepage */
+ 	willwrite = ((vma->vm_flags | VM_SHARED | VM_WRITE) == vma->vm_flags);
+ 	if ((err = unionfs_file_revalidate(file, willwrite)))
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 79abe8a..d3e0a4f 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -1084,6 +1084,7 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 		break;
+ 	}
+ 
++	/* for mmap */
+ 	if (ia->ia_valid & ATTR_SIZE) {
+ 		if (ia->ia_size != i_size_read(inode)) {
+ 			err = vmtruncate(inode, ia->ia_size);
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 93aba3a..ccad33f 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -163,8 +163,9 @@ int unionfs_readpage(struct file *file, struct page *page)
+ 	int err;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	if ((err = unionfs_file_revalidate(file, 0)))
+-		goto out_err;
++		goto out;
+ 
+ 	err = unionfs_do_readpage(file, page);
+ 
+@@ -177,9 +178,9 @@ int unionfs_readpage(struct file *file, struct page *page)
+ 	 * page.  but we no longer have to wakeup on our page here, b/c
+ 	 * UnlockPage does it
+ 	 */
+-
+-out_err:
++out:
+ 	unlock_page(page);
++	unionfs_check_file(file);
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 
+ 	return err;
+@@ -191,7 +192,9 @@ int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
+ 	int err;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	err = unionfs_file_revalidate(file, 1);
++	unionfs_check_file(file);
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 
+ 	return err;
+@@ -211,6 +214,7 @@ int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
+ 	BUG_ON(file == NULL);
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
+ 
+@@ -220,7 +224,8 @@ int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
+ 	if (UNIONFS_F(file) != NULL)
+ 		lower_file = unionfs_lower_file(file);
+ 
+-	BUG_ON(lower_file == NULL);	/* FIXME: is this assertion right here? */
++	/* FIXME: is this assertion right here? */
++	BUG_ON(lower_file == NULL);
+ 
+ 	page_data = (char *)kmap(page);
+ 	lower_file->f_pos = (page->index << PAGE_CACHE_SHIFT) + from;
+@@ -261,6 +266,7 @@ out:
+ 		ClearPageUptodate(page);
+ 
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
++	unionfs_check_file(file);
+ 	return err;		/* assume all is ok */
+ }
+ 
+@@ -281,6 +287,10 @@ void unionfs_sync_page(struct page *page)
+ 
+ 	/* do the actual sync */
+ 	mapping = lower_page->mapping;
++	/*
++	 * XXX: can we optimize ala RAIF and set the lower page to be
++	 * discarded after a successful sync_page?
++	 */
+ 	if (mapping && mapping->a_ops && mapping->a_ops->sync_page)
+ 		mapping->a_ops->sync_page(lower_page);
+ 
+-- 
+1.5.4.3
+

@@ -1,0 +1,377 @@
+From 087132d1faad6a925a1861bf6d8b0e32dae8ebb4 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 11 Aug 2007 14:01:08 -0400
+Subject: [PATCH] Unionfs: back-port stuff from Jeff's korg branch to per-kernel branches
+
+Just a bunch of code cleanups: no functionality changed.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/Makefile |    5 ++---
+ fs/unionfs/fanout.h |   51 +++++++++++++++++++++++++++++++++++++++++++--------
+ fs/unionfs/inode.c  |    7 ++++---
+ fs/unionfs/main.c   |    4 ++--
+ fs/unionfs/mmap.c   |    2 +-
+ fs/unionfs/super.c  |    4 ++--
+ 6 files changed, 54 insertions(+), 19 deletions(-)
+
+diff --git a/fs/unionfs/Makefile b/fs/unionfs/Makefile
+index 9bb88f4..e1cef40 100644
+--- a/fs/unionfs/Makefile
++++ b/fs/unionfs/Makefile
+@@ -5,9 +5,8 @@ EXTRA_CFLAGS += -DUNIONFS_VERSION=\"$(UNIONFS_VERSION)\"
+ obj-$(CONFIG_UNION_FS) += unionfs.o
+ 
+ unionfs-y := subr.o dentry.o file.o inode.o main.o super.o \
+-	rdstate.o copyup.o dirhelper.o rename.o \
+-	unlink.o lookup.o commonfops.o dirfops.o sioq.o \
+-	mmap.o
++	rdstate.o copyup.o dirhelper.o rename.o unlink.o \
++	lookup.o commonfops.o dirfops.o sioq.o mmap.o
+ 
+ unionfs-$(CONFIG_UNION_FS_XATTR) += xattr.o
+ 
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index e7407f0..c5bf454 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -48,16 +48,19 @@ static inline struct unionfs_inode_info *UNIONFS_I(const struct inode *inode)
+ /* macros to manipulate branch IDs in stored in our superblock */
+ static inline int branch_id(struct super_block *sb, int index)
+ {
++	BUG_ON(!sb || index < 0);
+ 	return UNIONFS_SB(sb)->data[index].branch_id;
+ }
+ 
+ static inline void set_branch_id(struct super_block *sb, int index, int val)
+ {
++	BUG_ON(!sb || index < 0);
+ 	UNIONFS_SB(sb)->data[index].branch_id = val;
+ }
+ 
+ static inline void new_branch_id(struct super_block *sb, int index)
+ {
++	BUG_ON(!sb || index < 0);
+ 	set_branch_id(sb, index, ++UNIONFS_SB(sb)->high_branch_id);
+ }
+ 
+@@ -77,7 +80,7 @@ static inline int branch_id_to_idx(struct super_block *sb, int id)
+ 		if (branch_id(sb, i) == id)
+ 			return i;
+ 	}
+-	/* in the non-ODF code, this  should really never happen */
++	/* in the non-ODF code, this should really never happen */
+ 	printk(KERN_WARNING "unionfs: cannot find branch with id %d\n", id);
+ 	return -1;
+ }
+@@ -85,18 +88,21 @@ static inline int branch_id_to_idx(struct super_block *sb, int id)
+ /* File to lower file. */
+ static inline struct file *unionfs_lower_file(const struct file *f)
+ {
++	BUG_ON(!f);
+ 	return UNIONFS_F(f)->lower_files[fbstart(f)];
+ }
+ 
+ static inline struct file *unionfs_lower_file_idx(const struct file *f,
+ 						  int index)
+ {
++	BUG_ON(!f || index < 0);
+ 	return UNIONFS_F(f)->lower_files[index];
+ }
+ 
+ static inline void unionfs_set_lower_file_idx(struct file *f, int index,
+ 					      struct file *val)
+ {
++	BUG_ON(!f || index < 0);
+ 	UNIONFS_F(f)->lower_files[index] = val;
+ 	/* save branch ID (may be redundant?) */
+ 	UNIONFS_F(f)->saved_branch_ids[index] =
+@@ -105,43 +111,50 @@ static inline void unionfs_set_lower_file_idx(struct file *f, int index,
+ 
+ static inline void unionfs_set_lower_file(struct file *f, struct file *val)
+ {
++	BUG_ON(!f);
+ 	unionfs_set_lower_file_idx((f), fbstart(f), (val));
+ }
+ 
+ /* Inode to lower inode. */
+ static inline struct inode *unionfs_lower_inode(const struct inode *i)
+ {
++	BUG_ON(!i);
+ 	return UNIONFS_I(i)->lower_inodes[ibstart(i)];
+ }
+ 
+ static inline struct inode *unionfs_lower_inode_idx(const struct inode *i,
+ 						    int index)
+ {
++	BUG_ON(!i || index < 0);
+ 	return UNIONFS_I(i)->lower_inodes[index];
+ }
+ 
+ static inline void unionfs_set_lower_inode_idx(struct inode *i, int index,
+ 					       struct inode *val)
+ {
++	BUG_ON(!i || index < 0);
+ 	UNIONFS_I(i)->lower_inodes[index] = val;
+ }
+ 
+ static inline void unionfs_set_lower_inode(struct inode *i, struct inode *val)
+ {
++	BUG_ON(!i);
+ 	UNIONFS_I(i)->lower_inodes[ibstart(i)] = val;
+ }
+ 
+ /* Superblock to lower superblock. */
+ static inline struct super_block *unionfs_lower_super(
+-	const struct super_block *sb)
++					const struct super_block *sb)
+ {
++	BUG_ON(!sb);
+ 	return UNIONFS_SB(sb)->data[sbstart(sb)].sb;
+ }
+ 
+ static inline struct super_block *unionfs_lower_super_idx(
+-	const struct super_block *sb,
+-	int index)
++					const struct super_block *sb,
++					int index)
+ {
++	BUG_ON(!sb || index < 0);
+ 	return UNIONFS_SB(sb)->data[index].sb;
+ }
+ 
+@@ -149,121 +162,143 @@ static inline void unionfs_set_lower_super_idx(struct super_block *sb,
+ 					       int index,
+ 					       struct super_block *val)
+ {
++	BUG_ON(!sb || index < 0);
+ 	UNIONFS_SB(sb)->data[index].sb = val;
+ }
+ 
+ static inline void unionfs_set_lower_super(struct super_block *sb,
+ 					   struct super_block *val)
+ {
++	BUG_ON(!sb);
+ 	UNIONFS_SB(sb)->data[sbstart(sb)].sb = val;
+ }
+ 
+ /* Branch count macros. */
+ static inline int branch_count(const struct super_block *sb, int index)
+ {
++	BUG_ON(!sb || index < 0);
+ 	return atomic_read(&UNIONFS_SB(sb)->data[index].open_files);
+ }
+ 
+ static inline void set_branch_count(struct super_block *sb, int index, int val)
+ {
++	BUG_ON(!sb || index < 0);
+ 	atomic_set(&UNIONFS_SB(sb)->data[index].open_files, val);
+ }
+ 
+ static inline void branchget(struct super_block *sb, int index)
+ {
++	BUG_ON(!sb || index < 0);
+ 	atomic_inc(&UNIONFS_SB(sb)->data[index].open_files);
+ }
+ 
+ static inline void branchput(struct super_block *sb, int index)
+ {
++	BUG_ON(!sb || index < 0);
+ 	atomic_dec(&UNIONFS_SB(sb)->data[index].open_files);
+ }
+ 
+ /* Dentry macros */
+ static inline struct unionfs_dentry_info *UNIONFS_D(const struct dentry *dent)
+ {
++	BUG_ON(!dent);
+ 	return dent->d_fsdata;
+ }
+ 
+ static inline int dbstart(const struct dentry *dent)
+ {
++	BUG_ON(!dent);
+ 	return UNIONFS_D(dent)->bstart;
+ }
+ 
+ static inline void set_dbstart(struct dentry *dent, int val)
+ {
++	BUG_ON(!dent);
+ 	UNIONFS_D(dent)->bstart = val;
+ }
+ 
+ static inline int dbend(const struct dentry *dent)
+ {
++	BUG_ON(!dent);
+ 	return UNIONFS_D(dent)->bend;
+ }
+ 
+ static inline void set_dbend(struct dentry *dent, int val)
+ {
++	BUG_ON(!dent);
+ 	UNIONFS_D(dent)->bend = val;
+ }
+ 
+ static inline int dbopaque(const struct dentry *dent)
+ {
++	BUG_ON(!dent);
+ 	return UNIONFS_D(dent)->bopaque;
+ }
+ 
+ static inline void set_dbopaque(struct dentry *dent, int val)
+ {
++	BUG_ON(!dent);
+ 	UNIONFS_D(dent)->bopaque = val;
+ }
+ 
+ static inline void unionfs_set_lower_dentry_idx(struct dentry *dent, int index,
+ 						struct dentry *val)
+ {
++	BUG_ON(!dent || index < 0);
+ 	UNIONFS_D(dent)->lower_paths[index].dentry = val;
+ }
+ 
+ static inline struct dentry *unionfs_lower_dentry_idx(
+-	const struct dentry *dent,
+-	int index)
++				const struct dentry *dent,
++				int index)
+ {
++	BUG_ON(!dent || index < 0);
+ 	return UNIONFS_D(dent)->lower_paths[index].dentry;
+ }
+ 
+ static inline struct dentry *unionfs_lower_dentry(const struct dentry *dent)
+ {
++	BUG_ON(!dent);
+ 	return unionfs_lower_dentry_idx(dent, dbstart(dent));
+ }
+ 
+ static inline void unionfs_set_lower_mnt_idx(struct dentry *dent, int index,
+ 					     struct vfsmount *mnt)
+ {
++	BUG_ON(!dent || index < 0);
+ 	UNIONFS_D(dent)->lower_paths[index].mnt = mnt;
+ }
+ 
+ static inline struct vfsmount *unionfs_lower_mnt_idx(
+-	const struct dentry *dent,
+-	int index)
++					const struct dentry *dent,
++					int index)
+ {
++	BUG_ON(!dent || index < 0);
+ 	return UNIONFS_D(dent)->lower_paths[index].mnt;
+ }
+ 
+ static inline struct vfsmount *unionfs_lower_mnt(const struct dentry *dent)
+ {
++	BUG_ON(!dent);
+ 	return unionfs_lower_mnt_idx(dent, dbstart(dent));
+ }
+ 
+ /* Macros for locking a dentry. */
+ static inline void unionfs_lock_dentry(struct dentry *d)
+ {
++	BUG_ON(!d);
+ 	mutex_lock(&UNIONFS_D(d)->lock);
+ }
+ 
+ static inline void unionfs_unlock_dentry(struct dentry *d)
+ {
++	BUG_ON(!d);
+ 	mutex_unlock(&UNIONFS_D(d)->lock);
+ }
+ 
+ static inline void verify_locked(struct dentry *d)
+ {
++	BUG_ON(!d);
+ 	BUG_ON(!mutex_is_locked(&UNIONFS_D(d)->lock));
+ }
+ 
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index c772fbd..9e0801a 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -918,7 +918,7 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	int len = PAGE_SIZE, err;
+ 	mm_segment_t old_fs;
+ 
+- 	unionfs_read_lock(dentry->d_sb);
++	unionfs_read_lock(dentry->d_sb);
+ 
+ 	/* This is freed by the put_link method assuming a successful call. */
+ 	buf = kmalloc(len, GFP_KERNEL);
+@@ -943,7 +943,7 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 
+ out:
+ 	unionfs_check_dentry(dentry);
+- 	unionfs_read_unlock(dentry->d_sb);
++	unionfs_read_unlock(dentry->d_sb);
+ 	return ERR_PTR(err);
+ }
+ 
+@@ -1062,7 +1062,8 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 		 * We use our own special version of permission, such that
+ 		 * only the first branch returns -EROFS.
+ 		 */
+-		err = inode_permission(inode->i_sb, lower_inode, mask, nd, bindex);
++		err = inode_permission(inode->i_sb, lower_inode, mask, nd,
++				       bindex);
+ 
+ 		/*
+ 		 * The permissions are an intersection of the overall directory
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index e437edb..c96133b 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -438,8 +438,8 @@ out:
+  * We want to mount our stackable file system on top of that lower directory.
+  */
+ static struct unionfs_dentry_info *unionfs_parse_options(
+-	struct super_block *sb,
+-	char *options)
++					 struct super_block *sb,
++					 char *options)
+ {
+ 	struct unionfs_dentry_info *lower_root_info;
+ 	char *optname;
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 8b04a46..6ef19af 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -160,7 +160,7 @@ static int unionfs_do_readpage(struct file *file, struct page *page)
+ 	char *page_data = NULL;
+ 	loff_t offset;
+ 
+-	if (UNIONFS_F(file) == NULL) {
++	if (!UNIONFS_F(file)) {
+ 		err = -ENOENT;
+ 		goto out;
+ 	}
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index d63b19f..21a554a 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -442,8 +442,8 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ 	struct path *new_lower_paths = NULL, *tmp_lower_paths = NULL;
+ 	struct inode **new_lower_inodes = NULL;
+ 	int new_high_branch_id;	/* new high branch ID */
+-	int old_ibstart, old_ibend;
+ 	int size;		/* memory allocation size, temp var */
++	int old_ibstart, old_ibend;
+ 
+ 	unionfs_write_lock(sb);
+ 
+@@ -671,7 +671,7 @@ out_no_change:
+ 	if (!new_lower_paths) {
+ 		err = -ENOMEM;
+ 		goto out_release;
+- 	}
++	}
+ 	/* allocate space for new pointers to lower inodes */
+ 	new_lower_inodes = kcalloc(new_branches,
+ 				   sizeof(struct inode *), GFP_KERNEL);
+-- 
+1.5.4.3
+

@@ -1,0 +1,110 @@
+From 8621a2cb8b23b4d1af23f10d02eeae80a9d80b0d Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 24 Jan 2008 11:23:23 +0200
+Subject: [PATCH] UBI: add layout volume information
+
+Add more information about layout volume to make userspace tools
+use the macros instead of constants. Also rename UBI_LAYOUT_VOL_ID
+to make it consistent with other macros.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c    |    2 +-
+ drivers/mtd/ubi/scan.c   |    2 +-
+ drivers/mtd/ubi/vtbl.c   |   10 +++++-----
+ include/mtd/ubi-header.h |    4 +++-
+ 4 files changed, 10 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 1f951e3..1f7375e 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -78,7 +78,7 @@ static unsigned long long next_sqnum(struct ubi_device *ubi)
+  */
+ static int ubi_get_compat(const struct ubi_device *ubi, int vol_id)
+ {
+-	if (vol_id == UBI_LAYOUT_VOL_ID)
++	if (vol_id == UBI_LAYOUT_VOLUME_ID)
+ 		return UBI_LAYOUT_VOLUME_COMPAT;
+ 	return 0;
+ }
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 6f2680f..05aa3e7 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -858,7 +858,7 @@ static int process_eb(struct ubi_device *ubi, struct ubi_scan_info *si, int pnum
+ 	}
+ 
+ 	vol_id = be32_to_cpu(vidh->vol_id);
+-	if (vol_id > UBI_MAX_VOLUMES && vol_id != UBI_LAYOUT_VOL_ID) {
++	if (vol_id > UBI_MAX_VOLUMES && vol_id != UBI_LAYOUT_VOLUME_ID) {
+ 		int lnum = be32_to_cpu(vidh->lnum);
+ 
+ 		/* Unsupported internal volume */
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index 2fd9cf4..d8222db 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -89,7 +89,7 @@ int ubi_change_vtbl_record(struct ubi_device *ubi, int idx,
+ 	struct ubi_volume *layout_vol;
+ 
+ 	ubi_assert(idx >= 0 && idx < ubi->vtbl_slots);
+-	layout_vol = ubi->volumes[vol_id2idx(ubi, UBI_LAYOUT_VOL_ID)];
++	layout_vol = ubi->volumes[vol_id2idx(ubi, UBI_LAYOUT_VOLUME_ID)];
+ 
+ 	if (!vtbl_rec)
+ 		vtbl_rec = &empty_vtbl_record;
+@@ -269,7 +269,7 @@ static int create_vtbl(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 	 * this volume table copy was found during scanning. It has to be wiped
+ 	 * out.
+ 	 */
+-	sv = ubi_scan_find_sv(si, UBI_LAYOUT_VOL_ID);
++	sv = ubi_scan_find_sv(si, UBI_LAYOUT_VOLUME_ID);
+ 	if (sv)
+ 		old_seb = ubi_scan_find_seb(sv, copy);
+ 
+@@ -281,7 +281,7 @@ retry:
+ 	}
+ 
+ 	vid_hdr->vol_type = UBI_VID_DYNAMIC;
+-	vid_hdr->vol_id = cpu_to_be32(UBI_LAYOUT_VOL_ID);
++	vid_hdr->vol_id = cpu_to_be32(UBI_LAYOUT_VOLUME_ID);
+ 	vid_hdr->compat = UBI_LAYOUT_VOLUME_COMPAT;
+ 	vid_hdr->data_size = vid_hdr->used_ebs =
+ 			     vid_hdr->data_pad = cpu_to_be32(0);
+@@ -590,7 +590,7 @@ static int init_volumes(struct ubi_device *ubi, const struct ubi_scan_info *si,
+ 	vol->last_eb_bytes = vol->reserved_pebs;
+ 	vol->used_bytes =
+ 		(long long)vol->used_ebs * (ubi->leb_size - vol->data_pad);
+-	vol->vol_id = UBI_LAYOUT_VOL_ID;
++	vol->vol_id = UBI_LAYOUT_VOLUME_ID;
+ 	vol->ref_count = 1;
+ 
+ 	ubi_assert(!ubi->volumes[i]);
+@@ -743,7 +743,7 @@ int ubi_read_volume_table(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 	ubi->vtbl_size = ubi->vtbl_slots * UBI_VTBL_RECORD_SIZE;
+ 	ubi->vtbl_size = ALIGN(ubi->vtbl_size, ubi->min_io_size);
+ 
+-	sv = ubi_scan_find_sv(si, UBI_LAYOUT_VOL_ID);
++	sv = ubi_scan_find_sv(si, UBI_LAYOUT_VOLUME_ID);
+ 	if (!sv) {
+ 		/*
+ 		 * No logical eraseblocks belonging to the layout volume were
+diff --git a/include/mtd/ubi-header.h b/include/mtd/ubi-header.h
+index 69d5d7e..292f916 100644
+--- a/include/mtd/ubi-header.h
++++ b/include/mtd/ubi-header.h
+@@ -299,7 +299,9 @@ struct ubi_vid_hdr {
+ 
+ /* The layout volume contains the volume table */
+ 
+-#define UBI_LAYOUT_VOL_ID        UBI_INTERNAL_VOL_START
++#define UBI_LAYOUT_VOLUME_ID     UBI_INTERNAL_VOL_START
++#define UBI_LAYOUT_VOLUME_TYPE   UBI_VID_DYNAMIC
++#define UBI_LAYOUT_VOLUME_ALIGN  1
+ #define UBI_LAYOUT_VOLUME_EBS    2
+ #define UBI_LAYOUT_VOLUME_NAME   "layout volume"
+ #define UBI_LAYOUT_VOLUME_COMPAT UBI_COMPAT_REJECT
+-- 
+1.5.6.3
+

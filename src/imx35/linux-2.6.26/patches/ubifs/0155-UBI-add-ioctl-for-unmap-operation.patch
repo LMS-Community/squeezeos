@@ -1,0 +1,67 @@
+From dd712cb9f6181ed31e8c16f0f8cff4945791637c Mon Sep 17 00:00:00 2001
+From: Corentin Chary <corentincj@iksaif.net>
+Date: Mon, 5 Jan 2009 14:46:19 +0100
+Subject: [PATCH] UBI: add ioctl for unmap operation
+
+This patch adds ioctl for the LEB unmap operation (as a debugging
+option so far).
+
+[Re-named ioctl to make it look the same as the other one and made
+ some minor stylistic changes. Artem Bityutskiy.]
+
+Signed-off-by: Corentin Chary <corentincj@iksaif.net>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |   15 ++++++++++++++-
+ include/mtd/ubi-user.h |    3 ++-
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 0b326bd..481da3e 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -531,13 +531,26 @@ static int vol_cdev_ioctl(struct inode *inode, struct file *file,
+ 		err = ubi_leb_map(desc, req.lnum, req.dtype);
+ 		break;
+ 	}
++
++	/* Logical eraseblock un-map command */
++	case UBI_IOCEBUNMAP:
++	{
++		int32_t lnum;
++
++		err = get_user(lnum, (__user int32_t *)argp);
++		if (err) {
++			err = -EFAULT;
++			break;
++		}
++		err = ubi_leb_unmap(desc, lnum);
++		break;
++	}
+ #endif
+ 
+ 	default:
+ 		err = -ENOTTY;
+ 		break;
+ 	}
+-
+ 	return err;
+ }
+ 
+diff --git a/include/mtd/ubi-user.h b/include/mtd/ubi-user.h
+index 26d770c..0348e63 100644
+--- a/include/mtd/ubi-user.h
++++ b/include/mtd/ubi-user.h
+@@ -135,7 +135,8 @@
+ #define UBI_IOCEBCH _IOW(UBI_VOL_IOC_MAGIC, 2, int32_t)
+ /* Map an eraseblock, used for debugging, disabled by default */
+ #define UBI_IOCEBMAP _IOW(UBI_VOL_IOC_MAGIC, 3, struct ubi_map_req)
+-
++/* Unmap an eraseblock, used for debugging, disabled by default */
++#define UBI_IOCEBUNMAP _IOW(UBI_VOL_IOC_MAGIC, 4, int32_t)
+ 
+ /* Maximum MTD device name length supported by UBI */
+ #define MAX_UBI_MTD_NAME_LEN 127
+-- 
+1.5.4.3
+

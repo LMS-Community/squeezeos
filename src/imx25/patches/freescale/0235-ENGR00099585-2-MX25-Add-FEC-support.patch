@@ -1,0 +1,204 @@
+From 27c92e32bf93149c708b423bbf22ec6d8ddb7271 Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Wed, 22 Oct 2008 14:55:43 -0600
+Subject: [PATCH] ENGR00099585-2 MX25: Add FEC support
+
+Add FEC support for MX25, including
+ - RMII reduced pin MUX configuration
+ - PHY enable and power control
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    2 +
+ arch/arm/mach-mx25/mx25_3stack.c        |    4 +-
+ arch/arm/mach-mx25/mx25_3stack_gpio.c   |  109 +++++++++++++-----------------
+ 3 files changed, 51 insertions(+), 64 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 0b44cf6..0cafea2 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -619,6 +619,8 @@ CONFIG_SMSC911X=y
+ # CONFIG_IBM_NEW_EMAC_EMAC4 is not set
+ # CONFIG_B44 is not set
+ # CONFIG_CS89x0 is not set
++CONFIG_FEC=m
++# CONFIG_FEC2 is not set
+ # CONFIG_NETDEV_1000 is not set
+ # CONFIG_NETDEV_10000 is not set
+ 
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index e94c1a7..0ef4094 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -206,7 +206,7 @@ static int __init mxc_init_enet(void)
+ 	return 0;
+ }
+ #else
+-static int _init mxc_init_enet(void)
++static int __init mxc_init_enet(void)
+ {
+ 	return 0;
+ }
+@@ -215,7 +215,7 @@ static int _init mxc_init_enet(void)
+ late_initcall(mxc_init_enet);
+ 
+ #if defined(CONFIG_FEC) || defined(CONFIG_FEC_MODULE)
+-unsigned int expio_intr_fec;
++unsigned int expio_intr_fec = MXC_INT_POWER_FAIL;
+ EXPORT_SYMBOL(expio_intr_fec);
+ #endif
+ 
+diff --git a/arch/arm/mach-mx25/mx25_3stack_gpio.c b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+index 66ed7f4..85e50e8 100644
+--- a/arch/arm/mach-mx25/mx25_3stack_gpio.c
++++ b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+@@ -279,19 +279,11 @@ void gpio_fec_active(void)
+ 	mxc_request_iomux(MX25_PIN_FEC_MDIO, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_FEC_RDATA1, MUX_CONFIG_FUNC);
+ 	mxc_request_iomux(MX25_PIN_FEC_TDATA1, MUX_CONFIG_FUNC);
+-	mxc_request_iomux(MX25_PIN_UART2_TXD, MUX_CONFIG_ALT2); /*TX_ERR*/
+-	mxc_request_iomux(MX25_PIN_UART2_RTS, MUX_CONFIG_ALT2); /*COL*/
+-	mxc_request_iomux(MX25_PIN_UART2_CTS, MUX_CONFIG_ALT2); /*RX_ERR*/
+-	mxc_request_iomux(MX25_PIN_SD1_CMD, MUX_CONFIG_ALT2); /*RDATA2*/
+-	mxc_request_iomux(MX25_PIN_SD1_CLK, MUX_CONFIG_ALT2); /*RDATA3*/
+-	mxc_request_iomux(MX25_PIN_SD1_DATA0, MUX_CONFIG_ALT2); /*TDATA2*/
+-	mxc_request_iomux(MX25_PIN_SD1_DATA1, MUX_CONFIG_ALT2); /*TDATA3*/
+-	mxc_request_iomux(MX25_PIN_SD1_DATA2, MUX_CONFIG_ALT2); /*RX_CLK*/
+-	mxc_request_iomux(MX25_PIN_SD1_DATA3, MUX_CONFIG_ALT2); /*CRS*/
+-	mxc_request_iomux(MX25_PIN_A17, MUX_CONFIG_ALT5); /*FEC_EN*/
+-
+-#define FEC_PAD_CTL1 (PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE)
+-#define FEC_PAD_CTL2 (PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PU)
++	mxc_request_iomux(MX25_PIN_POWER_FAIL, MUX_CONFIG_FUNC); /* PHY INT */
++
++#define FEC_PAD_CTL1 (PAD_CTL_HYS_SCHMITZ | PAD_CTL_PUE_PUD | \
++		      PAD_CTL_PKE_ENABLE)
++#define FEC_PAD_CTL2 (PAD_CTL_PUE_PUD)
+ 
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_TX_CLK, FEC_PAD_CTL1);
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_RX_DV, FEC_PAD_CTL1);
+@@ -299,34 +291,38 @@ void gpio_fec_active(void)
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_TDATA0, FEC_PAD_CTL2);
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_TX_EN, FEC_PAD_CTL2);
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_MDC, FEC_PAD_CTL2);
+-	mxc_iomux_set_pad(MX25_PIN_FEC_MDIO, FEC_PAD_CTL1 |
+-			  PAD_CTL_HYS_SCHMITZ | PAD_CTL_22K_PU);
++	mxc_iomux_set_pad(MX25_PIN_FEC_MDIO, FEC_PAD_CTL1 | PAD_CTL_22K_PU);
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_RDATA1, FEC_PAD_CTL1);
+ 	mxc_iomux_set_pad(MX25_PIN_FEC_TDATA1, FEC_PAD_CTL2);
+-	mxc_iomux_set_pad(MX25_PIN_UART2_TXD, FEC_PAD_CTL2); /*TX_ERR*/
+-	mxc_iomux_set_pad(MX25_PIN_UART2_RTS, FEC_PAD_CTL1); /*COL*/
+-	mxc_iomux_set_pad(MX25_PIN_UART2_CTS, FEC_PAD_CTL1); /*RX_ERR*/
+-	mxc_iomux_set_pad(MX25_PIN_SD1_CMD, FEC_PAD_CTL1); /*RDATA2*/
+-	mxc_iomux_set_pad(MX25_PIN_SD1_CLK, FEC_PAD_CTL1 |
+-			  PAD_CTL_HYS_SCHMITZ); /*RDATA3*/
+-	mxc_iomux_set_pad(MX25_PIN_SD1_DATA0, FEC_PAD_CTL2); /*TDATA2*/
+-	mxc_iomux_set_pad(MX25_PIN_SD1_DATA1, FEC_PAD_CTL2); /*TDATA3*/
+-	mxc_iomux_set_pad(MX25_PIN_SD1_DATA2, FEC_PAD_CTL1); /*RX_CLK*/
+-	mxc_iomux_set_pad(MX25_PIN_SD1_DATA3, FEC_PAD_CTL1); /*CRS*/
+-	mxc_iomux_set_pad(MX25_PIN_A17, 0);
+-
+-	mxc_iomux_set_input(MUX_IN_FEC_FEC_COL, INPUT_CTL_PATH2);
+-	mxc_iomux_set_input(MUX_IN_FEC_FEC_CRS, INPUT_CTL_PATH2);
+-	mxc_iomux_set_input(MUX_IN_FEC_FEC_RDATA_2, INPUT_CTL_PATH2);
+-	mxc_iomux_set_input(MUX_IN_FEC_FEC_RDATA_3, INPUT_CTL_PATH2);
+-	mxc_iomux_set_input(MUX_IN_FEC_FEC_RX_CLK, INPUT_CTL_PATH2);
+-	mxc_iomux_set_input(MUX_IN_FEC_FEC_RX_ER, INPUT_CTL_PATH2);
+-
+-	/* Configure enable as output */
+-	mxc_set_gpio_direction(MX25_PIN_A17, 0); /*FEC_EN*/
+-
+-	/* FEC enable */
+-	mxc_set_gpio_dataout(MX25_PIN_A17, 1);
++	mxc_iomux_set_pad(MX25_PIN_POWER_FAIL, FEC_PAD_CTL1);
++
++	/*
++	 * Set up the FEC_RESET_B and FEC_ENABLE GPIO pins.
++	 * Assert FEC_RESET_B, then power up the PHY by asserting
++	 * FEC_ENABLE, at the same time lifting FEC_RESET_B.
++	 *
++	 * FEC_RESET_B: gpio2[3] is ALT 5 mode of pin D12
++	 * FEC_ENABLE_B: gpio4[8] is ALT 5 mode of pin A17
++	 */
++	mxc_request_iomux(MX25_PIN_A17, MUX_CONFIG_ALT5); /* FEC_EN */
++	mxc_request_iomux(MX25_PIN_D12, MUX_CONFIG_ALT5); /* FEC_RESET_B */
++
++	mxc_iomux_set_pad(MX25_PIN_A17, PAD_CTL_ODE_OpenDrain);
++	mxc_iomux_set_pad(MX25_PIN_D12, 0);
++
++	mxc_set_gpio_direction(MX25_PIN_A17, 0); /* FEC_EN */
++	mxc_set_gpio_direction(MX25_PIN_D12, 0); /* FEC_RESET_B */
++
++	/* drop PHY power */
++	mxc_set_gpio_dataout(MX25_PIN_A17, 0);	/* FEC_EN */
++
++	/* assert reset */
++	mxc_set_gpio_dataout(MX25_PIN_D12, 0);	/* FEC_RESET_B */
++	udelay(2);		/* spec says 1us min */
++
++	/* turn on PHY power and lift reset */
++	mxc_set_gpio_dataout(MX25_PIN_A17, 1);	/* FEC_EN */
++	mxc_set_gpio_dataout(MX25_PIN_D12, 1);	/* FEC_RESET_B */
+ 
+ #undef FEC_PAD_CTL_COMMON
+ #undef FEC_PAD_CTL1
+@@ -339,6 +335,11 @@ EXPORT_SYMBOL(gpio_fec_active);
+  */
+ void gpio_fec_inactive(void)
+ {
++	/*
++	 * Turn off the PHY.
++	 */
++	mxc_set_gpio_dataout(MX25_PIN_A17, 0);
++
+ 	mxc_request_gpio(MX25_PIN_FEC_TX_CLK);
+ 	mxc_request_gpio(MX25_PIN_FEC_RX_DV);
+ 	mxc_request_gpio(MX25_PIN_FEC_RDATA0);
+@@ -348,16 +349,8 @@ void gpio_fec_inactive(void)
+ 	mxc_request_gpio(MX25_PIN_FEC_MDIO);
+ 	mxc_request_gpio(MX25_PIN_FEC_RDATA1);
+ 	mxc_request_gpio(MX25_PIN_FEC_TDATA1);
+-	mxc_request_gpio(MX25_PIN_UART2_TXD);
+-	mxc_request_gpio(MX25_PIN_UART2_RTS);
+-	mxc_request_gpio(MX25_PIN_UART2_CTS);
+-	mxc_request_gpio(MX25_PIN_SD1_CMD);
+-	mxc_request_gpio(MX25_PIN_SD1_CLK);
+-	mxc_request_gpio(MX25_PIN_SD1_DATA0);
+-	mxc_request_gpio(MX25_PIN_SD1_DATA1);
+-	mxc_request_gpio(MX25_PIN_SD1_DATA2);
+-	mxc_request_gpio(MX25_PIN_SD1_DATA3);
+-	mxc_request_gpio(MX25_PIN_A17);	/* FEC_EN */
++
++	mxc_request_gpio(MX25_PIN_D12);	/* FEC_RESET_B */
+ 
+ 	mxc_free_iomux(MX25_PIN_FEC_TX_CLK, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_FEC_RX_DV, MUX_CONFIG_GPIO);
+@@ -368,19 +361,11 @@ void gpio_fec_inactive(void)
+ 	mxc_free_iomux(MX25_PIN_FEC_MDIO, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_FEC_RDATA1, MUX_CONFIG_GPIO);
+ 	mxc_free_iomux(MX25_PIN_FEC_TDATA1, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_UART2_TXD, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_UART2_RTS, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_UART2_CTS, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_SD1_CMD, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_SD1_CLK, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_SD1_DATA0, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_SD1_DATA1, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_SD1_DATA2, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_SD1_DATA3, MUX_CONFIG_GPIO);
+-	mxc_free_iomux(MX25_PIN_A17, MUX_CONFIG_GPIO);
+-
+-	/* FEC disable */
+-	mxc_set_gpio_dataout(MX25_PIN_A17, 0);
++	mxc_request_iomux(MX25_PIN_POWER_FAIL, MUX_CONFIG_FUNC); /* PHY INT */
++
++	mxc_free_iomux(MX25_PIN_D12, MUX_CONFIG_GPIO); /* FEC_RESET_B */
++
++	/* We keep pin A17, so FEC_ENABLE doesn't float */
+ }
+ EXPORT_SYMBOL(gpio_fec_inactive);
+ 
+-- 
+1.5.4.4
+

@@ -1,0 +1,432 @@
+From 7db8dd535beb4841643fdecc3ab747b27772c125 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Tue, 4 Mar 2008 07:57:28 +0800
+Subject: [PATCH] ENGR00064327 MX31 3DS MSL UART SMSC
+
+Basic patch for mx31 3stack boards. It includes the changes: MSL UART SMSC
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |    4 +-
+ arch/arm/mach-mx3/board-mx31ads.h       |    4 +-
+ arch/arm/mach-mx3/board-mx3_3stack.h    |   39 ++++++++++++++++-
+ arch/arm/mach-mx3/mx3_3stack.c          |   34 ++++++++--------
+ arch/arm/mach-mx3/mx3_3stack_gpio.c     |   68 +++++++++++++++++++++++++++----
+ arch/arm/mach-mx3/serial.c              |   13 +++++-
+ 6 files changed, 129 insertions(+), 33 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index a61c453..b530e6c 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -613,8 +613,8 @@ CONFIG_MII=y
+ # CONFIG_NET_VENDOR_SMC is not set
+ # CONFIG_SMC91X is not set
+ # CONFIG_DM9000 is not set
+-CONFIG_SMC911X=y
+-# CONFIG_SMSC911X is not set
++# CONFIG_SMC911X is not set
++CONFIG_SMSC911X=y
+ # CONFIG_NET_VENDOR_RACAL is not set
+ # CONFIG_AT1700 is not set
+ # CONFIG_DEPCA is not set
+diff --git a/arch/arm/mach-mx3/board-mx31ads.h b/arch/arm/mach-mx3/board-mx31ads.h
+index 98889fa..4d80ab3 100644
+--- a/arch/arm/mach-mx3/board-mx31ads.h
++++ b/arch/arm/mach-mx3/board-mx31ads.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -14,6 +14,7 @@
+ #ifndef __ASM_ARCH_MXC_BOARD_MX31ADS_H__
+ #define __ASM_ARCH_MXC_BOARD_MX31ADS_H__
+ 
++#ifdef CONFIG_MACH_MX31ADS
+ /*!
+  * @defgroup BRDCFG_MX31 Board Configuration Options
+  * @ingroup MSL_MX31
+@@ -321,4 +322,5 @@
+ #define MXC_BD_LED_OFF(led) \
+         __raw_writew(led, PBC_BASE_ADDRESS + PBC_BCTRL1_CLEAR)
+ 
++#endif				/* CONFIG_MACH_MX31ADS */
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX31ADS_H__ */
+diff --git a/arch/arm/mach-mx3/board-mx3_3stack.h b/arch/arm/mach-mx3/board-mx3_3stack.h
+index f6ad571..78a1e92 100644
+--- a/arch/arm/mach-mx3/board-mx3_3stack.h
++++ b/arch/arm/mach-mx3/board-mx3_3stack.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -14,17 +14,18 @@
+ #ifndef __ASM_ARCH_MXC_BOARD_MX31PDK_H__
+ #define __ASM_ARCH_MXC_BOARD_MX31PDK_H__
+ 
++#ifdef CONFIG_MACH_MX31_3DS
+ /*!
+  * @defgroup BRDCFG_MX31 Board Configuration Options
+  * @ingroup MSL_MX31
+  */
+ 
+ /*!
+- * @file mach-mx3/board-mx31ads.h
++ * @file mach-mx3/board-mx3_3stack.h
+  *
+  * @brief This file contains all the board level configuration options.
+  *
+- * It currently hold the options defined for MX31 ADS Platform.
++ * It currently hold the options defined for MX31 3STACK Platform.
+  *
+  * @ingroup BRDCFG_MX31
+  */
+@@ -109,5 +110,37 @@
+ #define MAGIC_NUMBER2_REG	0x48
+ /* CPLD code version */
+ #define CPLD_CODE_VER_REG	0x50
++/* magic word for debug CPLD */
++#define MAGIC_NUMBER3_REG	0x58
++/* module reset register*/
++#define MODULE_RESET_REG	0x60
++/* CPU ID and Personality ID */
++#define MCU_BOARD_ID_REG	0x68
++
++/* interrupts like external uart , external ethernet etc*/
++#define EXPIO_PARENT_INT	IOMUX_TO_IRQ(MX31_PIN_GPIO1_1)
++
++#define EXPIO_INT_ENET		(MXC_EXP_IO_BASE + 0)
++#define EXPIO_INT_XUART_A 	(MXC_EXP_IO_BASE + 1)
++#define EXPIO_INT_XUART_B 	(MXC_EXP_IO_BASE + 2)
++#define EXPIO_INT_BUTTON_A 	(MXC_EXP_IO_BASE + 3)
++#define EXPIO_INT_BUTTON_B 	(MXC_EXP_IO_BASE + 4)
++
++/*! This is System IRQ used by LAN9217 */
++#define LAN9217_IRQ	EXPIO_INT_ENET
++
++/*! LED definition*/
++#define MXC_BD_LED1	(1)
++#define MXC_BD_LED2	(1 << 1)
++#define MXC_BD_LED3	(1 << 2)
++#define MXC_BD_LED4	(1 << 3)
++#define MXC_BD_LED5	(1 << 4)
++#define MXC_BD_LED6	(1 << 5)
++#define MXC_BD_LED7	(1 << 6)
++#define MXC_BD_LED8	(1 << 7)
++
++#define MXC_BD_LED_ON(led)
++#define MXC_BD_LED_OFF(led)
+ 
++#endif				/* CONFIG_MACH_MX31_3DS */
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX31PDK_H__ */
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index d1a69c7..819573a 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -126,7 +126,7 @@ static inline void mxc_init_keypad(void)
+ #if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE) \
+ 	|| defined(CONFIG_MTD_NAND_MXC_V2) || defined(CONFIG_MTD_NAND_MXC_V2_MODULE)
+ 
+-static struct mtd_partition mxc_nand_partitions[4] = {
++static struct mtd_partition mxc_nand_partitions[] = {
+ 	{
+ 	 .name = "IPL-SPL",
+ 	 .offset = 0,
+@@ -138,7 +138,11 @@ static struct mtd_partition mxc_nand_partitions[4] = {
+ 	{
+ 	 .name = "nand.rootfs",
+ 	 .offset = MTDPART_OFS_APPEND,
+-	 .size = 22 * 1024 * 1024},
++	 .size = 96 * 1024 * 1024},
++	{
++	 .name = "nand.configure",
++	 .offset = MTDPART_OFS_APPEND,
++	 .size = 8 * 1024 * 1024},
+ 	{
+ 	 .name = "nand.userfs",
+ 	 .offset = MTDPART_OFS_APPEND,
+@@ -222,20 +226,21 @@ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ };
+ 
+ /*lan9217 device*/
+-#if defined(CONFIG_SMC911X) || defined(CONFIG_SMC911X_MODULE)
++#if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
+ static struct resource smsc911x_resources[] = {
+ 	{
+ 	 .start = LAN9217_BASE_ADDR,
+-	 .end = LAN9217_BASE_ADDR + 255,
++	 .end = LAN9217_BASE_ADDR + 0x100,
+ 	 .flags = IORESOURCE_MEM,
+ 	 },
+ 	{
+-	 .start = MXC_EXP_IO_BASE,
++	 .start = LAN9217_IRQ,
++	 .end = LAN9217_IRQ,
+ 	 .flags = IORESOURCE_IRQ,
+ 	 },
+ };
+ static struct platform_device smsc_lan9217_device = {
+-	.name = "smc911x",
++	.name = "smsc911x",
+ 	.id = 0,
+ 	.dev = {
+ 		.release = mxc_nop_release,
+@@ -432,7 +437,10 @@ static int __init mxc_expio_init(void)
+ 		return -ENOMEM;
+ 
+ 	if ((__raw_readw(brd_io + MAGIC_NUMBER1_REG) != 0xAAAA) ||
+-	    (__raw_readw(brd_io + MAGIC_NUMBER2_REG) != 0x5555)) {
++	    (__raw_readw(brd_io + MAGIC_NUMBER2_REG) != 0x5555) ||
++	    (__raw_readw(brd_io + MAGIC_NUMBER3_REG) != 0xCAFE)) {
++		iounmap((void *)brd_io);
++		brd_io = 0;
+ 		return -ENODEV;
+ 	}
+ 
+@@ -457,9 +465,8 @@ static int __init mxc_expio_init(void)
+ 		set_irq_handler(i, handle_level_irq);
+ 		set_irq_flags(i, IRQF_VALID);
+ 	}
+-	set_irq_type(IOMUX_TO_IRQ(MX31_PIN_GPIO1_1), IRQT_LOW);
+-	set_irq_chained_handler(IOMUX_TO_IRQ(MX31_PIN_GPIO1_1),
+-				mxc_expio_irq_handler);
++	set_irq_type(EXPIO_PARENT_INT, IRQT_LOW);
++	set_irq_chained_handler(EXPIO_PARENT_INT, mxc_expio_irq_handler);
+ 
+ 	return 0;
+ }
+@@ -489,12 +496,10 @@ static void __init mxc_init_pmic_audio(void)
+ 	pll_clk = clk_get(NULL, "usb_pll");
+ 	ssi_clk = clk_get(NULL, "ssi_clk.0");
+ 	clk_set_parent(ssi_clk, pll_clk);
+-	clk_enable(ssi_clk);
+ 	clk_put(ssi_clk);
+ 
+ 	ssi_clk = clk_get(NULL, "ssi_clk.1");
+ 	clk_set_parent(ssi_clk, pll_clk);
+-	clk_enable(ssi_clk);
+ 	clk_put(ssi_clk);
+ 	clk_put(pll_clk);
+ 
+@@ -589,11 +594,6 @@ static void __init mxc_board_init(void)
+ #define PLL_399MHZ		PLL_PCTL_REG(1, 52, 7, 35)
+ #define PLL_133MHZ		PLL_PCTL_REG(2, 26, 5, 3)
+ 
+-/* For 27MHz input clock */
+-#define PLL_532_8MHZ		PLL_PCTL_REG(1, 15, 9, 13)
+-#define PLL_399_6MHZ		PLL_PCTL_REG(1, 18, 7, 7)
+-#define PLL_133_2MHZ		PLL_PCTL_REG(3, 5, 7, 2)
+-
+ #define PDR0_REG(mcu, max, hsp, ipg, nfc)	\
+ 	(MXC_CCM_PDR0_MCU_DIV_##mcu | MXC_CCM_PDR0_MAX_DIV_##max | \
+ 	 MXC_CCM_PDR0_HSP_DIV_##hsp | MXC_CCM_PDR0_IPG_DIV_##ipg | \
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index da45cd7..74be840 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -238,8 +238,6 @@ void gpio_spi_active(int cspi_mod)
+ 				  INPUTCONFIG_FUNC);
+ 		mxc_request_iomux(MX31_PIN_CSPI2_SS0, OUTPUTCONFIG_FUNC,
+ 				  INPUTCONFIG_FUNC);
+-		mxc_request_iomux(MX31_PIN_CSPI2_SS1, OUTPUTCONFIG_FUNC,
+-				  INPUTCONFIG_FUNC);
+ 		mxc_request_iomux(MX31_PIN_CSPI2_SS2, OUTPUTCONFIG_FUNC,
+ 				  INPUTCONFIG_FUNC);
+ 		break;
+@@ -308,6 +306,18 @@ void gpio_spi_inactive(int cspi_mod)
+ 		break;
+ 	case 1:
+ 		/* SPI2 */
++		mxc_request_iomux(MX31_PIN_CSPI2_MISO, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_GPIO);
++		mxc_request_iomux(MX31_PIN_CSPI2_MOSI, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_GPIO);
++		mxc_request_iomux(MX31_PIN_CSPI2_SCLK, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_GPIO);
++		mxc_request_iomux(MX31_PIN_CSPI2_SPI_RDY, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_GPIO);
++		mxc_request_iomux(MX31_PIN_CSPI2_SS0, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_GPIO);
++		mxc_request_iomux(MX31_PIN_CSPI2_SS2, OUTPUTCONFIG_GPIO,
++				  INPUTCONFIG_GPIO);
+ 		break;
+ 	case 2:
+ 		/* SPI3 */
+@@ -567,6 +577,8 @@ int sdhc_write_protect(void)
+ 		return 0;
+ }
+ 
++EXPORT_SYMBOL(sdhc_write_protect);
++
+ /*!
+  * Setup GPIO for LCD to be active
+  *
+@@ -644,11 +656,6 @@ void gpio_sensor_active(void)
+ 	mxc_set_gpio_direction(MX31_PIN_CSI_D5, 0);
+ 	mxc_set_gpio_dataout(MX31_PIN_CSI_D5, 0);
+ 
+-	/*mxc_request_iomux(MX31_PIN_SRX0, OUTPUTCONFIG_GPIO, INPUTCONFIG_NONE);
+-	   mxc_set_gpio_direction(MX31_PIN_SRX0, 0);
+-	   mxc_set_gpio_dataout(MX31_PIN_SRX0, 0);
+-	   mdelay(100);
+-	   mxc_set_gpio_dataout(MX31_PIN_SRX0, 1); */
+ 	mxc_request_iomux(MX31_PIN_CSI_D6, OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC);
+ 	mxc_request_iomux(MX31_PIN_CSI_D7, OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC);
+ 	mxc_request_iomux(MX31_PIN_CSI_D8, OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC);
+@@ -1126,3 +1133,48 @@ void gpio_usbotg_hs_inactive(void)
+ 
+ EXPORT_SYMBOL(gpio_usbotg_hs_inactive);
+ 
++/*!
++ * USB OTG FS port
++ */
++int gpio_usbotg_fs_active(void)
++{
++	if (mxc_request_iomux(MX31_PIN_USBOTG_DATA0,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA1,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA2,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA3,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA4,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA5,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA6,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DATA7,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_CLK,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_DIR,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_NXT,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USBOTG_STP,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC) ||
++	    mxc_request_iomux(MX31_PIN_USB_PWR,
++			      OUTPUTCONFIG_FUNC, INPUTCONFIG_FUNC))
++		return -EINVAL;
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_usbotg_fs_active);
++
++void gpio_usbotg_fs_inactive(void)
++{
++	/* Do nothing as  pins doesn't have/support GPIO mode */
++
++}
++
++EXPORT_SYMBOL(gpio_usbotg_fs_inactive);
++
+diff --git a/arch/arm/mach-mx3/serial.c b/arch/arm/mach-mx3/serial.c
+index 6e98117..433681f 100644
+--- a/arch/arm/mach-mx3/serial.c
++++ b/arch/arm/mach-mx3/serial.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2006-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2006-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -25,6 +25,7 @@
+ #include <asm/arch/spba.h>
+ #include "serial.h"
+ #include "board-mx31ads.h"
++#include "board-mx3_3stack.h"
+ 
+ #if defined(CONFIG_SERIAL_MXC) || defined(CONFIG_SERIAL_MXC_MODULE)
+ 
+@@ -35,7 +36,7 @@
+  * passes back the appropriate port structure as an argument to the control
+  * functions.
+  */
+-static uart_mxc_port mxc_ports[] = {
++static uart_mxc_port mxc_ports[MXC_UART_NR] = {
+ 	[0] = {
+ 	       .port = {
+ 			.membase = (void *)IO_ADDRESS(UART1_BASE_ADDR),
+@@ -92,6 +93,7 @@ static uart_mxc_port mxc_ports[] = {
+ 	       .ir_tx_inv = MXC_IRDA_TX_INV,
+ 	       .ir_rx_inv = MXC_IRDA_RX_INV,
+ 	       },
++#if UART3_ENABLED == 1
+ 	[2] = {
+ 	       .port = {
+ 			.membase = (void *)IO_ADDRESS(UART3_BASE_ADDR),
+@@ -120,6 +122,7 @@ static uart_mxc_port mxc_ports[] = {
+ 	       .ir_tx_inv = MXC_IRDA_TX_INV,
+ 	       .ir_rx_inv = MXC_IRDA_RX_INV,
+ 	       },
++#endif
+ #if UART4_ENABLED == 1
+ 	[3] = {
+ 	       .port = {
+@@ -150,6 +153,7 @@ static uart_mxc_port mxc_ports[] = {
+ 	       .ir_rx_inv = MXC_IRDA_RX_INV,
+ 	       },
+ #endif
++#if UART5_ENABLED == 1
+ 	[4] = {
+ 	       .port = {
+ 			.membase = (void *)IO_ADDRESS(UART5_BASE_ADDR),
+@@ -178,6 +182,7 @@ static uart_mxc_port mxc_ports[] = {
+ 	       .ir_tx_inv = MXC_IRDA_TX_INV,
+ 	       .ir_rx_inv = MXC_IRDA_RX_INV,
+ 	       },
++#endif
+ };
+ 
+ static struct platform_device mxc_uart_device1 = {
+@@ -196,6 +201,7 @@ static struct platform_device mxc_uart_device2 = {
+ 		},
+ };
+ 
++#if UART3_ENABLED == 1
+ static struct platform_device mxc_uart_device3 = {
+ 	.name = "mxcintuart",
+ 	.id = 2,
+@@ -203,6 +209,7 @@ static struct platform_device mxc_uart_device3 = {
+ 		.platform_data = &mxc_ports[2],
+ 		},
+ };
++#endif
+ 
+ #if UART4_ENABLED == 1
+ static struct platform_device mxc_uart_device4 = {
+@@ -214,6 +221,7 @@ static struct platform_device mxc_uart_device4 = {
+ };
+ #endif
+ 
++#if UART5_ENABLED == 1
+ static struct platform_device mxc_uart_device5 = {
+ 	.name = "mxcintuart",
+ 	.id = 4,
+@@ -221,6 +229,7 @@ static struct platform_device mxc_uart_device5 = {
+ 		.platform_data = &mxc_ports[4],
+ 		},
+ };
++#endif
+ 
+ static int __init mxc_init_uart(void)
+ {
+-- 
+1.5.4.4
+

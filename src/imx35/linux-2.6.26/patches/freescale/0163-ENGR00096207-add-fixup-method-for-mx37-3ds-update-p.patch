@@ -1,0 +1,102 @@
+From dc29aa3efa0b393bd9cc4e26a5dbbb570d52aa27 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Wed, 22 Oct 2008 15:58:52 +0800
+Subject: [PATCH] ENGR00096207 add fixup method for mx37 3ds, update pmic int pin
+
+add fixup method for mx37 3ds, update pmic int pin.
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack.c             |   18 +++++++++++++++++-
+ arch/arm/mach-mx37/mx37_3stack_gpio.c        |    7 +++----
+ arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c |    3 +++
+ 3 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 4bf7f9b..f7b6192 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -121,6 +121,10 @@ static void mc13892_reg_int(void)
+ 		"GPO4",
+ 	};
+ 
++	/* for board v1.1 do nothing*/
++	if (!board_is_mx37(BOARD_REV_2))
++		return;
++
+ 	for (i = 0; i < ARRAY_SIZE(reg_name); i++) {
+ 		regulator = regulator_get(NULL, reg_name[i]);
+ 		if (regulator != ERR_PTR(-ENOENT)) {
+@@ -293,7 +297,7 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	{
+ 	 .type = "mc13892",
+ 	 .addr = 0x08,
+-	 .platform_data = (void *)MX37_PIN_GPIO1_4,
++	 .platform_data = (void *)MX37_PIN_OWIRE_LINE,
+ 	 },
+ };
+ 
+@@ -604,11 +608,23 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
++
++/*!
++ * fixup for mx37 3stack board v1.1(wm8350)
++ */
++static void mx37_3stack_fixup_for_board_v1(void)
++{
++}
++
++
+ /*!
+  * Board specific initialization.
+  */
+ static void __init mxc_board_init(void)
+ {
++	if (!board_is_mx37(BOARD_REV_2))
++		mx37_3stack_fixup_for_board_v1();
++
+ 	mxc_cpu_common_init();
+ 	mxc_clocks_init();
+ 	mxc_gpio_init();
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index 2824f31..92adfec 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -763,15 +763,14 @@ EXPORT_SYMBOL(gpio_spdif_inactive);
+ 
+ void gpio_pmic_active(void)
+ {
+-	mxc_request_iomux(MX37_PIN_GPIO1_4, IOMUX_CONFIG_GPIO
+-			  | IOMUX_CONFIG_SION);
+-	mxc_iomux_set_pad(MX37_PIN_GPIO1_4, PAD_CTL_SRE_SLOW |
++	mxc_request_iomux(MX37_PIN_OWIRE_LINE, IOMUX_CONFIG_GPIO);
++	mxc_iomux_set_pad(MX37_PIN_OWIRE_LINE, PAD_CTL_SRE_SLOW |
+ 			  PAD_CTL_ODE_OPENDRAIN_NONE |
+ 			  PAD_CTL_DRV_MEDIUM |
+ 			  PAD_CTL_100K_PU |
+ 			  PAD_CTL_HYS_ENABLE |
+ 			  PAD_CTL_DRV_VOT_HIGH | PAD_CTL_DDR_INPUT_CMOS);
+-	mxc_set_gpio_direction(MX37_PIN_GPIO1_4, 1);
++	mxc_set_gpio_direction(MX37_PIN_OWIRE_LINE, 1);
+ }
+ 
+ EXPORT_SYMBOL(gpio_pmic_active);
+diff --git a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+index 6133147..576b01c 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
++++ b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+@@ -52,6 +52,9 @@ static void wm8350_regulator_init(void)
+ 		"LDO3",
+ 	};
+ 
++	/* for board v2.0 later, do nothing here*/
++	if (board_is_mx37(BOARD_REV_2))
++		return;
+ 	while (!IS_ERR_VALUE((unsigned long)(regulator = regulator_get(NULL,
+ 		wm8350_global_regulator[i])))) {
+ 		regulator_enable(regulator);
+-- 
+1.5.4.4
+

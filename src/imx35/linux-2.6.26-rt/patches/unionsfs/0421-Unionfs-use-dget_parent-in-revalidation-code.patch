@@ -1,0 +1,37 @@
+From 42c707d7194015fa613abc2ea665a7c7a92b4695 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 17:18:48 -0500
+Subject: [PATCH] Unionfs: use dget_parent in revalidation code
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dentry.c |   13 ++++---------
+ 1 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index a956b94..f8f65e1 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -410,15 +410,10 @@ bool __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd,
+ 		goto out;
+ 	}
+ 
+-	/*
+-	 * lock all dentries in chain, in child to parent order.
+-	 * if failed, then sleep for a little, then retry.
+-	 */
+-	dtmp = dentry->d_parent;
+-	for (i = chain_len-1; i >= 0; i--) {
+-		chain[i] = dget(dtmp);
+-		dtmp = dtmp->d_parent;
+-	}
++	/* grab all dentries in chain, in child to parent order */
++	dtmp = dentry;
++	for (i = chain_len-1; i >= 0; i--)
++		dtmp = chain[i] = dget_parent(dtmp);
+ 
+ 	/*
+ 	 * call __unionfs_d_revalidate_one() on each dentry, but in parent
+-- 
+1.5.4.3
+

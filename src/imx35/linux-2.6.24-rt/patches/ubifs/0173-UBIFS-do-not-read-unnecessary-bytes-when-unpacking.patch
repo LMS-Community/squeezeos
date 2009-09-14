@@ -1,0 +1,123 @@
+From 18bcb0729d9323e80f23f875c12a4d49d197c4b0 Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Date: Fri, 17 Oct 2008 16:52:10 +0300
+Subject: [PATCH] UBIFS: do not read unnecessary bytes when unpacking bits
+
+Fixes the following Oops:
+
+BUG: unable to handle kernel paging request at f8d24000
+IP: [<f8ff0657>] :ubifs:ubifs_unpack_bits+0xcd/0x231
+*pde = 34333067 *pte = 00000000
+Oops: 0000 [#1] PREEMPT SMP
+Modules linked in: deflate zlib_deflate lzo lzo_decompress lzo_compress
+ubifs ubi nandsim nand nand_ids nand_ecc mtd nfsd lockd sunrpc exportfs
+[last unloaded: nand_ecc]
+
+Pid: 7450, comm: sync Not tainted (2.6.27-rc8-ubifs-2.6 #27)
+EIP: 0060:[<f8ff0657>] EFLAGS: 00010206 CPU: 0
+EIP is at ubifs_unpack_bits+0xcd/0x231 [ubifs]
+EAX: 00000000 EBX: 00000000 ECX: d7e43dc0 EDX: 0000ff00
+ESI: 00000004 EDI: f8d23ffe EBP: d7e43db4 ESP: d7e43d8c
+DS: 007b ES: 007b FS: 00d8 GS: 0033 SS: 0068
+Process sync (pid: 7450, ti=d7e42000 task=eb6f9530 task.ti=d7e42000)
+Stack: 00000400 c0103db4 dc5e8090 d7e43dc0 d7e43dc0 d7e43dc4 0000001c 00000004
+      f496d1e0 f8d23ffc d7e43dd4 f8ffac7e f8d23ffe 00000000 f8d23ffe f2b7af68
+      f496d1e0 f8d23ffc d7e43e2c f8ffadc5 00000000 0001f000 00000000 c03b10a7
+Call Trace:
+[<c0103db4>] ? restore_nocheck_notrace+0x0/0xe
+[<f8ffac7e>] ? is_a_node+0x43/0x92 [ubifs]
+[<f8ffadc5>] ? dbg_check_ltab+0xf8/0x5c9 [ubifs]
+[<c03b10a7>] ? mutex_lock_nested+0x1b2/0x2a0
+[<f8ffc86e>] ? ubifs_lpt_start_commit+0x49/0xecb [ubifs]
+[<c03b0ef3>] ? mutex_unlock+0xd/0xf
+[<f8fef017>] ? ubifs_tnc_start_commit+0x1cf/0xef8 [ubifs]
+[<f8fe65d8>] ? do_commit+0x18f/0x52d [ubifs]
+[<f8fe69f6>] ? ubifs_run_commit+0x80/0xca [ubifs]
+[<f8fd8d35>] ? ubifs_sync_fs+0xdb/0xf6 [ubifs]
+[<c0181a07>] ? sync_filesystems+0xc6/0x10c
+[<c019f279>] ? do_sync+0x3b/0x6a
+[<c019f2ba>] ? sys_sync+0x12/0x18
+[<c0103ced>] ? sysenter_do_call+0x12/0x35
+=======================
+Code: 4d ec 89 01 8b 45 e8 89 10 89 d8 89 f1 d3 e8 85 c0 74 07 29 d6 83 fe
+20 75 2a 89 d8 83 c4 1c 5b 5e 5f 5d c3 0f b6 57 01 c1 e2 08 <0f> b6 47 02
+c1 e0 10 09 c2 0f b6 07 09 c2 0f b
+EIP: [<f8ff0657>] ubifs_unpack_bits+0xcd/0x231 [ubifs] SS:ESP 0068:d7e43d8c
+---[ end trace 1bbb4c407a6dd816 ]---
+
+Signed-off-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+---
+ fs/ubifs/lpt.c |   45 ++++++++++++++++++++++++++++++++++++++-------
+ 1 files changed, 38 insertions(+), 7 deletions(-)
+
+diff --git a/fs/ubifs/lpt.c b/fs/ubifs/lpt.c
+index cd11b23..db8bd0e 100644
+--- a/fs/ubifs/lpt.c
++++ b/fs/ubifs/lpt.c
+@@ -288,25 +288,56 @@ uint32_t ubifs_unpack_bits(uint8_t **addr, int *pos, int nrbits)
+ 	const int k = 32 - nrbits;
+ 	uint8_t *p = *addr;
+ 	int b = *pos;
+-	uint32_t val;
++	uint32_t uninitialized_var(val);
++	const int bytes = (nrbits + b + 7) >> 3;
+ 
+ 	ubifs_assert(nrbits > 0);
+ 	ubifs_assert(nrbits <= 32);
+ 	ubifs_assert(*pos >= 0);
+ 	ubifs_assert(*pos < 8);
+ 	if (b) {
+-		val = p[1] | ((uint32_t)p[2] << 8) | ((uint32_t)p[3] << 16) |
+-		      ((uint32_t)p[4] << 24);
++		switch (bytes) {
++		case 2:
++			val = p[1];
++			break;
++		case 3:
++			val = p[1] | ((uint32_t)p[2] << 8);
++			break;
++		case 4:
++			val = p[1] | ((uint32_t)p[2] << 8) |
++				     ((uint32_t)p[3] << 16);
++			break;
++		case 5:
++			val = p[1] | ((uint32_t)p[2] << 8) |
++				     ((uint32_t)p[3] << 16) |
++				     ((uint32_t)p[4] << 24);
++		}
+ 		val <<= (8 - b);
+ 		val |= *p >> b;
+ 		nrbits += b;
+-	} else
+-		val = p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+-		      ((uint32_t)p[3] << 24);
++	} else {
++		switch (bytes) {
++		case 1:
++			val = p[0];
++			break;
++		case 2:
++			val = p[0] | ((uint32_t)p[1] << 8);
++			break;
++		case 3:
++			val = p[0] | ((uint32_t)p[1] << 8) |
++				     ((uint32_t)p[2] << 16);
++			break;
++		case 4:
++			val = p[0] | ((uint32_t)p[1] << 8) |
++				     ((uint32_t)p[2] << 16) |
++				     ((uint32_t)p[3] << 24);
++			break;
++		}
++	}
+ 	val <<= k;
+ 	val >>= k;
+ 	b = nrbits & 7;
+-	p += nrbits / 8;
++	p += nrbits >> 3;
+ 	*addr = p;
+ 	*pos = b;
+ 	ubifs_assert((val >> nrbits) == 0 || nrbits - b == 32);
+-- 
+1.5.6.3
+

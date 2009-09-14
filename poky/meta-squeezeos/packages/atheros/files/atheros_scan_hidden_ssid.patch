@@ -1,0 +1,71 @@
+--- AR6kSDK.build_sw.62/host/os/linux/wireless_ext.c.orig	2009-07-22 09:53:30.000000000 +0200
++++ AR6kSDK.build_sw.62/host/os/linux/wireless_ext.c	2009-07-23 11:08:39.000000000 +0200
+@@ -2245,7 +2245,7 @@ ar6000_ioctl_iwaplist(struct net_device 
+ }
+ 
+ /*
+- * SIOCGIWSCAN
++ * SIOCSIWSCAN
+  */
+ int
+ ar6000_ioctl_siwscan(struct net_device *dev,
+@@ -2255,9 +2255,11 @@ ar6000_ioctl_siwscan(struct net_device *
+ #define ACT_DWELLTIME_DEFAULT   105
+ #define HOME_TXDRAIN_TIME       100
+ #define SCAN_INT                HOME_TXDRAIN_TIME + ACT_DWELLTIME_DEFAULT
+-    AR_SOFTC_T *ar = (AR_SOFTC_T *)dev->priv;
++    AR_SOFTC_T *ar = (AR_SOFTC_T *)netdev_priv(dev);
+     int ret = 0;
+ 
++
++
+     if (ar->arWmiReady == FALSE) {
+         return -EIO;
+     }
+@@ -2266,20 +2268,38 @@ ar6000_ioctl_siwscan(struct net_device *
+         return -EIO;
+     }
+ 
+-    if (!ar->arUserBssFilter) {
+-        if (wmi_bssfilter_cmd(ar->arWmi, (ar->arConnected ? ALL_BUT_BSS_FILTER : ALL_BSS_FILTER), 0) != A_OK) {
+-            return -EIO;
+-        }
++     /* We ask for everything from the target */
++    if (wmi_bssfilter_cmd(ar->arWmi, ALL_BSS_FILTER, 0) != A_OK) {
++        printk("Couldn't set filtering\n");
++        ret = -EIO;
+     }
+ 
+-    if (ar->arConnected) {
+-        if  (wmi_get_stats_cmd(ar->arWmi) != A_OK) {
+-            return -EIO;
++#if WIRELESS_EXT >= 18
++    if (data->pointer && (data->length == sizeof(struct iw_scan_req)))
++    {
++        if ((data->flags & IW_SCAN_THIS_ESSID) == IW_SCAN_THIS_ESSID)
++        {
++            struct iw_scan_req req;
++            if (copy_from_user(&req, data->pointer, sizeof(struct iw_scan_req)))
++                return -EIO;
++            if (wmi_probedSsid_cmd(ar->arWmi, 1, SPECIFIC_SSID_FLAG, req.essid_len, req.essid) != A_OK)
++                return -EIO;
++        }
++        else
++        {
++            if (wmi_probedSsid_cmd(ar->arWmi, 1, DISABLE_SSID_FLAG, 0, NULL) != A_OK)
++                return -EIO;
+         }
+     }
++    else
++    {
++        if (wmi_probedSsid_cmd(ar->arWmi, 1, DISABLE_SSID_FLAG, 0, NULL) != A_OK)
++            return -EIO;
++    }
++#endif
+ 
+     if (wmi_startscan_cmd(ar->arWmi, WMI_LONG_SCAN, FALSE, FALSE, \
+-                          HOME_TXDRAIN_TIME, SCAN_INT, 0, NULL) != A_OK) {
++                          0, 0, 0, NULL) != A_OK) {
+         ret = -EIO;
+     }
+ 

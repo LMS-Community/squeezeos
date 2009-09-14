@@ -1,0 +1,1084 @@
+From 5c06579badfd757c60b5509ab17ecf80c7355325 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Wed, 26 Mar 2008 22:42:42 -0500
+Subject: [PATCH] ENGR00058762 implimentaion nand driver on mx35 platform
+
+Implimentaion nand driver on mx35 platform
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ ...mplimentaion-nand-driver-on-mx35-platform.patch |  506 ++++++++++++++++++++
+ arch/arm/configs/imx35_3stack_defconfig            |   96 ++++-
+ arch/arm/mach-mx35/Kconfig                         |   16 +
+ arch/arm/mach-mx35/mx35_3stack.c                   |   11 +-
+ drivers/mtd/nand/mxc_nd2.c                         |    7 +-
+ drivers/mtd/nand/mxc_nd2.h                         |  206 ++++++---
+ include/asm-arm/arch-mxc/mx35.h                    |    8 +-
+ 7 files changed, 779 insertions(+), 71 deletions(-)
+
+diff --git a/0001-ENGR58762-implimentaion-nand-driver-on-mx35-platform.patch b/0001-ENGR58762-implimentaion-nand-driver-on-mx35-platform.patch
+new file mode 100644
+index 0000000..6dc35e3
+--- /dev/null
++++ b/0001-ENGR58762-implimentaion-nand-driver-on-mx35-platform.patch
+@@ -0,0 +1,506 @@
++From 48330b00843f522dbb33531b096019aa9156b5f5 Mon Sep 17 00:00:00 2001
++From: Jason Liu <r64343@freescale.com>
++Date: Wed, 26 Mar 2008 22:42:42 -0500
++Subject: [PATCH] ENGR58762 implimentaion nand driver on mx35 platform
++
++Implimentaion nand driver on mx35 platform
++
++Signed-off-by: Jason Liu <r64343@freescale.com>
++---
++ arch/arm/configs/imx35_3stack_defconfig |   96 +++++++++++++++++-
++ arch/arm/mach-mx35/Kconfig              |   16 +++
++ arch/arm/mach-mx35/mx35_3stack.c        |   11 +-
++ drivers/mtd/nand/mxc_nd2.c              |    7 +-
++ drivers/mtd/nand/mxc_nd2.h              |  163 ++++++++++++++++++++++++-------
++ include/asm-arm/arch-mxc/mx35.h         |    8 +-
++ 6 files changed, 251 insertions(+), 50 deletions(-)
++
++diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
++index b700ff8..5abb4a2 100644
++--- a/arch/arm/configs/imx35_3stack_defconfig
+++++ b/arch/arm/configs/imx35_3stack_defconfig
++@@ -1,6 +1,7 @@
++ #
++ # Automatically generated make config: don't edit
++ # Linux kernel version: 2.6.24
+++# Wed Mar 26 22:52:11 2008
++ #
++ CONFIG_ARM=y
++ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
++@@ -161,6 +162,7 @@ CONFIG_ARCH_MX35=y
++ CONFIG_I2C_MXC_SELECT1=y
++ # CONFIG_I2C_MXC_SELECT2 is not set
++ CONFIG_MXC_SDMA_API=y
+++CONFIG_ARCH_MXC_HAS_NFC_V2=y
++ # CONFIG_I2C_MXC_SELECT3 is not set
++ 
++ #
++@@ -169,6 +171,7 @@ CONFIG_MXC_SDMA_API=y
++ CONFIG_MACH_MX35_3DS=y
++ # CONFIG_MACH_MX35EVB is not set
++ # CONFIG_MX35_DOZE_DURING_IDLE is not set
+++CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
++ 
++ #
++ # Device options
++@@ -384,7 +387,92 @@ CONFIG_FW_LOADER=m
++ # CONFIG_SYS_HYPERVISOR is not set
++ CONFIG_CONNECTOR=y
++ CONFIG_PROC_EVENTS=y
++-# CONFIG_MTD is not set
+++CONFIG_MTD=y
+++# CONFIG_MTD_DEBUG is not set
+++# CONFIG_MTD_CONCAT is not set
+++CONFIG_MTD_PARTITIONS=y
+++# CONFIG_MTD_REDBOOT_PARTS is not set
+++CONFIG_MTD_CMDLINE_PARTS=y
+++# CONFIG_MTD_AFS_PARTS is not set
+++
+++#
+++# User Modules And Translation Layers
+++#
+++CONFIG_MTD_CHAR=y
+++CONFIG_MTD_BLKDEVS=y
+++CONFIG_MTD_BLOCK=y
+++# CONFIG_FTL is not set
+++# CONFIG_NFTL is not set
+++# CONFIG_INFTL is not set
+++# CONFIG_RFD_FTL is not set
+++# CONFIG_SSFDC is not set
+++# CONFIG_MTD_OOPS is not set
+++
+++#
+++# RAM/ROM/Flash chip drivers
+++#
+++CONFIG_MTD_CFI=y
+++# CONFIG_MTD_JEDECPROBE is not set
+++CONFIG_MTD_GEN_PROBE=y
+++# CONFIG_MTD_CFI_ADV_OPTIONS is not set
+++CONFIG_MTD_MAP_BANK_WIDTH_1=y
+++CONFIG_MTD_MAP_BANK_WIDTH_2=y
+++CONFIG_MTD_MAP_BANK_WIDTH_4=y
+++# CONFIG_MTD_MAP_BANK_WIDTH_8 is not set
+++# CONFIG_MTD_MAP_BANK_WIDTH_16 is not set
+++# CONFIG_MTD_MAP_BANK_WIDTH_32 is not set
+++CONFIG_MTD_CFI_I1=y
+++CONFIG_MTD_CFI_I2=y
+++# CONFIG_MTD_CFI_I4 is not set
+++# CONFIG_MTD_CFI_I8 is not set
+++# CONFIG_MTD_CFI_INTELEXT is not set
+++# CONFIG_MTD_CFI_AMDSTD is not set
+++# CONFIG_MTD_CFI_STAA is not set
+++# CONFIG_MTD_RAM is not set
+++# CONFIG_MTD_ROM is not set
+++# CONFIG_MTD_ABSENT is not set
+++
+++#
+++# Mapping drivers for chip access
+++#
+++# CONFIG_MTD_COMPLEX_MAPPINGS is not set
+++# CONFIG_MTD_PHYSMAP is not set
+++# CONFIG_MTD_ARM_INTEGRATOR is not set
+++# CONFIG_MTD_PLATRAM is not set
+++CONFIG_MTD_MXC=y
+++
+++#
+++# Self-contained MTD device drivers
+++#
+++# CONFIG_MTD_SLRAM is not set
+++# CONFIG_MTD_PHRAM is not set
+++# CONFIG_MTD_MTDRAM is not set
+++# CONFIG_MTD_BLOCK2MTD is not set
+++
+++#
+++# Disk-On-Chip Device Drivers
+++#
+++# CONFIG_MTD_DOC2000 is not set
+++# CONFIG_MTD_DOC2001 is not set
+++# CONFIG_MTD_DOC2001PLUS is not set
+++CONFIG_MTD_NAND=y
+++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
+++# CONFIG_MTD_NAND_ECC_SMC is not set
+++# CONFIG_MTD_NAND_MUSEUM_IDS is not set
+++CONFIG_MTD_NAND_IDS=y
+++# CONFIG_MTD_NAND_DISKONCHIP is not set
+++# CONFIG_MTD_NAND_NANDSIM is not set
+++CONFIG_MTD_NAND_MXC_V2=y
+++# CONFIG_MTD_NAND_MXC_SWECC is not set
+++# CONFIG_MTD_NAND_MXC_FORCE_CE is not set
+++# CONFIG_MXC_NAND_LOW_LEVEL_ERASE is not set
+++# CONFIG_MTD_NAND_PLATFORM is not set
+++# CONFIG_MTD_ONENAND is not set
+++
+++#
+++# UBI - Unsorted block images
+++#
+++# CONFIG_MTD_UBI is not set
++ 
++ #
++ # Voltage and Current regulators
++@@ -400,7 +488,6 @@ CONFIG_BLK_DEV=y
++ CONFIG_BLK_DEV_LOOP=y
++ # CONFIG_BLK_DEV_CRYPTOLOOP is not set
++ # CONFIG_BLK_DEV_NBD is not set
++-# CONFIG_BLK_DEV_UB is not set
++ # CONFIG_BLK_DEV_RAM is not set
++ # CONFIG_CDROM_PKTCDVD is not set
++ # CONFIG_ATA_OVER_ETH is not set
++@@ -572,6 +659,7 @@ CONFIG_INPUT=y
++ #
++ # CONFIG_VT is not set
++ # CONFIG_SERIAL_NONSTANDARD is not set
+++# CONFIG_FM_SI4702 is not set
++ # CONFIG_MXC_MU is not set
++ # CONFIG_MXC_SUPER_GEM is not set
++ 
++@@ -727,11 +815,11 @@ CONFIG_USB_ARCH_HAS_HCD=y
++ # CONFIG_OTG is not set
++ 
++ #
++-#
+++# 
++ #
++ 
++ #
++-#
+++# 
++ #
++ # CONFIG_MMC is not set
++ # CONFIG_NEW_LEDS is not set
++diff --git a/arch/arm/mach-mx35/Kconfig b/arch/arm/mach-mx35/Kconfig
++index c8e574e..9373ae5 100644
++--- a/arch/arm/mach-mx35/Kconfig
+++++ b/arch/arm/mach-mx35/Kconfig
++@@ -29,6 +29,22 @@ config MXC_SDMA_API
++            This selects the Freescale MXC SDMA API.
++            If unsure, say N.
++ 
+++config ARCH_MXC_HAS_NFC_V2
+++        bool "MXC NFC Hardware Version 2"
+++        depends on ARCH_MX35
+++        default y
+++        help
+++           This selects the Freescale MXC Nand Flash Controller Hardware Version 3
+++           If unsure, say N.
+++
+++config ARCH_MXC_HAS_NFC_V2_1
+++        bool "MXC NFC Hardware Version 2.1"
+++        depends on ARCH_MXC_HAS_NFC_V2
+++        default y
+++        help
+++           This selects the Freescale MXC Nand Flash Controller Hardware Version 2.1
+++           If unsure, say N.
+++
++ menu "Device options"
++ 
++ config I2C_MXC_SELECT1
++diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
++index 7c9c61f..d6eed2d 100644
++--- a/arch/arm/mach-mx35/mx35_3stack.c
+++++ b/arch/arm/mach-mx35/mx35_3stack.c
++@@ -134,17 +134,18 @@ static void mxc_init_nor_mtd(void)
++ 
++ /* MTD NAND flash */
++ 
++-#if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)
+++#if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)	\
+++	|| defined(CONFIG_MTD_NAND_MXC_V2) || defined(CONFIG_MTD_NAND_MXC_V2_MODULE)
++ 
++ static struct mtd_partition mxc_nand_partitions[] = {
++ 	{
++-	 .name = "IPL-SPL",
+++	 .name = "nand.bootloader",
++ 	 .offset = 0,
++-	 .size = 256 * 1024},
+++	 .size = 1024 * 1024},
++ 	{
++ 	 .name = "nand.kernel",
++ 	 .offset = MTDPART_OFS_APPEND,
++-	 .size = 4 * 1024 * 1024},
+++	 .size = 5 * 1024 * 1024},
++ 	{
++ 	 .name = "nand.rootfs",
++ 	 .offset = MTDPART_OFS_APPEND,
++@@ -166,7 +167,7 @@ static struct flash_platform_data mxc_nand_data = {
++ };
++ 
++ static struct platform_device mxc_nand_mtd_device = {
++-	.name = "mxc_nand_flash",
+++	.name = "mxc_nandv2_flash",
++ 	.id = 0,
++ 	.dev = {
++ 		.release = mxc_nop_release,
++diff --git a/drivers/mtd/nand/mxc_nd2.c b/drivers/mtd/nand/mxc_nd2.c
++index 51b4ec5..c58b7fa 100644
++--- a/drivers/mtd/nand/mxc_nd2.c
+++++ b/drivers/mtd/nand/mxc_nd2.c
++@@ -910,7 +910,8 @@ static int mxc_nand_read_page(struct mtd_info *mtd, struct nand_chip *chip,
++ 	}
++ 
++ 	nfc_memcpy((void *)buf, (void *)MAIN_AREA0, mtd->writesize);
++-
+++	copy_spare(mtd, (void *)chip->oob_poi, (void *)SPARE_AREA0,
+++		   mtd->oobsize, true);
++ 	return 0;
++ }
++ 
++@@ -919,6 +920,8 @@ static void mxc_nand_write_page(struct mtd_info *mtd, struct nand_chip *chip,
++ 				const uint8_t * buf)
++ {
++ 	memcpy((void *)MAIN_AREA0, buf, mtd->writesize);
+++	copy_spare(mtd, (char *)chip->oob_poi, (char *)SPARE_AREA0,
+++		   mtd->oobsize, false);
++ }
++ 
++ /* Define some generic bad / good block scan pattern which are used
++@@ -1022,7 +1025,7 @@ static int __init mxcnd_probe(struct platform_device *pdev)
++ 	nfc_ip_base = IO_ADDRESS(NFC_BASE_ADDR);
++ 
++ 	/* Resetting  NFC */
++-	raw_write(NFC_RST, REG_NFC_RST);
+++	raw_write((raw_read(REG_NFC_RST) | NFC_RST), REG_NFC_RST);
++ 
++ 	/* Allocate memory for MTD device structure and private data */
++ 	mxc_nand_data = kzalloc(sizeof(struct mxc_mtd_s), GFP_KERNEL);
++diff --git a/drivers/mtd/nand/mxc_nd2.h b/drivers/mtd/nand/mxc_nd2.h
++index 5bf05dc..b5bb406 100644
++--- a/drivers/mtd/nand/mxc_nd2.h
+++++ b/drivers/mtd/nand/mxc_nd2.h
++@@ -137,7 +137,7 @@
++ #define IS_4BIT_ECC			1
++ #define SET_SPAS(v)
++ #define SET_ECC_MODE(v)
++-#define SET_NFMS(v)	(NFMS |= (v));
+++#define SET_NFMS(v)	(NFMS |= (v))
++ 
++ #define WRITE_NFC_IP_REG(val,reg) \
++ 	raw_write((raw_read(REG_NFC_OPS_STAT) & ~NFC_OPS_STAT),  REG_NFC_OPS_STAT)
++@@ -197,10 +197,10 @@
++ #ifdef CONFIG_ARCH_MXC_HAS_NFC_V3_1
++ #define NFC_ECC_MODE_4    		(1 << 6)
++ #define NFC_ECC_MODE_8			~(1 << 6)
++-#define NFC_SPAS_16			16
++-#define NFC_SPAS_64			64
++-#define NFC_SPAS_128			128
++-#define NFC_SPAS_218			218
+++#define NFC_SPAS_16			8	
+++#define NFC_SPAS_64		 	32	
+++#define NFC_SPAS_128			64	
+++#define NFC_SPAS_218		 	109	
++ #define NFC_IPC_CREQ			(1 << 0)
++ #define NFC_IPC_ACK			(1 << 1)
++ #endif
++@@ -257,44 +257,125 @@
++ /*
++  * Addresses for NFC registers
++  */
++-#define NFC_BUF_SIZE            (nfc_ip_base + 0xE00)
++-#define NFC_BUF_ADDR            (nfc_ip_base + 0xE04)
++-#define NFC_FLASH_ADDR          (nfc_ip_base + 0xE06)
++-#define NFC_FLASH_CMD           (nfc_ip_base + 0xE08)
++-#define NFC_CONFIG              (nfc_ip_base + 0xE0A)
++-#define NFC_ECC_STATUS_RESULT   (nfc_ip_base + 0xE0C)
++-#define NFC_RSLTMAIN_AREA       (nfc_ip_base + 0xE0E)
++-#define NFC_RSLTSPARE_AREA      (nfc_ip_base + 0xE10)
++-#define NFC_WRPROT              (nfc_ip_base + 0xE12)
++-#define NFC_UNLOCKSTART_BLKADDR (nfc_ip_base + 0xE14)
++-#define NFC_UNLOCKEND_BLKADDR   (nfc_ip_base + 0xE16)
++-#define NFC_NF_WRPRST           (nfc_ip_base + 0xE18)
++-#define NFC_CONFIG1             (nfc_ip_base + 0xE1A)
++-#define NFC_CONFIG2             (nfc_ip_base + 0xE1C)
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define NFC_REG_BASE	(nfc_ip_base + 0x1000)
+++#else
+++#define NFC_REG_BASE	nfc_ip_base
+++#endif
+++#define NFC_BUF_SIZE            (NFC_REG_BASE + 0xE00)
+++#define NFC_BUF_ADDR            (NFC_REG_BASE + 0xE04)
+++#define NFC_FLASH_ADDR          (NFC_REG_BASE + 0xE06)
+++#define NFC_FLASH_CMD           (NFC_REG_BASE + 0xE08)
+++#define NFC_CONFIG              (NFC_REG_BASE + 0xE0A)
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define NFC_ECC_STATUS_RESULT	(NFC_REG_BASE + 0xE0C)
+++#define NFC_ECC_STATUS_RESULT_1	(NFC_REG_BASE + 0xE0C)
+++#define NFC_ECC_STATUS_RESULT_2	(NFC_REG_BASE + 0xE0E)
+++#define NFC_SPAS		(NFC_REG_BASE + 0xE10)
+++#else
+++#define NFC_ECC_STATUS_RESULT   (NFC_REG_BASE + 0xE0C)
+++#define NFC_RSLTMAIN_AREA       (NFC_REG_BASE + 0xE0E)
+++#define NFC_RSLTSPARE_AREA      (NFC_REG_BASE + 0xE10)
+++#endif
+++#define NFC_WRPROT              (NFC_REG_BASE + 0xE12)
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define NFC_UNLOCKSTART_BLKADDR  (NFC_REG_BASE + 0xE20)
+++#define NFC_UNLOCKEND_BLKADDR    (NFC_REG_BASE + 0xE22)
+++#define NFC_UNLOCKSTART_BLKADDR1 (NFC_REG_BASE + 0xE24)
+++#define NFC_UNLOCKEND_BLKADDR1   (NFC_REG_BASE + 0xE26)
+++#define NFC_UNLOCKSTART_BLKADDR2 (NFC_REG_BASE + 0xE28)
+++#define NFC_UNLOCKEND_BLKADDR2   (NFC_REG_BASE + 0xE2A)
+++#define NFC_UNLOCKSTART_BLKADDR3 (NFC_REG_BASE + 0xE2C)
+++#define NFC_UNLOCKEND_BLKADDR3   (NFC_REG_BASE + 0xE2E)
+++#else
+++#define NFC_UNLOCKSTART_BLKADDR  (NFC_REG_BASE + 0xE14)
+++#define NFC_UNLOCKEND_BLKADDR    (NFC_REG_BASE + 0xE16)
+++#endif
+++#define NFC_NF_WRPRST            (NFC_REG_BASE + 0xE18)
+++#define NFC_CONFIG1              (NFC_REG_BASE + 0xE1A)
+++#define NFC_CONFIG2              (NFC_REG_BASE + 0xE1C)
++ 
++ /*!
++  * Addresses for NFC RAM BUFFER Main area 0
++  */
++-#define MAIN_AREA0        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x000)
++-#define MAIN_AREA1        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x200)
++-#define MAIN_AREA2        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x400)
++-#define MAIN_AREA3        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x600)
+++#define MAIN_AREA0      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x000)
+++#define MAIN_AREA1      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x200)
+++#define MAIN_AREA2      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x400)
+++#define MAIN_AREA3      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x600)
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define MAIN_AREA4      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x800)
+++#define MAIN_AREA5      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0xA00)
+++#define MAIN_AREA6      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0xC00)
+++#define MAIN_AREA7      (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0xE00)
+++#endif
++ 
++ /*!
++  * Addresses for NFC SPARE BUFFER Spare area 0
++  */
++-#define SPARE_AREA0       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x800)
++-#define SPARE_AREA1       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x810)
++-#define SPARE_AREA2       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x820)
++-#define SPARE_AREA3       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x830)
++-#define SPARE_LEN         16
++-#define SPARE_COUNT       4
++-#define SPARE_SIZE        (SPARE_LEN * SPARE_COUNT)
++-
++-#define IS_4BIT_ECC       1
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define SPARE_AREA0     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1000)
+++#define SPARE_AREA1     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1040)
+++#define SPARE_AREA2     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1080)
+++#define SPARE_AREA3     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x10C0)
+++#define SPARE_AREA4     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1100)
+++#define SPARE_AREA5     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1140)
+++#define SPARE_AREA6     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1180)
+++#define SPARE_AREA7     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x11C0)
+++#define SPARE_LEN	64
+++#define SPARE_COUNT	8
+++#else
+++#define SPARE_AREA0     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x800)
+++#define SPARE_AREA1     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x810)
+++#define SPARE_AREA2     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x820)
+++#define SPARE_AREA3     (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x830)
+++#define SPARE_LEN       16
+++#define SPARE_COUNT     4
+++#endif
+++#define SPARE_SIZE      (SPARE_LEN * SPARE_COUNT)
+++
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define REG_NFC_ECC_MODE NFC_CONFIG1
+++#define SPAS_SHIFT		(0)
+++#define REG_NFC_SPAS NFC_SPAS
+++#define SPAS_MASK	(0xFF00)
+++#define IS_4BIT_ECC			\
+++	((raw_read(REG_NFC_ECC_MODE) & NFC_ECC_MODE_4) >> 0)
+++
+++
+++#define SET_SPAS(v)			\
+++	raw_write(((raw_read(REG_NFC_SPAS) & SPAS_MASK) | ((v<<SPAS_SHIFT))), REG_NFC_SPAS)
+++
+++#define SET_ECC_MODE(v ) 		 \
+++do {	\
+++	if ((v) == NFC_SPAS_218)  {	\
+++		raw_write((raw_read(REG_NFC_ECC_MODE) & NFC_ECC_MODE_8), REG_NFC_ECC_MODE);	\
+++	}else{	\
+++		raw_write((raw_read(REG_NFC_ECC_MODE) | NFC_ECC_MODE_4), REG_NFC_ECC_MODE);	\
+++	}	\
+++} while (0)
+++
+++#define GET_ECC_STATUS()  __raw_readl(REG_NFC_ECC_STATUS_RESULT);
+++#define SET_NFMS(v)	\
+++do {	\
+++	(NFMS |= (v));	\
+++	if (((v) & (1 << NFMS_NF_PG_SZ))) {	\
+++		if (IS_2K_PAGE_NAND) {	\
+++			SET_SPAS(NFC_SPAS_64);	\
+++		} else if (IS_4K_PAGE_NAND) {       \
+++			SET_SPAS(NFC_SPAS_128);	\
+++		} else {	\
+++			SET_SPAS(NFC_SPAS_16);	\
+++		}	\
+++		SET_ECC_MODE(NFC_SPAS_128); \
+++	}	\
+++} while (0)
+++#else
+++#define IS_4BIT_ECC			(1)
++ #define SET_SPAS(v)
++ #define SET_ECC_MODE(v)
++-#define SET_NFMS(v)	(NFMS |= (v));
+++#define GET_ECC_STATUS()  raw_read(REG_NFC_ECC_STATUS_RESULT);
+++#define SET_NFMS(v)     (NFMS |= (v))
+++#endif
++ 
++ #define WRITE_NFC_IP_REG(val,reg) \
++ 	raw_write((raw_read(REG_NFC_OPS_STAT) & ~NFC_OPS_STAT),  REG_NFC_OPS_STAT)
++@@ -330,6 +411,14 @@
++ #define NFC_FLASH_ADDR_SHIFT 		0
++ #define NFC_UNLOCK_END_ADDR_SHIFT	0
++ 
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define NFC_ECC_MODE_4    		 (1<<0)
+++#define NFC_ECC_MODE_8			 ~(1<<0)
+++#define NFC_SPAS_16			 8 
+++#define NFC_SPAS_64			 32 
+++#define NFC_SPAS_128			 64 
+++#define NFC_SPAS_218			 109 
+++#endif
++ /* NFC Register Mapping */
++ #define REG_NFC_OPS_STAT		NFC_CONFIG2
++ #define REG_NFC_INTRRUPT		NFC_CONFIG1
++@@ -365,7 +454,10 @@
++ /* NULL Definitions */
++ #define ACK_OPS
++ #define NFC_SET_RBA(val,buf_id)
++-
+++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
+++#define READ_PAGE()	send_read_page(0)
+++#define PROG_PAGE() 	send_prog_page(0)
+++#else
++ #define READ_PAGE()   \
++ do {                     \
++ 	send_read_page(0);  \
++@@ -381,9 +473,10 @@ do {                     \
++ 	send_prog_page(2);  \
++ 	send_prog_page(3);  \
++ } while (0)
++-
+++#endif
++ #define CHECK_NFC_RB            1
++ 
++ #endif
++ 
+++
++ #endif				/* __MXC_ND2_H__ */
++diff --git a/include/asm-arm/arch-mxc/mx35.h b/include/asm-arm/arch-mxc/mx35.h
++index 266b83c..8894c0b 100644
++--- a/include/asm-arm/arch-mxc/mx35.h
+++++ b/include/asm-arm/arch-mxc/mx35.h
++@@ -421,9 +421,9 @@
++ /*!
++  * NFMS bit in RCSR register for pagesize of nandflash
++  */
++-#define NFMS		(*((volatile u32 *)IO_ADDRESS(CCM_BASE_ADDR+0xc)))
++-#define NFMS_BIT 		30
++-#define NFMS_NF_DWIDTH 		31
++-#define NFMS_NF_PG_SZ 		30
+++#define NFMS		(*((volatile u32 *)IO_ADDRESS(CCM_BASE_ADDR+0x18)))
+++#define NFMS_BIT		8	
+++#define NFMS_NF_DWIDTH		14 		
+++#define NFMS_NF_PG_SZ		8	
++ 
++ #endif				/*  __ASM_ARCH_MXC_MX35_H__ */
++-- 
++1.5.3.1
++
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index b700ff8..5abb4a2 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,6 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
++# Wed Mar 26 22:52:11 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -161,6 +162,7 @@ CONFIG_ARCH_MX35=y
+ CONFIG_I2C_MXC_SELECT1=y
+ # CONFIG_I2C_MXC_SELECT2 is not set
+ CONFIG_MXC_SDMA_API=y
++CONFIG_ARCH_MXC_HAS_NFC_V2=y
+ # CONFIG_I2C_MXC_SELECT3 is not set
+ 
+ #
+@@ -169,6 +171,7 @@ CONFIG_MXC_SDMA_API=y
+ CONFIG_MACH_MX35_3DS=y
+ # CONFIG_MACH_MX35EVB is not set
+ # CONFIG_MX35_DOZE_DURING_IDLE is not set
++CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ 
+ #
+ # Device options
+@@ -384,7 +387,92 @@ CONFIG_FW_LOADER=m
+ # CONFIG_SYS_HYPERVISOR is not set
+ CONFIG_CONNECTOR=y
+ CONFIG_PROC_EVENTS=y
+-# CONFIG_MTD is not set
++CONFIG_MTD=y
++# CONFIG_MTD_DEBUG is not set
++# CONFIG_MTD_CONCAT is not set
++CONFIG_MTD_PARTITIONS=y
++# CONFIG_MTD_REDBOOT_PARTS is not set
++CONFIG_MTD_CMDLINE_PARTS=y
++# CONFIG_MTD_AFS_PARTS is not set
++
++#
++# User Modules And Translation Layers
++#
++CONFIG_MTD_CHAR=y
++CONFIG_MTD_BLKDEVS=y
++CONFIG_MTD_BLOCK=y
++# CONFIG_FTL is not set
++# CONFIG_NFTL is not set
++# CONFIG_INFTL is not set
++# CONFIG_RFD_FTL is not set
++# CONFIG_SSFDC is not set
++# CONFIG_MTD_OOPS is not set
++
++#
++# RAM/ROM/Flash chip drivers
++#
++CONFIG_MTD_CFI=y
++# CONFIG_MTD_JEDECPROBE is not set
++CONFIG_MTD_GEN_PROBE=y
++# CONFIG_MTD_CFI_ADV_OPTIONS is not set
++CONFIG_MTD_MAP_BANK_WIDTH_1=y
++CONFIG_MTD_MAP_BANK_WIDTH_2=y
++CONFIG_MTD_MAP_BANK_WIDTH_4=y
++# CONFIG_MTD_MAP_BANK_WIDTH_8 is not set
++# CONFIG_MTD_MAP_BANK_WIDTH_16 is not set
++# CONFIG_MTD_MAP_BANK_WIDTH_32 is not set
++CONFIG_MTD_CFI_I1=y
++CONFIG_MTD_CFI_I2=y
++# CONFIG_MTD_CFI_I4 is not set
++# CONFIG_MTD_CFI_I8 is not set
++# CONFIG_MTD_CFI_INTELEXT is not set
++# CONFIG_MTD_CFI_AMDSTD is not set
++# CONFIG_MTD_CFI_STAA is not set
++# CONFIG_MTD_RAM is not set
++# CONFIG_MTD_ROM is not set
++# CONFIG_MTD_ABSENT is not set
++
++#
++# Mapping drivers for chip access
++#
++# CONFIG_MTD_COMPLEX_MAPPINGS is not set
++# CONFIG_MTD_PHYSMAP is not set
++# CONFIG_MTD_ARM_INTEGRATOR is not set
++# CONFIG_MTD_PLATRAM is not set
++CONFIG_MTD_MXC=y
++
++#
++# Self-contained MTD device drivers
++#
++# CONFIG_MTD_SLRAM is not set
++# CONFIG_MTD_PHRAM is not set
++# CONFIG_MTD_MTDRAM is not set
++# CONFIG_MTD_BLOCK2MTD is not set
++
++#
++# Disk-On-Chip Device Drivers
++#
++# CONFIG_MTD_DOC2000 is not set
++# CONFIG_MTD_DOC2001 is not set
++# CONFIG_MTD_DOC2001PLUS is not set
++CONFIG_MTD_NAND=y
++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
++# CONFIG_MTD_NAND_ECC_SMC is not set
++# CONFIG_MTD_NAND_MUSEUM_IDS is not set
++CONFIG_MTD_NAND_IDS=y
++# CONFIG_MTD_NAND_DISKONCHIP is not set
++# CONFIG_MTD_NAND_NANDSIM is not set
++CONFIG_MTD_NAND_MXC_V2=y
++# CONFIG_MTD_NAND_MXC_SWECC is not set
++# CONFIG_MTD_NAND_MXC_FORCE_CE is not set
++# CONFIG_MXC_NAND_LOW_LEVEL_ERASE is not set
++# CONFIG_MTD_NAND_PLATFORM is not set
++# CONFIG_MTD_ONENAND is not set
++
++#
++# UBI - Unsorted block images
++#
++# CONFIG_MTD_UBI is not set
+ 
+ #
+ # Voltage and Current regulators
+@@ -400,7 +488,6 @@ CONFIG_BLK_DEV=y
+ CONFIG_BLK_DEV_LOOP=y
+ # CONFIG_BLK_DEV_CRYPTOLOOP is not set
+ # CONFIG_BLK_DEV_NBD is not set
+-# CONFIG_BLK_DEV_UB is not set
+ # CONFIG_BLK_DEV_RAM is not set
+ # CONFIG_CDROM_PKTCDVD is not set
+ # CONFIG_ATA_OVER_ETH is not set
+@@ -572,6 +659,7 @@ CONFIG_INPUT=y
+ #
+ # CONFIG_VT is not set
+ # CONFIG_SERIAL_NONSTANDARD is not set
++# CONFIG_FM_SI4702 is not set
+ # CONFIG_MXC_MU is not set
+ # CONFIG_MXC_SUPER_GEM is not set
+ 
+@@ -727,11 +815,11 @@ CONFIG_USB_ARCH_HAS_HCD=y
+ # CONFIG_OTG is not set
+ 
+ #
+-#
++# 
+ #
+ 
+ #
+-#
++# 
+ #
+ # CONFIG_MMC is not set
+ # CONFIG_NEW_LEDS is not set
+diff --git a/arch/arm/mach-mx35/Kconfig b/arch/arm/mach-mx35/Kconfig
+index c8e574e..9373ae5 100644
+--- a/arch/arm/mach-mx35/Kconfig
++++ b/arch/arm/mach-mx35/Kconfig
+@@ -29,6 +29,22 @@ config MXC_SDMA_API
+            This selects the Freescale MXC SDMA API.
+            If unsure, say N.
+ 
++config ARCH_MXC_HAS_NFC_V2
++        bool "MXC NFC Hardware Version 2"
++        depends on ARCH_MX35
++        default y
++        help
++           This selects the Freescale MXC Nand Flash Controller Hardware Version 3
++           If unsure, say N.
++
++config ARCH_MXC_HAS_NFC_V2_1
++        bool "MXC NFC Hardware Version 2.1"
++        depends on ARCH_MXC_HAS_NFC_V2
++        default y
++        help
++           This selects the Freescale MXC Nand Flash Controller Hardware Version 2.1
++           If unsure, say N.
++
+ menu "Device options"
+ 
+ config I2C_MXC_SELECT1
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 7c9c61f..8f81d41 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -134,17 +134,18 @@ static void mxc_init_nor_mtd(void)
+ 
+ /* MTD NAND flash */
+ 
+-#if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)
++#if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)	\
++|| defined(CONFIG_MTD_NAND_MXC_V2) || defined(CONFIG_MTD_NAND_MXC_V2_MODULE)
+ 
+ static struct mtd_partition mxc_nand_partitions[] = {
+ 	{
+-	 .name = "IPL-SPL",
++	 .name = "nand.bootloader",
+ 	 .offset = 0,
+-	 .size = 256 * 1024},
++	 .size = 1024 * 1024},
+ 	{
+ 	 .name = "nand.kernel",
+ 	 .offset = MTDPART_OFS_APPEND,
+-	 .size = 4 * 1024 * 1024},
++	 .size = 5 * 1024 * 1024},
+ 	{
+ 	 .name = "nand.rootfs",
+ 	 .offset = MTDPART_OFS_APPEND,
+@@ -166,7 +167,7 @@ static struct flash_platform_data mxc_nand_data = {
+ };
+ 
+ static struct platform_device mxc_nand_mtd_device = {
+-	.name = "mxc_nand_flash",
++	.name = "mxc_nandv2_flash",
+ 	.id = 0,
+ 	.dev = {
+ 		.release = mxc_nop_release,
+diff --git a/drivers/mtd/nand/mxc_nd2.c b/drivers/mtd/nand/mxc_nd2.c
+index 51b4ec5..c58b7fa 100644
+--- a/drivers/mtd/nand/mxc_nd2.c
++++ b/drivers/mtd/nand/mxc_nd2.c
+@@ -910,7 +910,8 @@ static int mxc_nand_read_page(struct mtd_info *mtd, struct nand_chip *chip,
+ 	}
+ 
+ 	nfc_memcpy((void *)buf, (void *)MAIN_AREA0, mtd->writesize);
+-
++	copy_spare(mtd, (void *)chip->oob_poi, (void *)SPARE_AREA0,
++		   mtd->oobsize, true);
+ 	return 0;
+ }
+ 
+@@ -919,6 +920,8 @@ static void mxc_nand_write_page(struct mtd_info *mtd, struct nand_chip *chip,
+ 				const uint8_t * buf)
+ {
+ 	memcpy((void *)MAIN_AREA0, buf, mtd->writesize);
++	copy_spare(mtd, (char *)chip->oob_poi, (char *)SPARE_AREA0,
++		   mtd->oobsize, false);
+ }
+ 
+ /* Define some generic bad / good block scan pattern which are used
+@@ -1022,7 +1025,7 @@ static int __init mxcnd_probe(struct platform_device *pdev)
+ 	nfc_ip_base = IO_ADDRESS(NFC_BASE_ADDR);
+ 
+ 	/* Resetting  NFC */
+-	raw_write(NFC_RST, REG_NFC_RST);
++	raw_write((raw_read(REG_NFC_RST) | NFC_RST), REG_NFC_RST);
+ 
+ 	/* Allocate memory for MTD device structure and private data */
+ 	mxc_nand_data = kzalloc(sizeof(struct mxc_mtd_s), GFP_KERNEL);
+diff --git a/drivers/mtd/nand/mxc_nd2.h b/drivers/mtd/nand/mxc_nd2.h
+index 5bf05dc..7611a6a 100644
+--- a/drivers/mtd/nand/mxc_nd2.h
++++ b/drivers/mtd/nand/mxc_nd2.h
+@@ -71,36 +71,36 @@
+ /*!
+  * Addresses for NFC RAM BUFFER Main area 0
+  */
+-#define MAIN_AREA0        		((volatile u16 *)(nfc_axi_base + 0x000))
+-#define MAIN_AREA1        		((volatile u16 *)(nfc_axi_base + 0x200))
+-#define MAIN_AREA2        		((volatile u16 *)(nfc_axi_base + 0x400))
+-#define MAIN_AREA3        		((volatile u16 *)(nfc_axi_base + 0x600))
++#define MAIN_AREA0        		((u16 *)(nfc_axi_base + 0x000))
++#define MAIN_AREA1        		((u16 *)(nfc_axi_base + 0x200))
++#define MAIN_AREA2        		((u16 *)(nfc_axi_base + 0x400))
++#define MAIN_AREA3        		((u16 *)(nfc_axi_base + 0x600))
+ 
+ #ifdef CONFIG_ARCH_MXC_HAS_NFC_V3_1
+-#define MAIN_AREA4        		((volatile u16 *)(nfc_axi_base + 0x800))
+-#define MAIN_AREA5        		((volatile u16 *)(nfc_axi_base + 0xa00))
+-#define MAIN_AREA6        		((volatile u16 *)(nfc_axi_base + 0xc00))
+-#define MAIN_AREA7        		((volatile u16 *)(nfc_axi_base + 0xe00))
++#define MAIN_AREA4        		((u16 *)(nfc_axi_base + 0x800))
++#define MAIN_AREA5        		((u16 *)(nfc_axi_base + 0xa00))
++#define MAIN_AREA6        		((u16 *)(nfc_axi_base + 0xc00))
++#define MAIN_AREA7        		((u16 *)(nfc_axi_base + 0xe00))
+ 
+ /*!
+  * Addresses for NFC SPARE BUFFER Spare area 0
+  */
+-#define SPARE_AREA0       		((volatile u16 *)(nfc_axi_base + 0x1000))
+-#define SPARE_AREA1       		((volatile u16 *)(nfc_axi_base + 0x1040))
+-#define SPARE_AREA2       		((volatile u16 *)(nfc_axi_base + 0x1080))
+-#define SPARE_AREA3       		((volatile u16 *)(nfc_axi_base + 0x10c0))
+-#define SPARE_AREA4       		((volatile u16 *)(nfc_axi_base + 0x1100))
+-#define SPARE_AREA5       		((volatile u16 *)(nfc_axi_base + 0x1140))
+-#define SPARE_AREA6       		((volatile u16 *)(nfc_axi_base + 0x1180))
+-#define SPARE_AREA7       		((volatile u16 *)(nfc_axi_base + 0x11c0))
++#define SPARE_AREA0       		((u16 *)(nfc_axi_base + 0x1000))
++#define SPARE_AREA1       		((u16 *)(nfc_axi_base + 0x1040))
++#define SPARE_AREA2       		((u16 *)(nfc_axi_base + 0x1080))
++#define SPARE_AREA3       		((u16 *)(nfc_axi_base + 0x10c0))
++#define SPARE_AREA4       		((u16 *)(nfc_axi_base + 0x1100))
++#define SPARE_AREA5       		((u16 *)(nfc_axi_base + 0x1140))
++#define SPARE_AREA6       		((u16 *)(nfc_axi_base + 0x1180))
++#define SPARE_AREA7       		((u16 *)(nfc_axi_base + 0x11c0))
+ #define SPARE_LEN			64
+ #define SPARE_COUNT			8
+ #define SPARE_SIZE			(SPARE_LEN * SPARE_COUNT)
+ #else
+-#define SPARE_AREA0       		((volatile u16 *)(nfc_axi_base + 0x800))
+-#define SPARE_AREA1       		((volatile u16 *)(nfc_axi_base + 0x810))
+-#define SPARE_AREA2       		((volatile u16 *)(nfc_axi_base + 0x820))
+-#define SPARE_AREA3       		((volatile u16 *)(nfc_axi_base + 0x830))
++#define SPARE_AREA0       		((u16 *)(nfc_axi_base + 0x800))
++#define SPARE_AREA1       		((u16 *)(nfc_axi_base + 0x810))
++#define SPARE_AREA2       		((u16 *)(nfc_axi_base + 0x820))
++#define SPARE_AREA3       		((u16 *)(nfc_axi_base + 0x830))
+ #define SPARE_LEN			16
+ #define SPARE_COUNT			4
+ #define SPARE_SIZE			(SPARE_LEN * SPARE_COUNT)
+@@ -126,7 +126,7 @@
+ #define WRITE_NFC_IP_REG(val,reg) 			\
+ 	do {	 					\
+ 		raw_write(NFC_IPC_CREQ, NFC_IPC);	\
+-		while(!((*(volatile u32*)NFC_IPC & NFC_IPC_ACK)>>1));\
++		while (!((raw_read(NFC_IPC) & NFC_IPC_ACK)>>1));\
+ 		raw_write(val, reg);			\
+ 		raw_write(0, NFC_IPC);			\
+ 	} while(0)
+@@ -137,7 +137,7 @@
+ #define IS_4BIT_ECC			1
+ #define SET_SPAS(v)
+ #define SET_ECC_MODE(v)
+-#define SET_NFMS(v)	(NFMS |= (v));
++#define SET_NFMS(v)	(NFMS |= (v))
+ 
+ #define WRITE_NFC_IP_REG(val,reg) \
+ 	raw_write((raw_read(REG_NFC_OPS_STAT) & ~NFC_OPS_STAT),  REG_NFC_OPS_STAT)
+@@ -197,10 +197,10 @@
+ #ifdef CONFIG_ARCH_MXC_HAS_NFC_V3_1
+ #define NFC_ECC_MODE_4    		(1 << 6)
+ #define NFC_ECC_MODE_8			~(1 << 6)
+-#define NFC_SPAS_16			16
+-#define NFC_SPAS_64			64
+-#define NFC_SPAS_128			128
+-#define NFC_SPAS_218			218
++#define NFC_SPAS_16			8
++#define NFC_SPAS_64		 	32
++#define NFC_SPAS_128			64
++#define NFC_SPAS_218		 	109
+ #define NFC_IPC_CREQ			(1 << 0)
+ #define NFC_IPC_ACK			(1 << 1)
+ #endif
+@@ -257,44 +257,127 @@
+ /*
+  * Addresses for NFC registers
+  */
+-#define NFC_BUF_SIZE            (nfc_ip_base + 0xE00)
+-#define NFC_BUF_ADDR            (nfc_ip_base + 0xE04)
+-#define NFC_FLASH_ADDR          (nfc_ip_base + 0xE06)
+-#define NFC_FLASH_CMD           (nfc_ip_base + 0xE08)
+-#define NFC_CONFIG              (nfc_ip_base + 0xE0A)
+-#define NFC_ECC_STATUS_RESULT   (nfc_ip_base + 0xE0C)
+-#define NFC_RSLTMAIN_AREA       (nfc_ip_base + 0xE0E)
+-#define NFC_RSLTSPARE_AREA      (nfc_ip_base + 0xE10)
+-#define NFC_WRPROT              (nfc_ip_base + 0xE12)
+-#define NFC_UNLOCKSTART_BLKADDR (nfc_ip_base + 0xE14)
+-#define NFC_UNLOCKEND_BLKADDR   (nfc_ip_base + 0xE16)
+-#define NFC_NF_WRPRST           (nfc_ip_base + 0xE18)
+-#define NFC_CONFIG1             (nfc_ip_base + 0xE1A)
+-#define NFC_CONFIG2             (nfc_ip_base + 0xE1C)
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define NFC_REG_BASE	(nfc_ip_base + 0x1000)
++#else
++#define NFC_REG_BASE	nfc_ip_base
++#endif
++#define NFC_BUF_SIZE            (NFC_REG_BASE + 0xE00)
++#define NFC_BUF_ADDR            (NFC_REG_BASE + 0xE04)
++#define NFC_FLASH_ADDR          (NFC_REG_BASE + 0xE06)
++#define NFC_FLASH_CMD           (NFC_REG_BASE + 0xE08)
++#define NFC_CONFIG              (NFC_REG_BASE + 0xE0A)
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define NFC_ECC_STATUS_RESULT	(NFC_REG_BASE + 0xE0C)
++#define NFC_ECC_STATUS_RESULT_1	(NFC_REG_BASE + 0xE0C)
++#define NFC_ECC_STATUS_RESULT_2	(NFC_REG_BASE + 0xE0E)
++#define NFC_SPAS		(NFC_REG_BASE + 0xE10)
++#else
++#define NFC_ECC_STATUS_RESULT   (NFC_REG_BASE + 0xE0C)
++#define NFC_RSLTMAIN_AREA       (NFC_REG_BASE + 0xE0E)
++#define NFC_RSLTSPARE_AREA      (NFC_REG_BASE + 0xE10)
++#endif
++#define NFC_WRPROT              (NFC_REG_BASE + 0xE12)
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define NFC_UNLOCKSTART_BLKADDR  (NFC_REG_BASE + 0xE20)
++#define NFC_UNLOCKEND_BLKADDR    (NFC_REG_BASE + 0xE22)
++#define NFC_UNLOCKSTART_BLKADDR1 (NFC_REG_BASE + 0xE24)
++#define NFC_UNLOCKEND_BLKADDR1   (NFC_REG_BASE + 0xE26)
++#define NFC_UNLOCKSTART_BLKADDR2 (NFC_REG_BASE + 0xE28)
++#define NFC_UNLOCKEND_BLKADDR2   (NFC_REG_BASE + 0xE2A)
++#define NFC_UNLOCKSTART_BLKADDR3 (NFC_REG_BASE + 0xE2C)
++#define NFC_UNLOCKEND_BLKADDR3   (NFC_REG_BASE + 0xE2E)
++#else
++#define NFC_UNLOCKSTART_BLKADDR  (NFC_REG_BASE + 0xE14)
++#define NFC_UNLOCKEND_BLKADDR    (NFC_REG_BASE + 0xE16)
++#endif
++#define NFC_NF_WRPRST            (NFC_REG_BASE + 0xE18)
++#define NFC_CONFIG1              (NFC_REG_BASE + 0xE1A)
++#define NFC_CONFIG2              (NFC_REG_BASE + 0xE1C)
+ 
+ /*!
+  * Addresses for NFC RAM BUFFER Main area 0
+  */
+-#define MAIN_AREA0        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x000)
+-#define MAIN_AREA1        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x200)
+-#define MAIN_AREA2        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x400)
+-#define MAIN_AREA3        (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x600)
++#define MAIN_AREA0      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x000)
++#define MAIN_AREA1      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x200)
++#define MAIN_AREA2      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x400)
++#define MAIN_AREA3      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x600)
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define MAIN_AREA4      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x800)
++#define MAIN_AREA5      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0xA00)
++#define MAIN_AREA6      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0xC00)
++#define MAIN_AREA7      (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0xE00)
++#endif
+ 
+ /*!
+  * Addresses for NFC SPARE BUFFER Spare area 0
+  */
+-#define SPARE_AREA0       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x800)
+-#define SPARE_AREA1       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x810)
+-#define SPARE_AREA2       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x820)
+-#define SPARE_AREA3       (volatile u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x830)
+-#define SPARE_LEN         16
+-#define SPARE_COUNT       4
+-#define SPARE_SIZE        (SPARE_LEN * SPARE_COUNT)
+-
+-#define IS_4BIT_ECC       1
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define SPARE_AREA0     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1000)
++#define SPARE_AREA1     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1040)
++#define SPARE_AREA2     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1080)
++#define SPARE_AREA3     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x10C0)
++#define SPARE_AREA4     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1100)
++#define SPARE_AREA5     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1140)
++#define SPARE_AREA6     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x1180)
++#define SPARE_AREA7     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x11C0)
++#define SPARE_LEN	64
++#define SPARE_COUNT	8
++#else
++#define SPARE_AREA0     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x800)
++#define SPARE_AREA1     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x810)
++#define SPARE_AREA2     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x820)
++#define SPARE_AREA3     (u16 *)IO_ADDRESS(NFC_BASE_ADDR + 0x830)
++#define SPARE_LEN       16
++#define SPARE_COUNT     4
++#endif
++#define SPARE_SIZE      (SPARE_LEN * SPARE_COUNT)
++
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define REG_NFC_ECC_MODE NFC_CONFIG1
++#define SPAS_SHIFT		(0)
++#define REG_NFC_SPAS NFC_SPAS
++#define SPAS_MASK	(0xFF00)
++#define IS_4BIT_ECC			\
++	((raw_read(REG_NFC_ECC_MODE) & NFC_ECC_MODE_4) >> 0)
++
++#define SET_SPAS(v)			\
++	raw_write(((raw_read(REG_NFC_SPAS) & SPAS_MASK) | ((v<<SPAS_SHIFT))), \
++								REG_NFC_SPAS)
++
++#define SET_ECC_MODE(v) 		 \
++do {	\
++	if ((v) == NFC_SPAS_218)  {	\
++		raw_write((raw_read(REG_NFC_ECC_MODE) & NFC_ECC_MODE_8), \
++							REG_NFC_ECC_MODE); \
++	} else {	\
++		raw_write((raw_read(REG_NFC_ECC_MODE) | NFC_ECC_MODE_4), \
++							REG_NFC_ECC_MODE); \
++	}	\
++} while (0)
++
++#define GET_ECC_STATUS()  __raw_readl(REG_NFC_ECC_STATUS_RESULT);
++#define SET_NFMS(v)	\
++do {	\
++	(NFMS |= (v));	\
++	if (((v) & (1 << NFMS_NF_PG_SZ))) {	\
++		if (IS_2K_PAGE_NAND) {	\
++			SET_SPAS(NFC_SPAS_64);	\
++		} else if (IS_4K_PAGE_NAND) {       \
++			SET_SPAS(NFC_SPAS_128);	\
++		} else {	\
++			SET_SPAS(NFC_SPAS_16);	\
++		}	\
++		SET_ECC_MODE(NFC_SPAS_128); \
++	}	\
++} while (0)
++#else
++#define IS_4BIT_ECC			(1)
+ #define SET_SPAS(v)
+ #define SET_ECC_MODE(v)
+-#define SET_NFMS(v)	(NFMS |= (v));
++#define GET_ECC_STATUS()  raw_read(REG_NFC_ECC_STATUS_RESULT);
++#define SET_NFMS(v)     (NFMS |= (v))
++#endif
+ 
+ #define WRITE_NFC_IP_REG(val,reg) \
+ 	raw_write((raw_read(REG_NFC_OPS_STAT) & ~NFC_OPS_STAT),  REG_NFC_OPS_STAT)
+@@ -330,6 +413,14 @@
+ #define NFC_FLASH_ADDR_SHIFT 		0
+ #define NFC_UNLOCK_END_ADDR_SHIFT	0
+ 
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define NFC_ECC_MODE_4    		 (1<<0)
++#define NFC_ECC_MODE_8			 ~(1<<0)
++#define NFC_SPAS_16			 8
++#define NFC_SPAS_64			 32
++#define NFC_SPAS_128			 64
++#define NFC_SPAS_218			 109
++#endif
+ /* NFC Register Mapping */
+ #define REG_NFC_OPS_STAT		NFC_CONFIG2
+ #define REG_NFC_INTRRUPT		NFC_CONFIG1
+@@ -365,7 +456,10 @@
+ /* NULL Definitions */
+ #define ACK_OPS
+ #define NFC_SET_RBA(val,buf_id)
+-
++#ifdef CONFIG_ARCH_MXC_HAS_NFC_V2_1
++#define READ_PAGE()	send_read_page(0)
++#define PROG_PAGE() 	send_prog_page(0)
++#else
+ #define READ_PAGE()   \
+ do {                     \
+ 	send_read_page(0);  \
+@@ -381,7 +475,7 @@ do {                     \
+ 	send_prog_page(2);  \
+ 	send_prog_page(3);  \
+ } while (0)
+-
++#endif
+ #define CHECK_NFC_RB            1
+ 
+ #endif
+diff --git a/include/asm-arm/arch-mxc/mx35.h b/include/asm-arm/arch-mxc/mx35.h
+index 266b83c..5f56030 100644
+--- a/include/asm-arm/arch-mxc/mx35.h
++++ b/include/asm-arm/arch-mxc/mx35.h
+@@ -421,9 +421,9 @@
+ /*!
+  * NFMS bit in RCSR register for pagesize of nandflash
+  */
+-#define NFMS		(*((volatile u32 *)IO_ADDRESS(CCM_BASE_ADDR+0xc)))
+-#define NFMS_BIT 		30
+-#define NFMS_NF_DWIDTH 		31
+-#define NFMS_NF_PG_SZ 		30
++#define NFMS		(*((volatile u32 *)IO_ADDRESS(CCM_BASE_ADDR+0x18)))
++#define NFMS_BIT		8
++#define NFMS_NF_DWIDTH		14
++#define NFMS_NF_PG_SZ		8
+ 
+ #endif				/*  __ASM_ARCH_MXC_MX35_H__ */
+-- 
+1.5.4.4
+

@@ -1,0 +1,91 @@
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2009-08-06 17:41:51.000000000 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-08-11 13:51:30.000000000 -0700
+@@ -14,10 +14,14 @@
+ #include <linux/workqueue.h>
+ #include <linux/hwmon-sysfs.h>
+ #include <linux/input.h>
++#include <linux/pm.h>
+ 
+ #include "msp430.h"
+ 
+ 
++static struct msp430_i2c_data *msp430_data;
++
++
+ static void msp430_i2c_work(struct work_struct *work)
+ {
+         struct msp430_i2c_data *data = irq_work_to_data(work);
+@@ -28,17 +32,15 @@
+         mutex_lock(&data->lock);
+ 
+ 	flags = i2c_smbus_read_byte_data(client, I2C_FLAGS_REGISTER);
+-	if (flags == -1) {
+-		if (data->i2c_failures++ >= 3) {
+-			printk(KERN_ERR "msp430 i2c bus failed\n");
++	if (flags == 0 || flags == -1) {
++		mutex_unlock(&data->lock);
+ 
+-			mutex_unlock(&data->lock);
++		if (data->i2c_failures++ >= 3) {
++			printk(KERN_ERR "ERROR: msp430 %s\n", (flags == 0) ? "irq storm" :"i2c bus failed");
+ 			return;
+ 		}
+ 
+-		mutex_unlock(&data->lock);
+ 		enable_irq(client->irq);
+-
+ 		return;
+ 	}
+ 	data->i2c_failures = 0;
+@@ -164,7 +166,7 @@
+ 			    msp430_i2c_show, NULL, 2, I2C_BATT_CAPACITY);
+ 
+ static SENSOR_DEVICE_ATTR_2(battery_disable, S_IRUGO | S_IWUSR,
+-			    msp430_i2c_show, NULL, 1, I2C_BATT_CHARGE_DISABLE);
++			    msp430_i2c_show, msp430_i2c_store, 1, I2C_BATT_CHARGE_DISABLE);
+ 
+ static SENSOR_DEVICE_ATTR_2(kill, S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 1, I2C_KILL_REGISTER);
+@@ -259,6 +261,29 @@
+ };
+ 
+ 
++static void msp430_power_off(void)
++{
++	unsigned char values[1] = { 1 };
++
++	if (!msp430_data) {
++		printk(KERN_ERR "No msp430, can't power down\n");
++		return;
++	}
++
++	printk(KERN_INFO "powering system down...\n");
++
++	mutex_lock(&msp430_data->lock);
++
++	/* make sure we power down */
++	while (true) {
++		i2c_smbus_write_i2c_block_data(msp430_data->client, I2C_KILL_REGISTER, 1, values);
++	}
++
++	/* we should never get here */
++	mutex_unlock(&msp430_data->lock);
++}
++
++
+ int msp430_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+         struct msp430_i2c_data *data;
+@@ -315,6 +340,10 @@
+ 	/* request firmware upgrade (if needed) */
+ 	msp430_programmer_upgrade(client);
+ 
++	/* register power off handler */
++	msp430_data = data;
++	pm_power_off = msp430_power_off;
++
+ 	return 0;
+ 
+  err4:

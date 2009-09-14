@@ -21,7 +21,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-__version__ = "1.8.11"
+__version__ = "1.8.13"
 
 __all__ = [
 
@@ -1129,4 +1129,5 @@ def dep_opconvert(mysplit, myuse):
 
 if __name__ == "__main__":
     import doctest, bb
+    bb.msg.set_debug_level(0)
     doctest.testmod(bb)

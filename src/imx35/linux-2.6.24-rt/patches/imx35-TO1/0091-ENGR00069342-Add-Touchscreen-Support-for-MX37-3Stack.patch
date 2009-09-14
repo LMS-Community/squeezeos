@@ -1,0 +1,562 @@
+From 54b0c33c7e8a50a391b3ddde8c14fffd9994a3c4 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Wed, 19 Mar 2008 15:04:41 -0500
+Subject: [PATCH] ENGR00069342 Add Touchscreen Support for MX37 3Stack Board
+
+Add Support for Touchscreen on the 3-Stack board
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |    1 +
+ arch/arm/mach-mx37/mx37_3stack.c        |   33 +++
+ arch/arm/mach-mx37/mx37_3stack_gpio.c   |   19 +-
+ arch/arm/plat-mxc/gpio.c                |    9 +-
+ drivers/input/touchscreen/Kconfig       |    8 +
+ drivers/input/touchscreen/Makefile      |    1 +
+ drivers/input/touchscreen/tsc2007.c     |  341 +++++++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mx37_pins.h    |    3 +-
+ 8 files changed, 401 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 84a87e7..2e300ee 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -641,6 +641,7 @@ CONFIG_INPUT_TOUCHSCREEN=y
+ # CONFIG_TOUCHSCREEN_TOUCHWIN is not set
+ # CONFIG_TOUCHSCREEN_UCB1400 is not set
+ # CONFIG_TOUCHSCREEN_USB_COMPOSITE is not set
++CONFIG_TOUCHSCREEN_TSC2007=y
+ # CONFIG_INPUT_MISC is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 50119bf..494d35e 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -22,6 +22,7 @@
+ #include <linux/clk.h>
+ #include <linux/platform_device.h>
+ #include <linux/spi/spi.h>
++#include <linux/i2c.h>
+ #if defined(CONFIG_MTD) || defined(CONFIG_MTD_MODULE)
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/map.h>
+@@ -155,6 +156,14 @@ static struct mxc_lcd_platform_data lcd_data = {
+ 	.reset = lcd_reset,
+ };
+ 
++static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
++	{
++	 .driver_name = "TSC2007",
++	 .addr = 0x48,
++	 .irq = IOMUX_TO_IRQ(MX37_PIN_AUD5_RXFS),
++	 },
++};
++
+ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	{
+ 	 .modalias = "cpld_spi",
+@@ -210,6 +219,26 @@ static inline void mxc_init_fb(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_TOUCHSCREEN_TSC2007) || defined(CONFIG_TOUCHSCREEN_TSC2007_MODULE)
++
++static int __init mxc_init_touchscreen(void)
++{
++	int pad_val;
++
++	mxc_request_iomux(MX37_PIN_AUD5_RXFS, IOMUX_CONFIG_GPIO);
++	pad_val = PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PU;
++	mxc_iomux_set_pad(MX37_PIN_AUD5_RXFS, pad_val);
++	mxc_set_gpio_direction(MX37_PIN_AUD5_RXFS, 1);
++
++	return 0;
++}
++#else
++static int __init mxc_init_touchscreen(void)
++{
++	return 0;
++}
++#endif
++
+ /*lan9217 device*/
+ #if defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
+ static struct resource smsc911x_resources[] = {
+@@ -283,11 +312,15 @@ static void __init mxc_board_init(void)
+ 	mxc_clocks_init();
+ 	mxc_gpio_init();
+ 	early_console_setup(saved_command_line);
++	i2c_register_board_info(0, mxc_i2c0_board_info,
++				ARRAY_SIZE(mxc_i2c0_board_info));
++
+ 	spi_register_board_info(mxc_spi_board_info,
+ 				ARRAY_SIZE(mxc_spi_board_info));
+ 	mxc_init_nand_mtd();
+ 
+ 	mxc_init_fb();
++	mxc_init_touchscreen();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index 0e7c8a0..6d3bf1e 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -19,6 +19,7 @@
+ #include <asm/hardware.h>
+ #include <asm/arch/clock.h>
+ #include <asm/arch/gpio.h>
++
+ #include "iomux.h"
+ 
+ /*!
+@@ -176,19 +177,19 @@ void gpio_i2c_active(int i2c_num)
+ 	case 0:
+ 		/* Touch */
+ 		/* select I2C1_SCK as daisy chain input */
++		mxc_request_iomux(MX37_PIN_I2C1_CLK, IOMUX_CONFIG_ALT0);
+ 		mxc_iomux_set_input(MUX_IN_I2C1_SCL, INPUT_CTL_PATH1);
+ 		/* OpenDrain enabled, 100k PU enabled */
+-		mxc_iomux_set_pad(MX37_PIN_I2C1_CLK,
+-				  PAD_CTL_100K_PU |
+-				  PAD_CTL_ODE_OPENDRAIN_ENABLE);
+-		mxc_request_iomux(MX37_PIN_I2C1_CLK, IOMUX_CONFIG_ALT0);
++		regval =
++		    PAD_CTL_ODE_OPENDRAIN_ENABLE | PAD_CTL_100K_PU |
++		    PAD_CTL_PKE_ENABLE;
++		mxc_iomux_set_pad(MX37_PIN_I2C1_CLK, regval);
++
+ 		/*select I2C1_SDA as daisy chain input */
+-		mxc_iomux_set_input(MUX_IN_I2C1_SDA, INPUT_CTL_PATH1);
+-		/* OpenDrain enabled, 100k PU enabled */
+-		mxc_iomux_set_pad(MX37_PIN_I2C1_DAT,
+-				  PAD_CTL_100K_PU |
+-				  PAD_CTL_ODE_OPENDRAIN_ENABLE);
+ 		mxc_request_iomux(MX37_PIN_I2C1_DAT, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_input(MUX_IN_I2C1_SDA, INPUT_CTL_PATH1);
++		mxc_iomux_set_pad(MX37_PIN_I2C1_DAT, regval);
++		mxc_iomux_set_pad(MX37_PIN_GRP_H3, PAD_CTL_HYS_ENABLE);
+ 		break;
+ 	case 1:
+ 		/* PMIC */
+diff --git a/arch/arm/plat-mxc/gpio.c b/arch/arm/plat-mxc/gpio.c
+index a1c85db..d852ad5 100644
+--- a/arch/arm/plat-mxc/gpio.c
++++ b/arch/arm/plat-mxc/gpio.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -343,9 +343,10 @@ static void mxc_gpio_irq_handler(u32 irq, struct irq_desc *desc)
+ 	int_valid = __raw_readl(isr_reg) & imr_val;
+ 
+ 	if (unlikely(!int_valid)) {
+-		printk(KERN_ERR "\nGPIO port: %d Spurious interrupt:0x%0x\n\n",
+-		       port->num, int_valid);
+-		BUG();		/* oops */
++		printk(KERN_DEBUG
++		       "\nGPIO port: %d Spurious interrupt:0x%0x Mask: %x\n\n",
++		       port->num, int_valid, imr_val);
++		return;
+ 	}
+ 
+ 	gpio_irq = port->virtual_irq_start;
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 9b0692a..9e49ffc 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -275,4 +275,12 @@ config TOUCHSCREEN_USB_GOTOP
+ 	bool "GoTop Super_Q2/GogoPen/PenPower tablet device support" if EMBEDDED
+ 	depends on TOUCHSCREEN_USB_COMPOSITE
+ 
++config TOUCHSCREEN_TSC2007
++	tristate "TI Touch Screen Controller Chip TSC2007"
++	depends on ARCH_MX37
++	help
++	  If you say yes here you get support for TSC2007 touch screen controller chip.
++	 
++	  This driver can also be built as a module.  If so, the module
++	  will be called tsc2007.
+ endif
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index 364ae57..cf53b2a 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -20,3 +20,4 @@ obj-$(CONFIG_TOUCHSCREEN_PENMOUNT)	+= penmount.o
+ obj-$(CONFIG_TOUCHSCREEN_TOUCHRIGHT)	+= touchright.o
+ obj-$(CONFIG_TOUCHSCREEN_TOUCHWIN)	+= touchwin.o
+ obj-$(CONFIG_TOUCHSCREEN_UCB1400)	+= ucb1400_ts.o
++obj-$(CONFIG_TOUCHSCREEN_TSC2007)	+= tsc2007.o
+diff --git a/drivers/input/touchscreen/tsc2007.c b/drivers/input/touchscreen/tsc2007.c
+new file mode 100644
+index 0000000..f59fcff
+--- /dev/null
++++ b/drivers/input/touchscreen/tsc2007.c
+@@ -0,0 +1,341 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file tsc2007.c
++ *
++ * @brief Driver for TI's tsc2007 I2C Touch Screen Controller.
++ *
++ * This driver is based on the driver written by Bill Gatliff
++ *  Copyright (C) 2005 Bill Gatliff <bgat at billgatliff.com>
++ *  Changes for 2.6.20 kernel by Nicholas Chen <nchen at cs.umd.edu>
++ *
++ * @ingroup touchscreen
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/string.h>
++#include <linux/bcd.h>
++#include <linux/list.h>
++#include <linux/device.h>
++#include <linux/interrupt.h>
++#include <linux/kthread.h>
++#include <linux/input.h>
++#include <linux/delay.h>
++#include <asm/mach/irq.h>
++
++#define DRIVER_NAME "TSC2007"
++
++enum tsc2007_pd {
++	PD_POWERDOWN = 0,	/* penirq */
++	PD_IREFOFF_ADCON = 1,	/* no penirq */
++	PD_IREFON_ADCOFF = 2,	/* penirq */
++	PD_IREFON_ADCON = 3,	/* no penirq */
++	PD_PENIRQ_ARM = PD_IREFON_ADCOFF,
++	PD_PENIRQ_DISARM = PD_IREFON_ADCON,
++};
++
++enum tsc2007_m {
++	M_12BIT = 0,
++	M_8BIT = 1
++};
++
++enum tsc2007_cmd {
++	MEAS_TEMP0 = 0,
++	MEAS_IN1 = 2,
++	MEAS_XPOS = 12,
++	MEAS_YPOS = 13,
++	MEAS_Z1POS = 14,
++	MEAS_Z2POS = 15
++};
++
++#define tsc2007_CMD(cn, pdn, m) (((cn) << 4) | ((pdn) << 2) | ((m) << 1))
++
++#define ADC_MAX ((1 << 12) - 1)
++
++struct tsc2007_data {
++	struct i2c_client *client;
++	struct input_dev *idev;
++	struct timer_list penirq_timer;
++	struct task_struct *tstask;
++	u32 ts_thread_cnt;
++	struct completion penirq_completion;
++	struct completion penup_completion;
++	enum tsc2007_m m;
++	int penirq;
++};
++
++static int tsc2007_read(struct tsc2007_data *data,
++			enum tsc2007_cmd cmd, enum tsc2007_pd pd, int *val)
++{
++	unsigned char c;
++	unsigned char d[2];
++	int ret;
++
++	c = tsc2007_CMD(cmd, pd, data->m);
++
++	ret = i2c_master_send(data->client, &c, 1);
++
++	if (ret < 0)
++		goto err;
++
++	udelay(20);
++	ret = i2c_master_recv(data->client, d, data->m == M_12BIT ? 2 : 1);
++	if (ret < 0)
++		goto err;
++
++	if (val) {
++		*val = d[0];
++		*val <<= 4;
++		if (data->m == M_12BIT)
++			*val += (d[1] >> 4);
++	}
++
++	return 0;
++err:
++	return -ENODEV;
++}
++
++static inline int tsc2007_read_xpos(struct tsc2007_data *d, enum
++				    tsc2007_pd pd, int *x)
++{
++	return tsc2007_read(d, MEAS_XPOS, pd, x);
++}
++
++static inline int tsc2007_read_ypos(struct tsc2007_data *d, enum
++				    tsc2007_pd pd, int *y)
++{
++	return tsc2007_read(d, MEAS_YPOS, pd, y);
++}
++
++static inline int tsc2007_read_pressure(struct tsc2007_data *d, enum
++					tsc2007_pd pd, int *p)
++{
++	return tsc2007_read(d, MEAS_Z1POS, pd, p);
++}
++
++static inline int tsc2007_powerdown(struct tsc2007_data *d)
++{
++	/* we don't have a distinct powerdown command,
++	   so do a benign read with the PD bits cleared */
++	return tsc2007_read(d, MEAS_IN1, PD_POWERDOWN, 0);
++}
++
++#define PENUP_TIMEOUT		10
++
++static irqreturn_t tsc2007_penirq(int irq, void *v)
++{
++	struct tsc2007_data *d = v;
++
++	disable_irq(d->penirq);
++	complete(&d->penirq_completion);
++	return IRQ_HANDLED;
++}
++
++static void tsc2007_pen_up(unsigned long v)
++{
++	struct tsc2007_data *d = (struct tsc2007_data *)v;
++
++	complete(&d->penup_completion);
++	return;
++}
++
++static inline void tsc2007_restart_pen_up_timer(struct tsc2007_data *d)
++{
++	mod_timer(&d->penirq_timer, jiffies + (PENUP_TIMEOUT * HZ) / 1000);
++}
++
++static int tsc2007ts_thread(void *v)
++{
++	struct tsc2007_data *d = v;
++
++	if (d->ts_thread_cnt)
++		return -EINVAL;
++	d->ts_thread_cnt = 1;
++
++	while (1) {
++		unsigned int x = 0, y = 0, p = 0;
++
++		/* Wait for an Pen down interrupt */
++		wait_for_completion(&d->penirq_completion);
++		tsc2007_read_xpos(d, PD_PENIRQ_DISARM, &x);
++		tsc2007_read_ypos(d, PD_PENIRQ_DISARM, &y);
++		tsc2007_read_pressure(d, PD_PENIRQ_DISARM, &p);
++		input_report_abs(d->idev, ABS_X, 4096 - x);
++		input_report_abs(d->idev, ABS_Y, 4096 - y);
++		input_report_abs(d->idev, ABS_PRESSURE, p);
++		input_sync(d->idev);
++
++		while (p > 10) {
++			tsc2007_restart_pen_up_timer(d);
++			wait_for_completion_interruptible(&d->penup_completion);
++			/* Pen Down */
++			tsc2007_read_xpos(d, PD_PENIRQ_DISARM, &x);
++			tsc2007_read_ypos(d, PD_PENIRQ_DISARM, &y);
++			tsc2007_read_pressure(d, PD_PENIRQ_DISARM, &p);
++			if (p <= 10)
++				break;
++
++			input_report_abs(d->idev, ABS_X, 4096 - x);
++			input_report_abs(d->idev, ABS_Y, 4096 - y);
++			input_report_abs(d->idev, ABS_PRESSURE, p);
++			input_sync(d->idev);
++		};
++
++		/* Pen Up */
++		input_report_abs(d->idev, ABS_X, 4096 - x);
++		input_report_abs(d->idev, ABS_Y, 4096 - y);
++		input_report_abs(d->idev, ABS_PRESSURE, 0);
++		input_sync(d->idev);
++
++		tsc2007_read(d, MEAS_TEMP0, PD_PENIRQ_ARM, 0);
++		enable_irq(d->penirq);
++
++		if (kthread_should_stop())
++			break;
++	}
++
++	d->ts_thread_cnt = 0;
++	return 0;
++}
++
++static int tsc2007_idev_open(struct input_dev *idev)
++{
++	struct tsc2007_data *d = idev->private;
++	int ret = 0;
++
++	d->penirq_timer.data = (unsigned long)d;
++	d->penirq_timer.function = tsc2007_pen_up;
++
++	d->tstask = kthread_run(tsc2007ts_thread, d, DRIVER_NAME "tsd");
++	if (IS_ERR(d->tstask))
++		ret = PTR_ERR(d->tstask);
++
++	return ret;
++}
++
++static int tsc2007_driver_register(struct tsc2007_data *data)
++{
++	struct input_dev *idev;
++	int ret = 0;
++
++	init_timer(&data->penirq_timer);
++	data->penirq_timer.data = (unsigned long)data;
++	data->penirq_timer.function = tsc2007_pen_up;
++
++	if (data->penirq) {
++		ret =
++		    request_irq(data->penirq, tsc2007_penirq, IRQT_LOW,
++				DRIVER_NAME, data);
++		if (!ret) {
++			printk(KERN_INFO "%s: Registering Touchscreen device\n",
++			       __func__);
++			init_completion(&data->penirq_completion);
++			init_completion(&data->penup_completion);
++		} else {
++			printk(KERN_ERR "%s: Cannot grab irq %d\n",
++			       __func__, data->penirq);
++		}
++	}
++	idev = input_allocate_device();
++	data->idev = idev;
++	idev->private = data;
++	idev->name = DRIVER_NAME;
++	idev->evbit[0] = BIT(EV_ABS);
++	idev->open = tsc2007_idev_open;
++	idev->absbit[0] = BIT(ABS_X) | BIT(ABS_Y) | BIT(ABS_PRESSURE);
++	input_set_abs_params(idev, ABS_X, 0, ADC_MAX, 0, 0);
++	input_set_abs_params(idev, ABS_Y, 0, ADC_MAX, 0, 0);
++	input_set_abs_params(idev, ABS_PRESSURE, 0, 0, 0, 0);
++
++	if (!ret)
++		ret = input_register_device(idev);
++
++	return ret;
++}
++
++static int tsc2007_i2c_remove(struct i2c_client *client)
++{
++	int err;
++	struct tsc2007_data *d = i2c_get_clientdata(client);
++
++	kthread_stop(d->tstask);
++	free_irq(d->penirq, d);
++	input_unregister_device(d->idev);
++
++	err = i2c_detach_client(client);
++	if (err) {
++		dev_err(&client->dev, "Client deregistration failed, "
++			"client not detached.\n");
++		return err;
++	}
++
++	return 0;
++}
++
++static int tsc2007_i2c_probe(struct i2c_client *client)
++{
++	struct tsc2007_data *data;
++	int err = 0;
++
++	data = kzalloc(sizeof(struct tsc2007_data), GFP_KERNEL);
++	if (data == NULL)
++		return -ENOMEM;
++
++	i2c_set_clientdata(client, data);
++	data->client = client;
++	data->penirq = client->irq;
++
++	err = tsc2007_powerdown(data);
++	if (err >= 0) {
++		data->m = M_12BIT;
++
++		err = tsc2007_driver_register(data);
++		if (err < 0)
++			goto exit;
++
++		return 0;
++	}
++
++exit:
++	return err;
++}
++
++static struct i2c_driver tsc2007_driver = {
++	.driver = {
++		   .name = DRIVER_NAME,
++		   },
++	.probe = tsc2007_i2c_probe,
++	.remove = tsc2007_i2c_remove,
++	.command = NULL,
++};
++
++static int __init tsc2007_init(void)
++{
++	return i2c_add_driver(&tsc2007_driver);
++}
++
++static void __exit tsc2007_exit(void)
++{
++	i2c_del_driver(&tsc2007_driver);
++}
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("tsc2007 Touch Screen Controller driver");
++MODULE_LICENSE("GPL");
++
++module_init(tsc2007_init);
++module_exit(tsc2007_exit);
+diff --git a/include/asm-arm/arch-mxc/mx37_pins.h b/include/asm-arm/arch-mxc/mx37_pins.h
+index 36d0fa1..a266b27 100644
+--- a/include/asm-arm/arch-mxc/mx37_pins.h
++++ b/include/asm-arm/arch-mxc/mx37_pins.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -261,6 +261,7 @@ typedef enum iomux_pins {
+ 	MX37_PIN_GPIO1_7 = _MXC_BUILD_GPIO_PIN(0, 7, 0, 0x22C, 0x484),
+ 	MX37_PIN_GRP_H10 = _MXC_BUILD_NON_GPIO_PIN(0x230, 0x490),
+ 	MX37_PIN_GRP_H9 = _MXC_BUILD_NON_GPIO_PIN(0x230, 0x494),
++	MX37_PIN_GRP_H3 = _MXC_BUILD_NON_GPIO_PIN(0x230, 0x4D0),
+ 	MX37_PIN_GRP_H5 = _MXC_BUILD_NON_GPIO_PIN(0x230, 0x4EC),
+ } iomux_pin_name_t;
+ 
+-- 
+1.5.4.4
+

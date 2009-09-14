@@ -1,0 +1,78 @@
+From 640db3dd6fb2439ede4e7592e8029f7aef74ba68 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Mon, 19 May 2008 15:47:57 +0800
+Subject: [PATCH] ENGR00076646 MX35 Fix pseudo incorrect irq number
+
+Change the irq definition in irq enable 2 register.
+the right definition in enable register2 is :
+bit 0: RTC
+bit 1: TS_ADC
+bit 2: TS_CALIBRATE
+bit 3: KEYPAD
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/mach-mx35/board-mx35_3stack.h |    3 ++-
+ arch/arm/mach-mx35/mx35_3stack_irq.c   |   13 ++++++-------
+ 2 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/board-mx35_3stack.h b/arch/arm/mach-mx35/board-mx35_3stack.h
+index a99be90..74d6451 100644
+--- a/arch/arm/mach-mx35/board-mx35_3stack.h
++++ b/arch/arm/mach-mx35/board-mx35_3stack.h
+@@ -93,9 +93,10 @@ enum {
+ 	MCU_INT_SD2_CD,
+ 	MCU_INT_SD2_WP,
+ 	MCU_INT_POWER_KEY,
+-	MCU_INT_KEYPAD,
+ 	MCU_INT_RTC,
+ 	MCU_INT_TS_ADC,
++	MCU_INT_TS_CALIBRATE,
++	MCU_INT_KEYPAD,
+ };
+ 
+ #define MXC_PSEUDO_IRQ_HEADPHONE	(MXC_PSEUDO_IO_BASE + MCU_INT_HEADPHONE)
+diff --git a/arch/arm/mach-mx35/mx35_3stack_irq.c b/arch/arm/mach-mx35/mx35_3stack_irq.c
+index 5373402..7ace232 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_irq.c
++++ b/arch/arm/mach-mx35/mx35_3stack_irq.c
+@@ -255,12 +255,11 @@ static void mcu_event_handler(struct work_struct *work)
+ 		goto no_new_events;
+ 	}
+ 
+-	for (i = 0; flag1 && (i < MCU_INT_KEYPAD); i++, flag1 >>= 1)
++	for (i = 0; flag1 && (i < MCU_INT_RTC); i++, flag1 >>= 1)
+ 		if (flag1 & 1)
+ 			set_bit(i, &pseudo_irq_pending);
+ 
+-	for (i = MCU_INT_KEYPAD; flag2 && (i <= MCU_INT_TS_ADC);
+-	     i++, flag2 >>= 1)
++	for (i = MCU_INT_RTC; flag2 && (i <= MCU_INT_KEYPAD); i++, flag2 >>= 1)
+ 		if (flag2 & 1)
+ 			set_bit(i, &pseudo_irq_pending);
+       no_new_events:
+@@ -273,8 +272,8 @@ static void mcu_state_handler(struct work_struct *work)
+ {
+ 	int err, i;
+ 	unsigned int event1, event2;
+-	event1 = pseudo_irq_enable & ((1 << MCU_INT_KEYPAD) - 1);
+-	event2 = pseudo_irq_enable >> MCU_INT_KEYPAD;
++	event1 = pseudo_irq_enable & ((1 << MCU_INT_RTC) - 1);
++	event2 = pseudo_irq_enable >> MCU_INT_RTC;
+ 
+ 	for (i = 0; i < 3; i++) {
+ 		err = pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
+@@ -331,8 +330,8 @@ static int mxc_pseudo_irq_suspend(struct platform_device *dev,
+ 	if (!pseudo_irq_wakeup)
+ 		return 0;
+ 
+-	event1 = pseudo_irq_wakeup & ((1 << MCU_INT_KEYPAD) - 1);
+-	event2 = pseudo_irq_wakeup >> MCU_INT_KEYPAD;
++	event1 = pseudo_irq_wakeup & ((1 << MCU_INT_RTC) - 1);
++	event2 = pseudo_irq_wakeup >> MCU_INT_RTC;
+ 
+ 	for (i = 0; i < 3; i++) {
+ 		err = pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
+-- 
+1.5.4.4
+

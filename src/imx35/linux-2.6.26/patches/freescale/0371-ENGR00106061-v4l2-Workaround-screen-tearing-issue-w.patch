@@ -1,0 +1,40 @@
+From a6c410bbfc1ce39ab68fc5f760a948084c8d0491 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Fri, 23 Jan 2009 16:07:50 +0800
+Subject: [PATCH] ENGR00106061 v4l2: Workaround screen tearing issue when capturing still image
+
+Enable ov3640 camera's mclk before initializing IPU IDMAC channel(CSI->MEM).
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/ipu_still.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_still.c b/drivers/media/video/mxc/capture/ipu_still.c
+index e89772e..101e3bf 100644
+--- a/drivers/media/video/mxc/capture/ipu_still.c
++++ b/drivers/media/video/mxc/capture/ipu_still.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -108,11 +108,12 @@ static int prp_still_start(void *private)
+ 		return -EINVAL;
+ 	}
+ 
++	ipu_csi_enable_mclk_if(CSI_MCLK_RAW, cam->csi, true, true);
++
+ 	memset(&params, 0, sizeof(params));
+ 	err = ipu_init_channel(CSI_MEM, &params);
+ 	if (err != 0)
+ 		return err;
+-	ipu_csi_enable_mclk_if(CSI_MCLK_RAW, cam->csi, true, true);
+ 
+ 	err = ipu_init_channel_buffer(CSI_MEM, IPU_OUTPUT_BUFFER,
+ 				      pixel_fmt, cam->v2f.fmt.pix.width,
+-- 
+1.5.4.4
+

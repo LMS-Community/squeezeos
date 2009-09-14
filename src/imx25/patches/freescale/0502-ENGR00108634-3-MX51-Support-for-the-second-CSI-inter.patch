@@ -1,0 +1,252 @@
+From 5d4857d5af625c7464815ee6f01926420a040f6f Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 21 Apr 2009 10:07:05 +0800
+Subject: [PATCH] ENGR00108634-3 MX51:Support for the second CSI interface.
+
+Support for the second CSI interface.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ arch/arm/mach-mx51/clock.c            |   78 ++++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx51/devices.c          |    4 ++
+ arch/arm/mach-mx51/mx51_3stack.c      |   29 +++++++++---
+ arch/arm/mach-mx51/mx51_3stack_gpio.c |   53 ++++++++++++++++++-----
+ 4 files changed, 145 insertions(+), 19 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index a9fe229..d966ba5 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -1141,6 +1141,82 @@ static struct clk csi0_clk = {
+ 	.disable = _clk_disable,
+ };
+ 
++#ifdef CONFIG_MACH_MX51_3DS
++static int _clk_csi1_set_parent(struct clk *clk, struct clk *parent)
++{
++	u32 reg, mux;
++
++	reg = __raw_readl(MXC_CCM_CSCMR2);
++	mux = _get_mux(parent, &pll1_sw_clk, &pll2_sw_clk, &pll3_sw_clk, NULL);
++	reg = (reg & ~MXC_CCM_CSCMR2_CSI_MCLK1_CLK_SEL_MASK) |
++		    (mux << MXC_CCM_CSCMR2_CSI_MCLK1_CLK_SEL_OFFSET);
++	__raw_writel(reg, MXC_CCM_CSCMR2);
++
++	return 0;
++}
++
++static void _clk_csi1_recalc(struct clk *clk)
++{
++	u32 reg, pred, podf;
++
++	reg = __raw_readl(MXC_CCM_CSCDR4);
++	pred = ((reg & MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PRED_MASK) >>
++			MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PRED_OFFSET) + 1;
++	podf = ((reg & MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PODF_MASK) >>
++			MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PODF_OFFSET) + 1;
++	clk->rate = clk->parent->rate / (pred * podf);
++}
++
++static unsigned long _clk_csi1_round_rate(struct clk *clk, unsigned long rate)
++{
++	u32 pre, post;
++	u32 div = clk->parent->rate / rate;
++	if (clk->parent->rate % rate)
++		div++;
++
++	__calc_pre_post_dividers(div, &pre, &post);
++
++	return clk->parent->rate / (pre * post);
++}
++
++static int _clk_csi1_set_rate(struct clk *clk, unsigned long rate)
++{
++	u32 reg;
++	u32 div;
++	u32 pre, post;
++
++	div = clk->parent->rate / rate;
++
++	if ((clk->parent->rate / div) != rate)
++		return -EINVAL;
++
++	__calc_pre_post_dividers(div, &pre, &post);
++
++	/* Set CSI clock divider */
++	reg = __raw_readl(MXC_CCM_CSCDR4) &
++	    ~(MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PRED_MASK |
++		MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PODF_MASK);
++	reg |= (post - 1) << MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PODF_OFFSET;
++	reg |= (pre - 1) << MXC_CCM_CSCDR4_CSI_MCLK1_CLK_PRED_OFFSET;
++	__raw_writel(reg, MXC_CCM_CSCDR4);
++
++	clk->rate = rate;
++	return 0;
++}
++
++static struct clk csi1_clk = {
++	.name = "csi_mclk2",
++	.parent = &pll3_sw_clk,
++	.set_parent = _clk_csi1_set_parent,
++	.recalc = _clk_csi1_recalc,
++	.round_rate = _clk_csi1_round_rate,
++	.set_rate = _clk_csi1_set_rate,
++	.enable = _clk_enable,
++	.enable_reg = MXC_CCM_CCGR6,
++	.enable_shift = MXC_CCM_CCGR6_CG2_OFFSET,
++	.disable = _clk_disable,
++};
++#else /* !CONFIG_MACH_MX51_3DS */
+ static int _clk_csi1_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	u32 reg, mux;
+@@ -1215,7 +1291,7 @@ static struct clk csi1_clk = {
+ 	.enable_shift = MXC_CCM_CCGR6_CG3_OFFSET,
+ 	.disable = _clk_disable,
+ };
+-
++#endif /* CONFIG_MACH_MX51_3DS */
+ 
+ static int _clk_hsc_enable(struct clk *clk)
+ {
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 918b11c..ed8b110 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -255,7 +255,11 @@ static void mxc_init_ipu(void)
+ 
+ 		/* CSI mode reserved*/
+ 		temp = __raw_readl(reg_hsc_mxt_conf);
++#ifdef CONFIG_MXC_CAMERA_USE_CSI0
+ 		__raw_writel(temp | 0x0FF, reg_hsc_mxt_conf);
++#else
++		__raw_writel(temp | 0x0FA, reg_hsc_mxt_conf);
++#endif
+ 
+ 		if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
+ 			temp = __raw_readl(reg_hsc_mxt_conf);
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 270f730..ae76d44 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -520,11 +520,26 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ #endif
+ #if defined(CONFIG_I2C_MXC_HS) || defined(CONFIG_I2C_MXC_HS_MODULE)
+ static struct mxc_camera_platform_data camera_data = {
+-	.io_regulator = "SW4",
+-	.analog_regulator = "VIOHI",
+-	.mclk = 24000000,
+-	.csi = 0,
++#ifdef CONFIG_MXC_CAMERA_USE_CSI0
++	 .io_regulator = "SW4",
++	 .analog_regulator = "VIOHI",
++	 .core_voltage = 1500000,
++	 .io_voltage = 1800000,
++	 .analog_voltage = 2800000,
++	 .mclk = 24000000,
++	 .csi = 0,
++#else
++	 .core_regulator = "VGEN1",
++	 .io_regulator = "VCAM",
++	 .analog_regulator = "VAUDIO",
++	 .core_voltage = 1500000,
++	 .io_voltage = 1800000,
++	 .analog_voltage = 2800000,
++	 .mclk = 24000000,
++	 .csi = 1,
++#endif
+ };
++
+ static struct mxc_lightsensor_platform_data ls_data = {
+ 	.vdd_reg = NULL,
+ 	.rext = 100,
+@@ -532,9 +547,9 @@ static struct mxc_lightsensor_platform_data ls_data = {
+ 
+ static struct i2c_board_info mxc_i2c_hs_board_info[] __initdata = {
+ 	{
+-		.type = "ov3640",
+-		.addr = 0x3C,
+-		.platform_data = (void *)&camera_data,
++	 .type = "ov3640",
++	 .addr = 0x3C,
++	 .platform_data = (void *)&camera_data,
+ 	},
+ 	{
+ 	 .type = "isl29003",
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 8ecef7a..ef9ed16 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -951,18 +951,39 @@ void gpio_sensor_active(unsigned int csi)
+ 				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_LOW |
+ 				  PAD_CTL_SRE_SLOW);
+ 
+-		mxc_request_iomux(MX51_PIN_GPIO1_5, IOMUX_CONFIG_ALT6);
+-		mxc_iomux_set_pad(MX51_PIN_GPIO1_5, PAD_CTL_HYS_NONE |
+-				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
+-				  PAD_CTL_DRV_LOW | PAD_CTL_ODE_OPENDRAIN_NONE |
+-				  PAD_CTL_SRE_SLOW);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++			/* Camera reset */
++			mxc_request_iomux(MX51_PIN_CSI1_D9, IOMUX_CONFIG_ALT3);
++			mxc_iomux_set_pad(MX51_PIN_CSI1_D9, PAD_CTL_HYS_NONE |
++					  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_LOW |
++					  PAD_CTL_SRE_SLOW);
++			mxc_set_gpio_direction(MX51_PIN_CSI1_D9, 0);
++			mxc_set_gpio_dataout(MX51_PIN_CSI1_D9, 1);
++		} else {
++			/* Camera reset */
++			mxc_request_iomux(MX51_PIN_EIM_EB3, IOMUX_CONFIG_ALT1);
++			mxc_iomux_set_pad(MX51_PIN_EIM_EB3, PAD_CTL_HYS_NONE |
++					  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
++					  PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW);
++			mxc_set_gpio_direction(MX51_PIN_EIM_EB3, 0);
++			mxc_set_gpio_dataout(MX51_PIN_EIM_EB3, 1);
++		}
+ 
+-		mxc_request_iomux(MX51_PIN_DI2_PIN4, IOMUX_CONFIG_ALT3);
+-		mxc_iomux_set_pad(MX51_PIN_DI2_PIN4, PAD_CTL_HYS_NONE |
++		/* Camera low power */
++		mxc_request_iomux(MX51_PIN_EIM_CS4, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_EIM_CS4, PAD_CTL_HYS_NONE |
+ 				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_LOW |
+ 				  PAD_CTL_SRE_SLOW);
+-		mxc_iomux_set_input(MUX_IN_FEC_FEC_COL_SELECT_INPUT,
+-				    INPUT_CTL_PATH1);
++		mxc_set_gpio_direction(MX51_PIN_EIM_CS4, 0);
++		mxc_set_gpio_dataout(MX51_PIN_EIM_CS4, 0);
++
++		/* Data enable */
++		mxc_request_iomux(MX51_PIN_GPIO1_8, IOMUX_CONFIG_ALT2);
++		mxc_iomux_set_input(MUX_IN_HSC_MIPI_MIX_IPP_IND_SENS1_DATA_EN_SELECT_INPUT, INPUT_CTL_PATH2);
++		mxc_iomux_set_pad(MX51_PIN_GPIO1_8, PAD_CTL_HYS_NONE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_22K_PU | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_SLOW);
+ 		break;
+ 	default:
+ 		break;
+@@ -994,8 +1015,18 @@ void gpio_sensor_inactive(unsigned int csi)
+ 		mxc_request_iomux(MX51_PIN_EIM_A26, IOMUX_CONFIG_ALT0);
+ 		break;
+ 	case 1:
+-		mxc_request_iomux(MX51_PIN_GPIO1_5, IOMUX_CONFIG_ALT0);
+-		mxc_request_iomux(MX51_PIN_DI2_PIN4, IOMUX_CONFIG_ALT0);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++			mxc_free_iomux(MX51_PIN_CSI1_D9, IOMUX_CONFIG_GPIO);
++			mxc_request_iomux(MX51_PIN_CSI1_D9, IOMUX_CONFIG_ALT0);
++		} else {
++			mxc_free_iomux(MX51_PIN_EIM_EB3, IOMUX_CONFIG_GPIO);
++			mxc_request_iomux(MX51_PIN_EIM_EB3, IOMUX_CONFIG_ALT0);
++		}
++
++		mxc_free_iomux(MX51_PIN_EIM_CS4, IOMUX_CONFIG_GPIO);
++		mxc_request_iomux(MX51_PIN_EIM_CS4, IOMUX_CONFIG_ALT0);
++
++		mxc_request_iomux(MX51_PIN_GPIO1_8, IOMUX_CONFIG_ALT0);
+ 		break;
+ 	default:
+ 		break;
+-- 
+1.5.4.4
+

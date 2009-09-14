@@ -1,0 +1,60 @@
+From e94ebaa5e682722368df4a790512d9e0c32f9237 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <linuxzsc@gmail.com>
+Date: Tue, 7 Oct 2008 08:05:20 +0800
+Subject: [PATCH] ALSA: ASoC: add new param mux to dapm_mux_update_power
+
+Function dapm_mux_update_power needs enum index mux and register mask value val
+as parameters, but it only has a parameter val, and uses it as both val and mux.
+snd_soc_test_bits(widget->codec, e->reg, mask, val) val is register mask here,
+e->texts[val] but val should be enum index mux here.
+
+This patch adds a new param mux to fix it.
+
+Signed-off-by: Richard Zhao <linuxzsc@gmail.com>
+Signed-off-by: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Signed-off-by: Jaroslav Kysela <perex@perex.cz>
+(cherry picked from commit cb01e2b99264d579085c63966744d91b87c6b35d)
+---
+ sound/soc/soc-dapm.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/soc-dapm.c b/sound/soc/soc-dapm.c
+index 5f046bc..5a294ec 100644
+--- a/sound/soc/soc-dapm.c
++++ b/sound/soc/soc-dapm.c
+@@ -683,7 +683,7 @@ static void dbg_dump_dapm(struct snd_soc_machine *machine, const char *action)
+ /* test and update the power status of a mux widget */
+ static int dapm_mux_update_power(struct snd_soc_dapm_widget *widget,
+ 				 struct snd_kcontrol *kcontrol, int mask,
+-				 int val, struct soc_enum* e)
++				 int mux, int val, struct soc_enum *e)
+ {
+ 	struct snd_soc_dapm_path *path;
+ 	int found = 0;
+@@ -699,12 +699,12 @@ static int dapm_mux_update_power(struct snd_soc_dapm_widget *widget,
+ 		if (path->kcontrol != kcontrol)
+ 			continue;
+ 
+-		if (!path->name || ! e->texts[val])
++		if (!path->name || !e->texts[mux])
+ 			continue;
+ 
+ 		found = 1;
+ 		/* we now need to match the string in the enum to the path */
+-		if (!(strcmp(path->name, e->texts[val])))
++		if (!(strcmp(path->name, e->texts[mux])))
+ 			path->connect = 1; /* new connection */
+ 		else
+ 			path->connect = 0; /* old connection must be powered down */
+@@ -1208,7 +1208,7 @@ int snd_soc_dapm_put_enum_double(struct snd_kcontrol *kcontrol,
+ 
+ 	mutex_lock(&widget->codec->mutex);
+ 	widget->value = val;
+-	dapm_mux_update_power(widget, kcontrol, mask, mux, e);
++	dapm_mux_update_power(widget, kcontrol, mask, mux, val, e);
+ 	if (widget->event) {
+ 		if (widget->event_flags & SND_SOC_DAPM_PRE_REG) {
+ 			ret = widget->event(widget,
+-- 
+1.5.4.4
+

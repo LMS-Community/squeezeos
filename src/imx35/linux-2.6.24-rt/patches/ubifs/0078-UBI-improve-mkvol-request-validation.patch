@@ -1,0 +1,70 @@
+From 000e058e4b1383cc1a8b75aeb5ba0f19044bba47 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 13 Jul 2008 21:46:24 +0300
+Subject: [PATCH] UBI: improve mkvol request validation
+
+Check that volume name is not shorter than 'name_len'.
+
+No need to copy the trailing zero byte because whole array
+was zeroed earlier.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |    7 +++++--
+ drivers/mtd/ubi/vmt.c  |    4 ++--
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 9ac7aa6..92789fb 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -569,6 +569,10 @@ static int verify_mkvol_req(const struct ubi_device *ubi,
+ 		goto bad;
+ 	}
+ 
++	n = strnlen(req->name, req->name_len + 1);
++	if (n != req->name_len)
++		goto bad;
++
+ 	return 0;
+ 
+ bad:
+@@ -624,12 +628,11 @@ static int ubi_cdev_ioctl(struct inode *inode, struct file *file,
+ 			break;
+ 		}
+ 
++		req.name[req.name_len] = '\0';
+ 		err = verify_mkvol_req(ubi, &req);
+ 		if (err)
+ 			break;
+ 
+-		req.name[req.name_len] = '\0';
+-
+ 		mutex_lock(&ubi->volumes_mutex);
+ 		err = ubi_create_volume(ubi, &req);
+ 		mutex_unlock(&ubi->volumes_mutex);
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 367b041..bfa7c5d 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -275,7 +275,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 	vol->data_pad  = ubi->leb_size % vol->alignment;
+ 	vol->vol_type  = req->vol_type;
+ 	vol->name_len  = req->name_len;
+-	memcpy(vol->name, req->name, vol->name_len + 1);
++	memcpy(vol->name, req->name, vol->name_len);
+ 	vol->ubi = ubi;
+ 
+ 	/*
+@@ -350,7 +350,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 		vtbl_rec.vol_type = UBI_VID_DYNAMIC;
+ 	else
+ 		vtbl_rec.vol_type = UBI_VID_STATIC;
+-	memcpy(vtbl_rec.name, vol->name, vol->name_len + 1);
++	memcpy(vtbl_rec.name, vol->name, vol->name_len);
+ 
+ 	err = ubi_change_vtbl_record(ubi, vol_id, &vtbl_rec);
+ 	if (err)
+-- 
+1.5.6.3
+

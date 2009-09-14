@@ -1,0 +1,46 @@
+From 308546d832d2c469bc66032c5c6b2ef90bb05a7e Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Fri, 17 Oct 2008 16:09:03 +0800
+Subject: [PATCH] ENGR00095657 wm8350: correct wrong return value when read/write i2c
+
+Correct wrong return value when read/write i2c
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ drivers/regulator/wm8350/reg-wm8350-bus.c |    8 ++++++--
+ 1 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/regulator/wm8350/reg-wm8350-bus.c b/drivers/regulator/wm8350/reg-wm8350-bus.c
+index edeb5af..82fe12d 100644
+--- a/drivers/regulator/wm8350/reg-wm8350-bus.c
++++ b/drivers/regulator/wm8350/reg-wm8350-bus.c
+@@ -100,12 +100,15 @@ static int wm8350_read_i2c_device(struct wm8350 *wm8350, char reg,
+ 	ret = i2c_master_send(wm8350->i2c_client, &reg, 1);
+ 	if (ret < 0)
+ 		return ret;
+-	return i2c_master_recv(wm8350->i2c_client, dest, bytes);
++	ret = i2c_master_recv(wm8350->i2c_client, dest, bytes);
++	return ret < 0 ? ret : 0;
+ }
+ 
+ static int wm8350_write_i2c_device(struct wm8350 *wm8350, char reg,
+ 	int bytes, char *src)
+ {
++	int ret;
++
+ 	/* we add 1 byte for device register */
+ 	u8 msg[(WM8350_MAX_REGISTER << 1) + 1];
+ 
+@@ -114,7 +117,8 @@ static int wm8350_write_i2c_device(struct wm8350 *wm8350, char reg,
+ 
+ 	msg[0] = reg;
+ 	memcpy(&msg[1], src, bytes);
+-	return i2c_master_send(wm8350->i2c_client, msg, bytes + 1);
++	ret = i2c_master_send(wm8350->i2c_client, msg, bytes + 1);
++	return ret < 0 ? ret : 0;
+ }
+ #endif
+ 
+-- 
+1.5.4.4
+

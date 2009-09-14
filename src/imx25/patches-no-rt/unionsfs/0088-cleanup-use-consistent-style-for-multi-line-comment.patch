@@ -1,0 +1,991 @@
+From 57c4f387a8646811207042be15f79a7082874cbf Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 24 Mar 2007 19:56:56 -0400
+Subject: [PATCH] cleanup: use consistent style for multi-line comments
+
+---
+ fs/stack.c               |    6 ++++--
+ fs/unionfs/branchman.c   |    3 ++-
+ fs/unionfs/commonfops.c  |   24 ++++++++++++++++--------
+ fs/unionfs/copyup.c      |   40 ++++++++++++++++++++++++++--------------
+ fs/unionfs/dentry.c      |    6 ++++--
+ fs/unionfs/dirfops.c     |    6 ++++--
+ fs/unionfs/dirhelper.c   |    3 ++-
+ fs/unionfs/inode.c       |   41 +++++++++++++++++++++++++++--------------
+ fs/unionfs/lookup.c      |   27 ++++++++++++++++++---------
+ fs/unionfs/main.c        |   24 ++++++++++++++++--------
+ fs/unionfs/rdstate.c     |   15 ++++++++++-----
+ fs/unionfs/rename.c      |   21 ++++++++++++++-------
+ fs/unionfs/sioq.c        |    3 ++-
+ fs/unionfs/subr.c        |   15 ++++++++++-----
+ fs/unionfs/super.c       |   15 ++++++++++-----
+ fs/unionfs/union.h       |   15 ++++++++++-----
+ fs/unionfs/xattr.c       |   12 ++++++++----
+ include/linux/fs_stack.h |    3 ++-
+ 18 files changed, 185 insertions(+), 94 deletions(-)
+
+diff --git a/fs/stack.c b/fs/stack.c
+index e05f9a3..0b3e93b 100644
+--- a/fs/stack.c
++++ b/fs/stack.c
+@@ -13,7 +13,8 @@
+ #include <linux/fs.h>
+ #include <linux/fs_stack.h>
+ 
+-/* does _NOT_ require i_mutex to be held.
++/*
++ * does _NOT_ require i_mutex to be held.
+  *
+  * This function cannot be inlined since i_size_{read,write} is rather
+  * heavy-weight on 32-bit systems
+@@ -25,7 +26,8 @@ void fsstack_copy_inode_size(struct inode *dst, const struct inode *src)
+ }
+ EXPORT_SYMBOL_GPL(fsstack_copy_inode_size);
+ 
+-/* copy all attributes; get_nlinks is optional way to override the i_nlink
++/*
++ * copy all attributes; get_nlinks is optional way to override the i_nlink
+  * copying
+  */
+ void fsstack_copy_attr_all(struct inode *dest, const struct inode *src,
+diff --git a/fs/unionfs/branchman.c b/fs/unionfs/branchman.c
+index 3163e4e..a11796c 100644
+--- a/fs/unionfs/branchman.c
++++ b/fs/unionfs/branchman.c
+@@ -18,7 +18,8 @@
+ 
+ #include "union.h"
+ 
+-/* return to userspace the branch indices containing the file in question
++/*
++ * return to userspace the branch indices containing the file in question
+  *
+  * We use fd_set and therefore we are limited to the number of the branches
+  * to FD_SETSIZE, which is currently 1024 - plenty for most people
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index de567a2..bef8035 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -18,7 +18,8 @@
+ 
+ #include "union.h"
+ 
+-/* 1) Copyup the file
++/*
++ * 1) Copyup the file
+  * 2) Rename the file to '.unionfs<original inode#><counter>' - obviously
+  * stolen from NFS's silly rename
+  */
+@@ -110,7 +111,8 @@ static int find_new_branch_index(struct file *file, int bindex,
+ 	return -1;
+ }
+ 
+-/* put all references held by upper struct file and free lower file pointer
++/*
++ * put all references held by upper struct file and free lower file pointer
+  * array
+  */
+ static void cleanup_file(struct file *file)
+@@ -305,7 +307,8 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 
+ 	BUG_ON(sbgen > dgen);
+ 
+-	/* There are two cases we are interested in.  The first is if the
++	/*
++	 * There are two cases we are interested in.  The first is if the
+ 	 * generation is lower than the super-block.  The second is if someone
+ 	 * has copied up this file from underneath us, we also need to refresh
+ 	 * things.
+@@ -394,7 +397,8 @@ static int __open_dir(struct inode *inode, struct file *file)
+ 
+ 		unionfs_set_lower_file_idx(file, bindex, hidden_file);
+ 
+-		/* The branchget goes after the open, because otherwise
++		/*
++		 * The branchget goes after the open, because otherwise
+ 		 * we would miss the reference on release.
+ 		 */
+ 		unionfs_read_lock(inode->i_sb);
+@@ -419,11 +423,13 @@ static int __open_file(struct inode *inode, struct file *file)
+ 	bstart = fbstart(file) = dbstart(file->f_dentry);
+ 	bend = fbend(file) = dbend(file->f_dentry);
+ 
+-	/* check for the permission for hidden file.  If the error is
++	/*
++	 * check for the permission for hidden file.  If the error is
+ 	 * COPYUP_ERR, copyup the file.
+ 	 */
+ 	if (hidden_dentry->d_inode && is_robranch(file->f_dentry)) {
+-		/* if the open will change the file, copy it up otherwise
++		/*
++		 * if the open will change the file, copy it up otherwise
+ 		 * defer it.
+ 		 */
+ 		if (hidden_flags & O_TRUNC) {
+@@ -445,7 +451,8 @@ static int __open_file(struct inode *inode, struct file *file)
+ 
+ 	dget(hidden_dentry);
+ 
+-	/* dentry_open will decrement mnt refcnt if err.
++	/*
++	 * dentry_open will decrement mnt refcnt if err.
+ 	 * otherwise fput() will do an mntput() for us upon file close.
+ 	 */
+ 	unionfs_mntget(file->f_dentry, bstart);
+@@ -506,7 +513,8 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 	/* increment, so that we can flush appropriately */
+ 	atomic_inc(&UNIONFS_I(dentry->d_inode)->totalopens);
+ 
+-	/* open all directories and make the unionfs file struct point to
++	/*
++	 * open all directories and make the unionfs file struct point to
+ 	 * these hidden file structs
+ 	 */
+ 	if (S_ISDIR(inode->i_mode))
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 2797231..72799a1 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -26,7 +26,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 					   struct dentry *dentry,
+ 					   const char *name, int bindex);
+ 
+-/* For detailed explanation of copyup see:
++/*
++ * For detailed explanation of copyup see:
+  * Documentation/filesystems/unionfs/concepts.txt
+  */
+ 
+@@ -135,7 +136,8 @@ int copyup_dentry(struct inode *dir, struct dentry *dentry,
+ 				   dentry->d_name.len, copyup_file, len);
+ }
+ 
+-/* create the new device/file/directory - use copyup_permission to copyup
++/*
++ * create the new device/file/directory - use copyup_permission to copyup
+  * times, and mode
+  *
+  * if the object being copied up is a regular file, the file is only created,
+@@ -314,7 +316,8 @@ out:
+ 	return err;
+ }
+ 
+-/* dput the lower references for old and new dentry & clear a lower dentry
++/*
++ * dput the lower references for old and new dentry & clear a lower dentry
+  * pointer
+  */
+ static void __clear(struct dentry *dentry, struct dentry *old_hidden_dentry,
+@@ -439,10 +442,10 @@ static int copyup_named_dentry(struct inode *dir, struct dentry *dentry,
+ 		unionfs_reinterpose(dentry);
+ 
+ 	goto out_unlock;
+-	/****/
+ 
+ out_unlink:
+-	/* copyup failed, because we possibly ran out of space or
++	/*
++	 * copyup failed, because we possibly ran out of space or
+ 	 * quota, or something else happened so let's unlink; we don't
+ 	 * really care about the return value of vfs_unlink
+ 	 */
+@@ -483,7 +486,8 @@ out:
+ 	return err;
+ }
+ 
+-/* This function creates a copy of a file represented by 'file' which currently
++/*
++ * This function creates a copy of a file represented by 'file' which currently
+  * resides in branch 'bstart' to branch 'new_bindex.'  The copy will be named
+  * "name".
+  */
+@@ -504,7 +508,8 @@ int copyup_named_file(struct inode *dir, struct file *file, char *name,
+ 	return err;
+ }
+ 
+-/* This function creates a copy of a file represented by 'file' which currently
++/*
++ * This function creates a copy of a file represented by 'file' which currently
+  * resides in branch 'bstart' to branch 'new_bindex'.
+  */
+ int copyup_file(struct inode *dir, struct file *file, int bstart,
+@@ -523,7 +528,8 @@ int copyup_file(struct inode *dir, struct file *file, int bstart,
+ 	return err;
+ }
+ 
+-/* This function replicates the directory structure upto given dentry in the
++/*
++ * This function replicates the directory structure upto given dentry in the
+  * bindex branch. Can create directory structure recursively to the right
+  * also.
+  */
+@@ -545,7 +551,8 @@ static void __cleanup_dentry(struct dentry * dentry, int bindex,
+ 	loop_start = min(old_bstart, bindex);
+ 	loop_end = max(old_bend, bindex);
+ 
+-	/* This loop sets the bstart and bend for the new dentry by
++	/*
++	 * This loop sets the bstart and bend for the new dentry by
+ 	 * traversing from left to right.  It also dputs all negative
+ 	 * dentries except bindex
+ 	 */
+@@ -606,7 +613,8 @@ static void __set_dentry(struct dentry * upper, struct dentry * lower,
+ 		set_dbend(upper, bindex);
+ }
+ 
+-/* This function replicates the directory structure upto given dentry
++/*
++ * This function replicates the directory structure upto given dentry
+  * in the bindex branch.
+  */
+ static struct dentry *create_parents_named(struct inode *dir,
+@@ -649,7 +657,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 	parent_dentry = dentry;
+ 
+ 	count = 0;
+-	/* This loop finds the first parent that exists in the given branch.
++	/*
++	 * This loop finds the first parent that exists in the given branch.
+ 	 * We start building the directory structure from there.  At the end
+ 	 * of the loop, the following should hold:
+ 	 *  - child_dentry is the first nonexistent child
+@@ -688,7 +697,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 
+ 	sb = dentry->d_sb;
+ 
+-	/* This is basically while(child_dentry != dentry).  This loop is
++	/*
++	 * This is basically while(child_dentry != dentry).  This loop is
+ 	 * horrible to follow and should be replaced with cleaner code.
+ 	 */
+ 	while (1) {
+@@ -710,7 +720,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 				goto out;
+ 		} else {
+ 
+-			/* is the name a whiteout of the childname ?
++			/*
++			 * is the name a whiteout of the childname ?
+ 			 * lookup the whiteout child in the underlying file
+ 			 * system
+ 			 */
+@@ -733,7 +744,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 		}
+ 
+ 		if (hidden_dentry->d_inode) {
+-			/* since this already exists we dput to avoid
++			/*
++			 * since this already exists we dput to avoid
+ 			 * multiple references on the same dentry
+ 			 */
+ 			dput(hidden_dentry);
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index e85bcf4..acd158e 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -58,7 +58,8 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry,
+ 		positive = 1;
+ 	dgen = atomic_read(&UNIONFS_D(dentry)->generation);
+ 	sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+-	/* If we are working on an unconnected dentry, then there is no
++	/*
++	 * If we are working on an unconnected dentry, then there is no
+ 	 * revalidation to be done, because this file does not exist within the
+ 	 * namespace, and Unionfs operates on the namespace, not data.
+ 	 */
+@@ -130,7 +131,8 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry,
+ 				valid = 0;
+ 				goto out;
+ 			}
+-			/* current unionfs_lookup_backend() doesn't return
++			/*
++			 * current unionfs_lookup_backend() doesn't return
+ 			 * a valid dentry
+ 			 */
+ 			dput(dentry);
+diff --git a/fs/unionfs/dirfops.c b/fs/unionfs/dirfops.c
+index cab7b6d..7306b3f 100644
+--- a/fs/unionfs/dirfops.c
++++ b/fs/unionfs/dirfops.c
+@@ -183,7 +183,8 @@ out:
+ 	return err;
+ }
+ 
+-/* This is not meant to be a generic repositioning function.  If you do
++/*
++ * This is not meant to be a generic repositioning function.  If you do
+  * things that aren't supported, then we return EINVAL.
+  *
+  * What is allowed:
+@@ -258,7 +259,8 @@ out:
+ 	return err;
+ }
+ 
+-/* Trimmed directory options, we shouldn't pass everything down since
++/*
++ * Trimmed directory options, we shouldn't pass everything down since
+  * we don't want to operate on partial directories.
+  */
+ struct file_operations unionfs_dir_fops = {
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index de22b30..e2cd544 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -18,7 +18,8 @@
+ 
+ #include "union.h"
+ 
+-/* Delete all of the whiteouts in a given directory for rmdir.
++/*
++ * Delete all of the whiteouts in a given directory for rmdir.
+  *
+  * hidden directory inode should be locked
+  */
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index ede3eef..6591c0b 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -80,8 +80,9 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 	}
+ 
+ 	if (wh_dentry->d_inode) {
+-		/* .wh.foo has been found. */
+-		/* First truncate it and then rename it to foo (hence having
++		/*
++		 * .wh.foo has been found.
++		 * First truncate it and then rename it to foo (hence having
+ 		 * the same overall effect as a normal create.
+ 		 */
+ 		struct dentry *hidden_dir_dentry;
+@@ -141,13 +142,15 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 			/* exit if the error returned was NOT -EROFS */
+ 			if (!IS_COPYUP_ERR(err))
+ 				goto out;
+-			/* We were not able to create the file in this
++			/*
++			 * We were not able to create the file in this
+ 			 * branch, so, we try to create it in one branch to
+ 			 * left
+ 			 */
+ 			bstart--;
+ 		} else {
+-			/* reset the unionfs dentry to point to the .wh.foo
++			/*
++			 * reset the unionfs dentry to point to the .wh.foo
+ 			 * entry.
+ 			 */
+ 
+@@ -167,11 +170,13 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 	for (bindex = bstart; bindex >= 0; bindex--) {
+ 		hidden_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 		if (!hidden_dentry) {
+-			/* if hidden_dentry is NULL, create the entire
++			/*
++			 * if hidden_dentry is NULL, create the entire
+ 			 * dentry directory structure in branch 'bindex'.
+ 			 * hidden_dentry will NOT be null when bindex == bstart
+ 			 * because lookup passed as a negative unionfs dentry
+-			 * pointing to a lone negative underlying dentry */
++			 * pointing to a lone negative underlying dentry.
++			 */
+ 			hidden_dentry = create_parents(parent, dentry, bindex);
+ 			if (!hidden_dentry || IS_ERR(hidden_dentry)) {
+ 				if (IS_ERR(hidden_dentry))
+@@ -264,7 +269,8 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 
+ 	hidden_new_dentry = unionfs_lower_dentry(new_dentry);
+ 
+-	/* check if whiteout exists in the branch of new dentry, i.e. lookup
++	/*
++	 * check if whiteout exists in the branch of new dentry, i.e. lookup
+ 	 * .wh.foo first. If present, delete it
+ 	 */
+ 	name = alloc_whname(new_dentry->d_name.name, new_dentry->d_name.len);
+@@ -396,7 +402,8 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 
+ 	hidden_dentry = unionfs_lower_dentry(dentry);
+ 
+-	/* check if whiteout exists in this branch, i.e. lookup .wh.foo
++	/*
++	 * check if whiteout exists in this branch, i.e. lookup .wh.foo
+ 	 * first. If present, delete it
+ 	 */
+ 	name = alloc_whname(dentry->d_name.name, dentry->d_name.len);
+@@ -446,13 +453,15 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 		}
+ 	}
+ 
+-	/* deleted whiteout if it was present, now do a normal vfs_symlink()
++	/*
++	 * deleted whiteout if it was present, now do a normal vfs_symlink()
+ 	 * with possible recursive directory creation
+ 	 */
+ 	for (bindex = bstart; bindex >= 0; bindex--) {
+ 		hidden_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 		if (!hidden_dentry) {
+-			/* if hidden_dentry is NULL, create the entire
++			/*
++			 * if hidden_dentry is NULL, create the entire
+ 			 * dentry directory structure in branch 'bindex'.
+ 			 * hidden_dentry will NOT be null when bindex ==
+ 			 * bstart because lookup passed as a negative
+@@ -827,7 +836,8 @@ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 	kfree(nd_get_link(nd));
+ }
+ 
+-/* Basically copied from the kernel vfs permission(), but we've changed
++/*
++ * Basically copied from the kernel vfs permission(), but we've changed
+  * the following:
+  *   (1) the IS_RDONLY check is skipped, and
+  *   (2) if you set the mount option `mode=nfsro', we assume that -EACCES
+@@ -912,19 +922,22 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 		if (!hidden_inode)
+ 			continue;
+ 
+-		/* check the condition for D-F-D underlying files/directories,
++		/*
++		 * check the condition for D-F-D underlying files/directories,
+ 		 * we dont have to check for files, if we are checking for
+ 		 * directories.
+ 		 */
+ 		if (!is_file && !S_ISDIR(hidden_inode->i_mode))
+ 			continue;
+ 
+-		/* We use our own special version of permission, such that
++		/*
++		 * We use our own special version of permission, such that
+ 		 * only the first branch returns -EROFS.
+ 		 */
+ 		err = inode_permission(hidden_inode, mask, nd, bindex);
+ 
+-		/* The permissions are an intersection of the overall directory
++		/*
++		 * The permissions are an intersection of the overall directory
+ 		 * permissions, so we fail if one fails.
+ 		 */
+ 		if (err)
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 5fe9bfd..e251b10 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -92,7 +92,8 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	const char *name;
+ 	int namelen;
+ 
+-	/* We should already have a lock on this dentry in the case of a
++	/*
++	 * We should already have a lock on this dentry in the case of a
+ 	 * partial lookup, or a revalidation. Otherwise it is returned from
+ 	 * new_dentry_private_data already locked.
+ 	 */
+@@ -137,7 +138,8 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	bopaque = dbopaque(parent_dentry);
+ 	BUG_ON(bstart < 0);
+ 
+-	/* It would be ideal if we could convert partial lookups to only have
++	/*
++	 * It would be ideal if we could convert partial lookups to only have
+ 	 * to do this work when they really need to.  It could probably improve
+ 	 * performance quite a bit, and maybe simplify the rest of the code.
+ 	 */
+@@ -218,13 +220,15 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 			goto out_free;
+ 		}
+ 
+-		/* Store the first negative dentry specially, because if they
++		/*
++		 * Store the first negative dentry specially, because if they
+ 		 * are all negative we need this for future creates.
+ 		 */
+ 		if (!hidden_dentry->d_inode) {
+ 			if (!first_hidden_dentry && (dbstart(dentry) == -1)) {
+ 				first_hidden_dentry = hidden_dentry;
+-				/* FIXME: following line needs to be changed
++				/*
++				 * FIXME: following line needs to be changed
+ 				 * to allow mountpoint crossing
+ 				 */
+ 				first_dentry = parent_dentry;
+@@ -244,7 +248,8 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 		if (dbstart(dentry) == -1)
+ 			set_dbstart(dentry, bindex);
+ 		unionfs_set_lower_dentry_idx(dentry, bindex, hidden_dentry);
+-		/* FIXME: the following line needs to get fixed to allow
++		/*
++		 * FIXME: the following line needs to get fixed to allow
+ 		 * mountpoint crossing
+ 		 */
+ 		unionfs_set_lower_mnt_idx(dentry, bindex,
+@@ -311,7 +316,8 @@ out_negative:
+ 			goto out;
+ 		}
+ 
+-		/* FIXME: the following line needs to be changed to allow
++		/*
++		 * FIXME: the following line needs to be changed to allow
+ 		 * mountpoint crossing
+ 		 */
+ 		first_dentry = dentry;
+@@ -334,7 +340,8 @@ out_negative:
+ out_positive:
+ 	BUG_ON(dentry_count <= 0);
+ 
+-	/* If we're holding onto the first negative dentry & corresponding
++	/*
++	 * If we're holding onto the first negative dentry & corresponding
+ 	 * vfsmount - throw it out.
+ 	 */
+ 	dput(first_hidden_dentry);
+@@ -347,7 +354,8 @@ out_positive:
+ 			goto out;
+ 		}
+ 
+-		/* This somehow turned positive, so it is as if we had a
++		/*
++		 * This somehow turned positive, so it is as if we had a
+ 		 * negative revalidation.
+ 		 */
+ 		lookupmode = INTERPOSE_REVAL_NEG;
+@@ -500,7 +508,8 @@ out:
+ 	return -ENOMEM;
+ }
+ 
+-/* scan through the lower dentry objects, and set bstart to reflect the
++/*
++ * scan through the lower dentry objects, and set bstart to reflect the
+  * starting branch
+  */
+ void update_bstart(struct dentry *dentry)
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index d458210..864fcc9 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -45,12 +45,14 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 	}
+ 	BUG_ON(is_negative_dentry);
+ 
+-	/* We allocate our new inode below, by calling iget.
++	/*
++	 * We allocate our new inode below, by calling iget.
+ 	 * iget will call our read_inode which will initialize some
+ 	 * of the new inode's fields
+ 	 */
+ 
+-	/* On revalidate we've already got our own inode and just need
++	/*
++	 * On revalidate we've already got our own inode and just need
+ 	 * to fix it up.
+ 	 */
+ 	if (flag == INTERPOSE_REVAL) {
+@@ -114,7 +116,8 @@ int unionfs_interpose(struct dentry *dentry, struct super_block *sb, int flag)
+ 	    S_ISFIFO(hidden_inode->i_mode) || S_ISSOCK(hidden_inode->i_mode))
+ 		init_special_inode(inode, hidden_inode->i_mode,
+ 				   hidden_inode->i_rdev);
+-	/* Fix our inode's address operations to that of the lower inode
++	/*
++	 * Fix our inode's address operations to that of the lower inode
+ 	 * (Unionfs is FiST-Lite)
+ 	 */
+ 	if (inode->i_mapping->a_ops != hidden_inode->i_mapping->a_ops)
+@@ -175,7 +178,8 @@ void unionfs_reinterpose(struct dentry *dentry)
+ 	ibend(inode) = dbend(dentry);
+ }
+ 
+-/* make sure the branch we just looked up (nd) makes sense:
++/*
++ * make sure the branch we just looked up (nd) makes sense:
+  *
+  * 1) we're not trying to stack unionfs on top of unionfs
+  * 2) it exists
+@@ -258,7 +262,8 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ 		goto out;
+ 	}
+ 
+-	/* Each colon means we have a separator, this is really just a rough
++	/*
++	 * Each colon means we have a separator, this is really just a rough
+ 	 * guess, since strsep will handle empty fields for us.
+ 	 */
+ 	for (i = 0; options[i]; i++)
+@@ -366,7 +371,8 @@ out:
+ 		kfree(hidden_root_info->lower_paths);
+ 		kfree(UNIONFS_SB(sb)->data);
+ 
+-		/* MUST clear the pointers to prevent potential double free if
++		/*
++		 * MUST clear the pointers to prevent potential double free if
+ 		 * the caller dies later on
+ 		 */
+ 		hidden_root_info->lower_paths = NULL;
+@@ -413,7 +419,8 @@ static struct unionfs_dentry_info *unionfs_parse_options(
+ 		if (optarg)
+ 			*optarg++ = '\0';
+ 
+-		/* All of our options take an argument now. Insert ones that
++		/*
++		 * All of our options take an argument now. Insert ones that
+ 		 * don't, above this check.
+ 		 */
+ 		if (!optarg) {
+@@ -485,7 +492,8 @@ out:
+ 	return hidden_root_info;
+ }
+ 
+-/* our custom d_alloc_root workalike
++/*
++ * our custom d_alloc_root workalike
+  *
+  * we can't use d_alloc_root if we want to use our own interpose function
+  * unchanged, so we simply call our own "fake" d_alloc_root
+diff --git a/fs/unionfs/rdstate.c b/fs/unionfs/rdstate.c
+index e84161d..f0525ff 100644
+--- a/fs/unionfs/rdstate.c
++++ b/fs/unionfs/rdstate.c
+@@ -20,11 +20,13 @@
+ 
+ /* This file contains the routines for maintaining readdir state. */
+ 
+-/* There are two structures here, rdstate which is a hash table
++/*
++ * There are two structures here, rdstate which is a hash table
+  * of the second structure which is a filldir_node.
+  */
+ 
+-/* This is a struct kmem_cache for filldir nodes, because we allocate a lot
++/*
++ * This is a struct kmem_cache for filldir nodes, because we allocate a lot
+  * of them and they shouldn't waste memory.  If the node has a small name
+  * (as defined by the dentry structure), then we use an inline name to
+  * preserve kmalloc space.
+@@ -47,7 +49,8 @@ void unionfs_destroy_filldir_cache(void)
+ 		kmem_cache_destroy(unionfs_filldir_cachep);
+ }
+ 
+-/* This is a tuning parameter that tells us roughly how big to make the
++/*
++ * This is a tuning parameter that tells us roughly how big to make the
+  * hash table in directory entries per page.  This isn't perfect, but
+  * at least we get a hash table size that shouldn't be too overloaded.
+  * The following averages are based on my home directory.
+@@ -204,12 +207,14 @@ struct filldir_node *find_filldir_node(struct unionfs_dir_state *rdstate,
+ 
+ 		if (cursor->namelen == namelen && cursor->hash == hash &&
+ 		    !strncmp(cursor->name, name, namelen)) {
+-			/* a duplicate exists, and hence no need to create
++			/*
++			 * a duplicate exists, and hence no need to create
+ 			 * entry to the list
+ 			 */
+ 			found = 1;
+ 
+-			/* if the duplicate is in this branch, then the file
++			/*
++			 * if the duplicate is in this branch, then the file
+ 			 * system is corrupted.
+ 			 */
+ 			if (cursor->bindex == rdstate->bindex) {
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 224ce5c..bce5b46 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -95,7 +95,8 @@ static int do_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	if (err)
+ 		goto out_unlock;
+ 
+-	/* ready to whiteout for old_dentry. caller will create the actual
++	/*
++	 * ready to whiteout for old_dentry. caller will create the actual
+ 	 * whiteout, and must dput(*wh_old)
+ 	 */
+ 	if (wh_old) {
+@@ -174,7 +175,8 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 	} else
+ 		revert = 1;
+ 
+-	/* Unlink all instances of destination that exist to the left of
++	/*
++	 * Unlink all instances of destination that exist to the left of
+ 	 * bstart of source. On error, revert back, goto out.
+ 	 */
+ 	for (bindex = old_bstart - 1; bindex >= new_bstart; bindex--) {
+@@ -213,7 +215,8 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 
+ 	if (do_copyup != -1) {
+ 		for (bindex = do_copyup; bindex >= 0; bindex--) {
+-			/* copyup the file into some left directory, so that
++			/*
++			 * copyup the file into some left directory, so that
+ 			 * you can rename it
+ 			 */
+ 			err = copyup_dentry(old_dentry->d_parent->d_inode,
+@@ -236,7 +239,8 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 			goto revert;
+ 	}
+ 
+-	/* Create whiteout for source, only if:
++	/*
++	 * Create whiteout for source, only if:
+ 	 * (1) There is more than one underlying instance of source.
+ 	 * (2) We did a copy_up
+ 	 */
+@@ -353,7 +357,8 @@ static struct dentry *lookup_whiteout(struct dentry *dentry)
+ 	return wh_dentry;
+ }
+ 
+-/* We can't copyup a directory, because it may involve huge
++/*
++ * We can't copyup a directory, because it may involve huge
+  * numbers of children, etc.  Doing that in the kernel would
+  * be bad, so instead we let the userspace recurse and ask us
+  * to copy up each file separately
+@@ -444,8 +449,10 @@ out:
+ 		/* clear the new_dentry stuff created */
+ 		d_drop(new_dentry);
+ 	else
+-		/* force re-lookup since the dir on ro branch is not renamed,
+-		   and hidden dentries still indicate the un-renamed ones. */
++		/*
++		 * force re-lookup since the dir on ro branch is not renamed,
++		 * and hidden dentries still indicate the un-renamed ones.
++		 */
+ 		if (S_ISDIR(old_dentry->d_inode->i_mode))
+ 			atomic_dec(&UNIONFS_D(old_dentry)->generation);
+ 
+diff --git a/fs/unionfs/sioq.c b/fs/unionfs/sioq.c
+index a1e8ffa..478041d 100644
+--- a/fs/unionfs/sioq.c
++++ b/fs/unionfs/sioq.c
+@@ -18,7 +18,8 @@
+ 
+ #include "union.h"
+ 
+-/* Super-user IO work Queue - sometimes we need to perform actions which
++/*
++ * Super-user IO work Queue - sometimes we need to perform actions which
+  * would fail due to the unix permissions on the parent directory (e.g.,
+  * rmdir a directory which appears empty, but in reality contains
+  * whiteouts).
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index f77101b..fb769ba 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -18,7 +18,8 @@
+ 
+ #include "union.h"
+ 
+-/* Pass an unionfs dentry and an index.  It will try to create a whiteout
++/*
++ * Pass an unionfs dentry and an index.  It will try to create a whiteout
+  * for the filename in dentry, and will try in branch 'index'.  On error,
+  * it will proceed to a branch to the left.
+  */
+@@ -47,7 +48,8 @@ int create_whiteout(struct dentry *dentry, int start)
+ 		hidden_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+ 
+ 		if (!hidden_dentry) {
+-			/* if hidden dentry is not present, create the entire
++			/*
++			 * if hidden dentry is not present, create the entire
+ 			 * hidden dentry directory structure and go ahead.
+ 			 * Since we want to just create whiteout, we only want
+ 			 * the parent dentry, and hence get rid of this dentry.
+@@ -67,7 +69,8 @@ int create_whiteout(struct dentry *dentry, int start)
+ 		if (IS_ERR(hidden_wh_dentry))
+ 			continue;
+ 
+-		/* The whiteout already exists. This used to be impossible, but
++		/*
++		 * The whiteout already exists. This used to be impossible, but
+ 		 * now is possible because of opaqueness.
+ 		 */
+ 		if (hidden_wh_dentry->d_inode) {
+@@ -98,7 +101,8 @@ out:
+ 	return err;
+ }
+ 
+-/* This is a helper function for rename, which ends up with hosed over dentries
++/*
++ * This is a helper function for rename, which ends up with hosed over dentries
+  * when it needs to revert.
+  */
+ int unionfs_refresh_hidden_dentry(struct dentry *dentry, int bindex)
+@@ -170,7 +174,8 @@ out:
+ 	return err;
+ }
+ 
+-/* returns the sum of the n_link values of all the underlying inodes of the
++/*
++ * returns the sum of the n_link values of all the underlying inodes of the
+  * passed inode
+  */
+ int unionfs_get_nlinks(struct inode *inode)
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index a94d1ea..045d74d 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -18,7 +18,8 @@
+ 
+ #include "union.h"
+ 
+-/* The inode cache is used with alloc_inode for both our inode info and the
++/*
++ * The inode cache is used with alloc_inode for both our inode info and the
+  * vfs inode.
+  */
+ static struct kmem_cache *unionfs_inode_cachep;
+@@ -119,7 +120,8 @@ static void unionfs_put_super(struct super_block *sb)
+ 	sb->s_fs_info = NULL;
+ }
+ 
+-/* Since people use this to answer the "How big of a file can I write?"
++/*
++ * Since people use this to answer the "How big of a file can I write?"
+  * question, we report the size of the highest priority branch as the size of
+  * the union.
+  */
+@@ -779,7 +781,8 @@ static void unionfs_clear_inode(struct inode *inode)
+ 		free_rdstate(rdstate);
+ 	}
+ 
+-	/* Decrement a reference to a hidden_inode, which was incremented
++	/*
++	 * Decrement a reference to a hidden_inode, which was incremented
+ 	 * by our read_inode when it was created initially.
+ 	 */
+ 	bstart = ibstart(inode);
+@@ -844,7 +847,8 @@ void unionfs_destroy_inode_cache(void)
+ 		kmem_cache_destroy(unionfs_inode_cachep);
+ }
+ 
+-/* Called when we have a dirty inode, right here we only throw out
++/*
++ * Called when we have a dirty inode, right here we only throw out
+  * parts of our readdir list that are too old.
+  */
+ static int unionfs_write_inode(struct inode *inode, int sync)
+@@ -878,7 +882,8 @@ static void unionfs_umount_begin(struct vfsmount *mnt, int flags)
+ 	int bindex, bstart, bend;
+ 
+ 	if (!(flags & MNT_FORCE))
+-		/* we are not being MNT_FORCEd, therefore we should emulate
++		/*
++		 * we are not being MNT_FORCEd, therefore we should emulate
+ 		 * old behaviour
+ 		 */
+ 		return;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 4bb3b24..a6a0507 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -109,7 +109,8 @@ struct unionfs_inode_info {
+ 
+ /* unionfs dentry data in memory */
+ struct unionfs_dentry_info {
+-	/* The semaphore is used to lock the dentry as soon as we get into a
++	/*
++	 * The semaphore is used to lock the dentry as soon as we get into a
+ 	 * unionfs function from the VFS.  Our lock ordering is that children
+ 	 * go before their parents.
+ 	 */
+@@ -150,7 +151,8 @@ struct filldir_node {
+ 	int hash;		/* name hash */
+ 	int namelen;		/* name len since name is not 0 terminated */
+ 
+-	/* we can check for duplicate whiteouts and files in the same branch
++	/*
++	 * we can check for duplicate whiteouts and files in the same branch
+ 	 * in order to return -EIO.
+ 	 */
+ 	int bindex;
+@@ -247,7 +249,8 @@ extern struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
+ /* partial lookup */
+ extern int unionfs_partial_lookup(struct dentry *dentry);
+ 
+-/* Pass an unionfs dentry and an index and it will try to create a whiteout
++/*
++ * Pass an unionfs dentry and an index and it will try to create a whiteout
+  * in branch 'index'.
+  *
+  * On error, it will proceed to a branch to the left
+@@ -416,7 +419,8 @@ static inline int is_valid_dentry(struct dentry *dentry)
+ /* What do we use for whiteouts. */
+ #define UNIONFS_WHPFX ".wh."
+ #define UNIONFS_WHLEN 4
+-/* If a directory contains this file, then it is opaque.  We start with the
++/*
++ * If a directory contains this file, then it is opaque.  We start with the
+  * .wh. flag so that it is blocked by lookup.
+  */
+ #define UNIONFS_DIR_OPAQUE_NAME "__dir_opaque"
+@@ -434,7 +438,8 @@ extern int check_branch(struct nameidata *nd);
+ extern int __parse_branch_mode(const char *name);
+ extern int parse_branch_mode(const char *name);
+ 
+-/* These two functions are here because it is kind of daft to copy and paste
++/*
++ * These two functions are here because it is kind of daft to copy and paste
+  * the contents of the two functions to 32+ places in unionfs
+  */
+ static inline struct dentry *lock_parent(struct dentry *dentry)
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 9d3073b..4dc8ada 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -47,7 +47,8 @@ void unionfs_xattr_free(void *ptr, size_t size)
+ 		vfree(ptr);
+ }
+ 
+-/* BKL held by caller.
++/*
++ * BKL held by caller.
+  * dentry->d_inode->i_mutex locked
+  */
+ ssize_t unionfs_getxattr(struct dentry * dentry, const char *name, void *value,
+@@ -68,7 +69,8 @@ ssize_t unionfs_getxattr(struct dentry * dentry, const char *name, void *value,
+ 	return err;
+ }
+ 
+-/* BKL held by caller.
++/*
++ * BKL held by caller.
+  * dentry->d_inode->i_mutex locked
+  */
+ int unionfs_setxattr(struct dentry *dentry, const char *name,
+@@ -89,7 +91,8 @@ int unionfs_setxattr(struct dentry *dentry, const char *name,
+ 	return err;
+ }
+ 
+-/* BKL held by caller.
++/*
++ * BKL held by caller.
+  * dentry->d_inode->i_mutex locked
+  */
+ int unionfs_removexattr(struct dentry *dentry, const char *name)
+@@ -108,7 +111,8 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	return err;
+ }
+ 
+-/* BKL held by caller.
++/*
++ * BKL held by caller.
+  * dentry->d_inode->i_mutex locked
+  */
+ ssize_t unionfs_listxattr(struct dentry * dentry, char *list, size_t size)
+diff --git a/include/linux/fs_stack.h b/include/linux/fs_stack.h
+index 9cafb5a..6a78d83 100644
+--- a/include/linux/fs_stack.h
++++ b/include/linux/fs_stack.h
+@@ -12,7 +12,8 @@
+ #ifndef _LINUX_FS_STACK_H
+ #define _LINUX_FS_STACK_H
+ 
+-/* This file defines generic functions used primarily by stackable
++/*
++ * This file defines generic functions used primarily by stackable
+  * filesystems; none of these functions require i_mutex to be held.
+  */
+ 
+-- 
+1.5.4.3
+

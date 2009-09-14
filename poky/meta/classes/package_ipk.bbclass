@@ -49,7 +49,7 @@ python package_ipk_install () {
 
 	if (not os.access(os.path.join(ipkdir,"Packages"), os.R_OK) or
 		not os.access(os.path.join(tmpdir, "stamps", "IPK_PACKAGE_INDEX_CLEAN"),os.R_OK):
-		ret = os.system('ipkg-make-index -p %s %s ' % (os.path.join(ipkdir, "Packages"), ipkdir))
+		ret = os.system('opkg-make-index -p %s %s ' % (os.path.join(ipkdir, "Packages"), ipkdir))
 		if (ret != 0 ):
 			raise bb.build.FuncFailed
 		f = open(os.path.join(tmpdir, "stamps", "IPK_PACKAGE_INDEX_CLEAN"),"w")
@@ -74,16 +74,16 @@ package_update_index_ipk () {
 	fi
 
 	touch ${DEPLOY_DIR_IPK}/Packages
-	ipkg-make-index -r ${DEPLOY_DIR_IPK}/Packages -p ${DEPLOY_DIR_IPK}/Packages -l ${DEPLOY_DIR_IPK}/Packages.filelist -m ${DEPLOY_DIR_IPK}
+	opkg-make-index -r ${DEPLOY_DIR_IPK}/Packages -p ${DEPLOY_DIR_IPK}/Packages -l ${DEPLOY_DIR_IPK}/Packages.filelist -m ${DEPLOY_DIR_IPK}
 
 	for arch in $ipkgarchs; do
 		if [ -e ${DEPLOY_DIR_IPK}/$arch/ ] ; then 
 			touch ${DEPLOY_DIR_IPK}/$arch/Packages
-			ipkg-make-index -r ${DEPLOY_DIR_IPK}/$arch/Packages -p ${DEPLOY_DIR_IPK}/$arch/Packages -l ${DEPLOY_DIR_IPK}/$arch/Packages.filelist -m ${DEPLOY_DIR_IPK}/$arch/
+			opkg-make-index -r ${DEPLOY_DIR_IPK}/$arch/Packages -p ${DEPLOY_DIR_IPK}/$arch/Packages -l ${DEPLOY_DIR_IPK}/$arch/Packages.filelist -m ${DEPLOY_DIR_IPK}/$arch/
 		fi
 		if [ -e ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/ ] ; then 
 			touch ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages
-			ipkg-make-index -r ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages -p ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages -l ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages.filelist -m ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/
+			opkg-make-index -r ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages -p ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages -l ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages.filelist -m ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/
 		fi
 	done
 }
@@ -94,21 +94,27 @@ package_update_index_ipk () {
 # use against the host system in sdk builds
 #
 package_generate_ipkg_conf () {
-	mkdir -p ${STAGING_ETCDIR_NATIVE}/
-	echo "src oe file:${DEPLOY_DIR_IPK}" > ${IPKGCONF_TARGET}
-	echo "src oe file:${DEPLOY_DIR_IPK}" > ${IPKGCONF_SDK}
+	package_generate_archlist
+	echo "src oe file:${DEPLOY_DIR_IPK}" >> ${IPKGCONF_TARGET}
+	echo "src oe file:${DEPLOY_DIR_IPK}" >> ${IPKGCONF_SDK}
 	ipkgarchs="${PACKAGE_ARCHS}"
-	priority=1
 	for arch in $ipkgarchs; do
-		echo "arch $arch $priority" >> ${IPKGCONF_TARGET}
-		echo "arch ${BUILD_ARCH}-$arch-sdk $priority" >> ${IPKGCONF_SDK}
-		priority=$(expr $priority + 5)
 		if [ -e ${DEPLOY_DIR_IPK}/$arch/Packages ] ; then
 		        echo "src oe-$arch file:${DEPLOY_DIR_IPK}/$arch" >> ${IPKGCONF_TARGET}
 		fi
 		if [ -e ${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk/Packages ] ; then
 		        echo "src oe-${BUILD_ARCH}-$arch-sdk file:${DEPLOY_DIR_IPK}/${BUILD_ARCH}-$arch-sdk" >> ${IPKGCONF_SDK}
 		fi
+	done
+}
+
+package_generate_archlist () {
+	ipkgarchs="${PACKAGE_ARCHS}"
+	priority=1
+	for arch in $ipkgarchs; do
+		echo "arch $arch $priority" >> ${IPKGCONF_TARGET}
+		echo "arch ${BUILD_ARCH}-$arch-sdk $priority" >> ${IPKGCONF_SDK}
+		priority=$(expr $priority + 5)
 	done
 }
 
@@ -160,10 +166,9 @@ python do_package_ipk () {
 			pkgname = pkg
 		bb.data.setVar('PKG', pkgname, localdata)
 
-		overrides = bb.data.getVar('OVERRIDES', localdata)
+		overrides = bb.data.getVar('OVERRIDES', localdata, True)
 		if not overrides:
 			raise bb.build.FuncFailed('OVERRIDES not defined')
-		overrides = bb.data.expand(overrides, localdata)
 		bb.data.setVar('OVERRIDES', overrides + ':' + pkg, localdata)
 
 		bb.data.update_data(localdata)
@@ -230,8 +235,8 @@ python do_package_ipk () {
 
 		bb.build.exec_func("mapping_rename_hook", localdata)
 
-		rdepends = explode_deps(bb.data.getVar("RDEPENDS", localdata, 1) or "")
-		rrecommends = explode_deps(bb.data.getVar("RRECOMMENDS", localdata, 1) or "")
+		rdepends = bb.utils.explode_deps(bb.data.getVar("RDEPENDS", localdata, 1) or "")
+		rrecommends = bb.utils.explode_deps(bb.data.getVar("RRECOMMENDS", localdata, 1) or "")
 		rsuggests = (bb.data.getVar("RSUGGESTS", localdata, 1) or "").split()
 		rprovides = (bb.data.getVar("RPROVIDES", localdata, 1) or "").split()
 		rreplaces = (bb.data.getVar("RREPLACES", localdata, 1) or "").split()
@@ -280,21 +285,12 @@ python do_package_ipk () {
 
 		os.chdir(basedir)
 		ret = os.system("PATH=\"%s\" %s %s %s" % (bb.data.getVar("PATH", localdata, 1), 
-                                                          bb.data.getVar("IPKGBUILDCMD",d,1), pkg, pkgoutdir))
+                                                          bb.data.getVar("OPKGBUILDCMD",d,1), pkg, pkgoutdir))
 		if ret != 0:
 			bb.utils.unlockfile(lf)
-			raise bb.build.FuncFailed("ipkg-build execution failed")
+			raise bb.build.FuncFailed("opkg-build execution failed")
 
-		for script in ["preinst", "postinst", "prerm", "postrm", "control" ]:
-			scriptfile = os.path.join(controldir, script)
-			try:
-				os.remove(scriptfile)
-			except OSError:
-				pass
-		try:
-			os.rmdir(controldir)
-		except OSError:
-			pass
+		bb.utils.prunedir(controldir)
 		bb.utils.unlockfile(lf)
 }
 
@@ -302,7 +298,7 @@ python () {
     import bb
     if bb.data.getVar('PACKAGES', d, True) != '':
         deps = (bb.data.getVarFlag('do_package_write_ipk', 'depends', d) or "").split()
-        deps.append('ipkg-utils-native:do_populate_staging')
+        deps.append('opkg-utils-native:do_populate_staging')
         deps.append('fakeroot-native:do_populate_staging')
         bb.data.setVarFlag('do_package_write_ipk', 'depends', " ".join(deps), d)
 }

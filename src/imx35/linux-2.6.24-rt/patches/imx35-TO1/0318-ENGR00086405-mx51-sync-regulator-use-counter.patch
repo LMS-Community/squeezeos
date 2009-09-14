@@ -1,0 +1,43 @@
+From eb8a47c2685a1d23ad2900f0cf44c86e6ede522c Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Mon, 4 Aug 2008 10:14:16 +0800
+Subject: [PATCH] ENGR00086405 mx51: sync regulator use counter
+
+Sync regulator user counter at init phase, and open all regulators by default
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ drivers/regulator/mc13892/reg-mc13892.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index 5abc4d6..26ddd80 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -1818,6 +1818,7 @@ int reg_mc13892_probe(void)
+ {
+ 	int ret11 = 0;
+ 	int i = 0;
++	struct regulator reg;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(reg_mc13892); i++) {
+ 		ret11 = regulator_register(&reg_mc13892[i].regulator);
+@@ -1825,6 +1826,15 @@ int reg_mc13892_probe(void)
+ 						   name,
+ 						   reg_mc13892[i].regulator.
+ 						   constraints);
++
++		reg.id = reg_mc13892[i].regulator.id;
++		if (reg_mc13892[i].regulator.ops->enable == NULL) {
++			reg_mc13892[i].regulator.use_count = 1;
++		} else {
++			/*default set all regulator on */
++			reg_mc13892[i].regulator.use_count = 1;
++			reg_mc13892[i].regulator.ops->enable(&reg);
++		}
+ 		if (ret11 < 0) {
+ 			printk(KERN_ERR "%s: failed to register %s err %d\n",
+ 			       __func__, reg_mc13892[i].regulator.name, ret11);
+-- 
+1.5.4.4
+

@@ -1,0 +1,67 @@
+From 3cd2ac91c3f5102c1334136e1ae62e63f52b2285 Mon Sep 17 00:00:00 2001
+From: Eric Chen <xinyu.chen@freescale.com>
+Date: Fri, 29 Feb 2008 10:54:38 +0800
+Subject: [PATCH] ENGR00064693 MX31 3DS dma zone
+
+Adjust dma zone size. This is the experience value from mx31 3ds
+
+Signed-off-by: Eric Chen <xinyu.chen@freesale.com>
+---
+ arch/arm/plat-mxc/Kconfig         |    8 ++++++++
+ include/asm-arm/arch-mxc/memory.h |    8 ++++++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index b39251c..ece95c3 100644
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -86,6 +86,14 @@ config MXC_FB_IRAM
+ 	bool
+ 	depends on ARCH_MXC
+ 
++config DMA_ZONE_SIZE
++	int "DMA memory zone size"
++	range 0 32
++	default 24
++	help
++	  This is the size in MB for the DMA zone. The DMA zone is used for
++	  dedicated memory for large contiguous video buffers
++
+ config ISP1504_MXC
+ 	bool "ISP1504 transceiver support"
+ 	depends on USB_ARCH_HAS_EHCI
+diff --git a/include/asm-arm/arch-mxc/memory.h b/include/asm-arm/arch-mxc/memory.h
+index 0376542..7a1e07d 100644
+--- a/include/asm-arm/arch-mxc/memory.h
++++ b/include/asm-arm/arch-mxc/memory.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -32,7 +32,7 @@
+ #endif
+ 
+ /* Size of contiguous memory for DMA and other h/w blocks */
+-#define CONSISTENT_DMA_SIZE	SZ_8M
++#define CONSISTENT_DMA_SIZE	(14 * SZ_1M)
+ 
+ /*!
+  * @defgroup Memory_MX27 Memory Map
+@@ -55,7 +55,11 @@
+  */
+ #ifndef __ASSEMBLY__
+ 
++#ifdef CONFIG_DMA_ZONE_SIZE
++#define MXC_DMA_ZONE_SIZE	((CONFIG_DMA_ZONE_SIZE * SZ_1M) >> PAGE_SHIFT)
++#else
+ #define MXC_DMA_ZONE_SIZE	((12 * SZ_1M) >> PAGE_SHIFT)
++#endif
+ 
+ static inline void __arch_adjust_zones(int node, unsigned long *zone_size,
+ 				       unsigned long *zhole_size)
+-- 
+1.5.4.4
+

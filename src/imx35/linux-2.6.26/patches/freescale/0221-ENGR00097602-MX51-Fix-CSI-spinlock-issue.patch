@@ -1,0 +1,85 @@
+From 6cc55a2ebf8c0872c17887d6cfaf0c0cc37a487f Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Mon, 17 Nov 2008 10:09:22 +0800
+Subject: [PATCH] ENGR00097602 MX51: Fix CSI spinlock issue
+
+Fix CSI driver double requires for the IPU spinlock issue.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_capture.c |   15 ---------------
+ 1 files changed, 0 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+index 750b456..efc3fa4 100755
+--- a/drivers/mxc/ipu3/ipu_capture.c
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -145,7 +145,6 @@ int _ipu_csi_mclk_set(uint32_t pixel_clk, uint32_t csi)
+ {
+ 	uint32_t temp;
+ 	uint32_t div_ratio;
+-	unsigned long lock_flags;
+ 
+ 	div_ratio = (clk_get_rate(g_ipu_clk) / pixel_clk) - 1;
+ 
+@@ -154,15 +153,11 @@ int _ipu_csi_mclk_set(uint32_t pixel_clk, uint32_t csi)
+ 		return -EINVAL;
+ 	}
+ 
+-	spin_lock_irqsave(&ipu_lock, lock_flags);
+-
+ 	temp = __raw_readl(CSI_SENS_CONF(csi));
+ 	temp &= ~CSI_SENS_CONF_DIVRATIO_MASK;
+ 	__raw_writel(temp | (div_ratio << CSI_SENS_CONF_DIVRATIO_SHIFT),
+ 			CSI_SENS_CONF(csi));
+ 
+-	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+-
+ 	return 0;
+ }
+ 
+@@ -558,9 +553,6 @@ err:
+ void _ipu_smfc_init(ipu_channel_t channel, uint32_t mipi_id, uint32_t csi)
+ {
+ 	uint32_t temp;
+-	unsigned long lock_flags;
+-
+-	spin_lock_irqsave(&ipu_lock, lock_flags);
+ 
+ 	temp = __raw_readl(SMFC_MAP);
+ 
+@@ -586,8 +578,6 @@ void _ipu_smfc_init(ipu_channel_t channel, uint32_t mipi_id, uint32_t csi)
+ 	}
+ 
+ 	__raw_writel(temp, SMFC_MAP);
+-
+-	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+ }
+ 
+ /*!
+@@ -709,7 +699,6 @@ int _ipu_csi_init(ipu_channel_t channel, uint32_t csi)
+ {
+ 	uint32_t csi_sens_conf, csi_dest;
+ 	int retval = 0;
+-	unsigned long lock_flags;
+ 
+ 	switch (channel) {
+ 	case CSI_MEM0:
+@@ -727,14 +716,10 @@ int _ipu_csi_init(ipu_channel_t channel, uint32_t csi)
+ 		goto err;
+ 	}
+ 
+-	spin_lock_irqsave(&ipu_lock, lock_flags);
+-
+ 	csi_sens_conf = __raw_readl(CSI_SENS_CONF(csi));
+ 	csi_sens_conf &= ~CSI_SENS_CONF_DATA_DEST_MASK;
+ 	__raw_writel(csi_sens_conf | (csi_dest <<
+ 		CSI_SENS_CONF_DATA_DEST_SHIFT), CSI_SENS_CONF(csi));
+-
+-	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+ err:
+ 	return retval;
+ }
+-- 
+1.5.4.4
+

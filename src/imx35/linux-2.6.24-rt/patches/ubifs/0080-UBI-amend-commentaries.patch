@@ -1,0 +1,694 @@
+From fa3a80fffe3049919ac8997a6cf01f23f85dca21 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 16 Jul 2008 10:25:56 +0300
+Subject: [PATCH] UBI: amend commentaries
+
+Hch asked not to use "unit" for sub-systems, let it be so.
+Also some other commentaries modifications.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c     |    2 +-
+ drivers/mtd/ubi/debug.h     |    6 +-
+ drivers/mtd/ubi/eba.c       |   22 +++++-----
+ drivers/mtd/ubi/io.c        |   22 +++++-----
+ drivers/mtd/ubi/scan.c      |   28 +++++++------
+ drivers/mtd/ubi/scan.h      |   19 ++++-----
+ drivers/mtd/ubi/ubi-media.h |   23 +++++-----
+ drivers/mtd/ubi/ubi.h       |   37 ++++++++---------
+ drivers/mtd/ubi/wl.c        |   94 +++++++++++++++++++++---------------------
+ include/linux/mtd/ubi.h     |    4 +-
+ 10 files changed, 129 insertions(+), 128 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index a5b1994..27271fe 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -524,7 +524,7 @@ out_si:
+ }
+ 
+ /**
+- * io_init - initialize I/O unit for a given UBI device.
++ * io_init - initialize I/O sub-system for a given UBI device.
+  * @ubi: UBI device description object
+  *
+  * If @ubi->vid_hdr_offset or @ubi->leb_start is zero, default offsets are
+diff --git a/drivers/mtd/ubi/debug.h b/drivers/mtd/ubi/debug.h
+index 718740a..5c768b6 100644
+--- a/drivers/mtd/ubi/debug.h
++++ b/drivers/mtd/ubi/debug.h
+@@ -76,21 +76,21 @@ void ubi_dbg_dump_mkvol_req(const struct ubi_mkvol_req *req);
+ #endif /* CONFIG_MTD_UBI_DEBUG_MSG */
+ 
+ #ifdef CONFIG_MTD_UBI_DEBUG_MSG_EBA
+-/* Messages from the eraseblock association unit */
++/* Messages from the eraseblock association sub-system */
+ #define dbg_eba(fmt, ...) dbg_msg(fmt, ##__VA_ARGS__)
+ #else
+ #define dbg_eba(fmt, ...) ({})
+ #endif
+ 
+ #ifdef CONFIG_MTD_UBI_DEBUG_MSG_WL
+-/* Messages from the wear-leveling unit */
++/* Messages from the wear-leveling sub-system */
+ #define dbg_wl(fmt, ...) dbg_msg(fmt, ##__VA_ARGS__)
+ #else
+ #define dbg_wl(fmt, ...) ({})
+ #endif
+ 
+ #ifdef CONFIG_MTD_UBI_DEBUG_MSG_IO
+-/* Messages from the input/output unit */
++/* Messages from the input/output sub-system */
+ #define dbg_io(fmt, ...) dbg_msg(fmt, ##__VA_ARGS__)
+ #else
+ #define dbg_io(fmt, ...) ({})
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 8dc488f..613cd1e 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -19,20 +19,20 @@
+  */
+ 
+ /*
+- * The UBI Eraseblock Association (EBA) unit.
++ * The UBI Eraseblock Association (EBA) sub-system.
+  *
+- * This unit is responsible for I/O to/from logical eraseblock.
++ * This sub-system is responsible for I/O to/from logical eraseblock.
+  *
+  * Although in this implementation the EBA table is fully kept and managed in
+  * RAM, which assumes poor scalability, it might be (partially) maintained on
+  * flash in future implementations.
+  *
+- * The EBA unit implements per-logical eraseblock locking. Before accessing a
+- * logical eraseblock it is locked for reading or writing. The per-logical
+- * eraseblock locking is implemented by means of the lock tree. The lock tree
+- * is an RB-tree which refers all the currently locked logical eraseblocks. The
+- * lock tree elements are &struct ubi_ltree_entry objects. They are indexed by
+- * (@vol_id, @lnum) pairs.
++ * The EBA sub-system implements per-logical eraseblock locking. Before
++ * accessing a logical eraseblock it is locked for reading or writing. The
++ * per-logical eraseblock locking is implemented by means of the lock tree. The
++ * lock tree is an RB-tree which refers all the currently locked logical
++ * eraseblocks. The lock tree elements are &struct ubi_ltree_entry objects.
++ * They are indexed by (@vol_id, @lnum) pairs.
+  *
+  * EBA also maintains the global sequence counter which is incremented each
+  * time a logical eraseblock is mapped to a physical eraseblock and it is
+@@ -1128,7 +1128,7 @@ out_unlock_leb:
+ }
+ 
+ /**
+- * ubi_eba_init_scan - initialize the EBA unit using scanning information.
++ * ubi_eba_init_scan - initialize the EBA sub-system using scanning information.
+  * @ubi: UBI device description object
+  * @si: scanning information
+  *
+@@ -1143,7 +1143,7 @@ int ubi_eba_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 	struct ubi_scan_leb *seb;
+ 	struct rb_node *rb;
+ 
+-	dbg_eba("initialize EBA unit");
++	dbg_eba("initialize EBA sub-system");
+ 
+ 	spin_lock_init(&ubi->ltree_lock);
+ 	mutex_init(&ubi->alc_mutex);
+@@ -1209,7 +1209,7 @@ int ubi_eba_init_scan(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 		ubi->rsvd_pebs  += ubi->beb_rsvd_pebs;
+ 	}
+ 
+-	dbg_eba("EBA unit is initialized");
++	dbg_eba("EBA sub-system is initialized");
+ 	return 0;
+ 
+ out_free:
+diff --git a/drivers/mtd/ubi/io.c b/drivers/mtd/ubi/io.c
+index 4ac11df..561e7b2 100644
+--- a/drivers/mtd/ubi/io.c
++++ b/drivers/mtd/ubi/io.c
+@@ -20,15 +20,15 @@
+  */
+ 
+ /*
+- * UBI input/output unit.
++ * UBI input/output sub-system.
+  *
+- * This unit provides a uniform way to work with all kinds of the underlying
+- * MTD devices. It also implements handy functions for reading and writing UBI
+- * headers.
++ * This sub-system provides a uniform way to work with all kinds of the
++ * underlying MTD devices. It also implements handy functions for reading and
++ * writing UBI headers.
+  *
+  * We are trying to have a paranoid mindset and not to trust to what we read
+- * from the flash media in order to be more secure and robust. So this unit
+- * validates every single header it reads from the flash media.
++ * from the flash media in order to be more secure and robust. So this
++ * sub-system validates every single header it reads from the flash media.
+  *
+  * Some words about how the eraseblock headers are stored.
+  *
+@@ -79,11 +79,11 @@
+  * 512-byte chunks, we have to allocate one more buffer and copy our VID header
+  * to offset 448 of this buffer.
+  *
+- * The I/O unit does the following trick in order to avoid this extra copy.
+- * It always allocates a @ubi->vid_hdr_alsize bytes buffer for the VID header
+- * and returns a pointer to offset @ubi->vid_hdr_shift of this buffer. When the
+- * VID header is being written out, it shifts the VID header pointer back and
+- * writes the whole sub-page.
++ * The I/O sub-system does the following trick in order to avoid this extra
++ * copy. It always allocates a @ubi->vid_hdr_alsize bytes buffer for the VID
++ * header and returns a pointer to offset @ubi->vid_hdr_shift of this buffer.
++ * When the VID header is being written out, it shifts the VID header pointer
++ * back and writes the whole sub-page.
+  */
+ 
+ #include <linux/crc32.h>
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 96d410e..892c2ba 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -19,9 +19,9 @@
+  */
+ 
+ /*
+- * UBI scanning unit.
++ * UBI scanning sub-system.
+  *
+- * This unit is responsible for scanning the flash media, checking UBI
++ * This sub-system is responsible for scanning the flash media, checking UBI
+  * headers and providing complete information about the UBI flash image.
+  *
+  * The scanning information is represented by a &struct ubi_scan_info' object.
+@@ -103,7 +103,7 @@ static int add_to_list(struct ubi_scan_info *si, int pnum, int ec,
+  * non-zero if an inconsistency was found and zero if not.
+  *
+  * Note, UBI does sanity check of everything it reads from the flash media.
+- * Most of the checks are done in the I/O unit. Here we check that the
++ * Most of the checks are done in the I/O sub-system. Here we check that the
+  * information in the VID header is consistent to the information in other VID
+  * headers of the same volume.
+  */
+@@ -256,8 +256,8 @@ static int compare_lebs(struct ubi_device *ubi, const struct ubi_scan_leb *seb,
+ 		 * that versions that are close to %0xFFFFFFFF are less then
+ 		 * versions that are close to %0.
+ 		 *
+-		 * The UBI WL unit guarantees that the number of pending tasks
+-		 * is not greater then %0x7FFFFFFF. So, if the difference
++		 * The UBI WL sub-system guarantees that the number of pending
++		 * tasks is not greater then %0x7FFFFFFF. So, if the difference
+ 		 * between any two versions is greater or equivalent to
+ 		 * %0x7FFFFFFF, there was an overflow and the logical
+ 		 * eraseblock with lower version is actually newer then the one
+@@ -645,9 +645,9 @@ void ubi_scan_rm_volume(struct ubi_scan_info *si, struct ubi_scan_volume *sv)
+  *
+  * This function erases physical eraseblock 'pnum', and writes the erase
+  * counter header to it. This function should only be used on UBI device
+- * initialization stages, when the EBA unit had not been yet initialized. This
+- * function returns zero in case of success and a negative error code in case
+- * of failure.
++ * initialization stages, when the EBA sub-system had not been yet initialized.
++ * This function returns zero in case of success and a negative error code in
++ * case of failure.
+  */
+ int ubi_scan_erase_peb(struct ubi_device *ubi, const struct ubi_scan_info *si,
+ 		       int pnum, int ec)
+@@ -687,9 +687,10 @@ out_free:
+  * @si: scanning information
+  *
+  * This function returns a free physical eraseblock. It is supposed to be
+- * called on the UBI initialization stages when the wear-leveling unit is not
+- * initialized yet. This function picks a physical eraseblocks from one of the
+- * lists, writes the EC header if it is needed, and removes it from the list.
++ * called on the UBI initialization stages when the wear-leveling sub-system is
++ * not initialized yet. This function picks a physical eraseblocks from one of
++ * the lists, writes the EC header if it is needed, and removes it from the
++ * list.
+  *
+  * This function returns scanning physical eraseblock information in case of
+  * success and an error code in case of failure.
+@@ -764,8 +765,9 @@ static int process_eb(struct ubi_device *ubi, struct ubi_scan_info *si, int pnum
+ 		return err;
+ 	else if (err) {
+ 		/*
+-		 * FIXME: this is actually duty of the I/O unit to initialize
+-		 * this, but MTD does not provide enough information.
++		 * FIXME: this is actually duty of the I/O sub-system to
++		 * initialize this, but MTD does not provide enough
++		 * information.
+ 		 */
+ 		si->bad_peb_count += 1;
+ 		return 0;
+diff --git a/drivers/mtd/ubi/scan.h b/drivers/mtd/ubi/scan.h
+index 966b9b6..4e2e3cc 100644
+--- a/drivers/mtd/ubi/scan.h
++++ b/drivers/mtd/ubi/scan.h
+@@ -59,16 +59,16 @@ struct ubi_scan_leb {
+  * @leb_count: number of logical eraseblocks in this volume
+  * @vol_type: volume type
+  * @used_ebs: number of used logical eraseblocks in this volume (only for
+- * static volumes)
++ *            static volumes)
+  * @last_data_size: amount of data in the last logical eraseblock of this
+- * volume (always equivalent to the usable logical eraseblock size in case of
+- * dynamic volumes)
++ *                  volume (always equivalent to the usable logical eraseblock
++ *                  size in case of dynamic volumes)
+  * @data_pad: how many bytes at the end of logical eraseblocks of this volume
+- * are not used (due to volume alignment)
++ *            are not used (due to volume alignment)
+  * @compat: compatibility flags of this volume
+  * @rb: link in the volume RB-tree
+  * @root: root of the RB-tree containing all the eraseblock belonging to this
+- * volume (&struct ubi_scan_leb objects)
++ *        volume (&struct ubi_scan_leb objects)
+  *
+  * One object of this type is allocated for each volume during scanning.
+  */
+@@ -92,8 +92,8 @@ struct ubi_scan_volume {
+  * @free: list of free physical eraseblocks
+  * @erase: list of physical eraseblocks which have to be erased
+  * @alien: list of physical eraseblocks which should not be used by UBI (e.g.,
++ *         those belonging to "preserve"-compatible internal volumes)
+  * @bad_peb_count: count of bad physical eraseblocks
+- * those belonging to "preserve"-compatible internal volumes)
+  * @vols_found: number of volumes found during scanning
+  * @highest_vol_id: highest volume ID
+  * @alien_peb_count: count of physical eraseblocks in the @alien list
+@@ -106,8 +106,8 @@ struct ubi_scan_volume {
+  * @ec_count: a temporary variable used when calculating @mean_ec
+  *
+  * This data structure contains the result of scanning and may be used by other
+- * UBI units to build final UBI data structures, further error-recovery and so
+- * on.
++ * UBI sub-systems to build final UBI data structures, further error-recovery
++ * and so on.
+  */
+ struct ubi_scan_info {
+ 	struct rb_root volumes;
+@@ -132,8 +132,7 @@ struct ubi_device;
+ struct ubi_vid_hdr;
+ 
+ /*
+- * ubi_scan_move_to_list - move a physical eraseblock from the volume tree to a
+- * list.
++ * ubi_scan_move_to_list - move a PEB from the volume tree to a list.
+  *
+  * @sv: volume scanning information
+  * @seb: scanning eraseblock infprmation
+diff --git a/drivers/mtd/ubi/ubi-media.h b/drivers/mtd/ubi/ubi-media.h
+index c3185d9..26bb7af 100644
+--- a/drivers/mtd/ubi/ubi-media.h
++++ b/drivers/mtd/ubi/ubi-media.h
+@@ -98,10 +98,11 @@ enum {
+  * Compatibility constants used by internal volumes.
+  *
+  * @UBI_COMPAT_DELETE: delete this internal volume before anything is written
+- * to the flash
++ *                     to the flash
+  * @UBI_COMPAT_RO: attach this device in read-only mode
+  * @UBI_COMPAT_PRESERVE: preserve this internal volume - do not touch its
+- * physical eraseblocks, don't allow the wear-leveling unit to move them
++ *                       physical eraseblocks, don't allow the wear-leveling
++ *                       sub-system to move them
+  * @UBI_COMPAT_REJECT: reject this UBI image
+  */
+ enum {
+@@ -123,7 +124,7 @@ enum {
+  * struct ubi_ec_hdr - UBI erase counter header.
+  * @magic: erase counter header magic number (%UBI_EC_HDR_MAGIC)
+  * @version: version of UBI implementation which is supposed to accept this
+- * UBI image
++ *           UBI image
+  * @padding1: reserved for future, zeroes
+  * @ec: the erase counter
+  * @vid_hdr_offset: where the VID header starts
+@@ -159,20 +160,20 @@ struct ubi_ec_hdr {
+  * struct ubi_vid_hdr - on-flash UBI volume identifier header.
+  * @magic: volume identifier header magic number (%UBI_VID_HDR_MAGIC)
+  * @version: UBI implementation version which is supposed to accept this UBI
+- * image (%UBI_VERSION)
++ *           image (%UBI_VERSION)
+  * @vol_type: volume type (%UBI_VID_DYNAMIC or %UBI_VID_STATIC)
+  * @copy_flag: if this logical eraseblock was copied from another physical
+- * eraseblock (for wear-leveling reasons)
++ *             eraseblock (for wear-leveling reasons)
+  * @compat: compatibility of this volume (%0, %UBI_COMPAT_DELETE,
+- * %UBI_COMPAT_IGNORE, %UBI_COMPAT_PRESERVE, or %UBI_COMPAT_REJECT)
++ *          %UBI_COMPAT_IGNORE, %UBI_COMPAT_PRESERVE, or %UBI_COMPAT_REJECT)
+  * @vol_id: ID of this volume
+  * @lnum: logical eraseblock number
+  * @leb_ver: version of this logical eraseblock (IMPORTANT: obsolete, to be
+- * removed, kept only for not breaking older UBI users)
++ *           removed, kept only for not breaking older UBI users)
+  * @data_size: how many bytes of data this logical eraseblock contains
+  * @used_ebs: total number of used logical eraseblocks in this volume
+  * @data_pad: how many bytes at the end of this physical eraseblock are not
+- * used
++ *            used
+  * @data_crc: CRC checksum of the data stored in this logical eraseblock
+  * @padding1: reserved for future, zeroes
+  * @sqnum: sequence number
+@@ -248,9 +249,9 @@ struct ubi_ec_hdr {
+  * The @data_crc field contains the CRC checksum of the contents of the logical
+  * eraseblock if this is a static volume. In case of dynamic volumes, it does
+  * not contain the CRC checksum as a rule. The only exception is when the
+- * data of the physical eraseblock was moved by the wear-leveling unit, then
+- * the wear-leveling unit calculates the data CRC and stores it in the
+- * @data_crc field. And of course, the @copy_flag is %in this case.
++ * data of the physical eraseblock was moved by the wear-leveling sub-system,
++ * then the wear-leveling sub-system calculates the data CRC and stores it in
++ * the @data_crc field. And of course, the @copy_flag is %in this case.
+  *
+  * The @data_size field is used only for static volumes because UBI has to know
+  * how many bytes of data are stored in this eraseblock. For dynamic volumes,
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index 3c1aefa..01a1139 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -74,15 +74,15 @@
+ #define UBI_IO_RETRIES 3
+ 
+ /*
+- * Error codes returned by the I/O unit.
++ * Error codes returned by the I/O sub-system.
+  *
+  * UBI_IO_PEB_EMPTY: the physical eraseblock is empty, i.e. it contains only
+- * 0xFF bytes
++ *                   %0xFF bytes
+  * UBI_IO_PEB_FREE: the physical eraseblock is free, i.e. it contains only a
+- * valid erase counter header, and the rest are %0xFF bytes
++ *                  valid erase counter header, and the rest are %0xFF bytes
+  * UBI_IO_BAD_EC_HDR: the erase counter header is corrupted (bad magic or CRC)
+  * UBI_IO_BAD_VID_HDR: the volume identifier header is corrupted (bad magic or
+- * CRC)
++ *                     CRC)
+  * UBI_IO_BITFLIPS: bit-flips were detected and corrected
+  */
+ enum {
+@@ -99,9 +99,9 @@ enum {
+  * @ec: erase counter
+  * @pnum: physical eraseblock number
+  *
+- * This data structure is used in the WL unit. Each physical eraseblock has a
+- * corresponding &struct wl_entry object which may be kept in different
+- * RB-trees. See WL unit for details.
++ * This data structure is used in the WL sub-system. Each physical eraseblock
++ * has a corresponding &struct wl_entry object which may be kept in different
++ * RB-trees. See WL sub-system for details.
+  */
+ struct ubi_wl_entry {
+ 	struct rb_node rb;
+@@ -118,10 +118,10 @@ struct ubi_wl_entry {
+  * @mutex: read/write mutex to implement read/write access serialization to
+  *         the (@vol_id, @lnum) logical eraseblock
+  *
+- * This data structure is used in the EBA unit to implement per-LEB locking.
+- * When a logical eraseblock is being locked - corresponding
++ * This data structure is used in the EBA sub-system to implement per-LEB
++ * locking. When a logical eraseblock is being locked - corresponding
+  * &struct ubi_ltree_entry object is inserted to the lock tree (@ubi->ltree).
+- * See EBA unit for details.
++ * See EBA sub-system for details.
+  */
+ struct ubi_ltree_entry {
+ 	struct rb_node rb;
+@@ -225,7 +225,7 @@ struct ubi_volume {
+ #ifdef CONFIG_MTD_UBI_GLUEBI
+ 	/*
+ 	 * Gluebi-related stuff may be compiled out.
+-	 * TODO: this should not be built into UBI but should be a separate
++	 * Note: this should not be built into UBI but should be a separate
+ 	 * ubimtd driver which works on top of UBI and emulates MTD devices.
+ 	 */
+ 	struct ubi_volume_desc *gluebi_desc;
+@@ -235,8 +235,7 @@ struct ubi_volume {
+ };
+ 
+ /**
+- * struct ubi_volume_desc - descriptor of the UBI volume returned when it is
+- * opened.
++ * struct ubi_volume_desc - UBI volume descriptor returned when it is opened.
+  * @vol: reference to the corresponding volume description object
+  * @mode: open mode (%UBI_READONLY, %UBI_READWRITE, or %UBI_EXCLUSIVE)
+  */
+@@ -316,11 +315,11 @@ struct ubi_wl_entry;
+  * @ro_mode: if the UBI device is in read-only mode
+  * @leb_size: logical eraseblock size
+  * @leb_start: starting offset of logical eraseblocks within physical
+- * eraseblocks
++ *             eraseblocks
+  * @ec_hdr_alsize: size of the EC header aligned to @hdrs_min_io_size
+  * @vid_hdr_alsize: size of the VID header aligned to @hdrs_min_io_size
+  * @vid_hdr_offset: starting offset of the volume identifier header (might be
+- * unaligned)
++ *                  unaligned)
+  * @vid_hdr_aloffset: starting offset of the VID header aligned to
+  * @hdrs_min_io_size
+  * @vid_hdr_shift: contains @vid_hdr_offset - @vid_hdr_aloffset
+@@ -356,16 +355,16 @@ struct ubi_device {
+ 	struct mutex volumes_mutex;
+ 
+ 	int max_ec;
+-	/* TODO: mean_ec is not updated run-time, fix */
++	/* Note, mean_ec is not updated run-time - should be fixed */
+ 	int mean_ec;
+ 
+-	/* EBA unit's stuff */
++	/* EBA sub-system's stuff */
+ 	unsigned long long global_sqnum;
+ 	spinlock_t ltree_lock;
+ 	struct rb_root ltree;
+ 	struct mutex alc_mutex;
+ 
+-	/* Wear-leveling unit's stuff */
++	/* Wear-leveling sub-system's stuff */
+ 	struct rb_root used;
+ 	struct rb_root free;
+ 	struct rb_root scrub;
+@@ -388,7 +387,7 @@ struct ubi_device {
+ 	int thread_enabled;
+ 	char bgt_name[sizeof(UBI_BGT_NAME_PATTERN)+2];
+ 
+-	/* I/O unit's stuff */
++	/* I/O sub-system's stuff */
+ 	long long flash_size;
+ 	int peb_count;
+ 	int peb_size;
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index cc8fe29..761952b 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -19,22 +19,22 @@
+  */
+ 
+ /*
+- * UBI wear-leveling unit.
++ * UBI wear-leveling sub-system.
+  *
+- * This unit is responsible for wear-leveling. It works in terms of physical
+- * eraseblocks and erase counters and knows nothing about logical eraseblocks,
+- * volumes, etc. From this unit's perspective all physical eraseblocks are of
+- * two types - used and free. Used physical eraseblocks are those that were
+- * "get" by the 'ubi_wl_get_peb()' function, and free physical eraseblocks are
+- * those that were put by the 'ubi_wl_put_peb()' function.
++ * This sub-system is responsible for wear-leveling. It works in terms of
++ * physical* eraseblocks and erase counters and knows nothing about logical
++ * eraseblocks, volumes, etc. From this sub-system's perspective all physical
++ * eraseblocks are of two types - used and free. Used physical eraseblocks are
++ * those that were "get" by the 'ubi_wl_get_peb()' function, and free physical
++ * eraseblocks are those that were put by the 'ubi_wl_put_peb()' function.
+  *
+  * Physical eraseblocks returned by 'ubi_wl_get_peb()' have only erase counter
+- * header. The rest of the physical eraseblock contains only 0xFF bytes.
++ * header. The rest of the physical eraseblock contains only %0xFF bytes.
+  *
+- * When physical eraseblocks are returned to the WL unit by means of the
++ * When physical eraseblocks are returned to the WL sub-system by means of the
+  * 'ubi_wl_put_peb()' function, they are scheduled for erasure. The erasure is
+  * done asynchronously in context of the per-UBI device background thread,
+- * which is also managed by the WL unit.
++ * which is also managed by the WL sub-system.
+  *
+  * The wear-leveling is ensured by means of moving the contents of used
+  * physical eraseblocks with low erase counter to free physical eraseblocks
+@@ -43,34 +43,36 @@
+  * The 'ubi_wl_get_peb()' function accepts data type hints which help to pick
+  * an "optimal" physical eraseblock. For example, when it is known that the
+  * physical eraseblock will be "put" soon because it contains short-term data,
+- * the WL unit may pick a free physical eraseblock with low erase counter, and
+- * so forth.
++ * the WL sub-system may pick a free physical eraseblock with low erase
++ * counter, and so forth.
+  *
+- * If the WL unit fails to erase a physical eraseblock, it marks it as bad.
++ * If the WL sub-system fails to erase a physical eraseblock, it marks it as
++ * bad.
+  *
+- * This unit is also responsible for scrubbing. If a bit-flip is detected in a
+- * physical eraseblock, it has to be moved. Technically this is the same as
+- * moving it for wear-leveling reasons.
++ * This sub-system is also responsible for scrubbing. If a bit-flip is detected
++ * in a physical eraseblock, it has to be moved. Technically this is the same
++ * as moving it for wear-leveling reasons.
+  *
+- * As it was said, for the UBI unit all physical eraseblocks are either "free"
+- * or "used". Free eraseblock are kept in the @wl->free RB-tree, while used
+- * eraseblocks are kept in a set of different RB-trees: @wl->used,
++ * As it was said, for the UBI sub-system all physical eraseblocks are either
++ * "free" or "used". Free eraseblock are kept in the @wl->free RB-tree, while
++ * used eraseblocks are kept in a set of different RB-trees: @wl->used,
+  * @wl->prot.pnum, @wl->prot.aec, and @wl->scrub.
+  *
+  * Note, in this implementation, we keep a small in-RAM object for each physical
+  * eraseblock. This is surely not a scalable solution. But it appears to be good
+  * enough for moderately large flashes and it is simple. In future, one may
+- * re-work this unit and make it more scalable.
++ * re-work this sub-system and make it more scalable.
+  *
+- * At the moment this unit does not utilize the sequence number, which was
+- * introduced relatively recently. But it would be wise to do this because the
+- * sequence number of a logical eraseblock characterizes how old is it. For
++ * At the moment this sub-system does not utilize the sequence number, which
++ * was introduced relatively recently. But it would be wise to do this because
++ * the sequence number of a logical eraseblock characterizes how old is it. For
+  * example, when we move a PEB with low erase counter, and we need to pick the
+  * target PEB, we pick a PEB with the highest EC if our PEB is "old" and we
+  * pick target PEB with an average EC if our PEB is not very "old". This is a
+- * room for future re-works of the WL unit.
++ * room for future re-works of the WL sub-system.
+  *
+- * FIXME: looks too complex, should be simplified (later).
++ * Note: the stuff with protection trees looks too complex and is difficult to
++ * understand. Should be fixed.
+  */
+ 
+ #include <linux/slab.h>
+@@ -92,20 +94,21 @@
+ 
+ /*
+  * Maximum difference between two erase counters. If this threshold is
+- * exceeded, the WL unit starts moving data from used physical eraseblocks with
+- * low erase counter to free physical eraseblocks with high erase counter.
++ * exceeded, the WL sub-system starts moving data from used physical
++ * eraseblocks with low erase counter to free physical eraseblocks with high
++ * erase counter.
+  */
+ #define UBI_WL_THRESHOLD CONFIG_MTD_UBI_WL_THRESHOLD
+ 
+ /*
+- * When a physical eraseblock is moved, the WL unit has to pick the target
++ * When a physical eraseblock is moved, the WL sub-system has to pick the target
+  * physical eraseblock to move to. The simplest way would be just to pick the
+  * one with the highest erase counter. But in certain workloads this could lead
+  * to an unlimited wear of one or few physical eraseblock. Indeed, imagine a
+  * situation when the picked physical eraseblock is constantly erased after the
+  * data is written to it. So, we have a constant which limits the highest erase
+- * counter of the free physical eraseblock to pick. Namely, the WL unit does
+- * not pick eraseblocks with erase counter greater then the lowest erase
++ * counter of the free physical eraseblock to pick. Namely, the WL sub-system
++ * does not pick eraseblocks with erase counter greater then the lowest erase
+  * counter plus %WL_FREE_MAX_DIFF.
+  */
+ #define WL_FREE_MAX_DIFF (2*UBI_WL_THRESHOLD)
+@@ -123,11 +126,11 @@
+  * @abs_ec: the absolute erase counter value when the protection ends
+  * @e: the wear-leveling entry of the physical eraseblock under protection
+  *
+- * When the WL unit returns a physical eraseblock, the physical eraseblock is
+- * protected from being moved for some "time". For this reason, the physical
+- * eraseblock is not directly moved from the @wl->free tree to the @wl->used
+- * tree. There is one more tree in between where this physical eraseblock is
+- * temporarily stored (@wl->prot).
++ * When the WL sub-system returns a physical eraseblock, the physical
++ * eraseblock is protected from being moved for some "time". For this reason,
++ * the physical eraseblock is not directly moved from the @wl->free tree to the
++ * @wl->used tree. There is one more tree in between where this physical
++ * eraseblock is temporarily stored (@wl->prot).
+  *
+  * All this protection stuff is needed because:
+  *  o we don't want to move physical eraseblocks just after we have given them
+@@ -175,7 +178,6 @@ struct ubi_wl_prot_entry {
+  * @list: a link in the list of pending works
+  * @func: worker function
+  * @priv: private data of the worker function
+- *
+  * @e: physical eraseblock to erase
+  * @torture: if the physical eraseblock has to be tortured
+  *
+@@ -1136,7 +1138,7 @@ out_ro:
+ }
+ 
+ /**
+- * ubi_wl_put_peb - return a physical eraseblock to the wear-leveling unit.
++ * ubi_wl_put_peb - return a PEB to the wear-leveling sub-system.
+  * @ubi: UBI device description object
+  * @pnum: physical eraseblock to return
+  * @torture: if this physical eraseblock has to be tortured
+@@ -1175,11 +1177,11 @@ retry:
+ 		/*
+ 		 * User is putting the physical eraseblock which was selected
+ 		 * as the target the data is moved to. It may happen if the EBA
+-		 * unit already re-mapped the LEB in 'ubi_eba_copy_leb()' but
+-		 * the WL unit has not put the PEB to the "used" tree yet, but
+-		 * it is about to do this. So we just set a flag which will
+-		 * tell the WL worker that the PEB is not needed anymore and
+-		 * should be scheduled for erasure.
++		 * sub-system already re-mapped the LEB in 'ubi_eba_copy_leb()'
++		 * but the WL sub-system has not put the PEB to the "used" tree
++		 * yet, but it is about to do this. So we just set a flag which
++		 * will tell the WL worker that the PEB is not needed anymore
++		 * and should be scheduled for erasure.
+ 		 */
+ 		dbg_wl("PEB %d is the target of data moving", pnum);
+ 		ubi_assert(!ubi->move_to_put);
+@@ -1425,8 +1427,7 @@ static void cancel_pending(struct ubi_device *ubi)
+ }
+ 
+ /**
+- * ubi_wl_init_scan - initialize the wear-leveling unit using scanning
+- * information.
++ * ubi_wl_init_scan - initialize the WL sub-system using scanning information.
+  * @ubi: UBI device description object
+  * @si: scanning information
+  *
+@@ -1583,13 +1584,12 @@ static void protection_trees_destroy(struct ubi_device *ubi)
+ }
+ 
+ /**
+- * ubi_wl_close - close the wear-leveling unit.
++ * ubi_wl_close - close the wear-leveling sub-system.
+  * @ubi: UBI device description object
+  */
+ void ubi_wl_close(struct ubi_device *ubi)
+ {
+-	dbg_wl("close the UBI wear-leveling unit");
+-
++	dbg_wl("close the WL sub-system");
+ 	cancel_pending(ubi);
+ 	protection_trees_destroy(ubi);
+ 	tree_destroy(&ubi->used);
+diff --git a/include/linux/mtd/ubi.h b/include/linux/mtd/ubi.h
+index 83302bb..6316faf 100644
+--- a/include/linux/mtd/ubi.h
++++ b/include/linux/mtd/ubi.h
+@@ -45,13 +45,13 @@ enum {
+  * @size: how many physical eraseblocks are reserved for this volume
+  * @used_bytes: how many bytes of data this volume contains
+  * @used_ebs: how many physical eraseblocks of this volume actually contain any
+- * data
++ *            data
+  * @vol_type: volume type (%UBI_DYNAMIC_VOLUME or %UBI_STATIC_VOLUME)
+  * @corrupted: non-zero if the volume is corrupted (static volumes only)
+  * @upd_marker: non-zero if the volume has update marker set
+  * @alignment: volume alignment
+  * @usable_leb_size: how many bytes are available in logical eraseblocks of
+- * this volume
++ *                   this volume
+  * @name_len: volume name length
+  * @name: volume name
+  * @cdev: UBI volume character device major and minor numbers
+-- 
+1.5.6.3
+

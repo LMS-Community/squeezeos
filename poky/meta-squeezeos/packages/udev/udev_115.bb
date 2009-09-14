@@ -3,7 +3,7 @@ DESCRIPTION = "udev is a daemon which dynamically creates and removes device nod
 the hotplug package and requires a kernel not older than 2.6.12."
 RPROVIDES_${PN} = "hotplug"
 
-PR = "r4"
+PR = "r9"
 
 SRC_URI = "http://kernel.org/pub/linux/utils/kernel/hotplug/udev-${PV}.tar.gz \
 	   file://noasmlinkage.patch;patch=1 \
@@ -44,6 +44,7 @@ do_install () {
 
 	install -m 0755 ${WORKDIR}/mount.sh ${D}${sysconfdir}/udev/scripts/mount.sh
 	install -m 0755 ${WORKDIR}/network.sh ${D}${sysconfdir}/udev/scripts
+	install -m 0755 ${WORKDIR}/usbserial.sh ${D}${sysconfdir}/udev/scripts/usbserial.sh
 
 	install -d ${D}${base_libdir}/udev/
 }

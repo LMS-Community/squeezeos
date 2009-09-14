@@ -1,0 +1,209 @@
+From 4a3085c09f784065582421ec7cd70cd82d8eff5b Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Wed, 14 Jan 2009 18:43:01 +0800
+Subject: [PATCH] ENGR00105012 MX35: Configure 5.1 codec and bluetooth sound card as module
+
+1. Export symbol imx_esai_tx, imx_esai_rx and imx_esai_txrx
+   in imx-esai.c
+2. Configure the 5.1 sound card and bluetooth sound card as module
+3. Add index, id and enable parameters for 5.1 codec
+   and bluetooth sound card
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |   12 ++++++------
+ sound/soc/imx/imx-3stack-bt.c           |   24 ++++++++++++++++++++----
+ sound/soc/imx/imx-3stack-wm8580.c       |   24 ++++++++++++++++++++----
+ sound/soc/imx/imx-esai.c                |    8 +++++++-
+ 4 files changed, 53 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index b7b5893..dcf649f 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Tue Jan 13 16:12:26 2009
++# Wed Jan 14 17:16:31 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1107,14 +1107,14 @@ CONFIG_SND_MXC_SPDIF=m
+ CONFIG_SND_SOC=y
+ CONFIG_SND_MXC_SOC=y
+ CONFIG_SND_MXC_SOC_SSI=y
+-CONFIG_SND_MXC_SOC_ESAI=y
++CONFIG_SND_MXC_SOC_ESAI=m
+ CONFIG_SND_MXC_SOC_IRAM=y
+ # CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
+ CONFIG_SND_SOC_IMX_3STACK_AK4647=y
+-CONFIG_SND_SOC_IMX_3STACK_WM8580=y
++CONFIG_SND_SOC_IMX_3STACK_WM8580=m
+ # CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
+ CONFIG_SND_SOC_IMX_3STACK_SGTL5000=y
+-CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH=y
++CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH=m
+ 
+ #
+ # ALSA SoC audio for Freescale SOCs
+@@ -1124,9 +1124,9 @@ CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH=y
+ # SoC Audio for the Texas Instruments OMAP
+ #
+ CONFIG_SND_SOC_AK4647=y
+-CONFIG_SND_SOC_WM8580=y
++CONFIG_SND_SOC_WM8580=m
+ CONFIG_SND_SOC_SGTL5000=y
+-CONFIG_SND_SOC_BLUETOOTH=y
++CONFIG_SND_SOC_BLUETOOTH=m
+ 
+ #
+ # Open Sound System
+diff --git a/sound/soc/imx/imx-3stack-bt.c b/sound/soc/imx/imx-3stack-bt.c
+index 7dc9cf5..c86af54 100644
+--- a/sound/soc/imx/imx-3stack-bt.c
++++ b/sound/soc/imx/imx-3stack-bt.c
+@@ -1,7 +1,7 @@
+ /*
+  * imx-3stack-bt.c  --  SoC bluetooth audio for imx_3stack
+  *
+- * Copyright 2008 Freescale  Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale  Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -34,6 +34,16 @@
+ #include "imx-ssi.h"
+ #include "imx-3stack-bt.h"
+ 
++static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;
++static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;
++static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE;
++module_param_array(index, int, NULL, 0444);
++MODULE_PARM_DESC(index, "Index value for bluetooth sound card.");
++module_param_array(id, charp, NULL, 0444);
++MODULE_PARM_DESC(id, "ID string for bluetooth sound card.");
++module_param_array(enable, bool, NULL, 0444);
++MODULE_PARM_DESC(enable, "Enable bluetooth sound card.");
++
+ #define BT_SSI_MASTER	1
+ 
+ struct bt_pcm_state {
+@@ -212,6 +222,14 @@ static int __init imx_3stack_bt_probe(struct platform_device *pdev)
+ 	struct snd_soc_pcm_link *bt_audio;
+ 	const char *ssi_port;
+ 	int ret;
++	static int dev;
++
++	if (dev >= SNDRV_CARDS)
++		return -ENODEV;
++	if (!enable[dev]) {
++		dev++;
++		return -ENOENT;
++	}
+ 
+ 	machine = kzalloc(sizeof(struct snd_soc_machine), GFP_KERNEL);
+ 	if (machine == NULL)
+@@ -227,9 +245,7 @@ static int __init imx_3stack_bt_probe(struct platform_device *pdev)
+ 
+ 	/* register card */
+ 	imx_3stack_mach = machine;
+-	ret =
+-	    snd_soc_new_card(machine, 1, SNDRV_DEFAULT_IDX1,
+-			     SNDRV_DEFAULT_STR1);
++	ret = snd_soc_new_card(machine, 1, index[dev], id[dev]);
+ 	if (ret < 0) {
+ 		pr_err("%s: failed to create bt sound card\n", __func__);
+ 		goto err;
+diff --git a/sound/soc/imx/imx-3stack-wm8580.c b/sound/soc/imx/imx-3stack-wm8580.c
+index 47832a0..d941090 100644
+--- a/sound/soc/imx/imx-3stack-wm8580.c
++++ b/sound/soc/imx/imx-3stack-wm8580.c
+@@ -1,7 +1,7 @@
+ /*
+  * imx-3stack-wm8580.c  --  SoC 5.1 audio for imx_3stack
+  *
+- * Copyright 2008 Freescale  Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale  Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -33,6 +33,16 @@
+ #include "imx-pcm.h"
+ #include "imx-esai.h"
+ 
++static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;
++static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;
++static int enable[SNDRV_CARDS] = SNDRV_DEFAULT_ENABLE;
++module_param_array(index, int, NULL, 0444);
++MODULE_PARM_DESC(index, "Index value for 5.1 codec sound card.");
++module_param_array(id, charp, NULL, 0444);
++MODULE_PARM_DESC(id, "ID string for 5.1 codec sound card.");
++module_param_array(enable, bool, NULL, 0444);
++MODULE_PARM_DESC(enable, "Enable 5.1 codec sound card.");
++
+ struct imx_3stack_pcm_state {
+ 	int lr_clk_active;
+ };
+@@ -272,6 +282,14 @@ static int __init imx_3stack_wm8580_probe(struct platform_device *pdev)
+ 	struct snd_soc_machine *machine;
+ 	struct snd_soc_pcm_link *surround;
+ 	int ret;
++	static int dev;
++
++	if (dev >= SNDRV_CARDS)
++		return -ENODEV;
++	if (!enable[dev]) {
++		dev++;
++		return -ENOENT;
++	}
+ 
+ 	machine = kzalloc(sizeof(struct snd_soc_machine), GFP_KERNEL);
+ 	if (machine == NULL)
+@@ -286,9 +304,7 @@ static int __init imx_3stack_wm8580_probe(struct platform_device *pdev)
+ 
+ 	/* register card */
+ 	imx_3stack_mach = machine;
+-	ret =
+-	    snd_soc_new_card(machine, 1, SNDRV_DEFAULT_IDX1,
+-			     SNDRV_DEFAULT_STR1);
++	ret = snd_soc_new_card(machine, 1, index[dev], id[dev]);
+ 	if (ret < 0) {
+ 		pr_err("%s: failed to create stereo sound card\n", __func__);
+ 		goto err;
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index 63260b7..67f5c13 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -870,14 +870,20 @@ const char imx_esai_tx[SND_SOC_DAI_NAME_SIZE] = {
+ 	"imx-esai-tx"
+ };
+ 
++EXPORT_SYMBOL_GPL(imx_esai_tx);
++
+ const char imx_esai_rx[SND_SOC_DAI_NAME_SIZE] = {
+ 	"imx-esai-rx"
+ };
+ 
++EXPORT_SYMBOL_GPL(imx_esai_rx);
++
+ const char imx_esai_txrx[SND_SOC_DAI_NAME_SIZE] = {
+ 	"imx-esai-txrx"
+ };
+ 
++EXPORT_SYMBOL_GPL(imx_esai_txrx);
++
+ static int imx_esai_probe(struct device *dev)
+ {
+ 	struct snd_soc_dai *dai = to_snd_soc_dai(dev);
+-- 
+1.5.4.4
+

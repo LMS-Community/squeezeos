@@ -1,0 +1,125 @@
+From c3ea7ee9e38e7cb45176ff30d76b4ae79e75fb45 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 9 Aug 2007 17:04:19 -0400
+Subject: [PATCH] Unionfs/eCryptfs: remove lookup_one_len_nd and LOOKUP_ONE code
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/ecryptfs/inode.c   |   10 ++--------
+ fs/namei.c            |    6 +-----
+ fs/unionfs/lookup.c   |   16 +++-------------
+ include/linux/namei.h |    2 --
+ 4 files changed, 6 insertions(+), 28 deletions(-)
+
+diff --git a/fs/ecryptfs/inode.c b/fs/ecryptfs/inode.c
+index 8ce8199..71fcaea 100644
+--- a/fs/ecryptfs/inode.c
++++ b/fs/ecryptfs/inode.c
+@@ -247,9 +247,7 @@ static struct dentry *ecryptfs_lookup(struct inode *dir, struct dentry *dentry,
+ 	int rc = 0;
+ 	struct dentry *lower_dir_dentry;
+ 	struct dentry *lower_dentry;
+-	struct dentry *dentry_save;
+ 	struct vfsmount *lower_mnt;
+-	struct vfsmount *mnt_save;
+ 	char *encoded_name;
+ 	int encoded_namelen;
+ 	struct ecryptfs_crypt_stat *crypt_stat = NULL;
+@@ -277,13 +275,9 @@ static struct dentry *ecryptfs_lookup(struct inode *dir, struct dentry *dentry,
+ 	}
+ 	ecryptfs_printk(KERN_DEBUG, "encoded_name = [%s]; encoded_namelen "
+ 			"= [%d]\n", encoded_name, encoded_namelen);
+-	dentry_save = nd->dentry;
+-	mnt_save = nd->mnt;
+-	lower_dentry = lookup_one_len_nd(encoded_name, lower_dir_dentry,
+-					 (encoded_namelen - 1), nd);
++	lower_dentry = lookup_one_len(encoded_name, lower_dir_dentry,
++				      encoded_namelen - 1);
+ 	kfree(encoded_name);
+-	nd->mnt = mnt_save;
+-	nd->dentry = dentry_save;
+ 	if (IS_ERR(lower_dentry)) {
+ 		ecryptfs_printk(KERN_ERR, "ERR from lower_dentry\n");
+ 		rc = PTR_ERR(lower_dentry);
+diff --git a/fs/namei.c b/fs/namei.c
+index f446600..3b26a24 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -1155,10 +1155,6 @@ static int do_path_lookup(int dfd, const char *name,
+ 		nd->path = fs->root;
+ 		path_get(&fs->root);
+ 		read_unlock(&fs->lock);
+-	} else if (flags & LOOKUP_ONE) {
+-		/* nd->mnt and nd->dentry already set, just grab references */
+-		mntget(nd->mnt);
+-		dget(nd->dentry);
+ 	} else if (dfd == AT_FDCWD) {
+ 		read_lock(&fs->lock);
+ 		nd->path = fs->pwd;
+@@ -2985,7 +2981,7 @@ EXPORT_SYMBOL(follow_up);
+ EXPORT_SYMBOL(get_write_access); /* binfmt_aout */
+ EXPORT_SYMBOL(getname);
+ EXPORT_SYMBOL(lock_rename);
+-EXPORT_SYMBOL(lookup_one_len_nd);
++EXPORT_SYMBOL(lookup_one_len);
+ EXPORT_SYMBOL(page_follow_link_light);
+ EXPORT_SYMBOL(page_put_link);
+ EXPORT_SYMBOL(page_readlink);
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 4916f25..d8f2793 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -227,12 +227,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 		wh_lower_dentry = NULL;
+ 
+ 		/* Now do regular lookup; lookup foo */
+-		nd->dentry = unionfs_lower_dentry_idx(dentry, bindex);
+-		/* FIXME: fix following line for mount point crossing */
+-		nd->mnt = unionfs_lower_mnt_idx(parent_dentry, bindex);
+-
+-		lower_dentry = lookup_one_len_nd(name, lower_dir_dentry,
+-						 namelen, nd);
++		lower_dentry = lookup_one_len(name, lower_dir_dentry, namelen);
+ 		if (IS_ERR(lower_dentry)) {
+ 			dput(first_lower_dentry);
+ 			unionfs_mntput(first_dentry, first_dentry_offset);
+@@ -323,13 +318,8 @@ out_negative:
+ 	}
+ 	/* This should only happen if we found a whiteout. */
+ 	if (first_dentry_offset == -1) {
+-		nd->dentry = dentry;
+-		/* FIXME: fix following line for mount point crossing */
+-		nd->mnt = unionfs_lower_mnt_idx(parent_dentry, bindex);
+-
+-		first_lower_dentry =
+-			lookup_one_len_nd(name, lower_dir_dentry,
+-					  namelen, nd);
++		first_lower_dentry = lookup_one_len(name, lower_dir_dentry,
++						    namelen);
+ 		first_dentry_offset = bindex;
+ 		if (IS_ERR(first_lower_dentry)) {
+ 			err = PTR_ERR(first_lower_dentry);
+diff --git a/include/linux/namei.h b/include/linux/namei.h
+index abf0f1a..a83bd12 100644
+--- a/include/linux/namei.h
++++ b/include/linux/namei.h
+@@ -42,7 +42,6 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
+  *  - internal "there are more path compnents" flag
+  *  - locked when lookup done with dcache_lock held
+  *  - dentry cache is untrusted; force a real lookup
+- *  - lookup path from given dentry/vfsmount pair
+  */
+ #define LOOKUP_FOLLOW		 1
+ #define LOOKUP_DIRECTORY	 2
+@@ -50,7 +49,6 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
+ #define LOOKUP_PARENT		16
+ #define LOOKUP_NOALT		32
+ #define LOOKUP_REVAL		64
+-#define LOOKUP_ONE	       128
+ /*
+  * Intent data
+  */
+-- 
+1.5.4.3
+

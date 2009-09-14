@@ -1,0 +1,1266 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby.c	2009-08-06 11:23:04.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby.c	2009-08-07 09:53:24.000000000 +0100
+@@ -473,6 +473,117 @@
+ 	platform_device_register(&mxc_alsa_aic3104_device);
+ };
+ 
++
++#include "linux/err.h"
++#include "linux/delay.h"
++#include "linux/kthread.h"
++
++extern void mx2fb_set_brightness(uint8_t);
++
++static struct task_struct *can_p;
++
++
++int baby_lock_up_detected = 0;
++
++static int lockup_count = 0;
++
++static int canary_check_thread(void *data)
++{
++	while (true) {
++		lockup_count = 0;
++
++		printk("tweety:%lu\n", jiffies);
++
++		/* mark ourselves as sleeping */
++		set_current_state(TASK_INTERRUPTIBLE);
++		/* go to sleep */
++		schedule();
++
++		/* check kthreads here */
++	}
++	return 0;
++}
++
++long baby_lock_up_preempt_schedule_enter;
++long baby_lock_up_preempt_schedule_ok;
++
++long baby_lock_up_preempt_curr_rt_ok;
++long baby_lock_up_preempt_curr_rt_fail;
++
++
++void print_cpu(struct seq_file *m, int cpu);
++
++void canary_irq(void)
++{
++	static int divider = 0;
++	static int lockup_fix = 0;
++
++	divider++;
++	if (divider == 500) {
++#ifdef CONFIG_FB_MXC
++		mx2fb_set_brightness(0);
++#endif
++	}
++	if (divider == 1000) {
++		struct thread_info *ti = current_thread_info();
++
++		divider = 0;
++#ifdef CONFIG_FB_MXC
++		mx2fb_set_brightness(255);
++#endif
++
++		//printk(KERN_INFO "@ %lu\n", jiffies);
++		//printk(KERN_INFO "THREAD: %s\n", ti->task->comm);
++		//printk(KERN_INFO "BEFORE wake: need_resched=%d kernel_preemption=%d ti->preempt_count=%d\n", test_thread_flag(TIF_NEED_RESCHED), kernel_preemption, ti->preempt_count);
++
++		wake_up_process(can_p);
++
++		printk(KERN_INFO "%lu AFTER wake: need_resched=%d kernel_preemption=%d ti->preempt_count=%d\n", jiffies, test_thread_flag(TIF_NEED_RESCHED), kernel_preemption, ti->preempt_count);
++		//printk(KERN_INFO "preempt_schedule_enter=%d preempt_schedule_ok=%d\n", baby_lock_up_preempt_schedule_enter, baby_lock_up_preempt_schedule_ok);
++
++		baby_lock_up_preempt_schedule_enter = 0;
++		baby_lock_up_preempt_schedule_ok = 0;
++		baby_lock_up_preempt_curr_rt_ok = 0;
++		baby_lock_up_preempt_curr_rt_fail = 0;
++
++		lockup_count++;
++		if (lockup_count > 4) {
++			printk(KERN_INFO "LOCKED DETECTED %d\n", lockup_fix);
++			printk(KERN_INFO "preempt_curr_rt_ok=%ld preempt_curr_rt_fail=%ld\n", baby_lock_up_preempt_curr_rt_ok, baby_lock_up_preempt_curr_rt_fail);
++
++			print_cpu(NULL, 0);
++
++			lockup_fix++;
++			if (lockup_fix > 100) {
++				set_need_resched();
++			}
++		}
++
++		/* trigger debug for testing */
++		baby_lock_up_detected = 1;
++	}
++	else {
++		baby_lock_up_detected = (lockup_count > 4);
++	}
++}
++
++
++static void canary_init(void)
++{
++	struct sched_param sp;
++
++	can_p = kthread_create(canary_check_thread, 0, "canary_check");
++	if (IS_ERR(can_p)) {
++		printk(KERN_ERR "canary disabled, unable to start thread\n");
++		return;
++	}
++
++	sp.sched_priority = 99;
++	sched_setscheduler(can_p, SCHED_FIFO, &sp);
++	wake_up_process(can_p);
++}
++
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -515,6 +626,8 @@
+ 	baby_init_buttons();
+ 	mxc_init_aic3104_audio();
+ 	platform_device_register(&baby_gpio_device);
++
++	canary_init();
+ }
+ 
+ /*
+Index: linux-2.6.26/arch/arm/plat-mxc/time.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/time.c	2009-08-06 11:23:04.000000000 +0100
++++ linux-2.6.26/arch/arm/plat-mxc/time.c	2009-08-06 11:23:05.000000000 +0100
+@@ -151,6 +151,8 @@
+ 	.set_mode = mxc_gpt_set_mode,
+ };
+ 
++static void canary_irq(void);
++
+ /*!
+  * This is the timer interrupt service routine to do required tasks.
+  * It also services the WDOG timer at the frequency of twice per WDOG
+@@ -166,15 +168,20 @@
+ static irqreturn_t mxc_timer_interrupt(int irq, void *dev_id)
+ {
+ 	unsigned int gptsr;
++	static int divider = 0;
+ 
+ 	gptsr = __raw_readl(MXC_GPT_GPTSR);
+ 	if (gptsr & GPTSR_OF1) {
+ 		/* Clear interrupt */
+ 		__raw_writel(GPTSR_OF1, MXC_GPT_GPTSR);
+ 
++		//printk("tick %p\n", gpt_clockevent.event_handler); // XXXX
++
+ 		gpt_clockevent.event_handler(&gpt_clockevent);
+ 	}
+ 
++	canary_irq();
++
+ 	return IRQ_HANDLED;
+ }
+ 
+Index: linux-2.6.26/.config
+===================================================================
+--- linux-2.6.26.orig/.config	2009-08-06 11:23:05.000000000 +0100
++++ linux-2.6.26/.config	2009-08-06 11:27:17.000000000 +0100
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26.8-rt16
+-# Wed Jul 29 12:23:49 2009
++# Thu Aug  6 11:27:17 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -30,33 +30,28 @@
+ #
+ # General setup
+ #
+-CONFIG_EXPERIMENTAL=y
++# CONFIG_EXPERIMENTAL is not set
+ CONFIG_BROKEN_ON_SMP=y
+ CONFIG_LOCK_KERNEL=y
+ CONFIG_INIT_ENV_ARG_LIMIT=32
+ CONFIG_LOCALVERSION=""
+-CONFIG_LOCALVERSION_AUTO=y
+-CONFIG_SWAP=y
+-CONFIG_SYSVIPC=y
+-CONFIG_SYSVIPC_SYSCTL=y
+-# CONFIG_POSIX_MQUEUE is not set
++# CONFIG_LOCALVERSION_AUTO is not set
++# CONFIG_SWAP is not set
++# CONFIG_SYSVIPC is not set
+ # CONFIG_BSD_PROCESS_ACCT is not set
+ # CONFIG_TASKSTATS is not set
+ # CONFIG_AUDIT is not set
+-CONFIG_IKCONFIG=y
+-CONFIG_IKCONFIG_PROC=y
++# CONFIG_IKCONFIG is not set
+ CONFIG_LOG_BUF_SHIFT=14
+ # CONFIG_CGROUPS is not set
+-# CONFIG_GROUP_SCHED is not set
+-CONFIG_SYSFS_DEPRECATED=y
+-CONFIG_SYSFS_DEPRECATED_V2=y
++# CONFIG_SYSFS_DEPRECATED_V2 is not set
+ # CONFIG_RELAY is not set
+-# CONFIG_NAMESPACES is not set
++CONFIG_NAMESPACES=y
++# CONFIG_UTS_NS is not set
+ # CONFIG_BLK_DEV_INITRD is not set
+ CONFIG_CC_OPTIMIZE_FOR_SIZE=y
+ CONFIG_SYSCTL=y
+-# CONFIG_RADIX_TREE_CONCURRENT is not set
+-CONFIG_EMBEDDED=y
++# CONFIG_EMBEDDED is not set
+ CONFIG_UID16=y
+ CONFIG_SYSCTL_SYSCALL=y
+ CONFIG_SYSCTL_SYSCALL_CHECK=y
+@@ -67,7 +62,7 @@
+ CONFIG_PRINTK=y
+ CONFIG_BUG=y
+ CONFIG_ELF_CORE=y
+-CONFIG_COMPAT_BRK=y
++# CONFIG_COMPAT_BRK is not set
+ CONFIG_BASE_FULL=y
+ CONFIG_FUTEX=y
+ CONFIG_ANON_INODES=y
+@@ -80,13 +75,10 @@
+ CONFIG_SLAB=y
+ # CONFIG_SLUB is not set
+ # CONFIG_SLOB is not set
+-CONFIG_PROFILING=y
++# CONFIG_PROFILING is not set
+ # CONFIG_TRACEPOINTS is not set
+ # CONFIG_MARKERS is not set
+-CONFIG_OPROFILE=y
+ CONFIG_HAVE_OPROFILE=y
+-CONFIG_PROFILE_NMI=y
+-# CONFIG_KPROBES is not set
+ CONFIG_HAVE_KPROBES=y
+ CONFIG_HAVE_KRETPROBES=y
+ # CONFIG_HAVE_DMA_ATTRS is not set
+@@ -95,18 +87,11 @@
+ CONFIG_RT_MUTEXES=y
+ # CONFIG_TINY_SHMEM is not set
+ CONFIG_BASE_SMALL=0
+-CONFIG_MODULES=y
+-CONFIG_MODULE_FORCE_LOAD=y
+-CONFIG_MODULE_UNLOAD=y
+-CONFIG_MODULE_FORCE_UNLOAD=y
+-CONFIG_MODVERSIONS=y
+-# CONFIG_MODULE_SRCVERSION_ALL is not set
+-CONFIG_KMOD=y
++# CONFIG_MODULES is not set
+ CONFIG_BLOCK=y
+ # CONFIG_LBD is not set
+ # CONFIG_BLK_DEV_IO_TRACE is not set
+ # CONFIG_LSF is not set
+-# CONFIG_BLK_DEV_BSG is not set
+ 
+ #
+ # IO Schedulers
+@@ -179,8 +164,6 @@
+ # CONFIG_ARCH_MX27 is not set
+ CONFIG_ARCH_MX25=y
+ # CONFIG_ARCH_MX21 is not set
+-CONFIG_I2C_MXC_SELECT1=y
+-CONFIG_I2C_MXC_SELECT2=y
+ 
+ #
+ # MX25 Options
+@@ -189,20 +172,13 @@
+ # CONFIG_MACH_MX25_3DS is not set
+ CONFIG_MACH_MX25_BABY=y
+ # CONFIG_MX25_DOZE_DURING_IDLE is not set
+-CONFIG_MXC_SDMA_API=y
+-
+-#
+-# SDMA options
+-#
+-CONFIG_SDMA_IRAM=y
+-CONFIG_SDMA_IRAM_SIZE=0x1000
++# CONFIG_MXC_SDMA_API is not set
+ CONFIG_ARCH_MXC_HAS_NFC_V2=y
+ CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ 
+ #
+ # Device options
+ #
+-# CONFIG_I2C_MXC_SELECT3 is not set
+ CONFIG_DMA_ZONE_SIZE=24
+ 
+ #
+@@ -224,7 +200,7 @@
+ #
+ # Processor Features
+ #
+-CONFIG_ARM_THUMB=y
++# CONFIG_ARM_THUMB is not set
+ # CONFIG_CPU_ICACHE_DISABLE is not set
+ # CONFIG_CPU_DCACHE_DISABLE is not set
+ # CONFIG_CPU_DCACHE_WRITETHROUGH is not set
+@@ -241,9 +217,9 @@
+ #
+ # Kernel Features
+ #
+-CONFIG_TICK_ONESHOT=y
+-CONFIG_NO_HZ=y
+-CONFIG_HIGH_RES_TIMERS=y
++# CONFIG_TICK_ONESHOT is not set
++# CONFIG_NO_HZ is not set
++# CONFIG_HIGH_RES_TIMERS is not set
+ CONFIG_GENERIC_CLOCKEVENTS_BUILD=y
+ # CONFIG_PREEMPT_NONE is not set
+ # CONFIG_PREEMPT_VOLUNTARY is not set
+@@ -256,15 +232,10 @@
+ CONFIG_PREEMPT_HARDIRQS_PRIORITIES="mxcsdma:90,40"
+ CONFIG_PREEMPT_RCU=y
+ CONFIG_PREEMPT_RCU_BOOST=y
+-CONFIG_RCU_TRACE=y
++# CONFIG_RCU_TRACE is not set
+ CONFIG_HZ=100
+ CONFIG_AEABI=y
+-# CONFIG_OABI_COMPAT is not set
+ # CONFIG_ARCH_DISCONTIGMEM_ENABLE is not set
+-CONFIG_SELECT_MEMORY_MODEL=y
+-CONFIG_FLATMEM_MANUAL=y
+-# CONFIG_DISCONTIGMEM_MANUAL is not set
+-# CONFIG_SPARSEMEM_MANUAL is not set
+ CONFIG_FLATMEM=y
+ CONFIG_FLAT_NODE_MEM_MAP=y
+ # CONFIG_SPARSEMEM_STATIC is not set
+@@ -285,7 +256,6 @@
+ CONFIG_ZBOOT_ROM_BSS=0x0
+ CONFIG_CMDLINE="noinitrd console=ttymxc0 root=/dev/mtdblock2 rw ip=off"
+ # CONFIG_XIP_KERNEL is not set
+-# CONFIG_KEXEC is not set
+ 
+ #
+ # CPU Frequency scaling
+@@ -330,10 +300,12 @@
+ # CONFIG_IP_MULTICAST is not set
+ # CONFIG_IP_ADVANCED_ROUTER is not set
+ CONFIG_IP_FIB_HASH=y
+-# CONFIG_IP_PNP is not set
++CONFIG_IP_PNP=y
++CONFIG_IP_PNP_DHCP=y
++# CONFIG_IP_PNP_BOOTP is not set
++# CONFIG_IP_PNP_RARP is not set
+ # CONFIG_NET_IPIP is not set
+ # CONFIG_NET_IPGRE is not set
+-# CONFIG_ARPD is not set
+ # CONFIG_SYN_COOKIES is not set
+ # CONFIG_INET_AH is not set
+ # CONFIG_INET_ESP is not set
+@@ -348,13 +320,9 @@
+ # CONFIG_TCP_CONG_ADVANCED is not set
+ CONFIG_TCP_CONG_CUBIC=y
+ CONFIG_DEFAULT_TCP_CONG="cubic"
+-# CONFIG_TCP_MD5SIG is not set
+ # CONFIG_IPV6 is not set
+ # CONFIG_NETWORK_SECMARK is not set
+ # CONFIG_NETFILTER is not set
+-# CONFIG_IP_DCCP is not set
+-# CONFIG_IP_SCTP is not set
+-# CONFIG_TIPC is not set
+ # CONFIG_ATM is not set
+ # CONFIG_BRIDGE is not set
+ # CONFIG_VLAN_8021Q is not set
+@@ -362,10 +330,6 @@
+ # CONFIG_LLC2 is not set
+ # CONFIG_IPX is not set
+ # CONFIG_ATALK is not set
+-# CONFIG_X25 is not set
+-# CONFIG_LAPB is not set
+-# CONFIG_ECONET is not set
+-# CONFIG_WAN_ROUTER is not set
+ # CONFIG_NET_SCHED is not set
+ 
+ #
+@@ -376,17 +340,15 @@
+ # CONFIG_CAN is not set
+ # CONFIG_IRDA is not set
+ # CONFIG_BT is not set
+-# CONFIG_AF_RXRPC is not set
+ 
+ #
+ # Wireless
+ #
+ # CONFIG_CFG80211 is not set
+-CONFIG_WIRELESS_EXT=y
++# CONFIG_WIRELESS_EXT is not set
+ # CONFIG_MAC80211 is not set
+ # CONFIG_IEEE80211 is not set
+ # CONFIG_RFKILL is not set
+-# CONFIG_NET_9P is not set
+ 
+ #
+ # Device Drivers
+@@ -402,135 +364,14 @@
+ # CONFIG_DEBUG_DRIVER is not set
+ # CONFIG_DEBUG_DEVRES is not set
+ # CONFIG_SYS_HYPERVISOR is not set
+-CONFIG_CONNECTOR=y
+-CONFIG_PROC_EVENTS=y
+-CONFIG_MTD=y
+-# CONFIG_MTD_DEBUG is not set
+-# CONFIG_MTD_CONCAT is not set
+-CONFIG_MTD_PARTITIONS=y
+-CONFIG_MTD_REDBOOT_PARTS=y
+-CONFIG_MTD_REDBOOT_DIRECTORY_BLOCK=-1
+-# CONFIG_MTD_REDBOOT_PARTS_UNALLOCATED is not set
+-# CONFIG_MTD_REDBOOT_PARTS_READONLY is not set
+-CONFIG_MTD_CMDLINE_PARTS=y
+-# CONFIG_MTD_AFS_PARTS is not set
+-# CONFIG_MTD_AR7_PARTS is not set
+-
+-#
+-# User Modules And Translation Layers
+-#
+-CONFIG_MTD_CHAR=y
+-CONFIG_MTD_BLKDEVS=y
+-CONFIG_MTD_BLOCK=y
+-# CONFIG_FTL is not set
+-# CONFIG_NFTL is not set
+-# CONFIG_INFTL is not set
+-# CONFIG_RFD_FTL is not set
+-# CONFIG_SSFDC is not set
+-# CONFIG_MTD_OOPS is not set
+-
+-#
+-# RAM/ROM/Flash chip drivers
+-#
+-CONFIG_MTD_CFI=y
+-# CONFIG_MTD_JEDECPROBE is not set
+-CONFIG_MTD_GEN_PROBE=y
+-CONFIG_MTD_CFI_ADV_OPTIONS=y
+-CONFIG_MTD_CFI_NOSWAP=y
+-# CONFIG_MTD_CFI_BE_BYTE_SWAP is not set
+-# CONFIG_MTD_CFI_LE_BYTE_SWAP is not set
+-CONFIG_MTD_CFI_GEOMETRY=y
+-# CONFIG_MTD_MAP_BANK_WIDTH_1 is not set
+-CONFIG_MTD_MAP_BANK_WIDTH_2=y
+-# CONFIG_MTD_MAP_BANK_WIDTH_4 is not set
+-# CONFIG_MTD_MAP_BANK_WIDTH_8 is not set
+-# CONFIG_MTD_MAP_BANK_WIDTH_16 is not set
+-# CONFIG_MTD_MAP_BANK_WIDTH_32 is not set
+-CONFIG_MTD_CFI_I1=y
+-# CONFIG_MTD_CFI_I2 is not set
+-# CONFIG_MTD_CFI_I4 is not set
+-# CONFIG_MTD_CFI_I8 is not set
+-# CONFIG_MTD_OTP is not set
+-# CONFIG_MTD_CFI_INTELEXT is not set
+-CONFIG_MTD_CFI_AMDSTD=y
+-# CONFIG_MTD_CFI_STAA is not set
+-CONFIG_MTD_CFI_UTIL=y
+-CONFIG_MTD_RAM=y
+-# CONFIG_MTD_ROM is not set
+-# CONFIG_MTD_ABSENT is not set
+-# CONFIG_MTD_XIP is not set
+-
+-#
+-# Mapping drivers for chip access
+-#
+-# CONFIG_MTD_COMPLEX_MAPPINGS is not set
+-# CONFIG_MTD_PHYSMAP is not set
+-# CONFIG_MTD_ARM_INTEGRATOR is not set
+-# CONFIG_MTD_PLATRAM is not set
+-# CONFIG_MTD_MXC is not set
+-
+-#
+-# Self-contained MTD device drivers
+-#
+-# CONFIG_MTD_DATAFLASH is not set
+-# CONFIG_MTD_M25P80 is not set
+-# CONFIG_MTD_SLRAM is not set
+-# CONFIG_MTD_PHRAM is not set
+-# CONFIG_MTD_MTDRAM is not set
+-# CONFIG_MTD_BLOCK2MTD is not set
+-
+-#
+-# Disk-On-Chip Device Drivers
+-#
+-# CONFIG_MTD_DOC2000 is not set
+-# CONFIG_MTD_DOC2001 is not set
+-# CONFIG_MTD_DOC2001PLUS is not set
+-CONFIG_MTD_NAND=y
+-# CONFIG_MTD_NAND_VERIFY_WRITE is not set
+-# CONFIG_MTD_NAND_ECC_SMC is not set
+-# CONFIG_MTD_NAND_MUSEUM_IDS is not set
+-CONFIG_MTD_NAND_IDS=y
+-# CONFIG_MTD_NAND_DISKONCHIP is not set
+-# CONFIG_MTD_NAND_NANDSIM is not set
+-CONFIG_MTD_NAND_MXC_V2=y
+-# CONFIG_MTD_NAND_MXC_SWECC is not set
+-# CONFIG_MTD_NAND_MXC_FORCE_CE is not set
+-# CONFIG_MXC_NAND_LOW_LEVEL_ERASE is not set
+-# CONFIG_MTD_NAND_PLATFORM is not set
+-# CONFIG_MTD_ONENAND is not set
+-
+-#
+-# UBI - Unsorted block images
+-#
+-CONFIG_MTD_UBI=y
+-CONFIG_MTD_UBI_WL_THRESHOLD=4096
+-CONFIG_MTD_UBI_BEB_RESERVE=1
+-CONFIG_MTD_UBI_GLUEBI=y
+-
+-#
+-# UBI debugging options
+-#
+-# CONFIG_MTD_UBI_DEBUG is not set
++# CONFIG_CONNECTOR is not set
++# CONFIG_MTD is not set
+ 
+ #
+ # Voltage and Current regulators
+ #
+-CONFIG_REGULATOR_API=y
+-CONFIG_REGULATOR=y
+-# CONFIG_REGULATOR_DEBUG is not set
+-# CONFIG_REGULATOR_WM8350 is not set
+ # CONFIG_PARPORT is not set
+-CONFIG_BLK_DEV=y
+-# CONFIG_BLK_DEV_COW_COMMON is not set
+-CONFIG_BLK_DEV_LOOP=y
+-# CONFIG_BLK_DEV_CRYPTOLOOP is not set
+-# CONFIG_BLK_DEV_NBD is not set
+-CONFIG_BLK_DEV_RAM=y
+-CONFIG_BLK_DEV_RAM_COUNT=16
+-CONFIG_BLK_DEV_RAM_SIZE=16384
+-# CONFIG_BLK_DEV_XIP is not set
+-# CONFIG_CDROM_PKTCDVD is not set
+-# CONFIG_ATA_OVER_ETH is not set
++# CONFIG_BLK_DEV is not set
+ # CONFIG_MISC_DEVICES is not set
+ CONFIG_HAVE_IDE=y
+ # CONFIG_IDE is not set
+@@ -548,7 +389,6 @@
+ # CONFIG_NETDEVICES_MULTIQUEUE is not set
+ # CONFIG_DUMMY is not set
+ # CONFIG_BONDING is not set
+-# CONFIG_MACVLAN is not set
+ # CONFIG_EQUALIZER is not set
+ # CONFIG_TUN is not set
+ # CONFIG_VETH is not set
+@@ -558,7 +398,6 @@
+ # CONFIG_AX88796 is not set
+ # CONFIG_SMC91X is not set
+ # CONFIG_DM9000 is not set
+-# CONFIG_ENC28J60 is not set
+ # CONFIG_SMC911X is not set
+ # CONFIG_SMSC911X is not set
+ # CONFIG_IBM_NEW_EMAC_ZMII is not set
+@@ -581,7 +420,6 @@
+ # CONFIG_WAN is not set
+ # CONFIG_PPP is not set
+ # CONFIG_SLIP is not set
+-# CONFIG_NETCONSOLE is not set
+ # CONFIG_NETPOLL is not set
+ # CONFIG_NET_POLL_CONTROLLER is not set
+ # CONFIG_ISDN is not set
+@@ -597,24 +435,17 @@
+ # Userland interfaces
+ #
+ CONFIG_INPUT_MOUSEDEV=y
+-CONFIG_INPUT_MOUSEDEV_PSAUX=y
++# CONFIG_INPUT_MOUSEDEV_PSAUX is not set
+ CONFIG_INPUT_MOUSEDEV_SCREEN_X=1024
+ CONFIG_INPUT_MOUSEDEV_SCREEN_Y=768
+ # CONFIG_INPUT_JOYDEV is not set
+-CONFIG_INPUT_EVDEV=y
++# CONFIG_INPUT_EVDEV is not set
+ # CONFIG_INPUT_EVBUG is not set
+ 
+ #
+ # Input Device Drivers
+ #
+-CONFIG_INPUT_KEYBOARD=y
+-# CONFIG_KEYBOARD_ATKBD is not set
+-# CONFIG_KEYBOARD_SUNKBD is not set
+-# CONFIG_KEYBOARD_LKKBD is not set
+-# CONFIG_KEYBOARD_XTKBD is not set
+-# CONFIG_KEYBOARD_NEWTON is not set
+-# CONFIG_KEYBOARD_STOWAWAY is not set
+-CONFIG_KEYBOARD_MXC=y
++# CONFIG_INPUT_KEYBOARD is not set
+ # CONFIG_INPUT_MOUSE is not set
+ # CONFIG_INPUT_JOYSTICK is not set
+ # CONFIG_INPUT_TABLET is not set
+@@ -634,7 +465,7 @@
+ CONFIG_VT_CONSOLE=y
+ CONFIG_HW_CONSOLE=y
+ # CONFIG_VT_HW_CONSOLE_BINDING is not set
+-CONFIG_DEVKMEM=y
++# CONFIG_DEVKMEM is not set
+ # CONFIG_SERIAL_NONSTANDARD is not set
+ # CONFIG_MXC_IIM is not set
+ 
+@@ -653,72 +484,19 @@
+ CONFIG_UNIX98_PTYS=y
+ # CONFIG_LEGACY_PTYS is not set
+ # CONFIG_IPMI_HANDLER is not set
+-CONFIG_HW_RANDOM=y
++# CONFIG_HW_RANDOM is not set
+ # CONFIG_NVRAM is not set
+ # CONFIG_R3964 is not set
+ # CONFIG_RAW_DRIVER is not set
+-# CONFIG_TCG_TPM is not set
+ # CONFIG_RMEM is not set
+ # CONFIG_ALLOC_RTSJ_MEM is not set
+-CONFIG_I2C=y
+-CONFIG_I2C_BOARDINFO=y
+-# CONFIG_I2C_CHARDEV is not set
+-CONFIG_I2C_HELPER_AUTO=y
+-
+-#
+-# I2C Hardware Bus support
+-#
+-CONFIG_I2C_MXC=y
+-# CONFIG_I2C_MXC_HS is not set
+-# CONFIG_I2C_OCORES is not set
+-# CONFIG_I2C_PARPORT_LIGHT is not set
+-# CONFIG_I2C_SIMTEC is not set
+-# CONFIG_I2C_TAOS_EVM is not set
+-# CONFIG_I2C_STUB is not set
+-# CONFIG_I2C_PCA_PLATFORM is not set
+-
+-#
+-# Miscellaneous I2C Chip support
+-#
+-# CONFIG_DS1682 is not set
+-# CONFIG_SENSORS_EEPROM is not set
+-# CONFIG_SENSORS_PCF8574 is not set
+-# CONFIG_PCF8575 is not set
+-# CONFIG_SENSORS_PCF8591 is not set
+-# CONFIG_SENSORS_MAX6875 is not set
+-# CONFIG_SENSORS_TSL2550 is not set
+-# CONFIG_I2C_DEBUG_CORE is not set
+-# CONFIG_I2C_DEBUG_ALGO is not set
+-# CONFIG_I2C_DEBUG_BUS is not set
+-# CONFIG_I2C_DEBUG_CHIP is not set
++# CONFIG_I2C is not set
+ # CONFIG_I2C_SLAVE is not set
+-CONFIG_SPI=y
+-# CONFIG_SPI_DEBUG is not set
+-CONFIG_SPI_MASTER=y
+-
+-#
+-# SPI Master Controller Drivers
+-#
+-# CONFIG_SPI_BITBANG is not set
+-# CONFIG_SPI_MXC is not set
+-
+-#
+-# SPI Protocol Masters
+-#
+-# CONFIG_SPI_AT25 is not set
+-# CONFIG_SPI_SPIDEV is not set
+-# CONFIG_SPI_TLE62X0 is not set
++# CONFIG_SPI is not set
+ # CONFIG_W1 is not set
+ # CONFIG_POWER_SUPPLY is not set
+ # CONFIG_HWMON is not set
+-CONFIG_WATCHDOG=y
+-CONFIG_WATCHDOG_NOWAYOUT=y
+-
+-#
+-# Watchdog Device Drivers
+-#
+-# CONFIG_SOFT_WATCHDOG is not set
+-CONFIG_MXC_WATCHDOG=y
++# CONFIG_WATCHDOG is not set
+ 
+ #
+ # Sonics Silicon Backplane
+@@ -782,11 +560,10 @@
+ # CONFIG_FB_MXC_TVOUT is not set
+ # CONFIG_FB_MXC_TVOUT_CH7024 is not set
+ # CONFIG_FB_MXC_ASYNC_PANEL is not set
+-# CONFIG_FB_UVESA is not set
+ # CONFIG_FB_S1D13XXX is not set
+ # CONFIG_FB_VIRTUAL is not set
+ CONFIG_BACKLIGHT_LCD_SUPPORT=y
+-# CONFIG_LCD_CLASS_DEVICE is not set
++CONFIG_LCD_CLASS_DEVICE=y
+ CONFIG_BACKLIGHT_CLASS_DEVICE=y
+ # CONFIG_BACKLIGHT_CORGI is not set
+ CONFIG_BACKLIGHT_MXC=y
+@@ -802,107 +579,17 @@
+ #
+ # CONFIG_VGA_CONSOLE is not set
+ CONFIG_DUMMY_CONSOLE=y
+-CONFIG_FRAMEBUFFER_CONSOLE=y
+-# CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY is not set
+-# CONFIG_FRAMEBUFFER_CONSOLE_ROTATION is not set
+-# CONFIG_FONTS is not set
+-CONFIG_FONT_8x8=y
+-CONFIG_FONT_8x16=y
+-CONFIG_LOGO=y
+-# CONFIG_LOGO_LINUX_MONO is not set
+-# CONFIG_LOGO_LINUX_VGA16 is not set
+-# CONFIG_LOGO_LINUX_CLUT224 is not set
+-CONFIG_LOGO_LOGITECH_BABY_CLUT224=y
++# CONFIG_FRAMEBUFFER_CONSOLE is not set
++# CONFIG_LOGO is not set
+ 
+ #
+ # Sound
+ #
+-CONFIG_SOUND=y
+-
+-#
+-# Advanced Linux Sound Architecture
+-#
+-CONFIG_SND=y
+-CONFIG_SND_TIMER=y
+-CONFIG_SND_PCM=y
+-# CONFIG_SND_SEQUENCER is not set
+-CONFIG_SND_OSSEMUL=y
+-CONFIG_SND_MIXER_OSS=y
+-CONFIG_SND_PCM_OSS=y
+-CONFIG_SND_PCM_OSS_PLUGINS=y
+-# CONFIG_SND_DYNAMIC_MINORS is not set
+-CONFIG_SND_SUPPORT_OLD_API=y
+-CONFIG_SND_VERBOSE_PROCFS=y
+-# CONFIG_SND_VERBOSE_PRINTK is not set
+-# CONFIG_SND_DEBUG is not set
+-
+-#
+-# Generic devices
+-#
+-# CONFIG_SND_DUMMY is not set
+-# CONFIG_SND_MTPAV is not set
+-# CONFIG_SND_SERIAL_U16550 is not set
+-# CONFIG_SND_MPU401 is not set
+-
+-#
+-# ALSA ARM devices
+-#
+-# CONFIG_SND_MXC_SPDIF is not set
+-
+-#
+-# SPI devices
+-#
+-
+-#
+-# System on Chip audio support
+-#
+-CONFIG_SND_SOC=y
+-CONFIG_SND_MXC_SOC=y
+-CONFIG_SND_MXC_SOC_SSI=y
+-CONFIG_SND_MXC_SOC_IRAM=y
+-# CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_AK4647 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_WM8580 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_SGTL5000 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH is not set
+-CONFIG_SND_SOC_BABY_TLV320AIC3104=y
+-
+-#
+-# ALSA SoC audio for Freescale SOCs
+-#
+-
+-#
+-# SoC Audio for the Texas Instruments OMAP
+-#
+-CONFIG_SND_SOC_TLV320AIC3104=y
+-
+-#
+-# Open Sound System
+-#
+-# CONFIG_SOUND_PRIME is not set
++# CONFIG_SOUND is not set
+ # CONFIG_HID_SUPPORT is not set
+ # CONFIG_USB_SUPPORT is not set
+ CONFIG_USB_ARCH_HAS_EHCI=y
+-CONFIG_MMC=y
+-# CONFIG_MMC_DEBUG is not set
+-# CONFIG_MMC_UNSAFE_RESUME is not set
+-
+-#
+-# MMC/SD Card Drivers
+-#
+-# CONFIG_MMC_BLOCK is not set
+-# CONFIG_SDIO_UART is not set
+-# CONFIG_MMC_TEST is not set
+-
+-#
+-# MMC/SD Host Controller Drivers
+-#
+-# CONFIG_MMC_SPI is not set
+-# CONFIG_MMC_MXC is not set
+-CONFIG_MMC_IMX_ESDHCI=y
+-# CONFIG_MMC_IMX_ESDHCI_SELECT2 is not set
+-# CONFIG_MMC_IMX_ESDHCI_PIO_MODE is not set
++# CONFIG_MMC is not set
+ # CONFIG_NEW_LEDS is not set
+ CONFIG_RTC_LIB=y
+ # CONFIG_RTC_CLASS is not set
+@@ -915,20 +602,16 @@
+ #
+ # MXC SSI support
+ #
+-CONFIG_MXC_SSI=y
++# CONFIG_MXC_SSI is not set
+ 
+ #
+ # MXC Digital Audio Multiplexer support
+ #
+-CONFIG_MXC_DAM=y
++# CONFIG_MXC_DAM is not set
+ 
+ #
+ # MXC PMIC support
+ #
+-# CONFIG_MXC_PMIC_MC13783 is not set
+-# CONFIG_MXC_PMIC_MC13892 is not set
+-# CONFIG_MXC_PMIC_MC34704 is not set
+-# CONFIG_MXC_PMIC_MC9SDZ60 is not set
+ 
+ #
+ # Advanced Power Management devices
+@@ -974,33 +657,30 @@
+ #
+ # i.MX ADC support
+ #
+-CONFIG_IMX_ADC=y
++# CONFIG_IMX_ADC is not set
+ 
+ #
+ # MXC Baby support
+ #
+-CONFIG_MXC_BABY_DEBUG_GPIO=y
+-CONFIG_MXC_BABY_BUTTONS=y
++# CONFIG_MXC_BABY_DEBUG_GPIO is not set
++# CONFIG_MXC_BABY_BUTTONS is not set
+ 
+ #
+ # Baby MSP430 support
+ #
+-CONFIG_BABY_MSP430_PROGRAMMER=y
+ 
+ #
+ # File systems
+ #
+ # CONFIG_EXT2_FS is not set
+ # CONFIG_EXT3_FS is not set
+-# CONFIG_EXT4DEV_FS is not set
+ # CONFIG_REISERFS_FS is not set
+ # CONFIG_JFS_FS is not set
+ # CONFIG_FS_POSIX_ACL is not set
+ # CONFIG_XFS_FS is not set
+ # CONFIG_OCFS2_FS is not set
+ # CONFIG_DNOTIFY is not set
+-CONFIG_INOTIFY=y
+-CONFIG_INOTIFY_USER=y
++# CONFIG_INOTIFY is not set
+ # CONFIG_QUOTA is not set
+ # CONFIG_AUTOFS_FS is not set
+ # CONFIG_AUTOFS4_FS is not set
+@@ -1025,36 +705,19 @@
+ CONFIG_PROC_FS=y
+ CONFIG_PROC_SYSCTL=y
+ CONFIG_SYSFS=y
+-CONFIG_TMPFS=y
+-# CONFIG_TMPFS_POSIX_ACL is not set
++# CONFIG_TMPFS is not set
+ # CONFIG_HUGETLB_PAGE is not set
+ # CONFIG_CONFIGFS_FS is not set
+ 
+ #
+ # Layered filesystems
+ #
+-CONFIG_UNION_FS=y
+-# CONFIG_UNION_FS_XATTR is not set
+-# CONFIG_UNION_FS_DEBUG is not set
+ 
+ #
+ # Miscellaneous filesystems
+ #
+-# CONFIG_ADFS_FS is not set
+-# CONFIG_AFFS_FS is not set
+-# CONFIG_HFS_FS is not set
+ # CONFIG_HFSPLUS_FS is not set
+-# CONFIG_BEFS_FS is not set
+-# CONFIG_BFS_FS is not set
+-# CONFIG_EFS_FS is not set
+-# CONFIG_JFFS2_FS is not set
+-CONFIG_UBIFS_FS=y
+-# CONFIG_UBIFS_FS_XATTR is not set
+-# CONFIG_UBIFS_FS_ADVANCED_COMPR is not set
+-CONFIG_UBIFS_FS_LZO=y
+-CONFIG_UBIFS_FS_ZLIB=y
+-# CONFIG_UBIFS_FS_DEBUG is not set
+-CONFIG_CRAMFS=y
++# CONFIG_CRAMFS is not set
+ # CONFIG_VXFS_FS is not set
+ # CONFIG_MINIX_FS is not set
+ # CONFIG_HPFS_FS is not set
+@@ -1062,7 +725,18 @@
+ # CONFIG_ROMFS_FS is not set
+ # CONFIG_SYSV_FS is not set
+ # CONFIG_UFS_FS is not set
+-# CONFIG_NETWORK_FILESYSTEMS is not set
++CONFIG_NETWORK_FILESYSTEMS=y
++CONFIG_NFS_FS=y
++# CONFIG_NFS_V3 is not set
++# CONFIG_NFSD is not set
++CONFIG_ROOT_NFS=y
++CONFIG_LOCKD=y
++CONFIG_NFS_COMMON=y
++CONFIG_SUNRPC=y
++# CONFIG_SMB_FS is not set
++# CONFIG_CIFS is not set
++# CONFIG_NCP_FS is not set
++# CONFIG_CODA_FS is not set
+ 
+ #
+ # Partition Types
+@@ -1070,40 +744,38 @@
+ # CONFIG_PARTITION_ADVANCED is not set
+ CONFIG_MSDOS_PARTITION=y
+ # CONFIG_NLS is not set
+-# CONFIG_DLM is not set
+ 
+ #
+ # Kernel hacking
+ #
+-# CONFIG_PRINTK_TIME is not set
++CONFIG_PRINTK_TIME=y
+ CONFIG_ENABLE_WARN_DEPRECATED=y
+ CONFIG_ENABLE_MUST_CHECK=y
+ CONFIG_FRAME_WARN=1024
+ # CONFIG_MAGIC_SYSRQ is not set
+ # CONFIG_UNUSED_SYMBOLS is not set
+-CONFIG_DEBUG_FS=y
++# CONFIG_DEBUG_FS is not set
+ # CONFIG_HEADERS_CHECK is not set
+ CONFIG_DEBUG_KERNEL=y
+ # CONFIG_DEBUG_SHIRQ is not set
+-CONFIG_DETECT_SOFTLOCKUP=y
++# CONFIG_DETECT_SOFTLOCKUP is not set
+ CONFIG_SCHED_DEBUG=y
+ # CONFIG_SCHEDSTATS is not set
+ # CONFIG_TIMER_STATS is not set
+ # CONFIG_DEBUG_OBJECTS is not set
+ # CONFIG_DEBUG_SLAB is not set
+-CONFIG_DEBUG_PREEMPT=y
++# CONFIG_DEBUG_PREEMPT is not set
+ # CONFIG_DEBUG_RT_MUTEXES is not set
+ # CONFIG_RTMUTEX_CHECK is not set
+ # CONFIG_RT_MUTEX_TESTER is not set
+ # CONFIG_DEBUG_SPINLOCK is not set
+-# CONFIG_RWLOCK_TORTURE_TEST is not set
+ # CONFIG_DEBUG_LOCK_ALLOC is not set
+ # CONFIG_PROVE_LOCKING is not set
+ # CONFIG_LOCK_STAT is not set
+ # CONFIG_DEBUG_SPINLOCK_SLEEP is not set
+ # CONFIG_DEBUG_LOCKING_API_SELFTESTS is not set
+ # CONFIG_DEBUG_KOBJECT is not set
+-# CONFIG_DEBUG_BUGVERBOSE is not set
++CONFIG_DEBUG_BUGVERBOSE=y
+ # CONFIG_DEBUG_INFO is not set
+ # CONFIG_DEBUG_VM is not set
+ # CONFIG_DEBUG_WRITECOUNT is not set
+@@ -1111,7 +783,6 @@
+ # CONFIG_DEBUG_SG is not set
+ CONFIG_FRAME_POINTER=y
+ # CONFIG_BOOT_PRINTK_DELAY is not set
+-# CONFIG_RCU_TORTURE_TEST is not set
+ # CONFIG_BACKTRACE_SELF_TEST is not set
+ # CONFIG_FAULT_INJECTION is not set
+ CONFIG_HAVE_FTRACE=y
+@@ -1129,108 +800,26 @@
+ # CONFIG_DEBUG_USER is not set
+ # CONFIG_DEBUG_ERRORS is not set
+ # CONFIG_DEBUG_STACK_USAGE is not set
+-CONFIG_DEBUG_LL=y
+-# CONFIG_DEBUG_LL_PRINTK_BYPASS is not set
+-# CONFIG_DEBUG_ICEDCC is not set
++# CONFIG_DEBUG_LL is not set
+ 
+ #
+ # Security options
+ #
+ # CONFIG_KEYS is not set
+ # CONFIG_SECURITY is not set
+-# CONFIG_SECURITY_FILE_CAPABILITIES is not set
+-CONFIG_CRYPTO=y
+-
+-#
+-# Crypto core or helper
+-#
+-CONFIG_CRYPTO_ALGAPI=y
+-# CONFIG_CRYPTO_MANAGER is not set
+-# CONFIG_CRYPTO_GF128MUL is not set
+-# CONFIG_CRYPTO_NULL is not set
+-# CONFIG_CRYPTO_CRYPTD is not set
+-# CONFIG_CRYPTO_AUTHENC is not set
+-# CONFIG_CRYPTO_TEST is not set
+-
+-#
+-# Authenticated Encryption with Associated Data
+-#
+-# CONFIG_CRYPTO_CCM is not set
+-# CONFIG_CRYPTO_GCM is not set
+-# CONFIG_CRYPTO_SEQIV is not set
+-
+-#
+-# Block modes
+-#
+-# CONFIG_CRYPTO_CBC is not set
+-# CONFIG_CRYPTO_CTR is not set
+-# CONFIG_CRYPTO_CTS is not set
+-# CONFIG_CRYPTO_ECB is not set
+-# CONFIG_CRYPTO_LRW is not set
+-# CONFIG_CRYPTO_PCBC is not set
+-# CONFIG_CRYPTO_XTS is not set
+-
+-#
+-# Hash modes
+-#
+-# CONFIG_CRYPTO_HMAC is not set
+-# CONFIG_CRYPTO_XCBC is not set
+-
+-#
+-# Digest
+-#
+-# CONFIG_CRYPTO_CRC32C is not set
+-# CONFIG_CRYPTO_MD4 is not set
+-# CONFIG_CRYPTO_MD5 is not set
+-# CONFIG_CRYPTO_MICHAEL_MIC is not set
+-# CONFIG_CRYPTO_SHA1 is not set
+-# CONFIG_CRYPTO_SHA256 is not set
+-# CONFIG_CRYPTO_SHA512 is not set
+-# CONFIG_CRYPTO_TGR192 is not set
+-# CONFIG_CRYPTO_WP512 is not set
+-
+-#
+-# Ciphers
+-#
+-# CONFIG_CRYPTO_AES is not set
+-# CONFIG_CRYPTO_ANUBIS is not set
+-# CONFIG_CRYPTO_ARC4 is not set
+-# CONFIG_CRYPTO_BLOWFISH is not set
+-# CONFIG_CRYPTO_CAMELLIA is not set
+-# CONFIG_CRYPTO_CAST5 is not set
+-# CONFIG_CRYPTO_CAST6 is not set
+-# CONFIG_CRYPTO_DES is not set
+-# CONFIG_CRYPTO_FCRYPT is not set
+-# CONFIG_CRYPTO_KHAZAD is not set
+-# CONFIG_CRYPTO_SALSA20 is not set
+-# CONFIG_CRYPTO_SEED is not set
+-# CONFIG_CRYPTO_SERPENT is not set
+-# CONFIG_CRYPTO_TEA is not set
+-# CONFIG_CRYPTO_TWOFISH is not set
+-
+-#
+-# Compression
+-#
+-CONFIG_CRYPTO_DEFLATE=y
+-CONFIG_CRYPTO_LZO=y
+-CONFIG_CRYPTO_HW=y
++# CONFIG_CRYPTO is not set
+ 
+ #
+ # Library routines
+ #
+-CONFIG_BITREVERSE=y
+ # CONFIG_GENERIC_FIND_FIRST_BIT is not set
+ # CONFIG_GENERIC_FIND_NEXT_BIT is not set
+ # CONFIG_CRC_CCITT is not set
+-CONFIG_CRC16=y
++# CONFIG_CRC16 is not set
+ # CONFIG_CRC_ITU_T is not set
+-CONFIG_CRC32=y
++# CONFIG_CRC32 is not set
+ # CONFIG_CRC7 is not set
+ # CONFIG_LIBCRC32C is not set
+-CONFIG_ZLIB_INFLATE=y
+-CONFIG_ZLIB_DEFLATE=y
+-CONFIG_LZO_COMPRESS=y
+-CONFIG_LZO_DECOMPRESS=y
+ CONFIG_PLIST=y
+ CONFIG_HAS_IOMEM=y
+ CONFIG_HAS_IOPORT=y
+Index: linux-2.6.26/arch/arm/kernel/process.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/kernel/process.c	2009-08-06 11:22:37.000000000 +0100
++++ linux-2.6.26/arch/arm/kernel/process.c	2009-08-07 09:49:48.000000000 +0100
+@@ -36,6 +36,8 @@
+ #include <asm/uaccess.h>
+ #include <asm/mach/time.h>
+ 
++extern int baby_lock_up_detected;
++
+ DEFINE_RAW_SPINLOCK(futex_atomic_lock);
+ 
+ static const char *processor_modes[] = {
+@@ -167,12 +169,21 @@
+ 			idle = default_idle;
+ 		leds_event(led_idle_start);
+ 		tick_nohz_stop_sched_tick(1);
+-		while (!need_resched())
++		while (!need_resched()) {
++			//if (baby_lock_up_detected) {
++			//	printk(".");
++			//}
+ 			idle();
++		}
+ 		leds_event(led_idle_end);
+ 		tick_nohz_restart_sched_tick();
+ 		local_irq_disable();
+ 		__preempt_enable_no_resched();
++
++		//if (baby_lock_up_detected) {
++		//	printk("idle calling schedule\n");
++		//}
++
+ 		__schedule();
+ 		preempt_disable();
+ 		local_irq_enable();
+Index: linux-2.6.26/kernel/sched.c
+===================================================================
+--- linux-2.6.26.orig/kernel/sched.c	2009-08-06 11:22:37.000000000 +0100
++++ linux-2.6.26/kernel/sched.c	2009-08-07 09:50:36.000000000 +0100
+@@ -81,6 +81,9 @@
+ 
+ #include "sched_cpupri.h"
+ 
++extern int baby_lock_up_detected;
++
++
+ /*
+  * Convert user-nice values [ -20 ... 0 ... 19 ]
+  * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
+@@ -1442,6 +1445,11 @@
+ static void __resched_task(struct task_struct *p, int tif_bit)
+ {
+ 	assert_spin_locked(&task_rq(p)->lock);
++
++	//if (baby_lock_up_detected) {
++	//	printk("set need_resched %s\n", p->comm);
++	//}
++
+ 	set_tsk_thread_flag(p, tif_bit);
+ }
+ #endif
+@@ -4538,6 +4546,10 @@
+ 	struct rq *rq;
+ 	int cpu;
+ 
++	//if (baby_lock_up_detected) {
++		//printk("__schedule called\n");
++	//}
++
+ 	rcu_preempt_boost();
+ 
+ 	preempt_disable();
+@@ -4561,6 +4573,10 @@
+ 	spin_lock(&rq->lock);
+ 	clear_tsk_need_resched(prev);
+ 
++	//if (baby_lock_up_detected) {
++		//printk("clear need_resched %s\n", prev->comm);
++	//}
++
+ 	if (!(prev->state & TASK_RUNNING_MUTEX) && prev->state &&
+ 	    !(preempt_count() & PREEMPT_ACTIVE)) {
+ 		if (unlikely(signal_pending_state(prev->state, prev)))
+@@ -4625,6 +4641,11 @@
+ asmlinkage void __sched schedule(void)
+ {
+ 	WARN_ON(system_state == SYSTEM_BOOTING);
++
++	//if (baby_lock_up_detected) {
++	//	printk("schedule() called\n");
++	//}
++
+ 	/*
+ 	 * Test if we have interrupts disabled.
+ 	 */
+@@ -4685,6 +4706,7 @@
+ 
+ __setup("preempt=", preempt_setup);
+ 
++
+ /*
+  * this is the entry point to schedule() from in-kernel preemption
+  * off of preempt_enable. Kernel preemptions off return from interrupt
+@@ -4695,6 +4717,15 @@
+ 	struct thread_info *ti = current_thread_info();
+ 	struct task_struct *task = current;
+ 	int saved_lock_depth;
++	//extern long baby_lock_up_preempt_schedule_enter;
++	//extern long baby_lock_up_preempt_schedule_ok;
++
++	//baby_lock_up_preempt_schedule_enter++;
++
++	//if (baby_lock_up_detected) {
++		// causes printk recursion
++		//printk("preempt_schedule() called\n");
++	//}
+ 
+ 	if (!kernel_preemption)
+ 		return;
+@@ -4705,6 +4736,8 @@
+ 	if (likely(ti->preempt_count || irqs_disabled()))
+ 		return;
+ 
++	//baby_lock_up_preempt_schedule_ok++;
++
+ 	do {
+ 		local_irq_disable();
+ 		add_preempt_count(PREEMPT_ACTIVE);
+@@ -4741,6 +4774,10 @@
+ 	struct task_struct *task = current;
+ 	int saved_lock_depth;
+ 
++	//if (baby_lock_up_detected) {
++		//printk("preempt_schedule_irq() called\n");
++	//}
++
+ 	if (!kernel_preemption)
+ 		return;
+ 	/*
+Index: linux-2.6.26/kernel/sched_debug.c
+===================================================================
+--- linux-2.6.26.orig/kernel/sched_debug.c	2009-08-06 11:22:38.000000000 +0100
++++ linux-2.6.26/kernel/sched_debug.c	2009-08-06 11:23:05.000000000 +0100
+@@ -169,7 +169,7 @@
+ 			cfs_rq->nr_spread_over);
+ }
+ 
+-static void print_cpu(struct seq_file *m, int cpu)
++void print_cpu(struct seq_file *m, int cpu)
+ {
+ 	struct rq *rq = &per_cpu(runqueues, cpu);
+ 
+Index: linux-2.6.26/kernel/sched_rt.c
+===================================================================
+--- linux-2.6.26.orig/kernel/sched_rt.c	2009-08-06 11:22:37.000000000 +0100
++++ linux-2.6.26/kernel/sched_rt.c	2009-08-06 11:23:05.000000000 +0100
+@@ -723,8 +723,16 @@
+  */
+ static void check_preempt_curr_rt(struct rq *rq, struct task_struct *p)
+ {
+-	if (p->prio < rq->curr->prio)
++	extern long baby_lock_up_preempt_curr_rt_ok;
++	extern long baby_lock_up_preempt_curr_rt_fail;
++
++	if (p->prio < rq->curr->prio) {
++		baby_lock_up_preempt_curr_rt_ok++;
+ 		resched_task(rq->curr);
++	}
++	else {
++		baby_lock_up_preempt_curr_rt_fail++;
++	}
+ }
+ 
+ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,

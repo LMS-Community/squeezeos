@@ -1,0 +1,109 @@
+From 1dae2a580f90ecaee00b56f2f14b9c434f4cd74d Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b02248@freescale.com>
+Date: Thu, 23 Oct 2008 17:02:03 +0800
+Subject: [PATCH] ENGR00096410 HSI2C:use start and stop to replace repeat start
+
+Use start and stop to replace repeat start and disable the hs i2c clock
+when the transfer finished.
+
+Signed-off-by: Guoxing Wu <b02248@freescale.com>
+---
+ drivers/i2c/busses/mxc_i2c_hs.c |   34 +++++++++-------------------------
+ 1 files changed, 9 insertions(+), 25 deletions(-)
+
+diff --git a/drivers/i2c/busses/mxc_i2c_hs.c b/drivers/i2c/busses/mxc_i2c_hs.c
+index c745e29..c0a2576 100644
+--- a/drivers/i2c/busses/mxc_i2c_hs.c
++++ b/drivers/i2c/busses/mxc_i2c_hs.c
+@@ -116,6 +116,7 @@ static void mxci2c_hs_set_div(mxc_i2c_hs *i2c_hs)
+ 
+ static int mxci2c_hs_enable(mxc_i2c_hs *i2c_hs)
+ {
++	gpio_i2c_hs_active();
+ 	clk_enable(i2c_hs->ipg_clk);
+ 	clk_enable(i2c_hs->serial_clk);
+ 	mxci2c_hs_set_div(i2c_hs);
+@@ -348,7 +349,7 @@ static int mxci2c_hs_write(mxc_i2c_hs *i2c_hs, int repeat_start,
+ static int mxci2c_hs_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+ 			  int num)
+ {
+-	int i, repeat_start;
++	int i;
+ 	mxc_i2c_hs *i2c_hs = (mxc_i2c_hs *) (i2c_get_adapdata(adap));
+ 
+ 	if (i2c_hs->low_power) {
+@@ -363,27 +364,16 @@ static int mxci2c_hs_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+ 	mxci2c_hs_enable(i2c_hs);
+ 
+ 	for (i = 0; i < num; i++) {
+-		if (i == 0) {
+-			repeat_start = 0;
+-		} else if ((msgs[i].addr != msgs[i - 1].addr) ||
+-			   ((msgs[i].flags & I2C_M_RD) !=
+-			    (msgs[i - 1].flags & I2C_M_RD))) {
+-			repeat_start = 1;
+-		} else {
+-			mxci2c_hs_stop(i2c_hs);
+-			repeat_start = 0;
+-		}
+-
+ 		if (msgs[i].flags & I2C_M_RD) {
+-			if (mxci2c_hs_read(i2c_hs, repeat_start, &msgs[i]) < 0)
++			if (mxci2c_hs_read(i2c_hs, 0, &msgs[i]) < 0)
+ 				break;
+ 		} else {
+-			if (mxci2c_hs_write(i2c_hs, repeat_start, &msgs[i]) < 0)
++			if (mxci2c_hs_write(i2c_hs, 0, &msgs[i]) < 0)
+ 				break;
+ 		}
++		mxci2c_hs_stop(i2c_hs);
+ 	}
+ 
+-	mxci2c_hs_stop(i2c_hs);
+ 	mxci2c_hs_disable(i2c_hs);
+ 
+ 	return i;
+@@ -442,17 +432,15 @@ static int mxci2c_hs_probe(struct platform_device *pdev)
+ 
+ 	i2c_hs->low_power = false;
+ 
+-	gpio_i2c_hs_active();
+-
+ 	/*
+ 	 * Set the adapter information
+ 	 */
+ 	adap = kzalloc(sizeof(struct i2c_adapter), GFP_KERNEL);
+ 	if (!adap) {
+ 		ret = -ENODEV;
+-		goto err2;
++		goto err1;
+ 	}
+-	strcpy(adap->name, pdev->name);
++	strlcpy(adap->name, pdev->name, 48);
+ 	adap->id = adap->nr = id;
+ 	adap->algo = &mxci2c_hs_algorithm;
+ 	adap->timeout = 1;
+@@ -460,18 +448,14 @@ static int mxci2c_hs_probe(struct platform_device *pdev)
+ 	i2c_set_adapdata(adap, i2c_hs);
+ 	ret = i2c_add_numbered_adapter(adap);
+ 	if (ret < 0) {
+-		goto err3;
++		goto err2;
+ 	}
+ 
+-	mxci2c_hs_enable(i2c_hs);
+-
+ 	printk(KERN_INFO "MXC HS I2C driver\n");
+ 	return 0;
+ 
+-      err3:
+-	kfree(adap);
+       err2:
+-	gpio_i2c_hs_inactive();
++	kfree(adap);
+       err1:
+ 	dev_err(&pdev->dev, "failed to probe high speed i2c adapter\n");
+ 	kfree(i2c_hs);
+-- 
+1.5.4.4
+

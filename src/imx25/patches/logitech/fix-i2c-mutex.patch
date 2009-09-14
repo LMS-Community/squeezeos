@@ -1,0 +1,88 @@
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2009-08-20 13:06:25.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-08-20 20:47:08.000000000 +0100
+@@ -106,8 +106,10 @@
+         mutex_lock(&data->lock);
+ 
+         ret = i2c_smbus_read_i2c_block_data(client, sattr->index, sattr->nr, values);
+-        if(ret < 0)
++        if(ret < 0) {
++		mutex_unlock(&data->lock);
+                 return ret;
++	}
+ 	for (i=sattr->nr-1; i >= 0; i--) {
+ 		val = (val << 8) | values[i];
+ 	}
+@@ -142,6 +144,7 @@
+ 	}
+ 	ret = i2c_smbus_write_i2c_block_data(client, sattr->index, sattr->nr, values);
+ 	if (ret < 0) {
++		mutex_unlock(&data->lock);
+ 		return ret;
+ 	}
+ 
+@@ -297,11 +300,16 @@
+ 	unsigned char val[4];
+ 	int ret;
+ 
++	mutex_lock(&msp430_data->lock);
++
+ 	ret = i2c_smbus_read_i2c_block_data(msp430_data->client, I2C_TIME_REGISTER, 4, val);
+ 	if (ret < 0) {
++		mutex_unlock(&msp430_data->lock);
+ 		return ret;
+ 	}
+ 
++	mutex_unlock(&msp430_data->lock);
++
+ 	seconds = val[0];
+ 	seconds |= (val[1] << 8);
+ 	seconds |= (val[2] << 16);
+@@ -325,10 +333,14 @@
+ 	val[2] = (seconds >> 16) & 0xFF;
+ 	val[3] = (seconds >> 24) & 0xFF;
+ 
++	mutex_lock(&msp430_data->lock);
++
+ 	ret = i2c_smbus_write_i2c_block_data(msp430_data->client, I2C_TIME_REGISTER, 4, val);
+ 	if (ret < 0) {
++		mutex_unlock(&msp430_data->lock);
+ 		return ret;
+ 	}
++	mutex_unlock(&msp430_data->lock);
+ 
+ 	return 0;
+ }
+@@ -340,11 +352,16 @@
+ 	unsigned char val[4];
+ 	int ret;
+ 
++	mutex_lock(&msp430_data->lock);
++
+ 	ret = i2c_smbus_read_i2c_block_data(msp430_data->client, I2C_ALARM_REGISTER, 4, val);
+ 	if (ret < 0) {
++		mutex_unlock(&msp430_data->lock);
+ 		return ret;
+ 	}
+ 
++	mutex_unlock(&msp430_data->lock);
++
+ 	seconds = val[0];
+ 	seconds |= (val[1] << 8);
+ 	seconds |= (val[2] << 16);
+@@ -368,10 +385,14 @@
+ 	val[2] = (seconds >> 16) & 0xFF;
+ 	val[3] = (seconds >> 24) & 0xFF;
+ 
++	mutex_lock(&msp430_data->lock);
++
+ 	ret = i2c_smbus_write_i2c_block_data(msp430_data->client, I2C_ALARM_REGISTER, 4, val);
+ 	if (ret < 0) {
++		mutex_unlock(&msp430_data->lock);
+ 		return ret;
+ 	}
++	mutex_unlock(&msp430_data->lock);
+ 
+ 	return 0;
+ }

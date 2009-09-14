@@ -1,0 +1,53 @@
+From f2bfd64e082cadedd4e36f4cf3b962cfddb870e8 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 24 Nov 2007 16:43:36 -0500
+Subject: [PATCH] Unionfs: reintroduce a bmap method
+
+This is needed for swapon(2) files in the union.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   23 +++++++++++++++++++++++
+ 1 files changed, 23 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 3f65e52..fa358ef 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -304,10 +304,33 @@ out:
+ 	return err;		/* assume all is ok */
+ }
+ 
++/*
++ * Although unionfs isn't a block-based file system, it may stack on one.
++ * ->bmap is needed, for example, to swapon(2) files.
++ */
++sector_t unionfs_bmap(struct address_space *mapping, sector_t block)
++{
++	int err = -EINVAL;
++	struct inode *inode, *lower_inode;
++	sector_t (*bmap)(struct address_space *, sector_t);
++
++	inode = (struct inode *)mapping->host;
++	lower_inode = unionfs_lower_inode(inode);
++	if (!lower_inode)
++		goto out;
++	bmap = lower_inode->i_mapping->a_ops->bmap;
++	if (bmap)
++		err = bmap(lower_inode->i_mapping, block);
++out:
++	return err;
++}
++
++
+ struct address_space_operations unionfs_aops = {
+ 	.writepage	= unionfs_writepage,
+ 	.writepages	= unionfs_writepages,
+ 	.readpage	= unionfs_readpage,
+ 	.prepare_write	= unionfs_prepare_write,
+ 	.commit_write	= unionfs_commit_write,
++	.bmap		= unionfs_bmap,
+ };
+-- 
+1.5.4.3
+

@@ -1,0 +1,648 @@
+From c2ac84f7a80256cc6fb4e20956d2a21702a98d30 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Fri, 9 Jan 2009 09:35:01 +0800
+Subject: [PATCH] ENGR00078047 support DSM in MX31 PDK 3-stack
+
+Add low power code into plat-mxc for DSM. And implement DSM on i.MX31 3stack.
+The original patch is providen by CPO team of freescale.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/mach-mx3/mxc_pm.c            |   56 ++++---
+ arch/arm/mach-mx3/pm.c                |   15 ++-
+ arch/arm/mm/cache-l2x0.c              |   23 +++
+ arch/arm/plat-mxc/Makefile            |    4 +-
+ arch/arm/plat-mxc/entry-pm.S          |  315 +++++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/irq.c               |   25 ++--
+ include/asm-arm/arch-mxc/mxc_pm.h     |    4 +-
+ include/asm-arm/hardware/cache-l2x0.h |    2 +
+ 8 files changed, 405 insertions(+), 39 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mxc_pm.c b/arch/arm/mach-mx3/mxc_pm.c
+index ca689b9..88df72e 100644
+--- a/arch/arm/mach-mx3/mxc_pm.c
++++ b/arch/arm/mach-mx3/mxc_pm.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -34,7 +34,10 @@
+ #include <asm/hardware.h>
+ #include <asm/arch/system.h>
+ #include <asm/arch/mxc_pm.h>
++#include <asm/cacheflush.h>
+ #include <asm/irq.h>
++#include <asm/arch/common.h>
++#include <asm/hardware/cache-l2x0.h>
+ 
+ #include "crm_regs.h"
+ 
+@@ -291,10 +294,6 @@ void mxc_pm_lowpower(int mode)
+ 	enable_flag = 0;
+ 
+ 	switch (mode) {
+-	case DOZE_MODE:
+-		lpm = 1;
+-		break;
+-
+ 	case STOP_MODE:
+ 		/* State Retention mode */
+ 		lpm = 2;
+@@ -303,17 +302,19 @@ void mxc_pm_lowpower(int mode)
+ 		enable_flag = 1;
+ 
+ 		/* Enable Well Bias and set VSTBY
+-		  * VSTBY pin will be asserted during SR mode. This asks the
+-		  * PM IC to set the core voltage to the standby voltage
+-		  * Must clear the MXC_CCM_CCMR_SBYCS bit as well  */
++		 * VSTBY pin will be asserted during SR mode. This asks the
++		 * PM IC to set the core voltage to the standby voltage
++		 * Must clear the MXC_CCM_CCMR_SBYCS bit as well  */
+ 		mxc_ccm_modify_reg(MXC_CCM_CCMR,
+ 				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY |
+-					MXC_CCM_CCMR_SBYCS,
+-				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY);
++				   MXC_CCM_CCMR_SBYCS,
++				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY |
++				   MXC_CCM_CCMR_SBYCS);
+ 
+ 		mxc_ccm_modify_reg(MXC_CCM_CCMR,
+ 				   MXC_CCM_CCMR_LPM_MASK,
+ 				   lpm << MXC_CCM_CCMR_LPM_OFFSET);
++		cpu_do_idle();
+ 		break;
+ 
+ 	case DSM_MODE:
+@@ -325,26 +326,35 @@ void mxc_pm_lowpower(int mode)
+ 		/* Enabled Well Bias
+ 		 * SBYCS = 0, MCU clock source is disabled*/
+ 		mxc_ccm_modify_reg(MXC_CCM_CCMR,
+-				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_SBYCS,
+-				   MXC_CCM_CCMR_WBEN);
+-		break;
++				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY |
++				   MXC_CCM_CCMR_SBYCS | MXC_CCM_CCMR_LPM_MASK,
++				   MXC_CCM_CCMR_WBEN | MXC_CCM_CCMR_VSTBY |
++				   MXC_CCM_CCMR_SBYCS |
++				   (lpm << MXC_CCM_CCMR_LPM_OFFSET));
+ 
++		reg = __raw_readl(MXC_CCM_WIMR);
++		reg &= ~(1 << 18);
++		__raw_writel(reg, MXC_CCM_WIMR);
++
++		flush_cache_all();
++		l2x0_disable();
++
++		mxc_pm_arch_entry(IO_ADDRESS(NFC_BASE_ADDR), 2048);
++		printk(KERN_INFO "Resume from DSM\n");
++
++		l2x0_enable();
++		mxc_init_irq();
++
++		break;
+ 	default:
+ 	case WAIT_MODE:
+ 		/* Wait is the default mode used when idle. */
+-		lpm = 0;
++		reg = __raw_readl(MXC_CCM_CCMR);
++		reg &= ~MXC_CCM_CCMR_LPM_MASK;
++		__raw_writel(reg, MXC_CCM_CCMR);
+ 		break;
+ 	}
+ 
+-	reg = __raw_readl(MXC_CCM_CCMR);
+-	reg = (reg & (~MXC_CCM_CCMR_LPM_MASK)) | lpm << MXC_CCM_CCMR_LPM_OFFSET;
+-	__raw_writel(reg, MXC_CCM_CCMR);
+-	/* Executing CP15 (Wait-for-Interrupt) Instruction */
+-	/* wait for interrupt */
+-	__asm__ __volatile__("mov r1, #0x0\n"
+-				"mcr	p15, 0, r1, c7, c0, 4\n"
+-			     "nop\n" "nop\n" "nop\n" "nop\n" "nop\n"::);
+-
+ 	if (enable_flag) {
+ 		/* Enable timer interrupt */
+ 		enable_irq(MXC_INT_GPT);
+diff --git a/arch/arm/mach-mx3/pm.c b/arch/arm/mach-mx3/pm.c
+index a2c672f..f2ee419 100644
+--- a/arch/arm/mach-mx3/pm.c
++++ b/arch/arm/mach-mx3/pm.c
+@@ -15,7 +15,7 @@
+  * Cleanup 2004 for OMAP1510/1610 by Dirk Behme <dirk.behme@de.bosch.com>
+  *
+  * Modified for the MX31
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License as published by the
+@@ -39,8 +39,9 @@
+  */
+ 
+ #include <linux/kernel.h>
++#include <linux/err.h>
+ #include <linux/suspend.h>
+-
++#include <linux/regulator/regulator-platform.h>
+ #include <asm/arch/mxc_pm.h>
+ 
+ /*
+@@ -68,6 +69,16 @@ static int mx31_suspend_enter(suspend_state_t state)
+  */
+ static int mx31_suspend_prepare(void)
+ {
++	struct regulator *reg_core;
++	reg_core = regulator_get(NULL, "SW1A_STBY");
++	if (reg_core == NULL || IS_ERR(reg_core)) {
++		printk(KERN_ERR "Get regulator SW1A_STBY fail\n");
++		return -1;
++	}
++	regulator_set_voltage(reg_core, 1250000);
++	regulator_set_mode(reg_core, REGULATOR_MODE_STANDBY);
++	regulator_put(reg_core, NULL);
++
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mm/cache-l2x0.c b/arch/arm/mm/cache-l2x0.c
+index edc4201..5c34448 100644
+--- a/arch/arm/mm/cache-l2x0.c
++++ b/arch/arm/mm/cache-l2x0.c
+@@ -34,6 +34,7 @@
+ #endif
+ 
+ static void __iomem *l2x0_base;
++static unsigned long l2x0_aux;
+ static DEFINE_SPINLOCK(l2x0_lock);
+ 
+ static inline void sync_writel(unsigned long val, unsigned long reg,
+@@ -163,6 +164,7 @@ void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
+ 	aux = readl(l2x0_base + L2X0_AUX_CTRL);
+ 	aux &= aux_mask;
+ 	aux |= aux_val;
++	l2x0_aux = aux;
+ 	writel(aux, l2x0_base + L2X0_AUX_CTRL);
+ 
+ 	l2x0_inv_all();
+@@ -178,3 +180,24 @@ void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
+ 	printk(KERN_INFO "L2X0 cache controller enabled\n");
+ }
+ EXPORT_SYMBOL(outer_cache);
++
++void l2x0_disable(void)
++{
++	if (readl(l2x0_base + L2X0_CTRL)
++	    && !(readl(l2x0_base + L2X0_DEBUG_CTRL) & 0x2)) {
++		l2x0_flush_all();
++		writel(0, l2x0_base + L2X0_CTRL);
++		l2x0_flush_all();
++	}
++}
++
++void l2x0_enable(void)
++{
++	if (!readl(l2x0_base + L2X0_CTRL)) {
++		writel(l2x0_aux, l2x0_base + L2X0_AUX_CTRL);
++		l2x0_inv_all();
++		/* enable L2X0 */
++		writel(1, l2x0_base + L2X0_CTRL);
++	}
++}
++
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 1d11800..e3cc7b6 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -18,7 +18,7 @@ endif
+ obj-$(CONFIG_ARCH_MX21) += dma_mx2.o
+ obj-$(CONFIG_ARCH_MX25) += 
+ obj-$(CONFIG_ARCH_MX27) += dma_mx2.o usb_common.o
+-obj-$(CONFIG_ARCH_MX3) += dptc.o usb_common.o
++obj-$(CONFIG_ARCH_MX3) += dptc.o usb_common.o entry-pm.o
+ obj-$(CONFIG_ARCH_MX35) += usb_common.o serialxc.o
+ obj-$(CONFIG_ARCH_MX37) += usb_common.o utmixc.o dptc.o dvfs_core.o
+ obj-$(CONFIG_ARCH_MX51) += usb_common.o utmixc.o dvfs_core.o
+@@ -38,4 +38,4 @@ obj-y += serialxc.o
+ else
+ obj-y += isp1504xc.o
+ endif
+-endif
+\ No newline at end of file
++endif
+diff --git a/arch/arm/plat-mxc/entry-pm.S b/arch/arm/plat-mxc/entry-pm.S
+new file mode 100644
+index 0000000..9c95598
+--- /dev/null
++++ b/arch/arm/plat-mxc/entry-pm.S
+@@ -0,0 +1,315 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file plat-mxc/entry-pm.S
++ *
++ * @brief This file contains common pm entry .
++ *
++ * @ingroup MXC_PM
++ */
++
++#include <asm/assembler.h>
++#include <asm/ptrace.h>
++#include <asm/memory.h>
++#include <asm/system.h>
++#include <asm/hardware.h>
++#include <asm/asm-offsets.h>
++#include <asm/thread_info.h>
++#include <asm/proc-fns.h>
++#include <asm/vfpmacros.h>
++
++#define WAIT_MODE               111
++#define DOZE_MODE               112
++#define STOP_MODE               113
++#define DSM_MODE                114
++
++#define PM_XLOAD_SIZE		0x04
++#define PM_XLOAD_ENTRY		0x08
++#define PM_XLOAD_SUSPEND_MODE	0x0C
++#define PM_XLOAD_CORE_SP	0x10
++
++#define PROCINFO_PROC_FNS	36
++#define PROC_FIN_FN		12
++#define PROC_IDLE_FN		20
++
++#ifdef CONFIG_FIQ
++#define ARM_CONTEXT_SIZE 12
++#else
++#define ARM_CONTEXT_SIZE 8
++#endif
++
++#ifdef CONFIG_PM_VERBOSE
++resume_str:
++	.string "Resume from DSM..."
++	.size resume_str, . - resume_str
++
++.macro show_resume_str
++	ldr r0, =resume_str
++	bl printk
++.endm
++
++#else
++.macro show_resume_str
++.endm
++#endif
++
++	.data
++	.align 3
++arm_core_context:
++	.rept ARM_CONTEXT_SIZE
++	.long 0
++	.endr
++
++#ifdef CONFIG_VFP
++	.text
++	.align 5
++arm_vfp_save:
++	mov ip, sp
++	stmdb sp!, {r0-r8, fp, ip, lr, pc}
++	sub fp, ip, #4
++	mov r1, #THREAD_SIZE
++	sub r1, r1, #1
++	bic r0, sp, r1
++	ldr r8, [r0, #TI_CPU]
++	add r4, r0, #TI_VFPSTATE
++
++	ldr r3, =last_VFP_context
++	VFPFMRX	r2, FPEXC
++	tst r2, #FPEXC_EN
++	bne 1f
++
++	ldr r4, [r3, r8, lsl #2]
++	cmp r4, #0
++	beq dead_vfp
++1:
++	bic r1, r2, #FPEXC_EN
++	VFPFMXR FPEXC, r1
++	/*TODO: SMP */
++	VFPFSTMIA r4, r1
++	VFPFMRX	r5, FPSCR
++	tst r2, #FPEXC_EX
++	VFPFMRX r6, FPINST, NE
++	tstne r2, #FPEXC_FP2V
++	VFPFMRX r7, FPINST2, NE
++	stmia r4, {r2, r5, r6, r7}
++
++	mov r1, #0
++	str r1, [r3, r8, lsl #2]
++dead_vfp:
++	ldmia sp, {r0-r8, fp, sp, pc}
++#endif
++/*
++ * The function just be called in this file
++ * Current r0 ~r4 are not saved.
++ * Otherwise, the working registers should be saved
++ */
++	.text
++	.align 5
++arm_core_save:
++	mov ip, sp
++	stmdb sp!, {r8, r9, sl, fp, ip, lr, pc}
++	sub fp, ip, #4
++	ldr r0, =arm_core_context
++	mov r3, r0
++	/* SVC mode */
++	mrs r1, spsr	@Save spsr
++	mrs r2, cpsr	@Save cpsr
++	stmia r0!, {r1, r2}
++	/* Abort mode */
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | ABT_MODE
++	stmia r0!, {sp}		@Save stack pointer for abort mode
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | UND_MODE
++	stmia r0!, {sp}		@Save stack pointer for undefine mode
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | IRQ_MODE
++	stmia r0!, {sp}		@Save stack pointer for irq mode
++#ifdef CONFIG_FIQ
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | FIQ_MODE
++	/*Save general register and sp for fiq mode*/
++	stmia r0!, {r8-r9, sl, fp, ip, sp}
++#endif
++	ldr r0, [r3, #4]
++	msr cpsr_c, r0
++	ldmia sp, {r8-r9, sl, fp, sp, pc}
++
++/*
++ * The function just be called in this file
++ * Current r0 ~r4 are not saved.
++ * Otherwise, the working registers should be saved
++ */
++arm_core_restore:
++	mov ip, sp
++	stmdb sp!, {fp, ip, lr, pc}
++	sub fp, ip, #4
++	ldr r0, =arm_core_context
++	mov r3, r0
++	/* SVC mode */
++	add r0, r0, #8		@skip svc mode
++	/* Abort mode */
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | ABT_MODE
++	ldmia r0!, {sp}		@restore stack pointer for abort mode
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | UND_MODE
++	ldmia r0!, {sp}		@restore stack pointer for undefine mode
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | IRQ_MODE
++	ldmia r0!, {sp}		@restore stack pointer for irq mode
++#ifdef CONFIG_FIQ
++	msr cpsr_c, #PSR_F_BIT | PSR_I_BIT | FIQ_MODE
++	/*Save general register and sp for fiq mode*/
++	ldmia r0!, {r8-r9, sl, fp, ip, sp}
++#endif
++	ldmia r3!, {r1, r2}
++	msr cpsr, r2		@restore cpsr
++	msr spsr, r1		@restore spsr
++	ldmia sp, {fp, sp, pc}
++
++mxc_cp15_context:
++	.rept 16
++	.long 0
++	.endr
++
++	.align 5
++mxc_cp15_restore:
++	/* Physical address */
++	adr r0, mxc_cp15_context
++	ldmia r0, {r1-r9}
++#ifndef CONFIG_PM_DEBUG
++	@Add dynamic check to skip this block when debug
++	sub lr, lr, #PHYS_OFFSET
++	add lr, lr, #PAGE_OFFSET
++#endif
++	mcr p15, 0, r3, c1, c0, 2	@CP Access Register
++	mcr p15, 0, r2, c1, c0, 1	@Aux Control register
++
++#ifndef CONFIG_PM_DEBUG
++	mcr p15, 0, r0, c7, c5, 6	@flush BTAC/BTB
++	mcr p15, 0, r0, c7, c7, 0	@invalidate both caches
++	mcr p15, 0, r0, c8, c7, 0	@Inval TLBs
++#endif
++
++	mcr p15, 0, r4, c13, c0, 0	@PID
++	mcr p15, 0, r5, c13, c0, 1	@Context ID
++
++	mcr p15, 0, r6, c3, c0, 0	@Domain Access Register
++	mcr p15, 0, r7, c2, c0, 0	@TTB0
++	mcr p15, 0, r8, c2, c0, 1	@TTB1
++	mcr p15, 0, r9, c2, c0, 2	@TTBC
++
++	mcr p15, 0, r1, c1, c0, 0	@Control Register
++	/* mcu enabled */
++	mrc p15, 0, r0, c2, c0, 0
++
++	mov pc, lr
++	nop
++	nop
++	nop
++	nop
++	nop
++	nop
++	nop
++	nop
++
++mxc_cp15_save:
++	mov ip, sp
++	stmdb sp!, {r8-r9, fp, ip, lr, pc}
++	sub fp, ip, #4
++	ldr r0, =mxc_cp15_context
++/* System Control Registers */
++	mrc p15, 0, r1, c1, c0, 0	@Control Register
++	mrc p15, 0, r2, c1, c0, 1	@Aux Control Register
++	mrc p15, 0, r3, c1, c0, 2	@CP access Register
++
++/* Memory management Registers */
++	mrc p15, 0, r4, c13, c0, 0	@PID
++	mrc p15, 0, r5, c13, c0, 1	@Context ID
++
++	mrc p15, 0, r6, c3, c0, 0	@Domain Access Register
++
++	mrc p15, 0, r7, c2, c0, 0	@TTB0
++	mrc p15, 0, r8, c2, c0, 1	@TTB1
++	mrc p15, 0, r9, c2, c0, 2	@TTBC
++	stmia r0, {r1-r9}
++	ldmia sp, {r8, r9, fp, sp, pc}
++
++/*
++ * int __mxc_pm_arch_entry(u32 entry, u32 size)
++ */
++	.align 5
++	.globl mxc_pm_arch_entry
++mxc_pm_arch_entry:
++	mov ip, sp
++	stmdb sp!, {r4-r9, sl, fp, ip, lr, pc}
++	sub fp, ip, #4
++	sub sp, sp, #4
++	mov r8, r0	@save entry
++	mov r9, r1	@save entry size
++#ifdef CONFIG_VFP
++	bl arm_vfp_save
++#endif
++	/* r0 ~r3, ip is dirty*/
++	bl arm_core_save	@save arm context
++	bl mxc_cp15_save
++	mov r0, sp
++	mov r1, r8	@restore entry
++	mov r2, r9	@restore entry size
++	bl __mxc_pm_xload_setup
++1:	bl cpu_v6_proc_fin
++	bl cpu_v6_do_idle
++	nop
++	nop
++	nop
++	nop
++__mxc_pm_arch_leave:
++	adr r0, __mxc_pm_xload_info
++	ldr sp, [r0, #PM_XLOAD_CORE_SP]
++
++#ifndef CONFIG_PM_DEBUG
++	sub sp, sp, #PAGE_OFFSET
++	add sp, sp, #PHYS_OFFSET
++#endif
++	bl mxc_cp15_restore
++#ifndef CONFIG_PM_DEBUG
++	sub sp, sp, #PHYS_OFFSET
++	add sp, sp, #PAGE_OFFSET
++#endif
++	show_resume_str
++	bl arm_core_restore
++	ldmib sp, {r4-r9, sl, fp, sp, pc}
++
++__mxc_pm_xload_info:
++	adr pc, __mxc_pm_xload_entry		@Jump instruction
++	.long	__mxc_pm_xload_end - __mxc_pm_xload_info	@loader size
++	.long 	(__mxc_pm_arch_leave - PAGE_OFFSET + PHYS_OFFSET) @resume entry
++	.long   0 		@suspend state
++	.long   0		@Core Stack pointer
++__mxc_pm_xload_entry:
++	adr r0, __mxc_pm_xload_info
++	ldr pc, [r0, #PM_XLOAD_ENTRY]
++__mxc_pm_xload_end:
++
++/*
++ * __mxc_pm_xload_setup(u32 sp, u32 entry, u32 size)
++ * r0~r6 is dirty
++ */
++__mxc_pm_xload_setup:
++	ldr r3, =__mxc_pm_xload_info
++	str r0, [r3, #PM_XLOAD_CORE_SP]
++	ldr r4, [r3, #PM_XLOAD_SIZE]
++	cmp r2, r4
++	blo 2f
++1:	ldr r5, [r3], #4
++	str r5, [r1], #4
++	subs r4, r4, #4
++	bhi 1b
++	b 3f
++2:	str r3, [r1]
++3:	mov pc, lr
+diff --git a/arch/arm/plat-mxc/irq.c b/arch/arm/plat-mxc/irq.c
+index 4b38226..033beb6 100644
+--- a/arch/arm/plat-mxc/irq.c
++++ b/arch/arm/plat-mxc/irq.c
+@@ -1,5 +1,5 @@
+ /*
+- *  Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -322,6 +322,7 @@ void __init mxc_init_irq(void)
+ {
+ 	int i;
+ 	u32 reg;
++	static int initialized;
+ 
+ 	/* put the AVIC into the reset value with
+ 	 * all interrupts disabled
+@@ -336,20 +337,21 @@ void __init mxc_init_irq(void)
+ 	/* all IRQ no FIQ */
+ 	__raw_writel(0, AVIC_INTTYPEH);
+ 	__raw_writel(0, AVIC_INTTYPEL);
+-	for (i = 0; i < MXC_MAX_INT_LINES; i++) {
++	if (!initialized) {
++		for (i = 0; i < MXC_MAX_INT_LINES; i++) {
+ #ifdef EDIO_BASE_ADDR
+-		if (irq_to_edio(i) != -1) {
+-			mxc_irq_set_edio(i, 0, 0, 0);
+-			set_irq_chip(i, &mxc_edio_chip);
+-		} else
++			if (irq_to_edio(i) != -1) {
++				mxc_irq_set_edio(i, 0, 0, 0);
++				set_irq_chip(i, &mxc_edio_chip);
++			} else
+ #endif
+-		{
+-			set_irq_chip(i, &mxc_avic_chip);
++			{
++				set_irq_chip(i, &mxc_avic_chip);
++			}
++			set_irq_handler(i, handle_level_irq);
++			set_irq_flags(i, IRQF_VALID);
+ 		}
+-		set_irq_handler(i, handle_level_irq);
+-		set_irq_flags(i, IRQF_VALID);
+ 	}
+-
+ 	/* Set WDOG2's interrupt the highest priority level (bit 28-31) */
+ 	reg = __raw_readl(AVIC_NIPRIORITY6);
+ 	reg |= (0xF << 28);
+@@ -360,6 +362,7 @@ void __init mxc_init_irq(void)
+ 	else if (MXC_INT_FORCE >= 0)
+ 		__raw_writel(1 << MXC_INT_FORCE, AVIC_INTFRCL);
+ 
++	initialized = 1;
+ 	printk(KERN_INFO "MXC IRQ initialized\n");
+ }
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc_pm.h b/include/asm-arm/arch-mxc/mxc_pm.h
+index 082753b..0cd865f 100644
+--- a/include/asm-arm/arch-mxc/mxc_pm.h
++++ b/include/asm-arm/arch-mxc/mxc_pm.h
+@@ -1,6 +1,6 @@
+ 
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -247,4 +247,6 @@ int mxc_pm_pllscale(long armfreq, long ahbfreq, long ipfreq);
+  */
+ int mxc_pm_dvfs(unsigned long armfreq, long ahbfreq, long ipfreq);
+ 
++extern void mxc_pm_arch_entry(u32 entry, u32 size);
++
+ #endif
+diff --git a/include/asm-arm/hardware/cache-l2x0.h b/include/asm-arm/hardware/cache-l2x0.h
+index 54029a7..b4ad978 100644
+--- a/include/asm-arm/hardware/cache-l2x0.h
++++ b/include/asm-arm/hardware/cache-l2x0.h
+@@ -51,6 +51,8 @@
+ 
+ #ifndef __ASSEMBLY__
+ extern void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask);
++extern void l2x0_enable(void);
++extern void l2x0_disable(void);
+ #endif
+ 
+ #endif
+-- 
+1.5.4.4
+

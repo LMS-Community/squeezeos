@@ -1,0 +1,43 @@
+From e0376789ad5327e5e9412af1f676f9e6da4dd820 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Thu, 5 Feb 2009 13:51:39 -0600
+Subject: [PATCH] ENGR00107223-1 SGTL5000: call gpio_activate_audio_ports from mach_probe
+
+Delay calling gpio_activate_audio_ports until after the codec
+io_probe succeeds.  This way the gpio lines will not be requested
+until the SGTL5000 part id has happened and we are certain
+that there is a SGTL5000 on this board and not some other
+codec instead (which would also need those gpio lines).
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/imx/imx-3stack-sgtl5000.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index d2e0163..0d5d245 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -493,6 +493,9 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 	if (ret < 0)
+ 		goto err_card_reg;
+ 
++	gpio_activate_audio_ports();
++	imx_3stack_init_dam(plat->src_port, plat->ext_port);
++
+ 	/* Add imx_3stack specific widgets */
+ 	for (i = 0; i < ARRAY_SIZE(imx_3stack_dapm_widgets); i++) {
+ 		snd_soc_dapm_new_control(machine, codec,
+@@ -662,9 +665,6 @@ static int __devinit imx_3stack_sgtl5000_audio_probe(struct platform_device *pde
+ 		goto link_err;
+ 	}
+ 
+-	gpio_activate_audio_ports();
+-	imx_3stack_init_dam(plat->src_port, plat->ext_port);
+-
+ 	ret = driver_create_file(pdev->dev.driver, &driver_attr_headphone);
+ 	if (ret < 0) {
+ 		pr_err("%s:failed to create driver_attr_headphone\n", __func__);
+-- 
+1.5.4.4
+

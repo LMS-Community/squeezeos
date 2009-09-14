@@ -1,0 +1,125 @@
+Index: linux-2.6.26/.config
+===================================================================
+--- linux-2.6.26.orig/.config	2009-08-11 17:24:42.000000000 +0100
++++ linux-2.6.26/.config	2009-08-11 20:05:58.000000000 +0100
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26.8-rt16
+-# Tue Aug 11 10:37:31 2009
++# Tue Aug 11 20:05:58 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -240,9 +240,9 @@
+ #
+ # Kernel Features
+ #
+-CONFIG_TICK_ONESHOT=y
+-CONFIG_NO_HZ=y
+-CONFIG_HIGH_RES_TIMERS=y
++# CONFIG_TICK_ONESHOT is not set
++# CONFIG_NO_HZ is not set
++# CONFIG_HIGH_RES_TIMERS is not set
+ CONFIG_GENERIC_CLOCKEVENTS_BUILD=y
+ # CONFIG_PREEMPT_NONE is not set
+ # CONFIG_PREEMPT_VOLUNTARY is not set
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby.c	2009-08-11 15:20:06.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby.c	2009-08-11 20:07:03.000000000 +0100
+@@ -473,6 +473,63 @@
+ 	platform_device_register(&mxc_alsa_aic3104_device);
+ };
+ 
++
++#include "linux/kthread.h"
++
++static struct task_struct *can_p;
++
++static int lockup_count = 0;
++
++void canary_irq(void)
++{
++	static int divider = 0;
++
++	divider++;
++	if (divider == 200) {
++		divider = 0;
++
++		wake_up_process(can_p);
++
++		lockup_count++;
++		if (lockup_count > 2) {
++			printk(KERN_INFO "**** LOCKED DETECTED ****\n");
++
++			/* make sure we reschedule */
++			set_need_resched();
++		}
++	}
++}
++
++static int canary_check_thread(void *data)
++{
++	while (true) {
++		lockup_count = 0;
++
++		/* mark ourselves as sleeping */
++		set_current_state(TASK_INTERRUPTIBLE);
++
++		/* go to sleep */
++		schedule();
++	}
++	return 0;
++}
++
++static void canary_init(void)
++{
++	struct sched_param sp;
++
++	can_p = kthread_create(canary_check_thread, 0, "canary_check");
++	if (IS_ERR(can_p)) {
++		printk(KERN_ERR "canary disabled, unable to start thread\n");
++		return;
++	}
++
++	sp.sched_priority = 99;
++	sched_setscheduler(can_p, SCHED_FIFO, &sp);
++	wake_up_process(can_p);
++}
++
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -515,6 +572,8 @@
+ 	baby_init_buttons();
+ 	mxc_init_aic3104_audio();
+ 	platform_device_register(&baby_gpio_device);
++
++	canary_init();
+ }
+ 
+ /*
+Index: linux-2.6.26/arch/arm/plat-mxc/time.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/time.c	2009-08-11 15:20:06.000000000 +0100
++++ linux-2.6.26/arch/arm/plat-mxc/time.c	2009-08-11 20:06:45.000000000 +0100
+@@ -151,6 +151,8 @@
+ 	.set_mode = mxc_gpt_set_mode,
+ };
+ 
++static void canary_irq(void);
++
+ /*!
+  * This is the timer interrupt service routine to do required tasks.
+  * It also services the WDOG timer at the frequency of twice per WDOG
+@@ -175,6 +177,8 @@
+ 		gpt_clockevent.event_handler(&gpt_clockevent);
+ 	}
+ 
++	canary_irq();
++
+ 	return IRQ_HANDLED;
+ }
+ 

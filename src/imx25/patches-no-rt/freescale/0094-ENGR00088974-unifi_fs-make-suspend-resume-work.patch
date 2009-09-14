@@ -1,0 +1,75 @@
+From 14511de99f1ada169682d31ca3549791cf188ebc Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Fri, 19 Sep 2008 14:33:59 +0800
+Subject: [PATCH] ENGR00088974 unifi_fs: make suspend/resume work
+
+drivers/mmc/card/unifi_fs/fs_lx.c:
+Reset int_enabled when unregister unifi driver.
+
+suspend/resume will re-download unifi firmware.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ drivers/mmc/card/unifi_fs/fs_lx.c |   17 +++++++++++++++--
+ 1 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/card/unifi_fs/fs_lx.c b/drivers/mmc/card/unifi_fs/fs_lx.c
+index 0f7e173..4534e87 100644
+--- a/drivers/mmc/card/unifi_fs/fs_lx.c
++++ b/drivers/mmc/card/unifi_fs/fs_lx.c
+@@ -396,6 +396,8 @@ void fs_sdio_unregister_driver(struct fs_driver *driver)
+ 	 * so pass the remove to the registered driver to clean up.
+ 	 */
+ 	if (available_sdio_dev) {
++		struct mmc_host *host = available_sdio_dev->func->card->host;
++
+ 		printk(KERN_INFO "fs_sdio_unregister_driver: Glue exists, "
+ 		       "unregister IRQ and remove device driver\n");
+ 
+@@ -406,16 +408,21 @@ void fs_sdio_unregister_driver(struct fs_driver *driver)
+ 
+ 		driver->remove(available_sdio_dev);
+ 
++		if (!available_sdio_dev->int_enabled) {
++			available_sdio_dev->int_enabled = 1;
++			host->ops->enable_sdio_irq(host, 1);
++		}
++
+ 		/* Invalidate the context to the device driver */
+ 		available_sdio_dev->driver = NULL;
+ 	}
+ 
++	/* invalidate the context to the device driver to the global */
++	available_driver = NULL;
+ 	/* Power down the UniFi */
+ 	fs_unifi_power_off(-1);
+ 	/* Wait for card removed */
+ 	msleep(100);
+-	/* invalidate the context to the device driver to the global */
+-	available_driver = NULL;
+ }
+ EXPORT_SYMBOL(fs_sdio_unregister_driver);
+ 
+@@ -503,6 +510,7 @@ static int fs_sdio_probe(struct sdio_func *func,
+ static void fs_sdio_remove(struct sdio_func *func)
+ {
+ 	struct sdio_dev *fdev = (struct sdio_dev *)sdio_get_drvdata(func);
++	struct mmc_host *host = func->card->host;
+ 
+ 	/* If there is a registered device driver, pass on the remove */
+ 	if (fdev->driver) {
+@@ -514,6 +522,11 @@ static void fs_sdio_remove(struct sdio_func *func)
+ 		sdio_release_host(fdev->func);
+ 
+ 		fdev->driver->remove(fdev);
++
++		if (!fdev->int_enabled) {
++			fdev->int_enabled = 1;
++			host->ops->enable_sdio_irq(host, 1);
++		}
+ 	}
+ 
+ 	/* Unregister the card context from the MMC driver. */
+-- 
+1.5.4.4
+

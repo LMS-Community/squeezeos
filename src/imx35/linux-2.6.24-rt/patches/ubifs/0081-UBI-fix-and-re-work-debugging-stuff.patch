@@ -1,0 +1,949 @@
+From aa54245a543ce5260de0a1babad82b79a4c0cec6 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 16 Jul 2008 17:40:22 +0300
+Subject: [PATCH] UBI: fix and re-work debugging stuff
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c  |    2 +-
+ drivers/mtd/ubi/cdev.c   |   26 ++++----
+ drivers/mtd/ubi/debug.c  |  160 ++++++++++++++++++++++++----------------------
+ drivers/mtd/ubi/debug.h  |   68 +++++++++++++-------
+ drivers/mtd/ubi/gluebi.c |   10 ++--
+ drivers/mtd/ubi/io.c     |    4 +-
+ drivers/mtd/ubi/kapi.c   |   20 +++---
+ drivers/mtd/ubi/scan.c   |    2 +-
+ drivers/mtd/ubi/upd.c    |   16 ++--
+ drivers/mtd/ubi/vmt.c    |   73 +++++++++++----------
+ drivers/mtd/ubi/vtbl.c   |    2 +-
+ 11 files changed, 206 insertions(+), 177 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 27271fe..7210e1d 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -403,7 +403,7 @@ static int uif_init(struct ubi_device *ubi)
+ 
+ 	ubi_assert(MINOR(dev) == 0);
+ 	cdev_init(&ubi->cdev, &ubi_cdev_operations);
+-	dbg_msg("%s major is %u", ubi->ubi_name, MAJOR(dev));
++	dbg_gen("%s major is %u", ubi->ubi_name, MAJOR(dev));
+ 	ubi->cdev.owner = THIS_MODULE;
+ 
+ 	err = cdev_add(&ubi->cdev, dev, 1);
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 92789fb..f3fc831 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -112,7 +112,7 @@ static int vol_cdev_open(struct inode *inode, struct file *file)
+ 	else
+ 		mode = UBI_READONLY;
+ 
+-	dbg_msg("open volume %d, mode %d", vol_id, mode);
++	dbg_gen("open volume %d, mode %d", vol_id, mode);
+ 
+ 	desc = ubi_open_volume(ubi_num, vol_id, mode);
+ 	if (IS_ERR(desc))
+@@ -127,7 +127,7 @@ static int vol_cdev_release(struct inode *inode, struct file *file)
+ 	struct ubi_volume_desc *desc = file->private_data;
+ 	struct ubi_volume *vol = desc->vol;
+ 
+-	dbg_msg("release volume %d, mode %d", vol->vol_id, desc->mode);
++	dbg_gen("release volume %d, mode %d", vol->vol_id, desc->mode);
+ 
+ 	if (vol->updating) {
+ 		ubi_warn("update of volume %d not finished, volume is damaged",
+@@ -136,7 +136,7 @@ static int vol_cdev_release(struct inode *inode, struct file *file)
+ 		vol->updating = 0;
+ 		vfree(vol->upd_buf);
+ 	} else if (vol->changing_leb) {
+-		dbg_msg("only %lld of %lld bytes received for atomic LEB change"
++		dbg_gen("only %lld of %lld bytes received for atomic LEB change"
+ 			" for volume %d:%d, cancel", vol->upd_received,
+ 			vol->upd_bytes, vol->ubi->ubi_num, vol->vol_id);
+ 		vol->changing_leb = 0;
+@@ -178,7 +178,7 @@ static loff_t vol_cdev_llseek(struct file *file, loff_t offset, int origin)
+ 		return -EINVAL;
+ 	}
+ 
+-	dbg_msg("seek volume %d, offset %lld, origin %d, new offset %lld",
++	dbg_gen("seek volume %d, offset %lld, origin %d, new offset %lld",
+ 		vol->vol_id, offset, origin, new_offset);
+ 
+ 	file->f_pos = new_offset;
+@@ -196,7 +196,7 @@ static ssize_t vol_cdev_read(struct file *file, __user char *buf, size_t count,
+ 	void *tbuf;
+ 	uint64_t tmp;
+ 
+-	dbg_msg("read %zd bytes from offset %lld of volume %d",
++	dbg_gen("read %zd bytes from offset %lld of volume %d",
+ 		count, *offp, vol->vol_id);
+ 
+ 	if (vol->updating) {
+@@ -211,7 +211,7 @@ static ssize_t vol_cdev_read(struct file *file, __user char *buf, size_t count,
+ 		return 0;
+ 
+ 	if (vol->corrupted)
+-		dbg_msg("read from corrupted volume %d", vol->vol_id);
++		dbg_gen("read from corrupted volume %d", vol->vol_id);
+ 
+ 	if (*offp + count > vol->used_bytes)
+ 		count_save = count = vol->used_bytes - *offp;
+@@ -280,7 +280,7 @@ static ssize_t vol_cdev_direct_write(struct file *file, const char __user *buf,
+ 	char *tbuf;
+ 	uint64_t tmp;
+ 
+-	dbg_msg("requested: write %zd bytes to offset %lld of volume %u",
++	dbg_gen("requested: write %zd bytes to offset %lld of volume %u",
+ 		count, *offp, vol->vol_id);
+ 
+ 	if (vol->vol_type == UBI_STATIC_VOLUME)
+@@ -509,7 +509,7 @@ static int vol_cdev_ioctl(struct inode *inode, struct file *file,
+ 			break;
+ 		}
+ 
+-		dbg_msg("erase LEB %d:%d", vol->vol_id, lnum);
++		dbg_gen("erase LEB %d:%d", vol->vol_id, lnum);
+ 		err = ubi_eba_unmap_leb(ubi, vol, lnum);
+ 		if (err)
+ 			break;
+@@ -621,7 +621,7 @@ static int ubi_cdev_ioctl(struct inode *inode, struct file *file,
+ 	{
+ 		struct ubi_mkvol_req req;
+ 
+-		dbg_msg("create volume");
++		dbg_gen("create volume");
+ 		err = copy_from_user(&req, argp, sizeof(struct ubi_mkvol_req));
+ 		if (err) {
+ 			err = -EFAULT;
+@@ -651,7 +651,7 @@ static int ubi_cdev_ioctl(struct inode *inode, struct file *file,
+ 	{
+ 		int vol_id;
+ 
+-		dbg_msg("remove volume");
++		dbg_gen("remove volume");
+ 		err = get_user(vol_id, (__user int32_t *)argp);
+ 		if (err) {
+ 			err = -EFAULT;
+@@ -684,7 +684,7 @@ static int ubi_cdev_ioctl(struct inode *inode, struct file *file,
+ 		uint64_t tmp;
+ 		struct ubi_rsvol_req req;
+ 
+-		dbg_msg("re-size volume");
++		dbg_gen("re-size volume");
+ 		err = copy_from_user(&req, argp, sizeof(struct ubi_rsvol_req));
+ 		if (err) {
+ 			err = -EFAULT;
+@@ -737,7 +737,7 @@ static int ctrl_cdev_ioctl(struct inode *inode, struct file *file,
+ 		struct ubi_attach_req req;
+ 		struct mtd_info *mtd;
+ 
+-		dbg_msg("attach MTD device");
++		dbg_gen("attach MTD device");
+ 		err = copy_from_user(&req, argp, sizeof(struct ubi_attach_req));
+ 		if (err) {
+ 			err = -EFAULT;
+@@ -777,7 +777,7 @@ static int ctrl_cdev_ioctl(struct inode *inode, struct file *file,
+ 	{
+ 		int ubi_num;
+ 
+-		dbg_msg("dettach MTD device");
++		dbg_gen("dettach MTD device");
+ 		err = get_user(ubi_num, (__user int32_t *)argp);
+ 		if (err) {
+ 			err = -EFAULT;
+diff --git a/drivers/mtd/ubi/debug.c b/drivers/mtd/ubi/debug.c
+index 56956ec..21e0d7d 100644
+--- a/drivers/mtd/ubi/debug.c
++++ b/drivers/mtd/ubi/debug.c
+@@ -24,7 +24,7 @@
+  * changes.
+  */
+ 
+-#ifdef CONFIG_MTD_UBI_DEBUG_MSG
++#ifdef CONFIG_MTD_UBI_DEBUG
+ 
+ #include "ubi.h"
+ 
+@@ -34,14 +34,19 @@
+  */
+ void ubi_dbg_dump_ec_hdr(const struct ubi_ec_hdr *ec_hdr)
+ {
+-	dbg_msg("erase counter header dump:");
+-	dbg_msg("magic          %#08x", be32_to_cpu(ec_hdr->magic));
+-	dbg_msg("version        %d",    (int)ec_hdr->version);
+-	dbg_msg("ec             %llu",  (long long)be64_to_cpu(ec_hdr->ec));
+-	dbg_msg("vid_hdr_offset %d",    be32_to_cpu(ec_hdr->vid_hdr_offset));
+-	dbg_msg("data_offset    %d",    be32_to_cpu(ec_hdr->data_offset));
+-	dbg_msg("hdr_crc        %#08x", be32_to_cpu(ec_hdr->hdr_crc));
+-	dbg_msg("erase counter header hexdump:");
++	printk(KERN_DEBUG "Erase counter header dump:\n");
++	printk(KERN_DEBUG "\tmagic          %#08x\n",
++	       be32_to_cpu(ec_hdr->magic));
++	printk(KERN_DEBUG "\tversion        %d\n", (int)ec_hdr->version);
++	printk(KERN_DEBUG "\tec             %llu\n",
++	       (long long)be64_to_cpu(ec_hdr->ec));
++	printk(KERN_DEBUG "\tvid_hdr_offset %d\n",
++	       be32_to_cpu(ec_hdr->vid_hdr_offset));
++	printk(KERN_DEBUG "\tdata_offset    %d\n",
++	       be32_to_cpu(ec_hdr->data_offset));
++	printk(KERN_DEBUG "\thdr_crc        %#08x\n",
++	       be32_to_cpu(ec_hdr->hdr_crc));
++	printk(KERN_DEBUG "erase counter header hexdump:\n");
+ 	print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 32, 1,
+ 		       ec_hdr, UBI_EC_HDR_SIZE, 1);
+ }
+@@ -52,22 +57,24 @@ void ubi_dbg_dump_ec_hdr(const struct ubi_ec_hdr *ec_hdr)
+  */
+ void ubi_dbg_dump_vid_hdr(const struct ubi_vid_hdr *vid_hdr)
+ {
+-	dbg_msg("volume identifier header dump:");
+-	dbg_msg("magic     %08x", be32_to_cpu(vid_hdr->magic));
+-	dbg_msg("version   %d",   (int)vid_hdr->version);
+-	dbg_msg("vol_type  %d",   (int)vid_hdr->vol_type);
+-	dbg_msg("copy_flag %d",   (int)vid_hdr->copy_flag);
+-	dbg_msg("compat    %d",   (int)vid_hdr->compat);
+-	dbg_msg("vol_id    %d",   be32_to_cpu(vid_hdr->vol_id));
+-	dbg_msg("lnum      %d",   be32_to_cpu(vid_hdr->lnum));
+-	dbg_msg("leb_ver   %u",   be32_to_cpu(vid_hdr->leb_ver));
+-	dbg_msg("data_size %d",   be32_to_cpu(vid_hdr->data_size));
+-	dbg_msg("used_ebs  %d",   be32_to_cpu(vid_hdr->used_ebs));
+-	dbg_msg("data_pad  %d",   be32_to_cpu(vid_hdr->data_pad));
+-	dbg_msg("sqnum     %llu",
++	printk(KERN_DEBUG "Volume identifier header dump:\n");
++	printk(KERN_DEBUG "\tmagic     %08x\n", be32_to_cpu(vid_hdr->magic));
++	printk(KERN_DEBUG "\tversion   %d\n",   (int)vid_hdr->version);
++	printk(KERN_DEBUG "\tvol_type  %d\n",   (int)vid_hdr->vol_type);
++	printk(KERN_DEBUG "\tcopy_flag %d\n",   (int)vid_hdr->copy_flag);
++	printk(KERN_DEBUG "\tcompat    %d\n",   (int)vid_hdr->compat);
++	printk(KERN_DEBUG "\tvol_id    %d\n",   be32_to_cpu(vid_hdr->vol_id));
++	printk(KERN_DEBUG "\tlnum      %d\n",   be32_to_cpu(vid_hdr->lnum));
++	printk(KERN_DEBUG "\tleb_ver   %u\n",   be32_to_cpu(vid_hdr->leb_ver));
++	printk(KERN_DEBUG "\tdata_size %d\n",   be32_to_cpu(vid_hdr->data_size));
++	printk(KERN_DEBUG "\tused_ebs  %d\n",   be32_to_cpu(vid_hdr->used_ebs));
++	printk(KERN_DEBUG "\tdata_pad  %d\n",   be32_to_cpu(vid_hdr->data_pad));
++	printk(KERN_DEBUG "\tsqnum     %llu\n",
+ 		(unsigned long long)be64_to_cpu(vid_hdr->sqnum));
+-	dbg_msg("hdr_crc   %08x", be32_to_cpu(vid_hdr->hdr_crc));
+-	dbg_msg("volume identifier header hexdump:");
++	printk(KERN_DEBUG "\thdr_crc   %08x\n", be32_to_cpu(vid_hdr->hdr_crc));
++	printk(KERN_DEBUG "Volume identifier header hexdump:\n");
++	print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 32, 1,
++		       vid_hdr, UBI_VID_HDR_SIZE, 1);
+ }
+ 
+ /**
+@@ -76,27 +83,27 @@ void ubi_dbg_dump_vid_hdr(const struct ubi_vid_hdr *vid_hdr)
+  */
+ void ubi_dbg_dump_vol_info(const struct ubi_volume *vol)
+ {
+-	dbg_msg("volume information dump:");
+-	dbg_msg("vol_id          %d", vol->vol_id);
+-	dbg_msg("reserved_pebs   %d", vol->reserved_pebs);
+-	dbg_msg("alignment       %d", vol->alignment);
+-	dbg_msg("data_pad        %d", vol->data_pad);
+-	dbg_msg("vol_type        %d", vol->vol_type);
+-	dbg_msg("name_len        %d", vol->name_len);
+-	dbg_msg("usable_leb_size %d", vol->usable_leb_size);
+-	dbg_msg("used_ebs        %d", vol->used_ebs);
+-	dbg_msg("used_bytes      %lld", vol->used_bytes);
+-	dbg_msg("last_eb_bytes   %d", vol->last_eb_bytes);
+-	dbg_msg("corrupted       %d", vol->corrupted);
+-	dbg_msg("upd_marker      %d", vol->upd_marker);
++	printk(KERN_DEBUG "Volume information dump:\n");
++	printk(KERN_DEBUG "\tvol_id          %d\n", vol->vol_id);
++	printk(KERN_DEBUG "\treserved_pebs   %d\n", vol->reserved_pebs);
++	printk(KERN_DEBUG "\talignment       %d\n", vol->alignment);
++	printk(KERN_DEBUG "\tdata_pad        %d\n", vol->data_pad);
++	printk(KERN_DEBUG "\tvol_type        %d\n", vol->vol_type);
++	printk(KERN_DEBUG "\tname_len        %d\n", vol->name_len);
++	printk(KERN_DEBUG "\tusable_leb_size %d\n", vol->usable_leb_size);
++	printk(KERN_DEBUG "\tused_ebs        %d\n", vol->used_ebs);
++	printk(KERN_DEBUG "\tused_bytes      %lld\n", vol->used_bytes);
++	printk(KERN_DEBUG "\tlast_eb_bytes   %d\n", vol->last_eb_bytes);
++	printk(KERN_DEBUG "\tcorrupted       %d\n", vol->corrupted);
++	printk(KERN_DEBUG "\tupd_marker      %d\n", vol->upd_marker);
+ 
+ 	if (vol->name_len <= UBI_VOL_NAME_MAX &&
+ 	    strnlen(vol->name, vol->name_len + 1) == vol->name_len) {
+-		dbg_msg("name            %s", vol->name);
++		printk(KERN_DEBUG "\tname            %s\n", vol->name);
+ 	} else {
+-		dbg_msg("the 1st 5 characters of the name: %c%c%c%c%c",
+-			vol->name[0], vol->name[1], vol->name[2],
+-			vol->name[3], vol->name[4]);
++		printk(KERN_DEBUG "\t1st 5 characters of name: %c%c%c%c%c\n",
++		       vol->name[0], vol->name[1], vol->name[2],
++		       vol->name[3], vol->name[4]);
+ 	}
+ }
+ 
+@@ -109,28 +116,29 @@ void ubi_dbg_dump_vtbl_record(const struct ubi_vtbl_record *r, int idx)
+ {
+ 	int name_len = be16_to_cpu(r->name_len);
+ 
+-	dbg_msg("volume table record %d dump:", idx);
+-	dbg_msg("reserved_pebs   %d", be32_to_cpu(r->reserved_pebs));
+-	dbg_msg("alignment       %d", be32_to_cpu(r->alignment));
+-	dbg_msg("data_pad        %d", be32_to_cpu(r->data_pad));
+-	dbg_msg("vol_type        %d", (int)r->vol_type);
+-	dbg_msg("upd_marker      %d", (int)r->upd_marker);
+-	dbg_msg("name_len        %d", name_len);
++	printk(KERN_DEBUG "Volume table record %d dump:\n", idx);
++	printk(KERN_DEBUG "\treserved_pebs   %d\n",
++	       be32_to_cpu(r->reserved_pebs));
++	printk(KERN_DEBUG "\talignment       %d\n", be32_to_cpu(r->alignment));
++	printk(KERN_DEBUG "\tdata_pad        %d\n", be32_to_cpu(r->data_pad));
++	printk(KERN_DEBUG "\tvol_type        %d\n", (int)r->vol_type);
++	printk(KERN_DEBUG "\tupd_marker      %d\n", (int)r->upd_marker);
++	printk(KERN_DEBUG "\tname_len        %d\n", name_len);
+ 
+ 	if (r->name[0] == '\0') {
+-		dbg_msg("name            NULL");
++		printk(KERN_DEBUG "\tname            NULL\n");
+ 		return;
+ 	}
+ 
+ 	if (name_len <= UBI_VOL_NAME_MAX &&
+ 	    strnlen(&r->name[0], name_len + 1) == name_len) {
+-		dbg_msg("name            %s", &r->name[0]);
++		printk(KERN_DEBUG "\tname            %s\n", &r->name[0]);
+ 	} else {
+-		dbg_msg("1st 5 characters of the name: %c%c%c%c%c",
++		printk(KERN_DEBUG "\t1st 5 characters of name: %c%c%c%c%c\n",
+ 			r->name[0], r->name[1], r->name[2], r->name[3],
+ 			r->name[4]);
+ 	}
+-	dbg_msg("crc             %#08x", be32_to_cpu(r->crc));
++	printk(KERN_DEBUG "\tcrc             %#08x\n", be32_to_cpu(r->crc));
+ }
+ 
+ /**
+@@ -139,15 +147,15 @@ void ubi_dbg_dump_vtbl_record(const struct ubi_vtbl_record *r, int idx)
+  */
+ void ubi_dbg_dump_sv(const struct ubi_scan_volume *sv)
+ {
+-	dbg_msg("volume scanning information dump:");
+-	dbg_msg("vol_id         %d", sv->vol_id);
+-	dbg_msg("highest_lnum   %d", sv->highest_lnum);
+-	dbg_msg("leb_count      %d", sv->leb_count);
+-	dbg_msg("compat         %d", sv->compat);
+-	dbg_msg("vol_type       %d", sv->vol_type);
+-	dbg_msg("used_ebs       %d", sv->used_ebs);
+-	dbg_msg("last_data_size %d", sv->last_data_size);
+-	dbg_msg("data_pad       %d", sv->data_pad);
++	printk(KERN_DEBUG "Volume scanning information dump:\n");
++	printk(KERN_DEBUG "\tvol_id         %d\n", sv->vol_id);
++	printk(KERN_DEBUG "\thighest_lnum   %d\n", sv->highest_lnum);
++	printk(KERN_DEBUG "\tleb_count      %d\n", sv->leb_count);
++	printk(KERN_DEBUG "\tcompat         %d\n", sv->compat);
++	printk(KERN_DEBUG "\tvol_type       %d\n", sv->vol_type);
++	printk(KERN_DEBUG "\tused_ebs       %d\n", sv->used_ebs);
++	printk(KERN_DEBUG "\tlast_data_size %d\n", sv->last_data_size);
++	printk(KERN_DEBUG "\tdata_pad       %d\n", sv->data_pad);
+ }
+ 
+ /**
+@@ -157,14 +165,14 @@ void ubi_dbg_dump_sv(const struct ubi_scan_volume *sv)
+  */
+ void ubi_dbg_dump_seb(const struct ubi_scan_leb *seb, int type)
+ {
+-	dbg_msg("eraseblock scanning information dump:");
+-	dbg_msg("ec       %d", seb->ec);
+-	dbg_msg("pnum     %d", seb->pnum);
++	printk(KERN_DEBUG "eraseblock scanning information dump:\n");
++	printk(KERN_DEBUG "\tec       %d\n", seb->ec);
++	printk(KERN_DEBUG "\tpnum     %d\n", seb->pnum);
+ 	if (type == 0) {
+-		dbg_msg("lnum     %d", seb->lnum);
+-		dbg_msg("scrub    %d", seb->scrub);
+-		dbg_msg("sqnum    %llu", seb->sqnum);
+-		dbg_msg("leb_ver  %u", seb->leb_ver);
++		printk(KERN_DEBUG "\tlnum     %d\n", seb->lnum);
++		printk(KERN_DEBUG "\tscrub    %d\n", seb->scrub);
++		printk(KERN_DEBUG "\tsqnum    %llu\n", seb->sqnum);
++		printk(KERN_DEBUG "\tleb_ver  %u\n", seb->leb_ver);
+ 	}
+ }
+ 
+@@ -176,16 +184,16 @@ void ubi_dbg_dump_mkvol_req(const struct ubi_mkvol_req *req)
+ {
+ 	char nm[17];
+ 
+-	dbg_msg("volume creation request dump:");
+-	dbg_msg("vol_id    %d",   req->vol_id);
+-	dbg_msg("alignment %d",   req->alignment);
+-	dbg_msg("bytes     %lld", (long long)req->bytes);
+-	dbg_msg("vol_type  %d",   req->vol_type);
+-	dbg_msg("name_len  %d",   req->name_len);
++	printk(KERN_DEBUG "Volume creation request dump:\n");
++	printk(KERN_DEBUG "\tvol_id    %d\n",   req->vol_id);
++	printk(KERN_DEBUG "\talignment %d\n",   req->alignment);
++	printk(KERN_DEBUG "\tbytes     %lld\n", (long long)req->bytes);
++	printk(KERN_DEBUG "\tvol_type  %d\n",   req->vol_type);
++	printk(KERN_DEBUG "\tname_len  %d\n",   req->name_len);
+ 
+ 	memcpy(nm, req->name, 16);
+ 	nm[16] = 0;
+-	dbg_msg("the 1st 16 characters of the name: %s", nm);
++	printk(KERN_DEBUG "\t1st 16 characters of name: %s\n", nm);
+ }
+ 
+-#endif /* CONFIG_MTD_UBI_DEBUG_MSG */
++#endif /* CONFIG_MTD_UBI_DEBUG */
+diff --git a/drivers/mtd/ubi/debug.h b/drivers/mtd/ubi/debug.h
+index 5c768b6..9873008 100644
+--- a/drivers/mtd/ubi/debug.h
++++ b/drivers/mtd/ubi/debug.h
+@@ -24,21 +24,16 @@
+ #ifdef CONFIG_MTD_UBI_DEBUG
+ #include <linux/random.h>
+ 
+-#define ubi_assert(expr)  BUG_ON(!(expr))
+ #define dbg_err(fmt, ...) ubi_err(fmt, ##__VA_ARGS__)
+-#else
+-#define ubi_assert(expr)  ({})
+-#define dbg_err(fmt, ...) ({})
+-#endif
+ 
+-#ifdef CONFIG_MTD_UBI_DEBUG_DISABLE_BGT
+-#define DBG_DISABLE_BGT 1
+-#else
+-#define DBG_DISABLE_BGT 0
+-#endif
++#define ubi_assert(expr)  do {                                               \
++        if (unlikely(!(expr))) {                                             \
++                printk(KERN_CRIT "UBI assert failed in %s at %u (pid %d)\n", \
++                       __func__, __LINE__, current->pid);                    \
++                ubi_dbg_dump_stack();                                        \
++        }                                                                    \
++} while (0)
+ 
+-#ifdef CONFIG_MTD_UBI_DEBUG_MSG
+-/* Generic debugging message */
+ #define dbg_msg(fmt, ...)                                    \
+ 	printk(KERN_DEBUG "UBI DBG (pid %d): %s: " fmt "\n", \
+ 	       current->pid, __FUNCTION__, ##__VA_ARGS__)
+@@ -61,19 +56,12 @@ void ubi_dbg_dump_sv(const struct ubi_scan_volume *sv);
+ void ubi_dbg_dump_seb(const struct ubi_scan_leb *seb, int type);
+ void ubi_dbg_dump_mkvol_req(const struct ubi_mkvol_req *req);
+ 
++#ifdef CONFIG_MTD_UBI_DEBUG_MSG
++/* General debugging messages */
++#define dbg_gen(fmt, ...) dbg_msg(fmt, ##__VA_ARGS__)
+ #else
+-
+-#define dbg_msg(fmt, ...)    ({})
+-#define ubi_dbg_dump_stack() ({})
+-#define ubi_dbg_dump_ec_hdr(ec_hdr)      ({})
+-#define ubi_dbg_dump_vid_hdr(vid_hdr)    ({})
+-#define ubi_dbg_dump_vol_info(vol)       ({})
+-#define ubi_dbg_dump_vtbl_record(r, idx) ({})
+-#define ubi_dbg_dump_sv(sv)              ({})
+-#define ubi_dbg_dump_seb(seb, type)      ({})
+-#define ubi_dbg_dump_mkvol_req(req)      ({})
+-
+-#endif /* CONFIG_MTD_UBI_DEBUG_MSG */
++#define dbg_gen(fmt, ...) ({})
++#endif
+ 
+ #ifdef CONFIG_MTD_UBI_DEBUG_MSG_EBA
+ /* Messages from the eraseblock association sub-system */
+@@ -105,6 +93,12 @@ void ubi_dbg_dump_mkvol_req(const struct ubi_mkvol_req *req);
+ #define UBI_IO_DEBUG 0
+ #endif
+ 
++#ifdef CONFIG_MTD_UBI_DEBUG_DISABLE_BGT
++#define DBG_DISABLE_BGT 1
++#else
++#define DBG_DISABLE_BGT 0
++#endif
++
+ #ifdef CONFIG_MTD_UBI_DEBUG_EMULATE_BITFLIPS
+ /**
+  * ubi_dbg_is_bitflip - if it is time to emulate a bit-flip.
+@@ -149,4 +143,30 @@ static inline int ubi_dbg_is_erase_failure(void)
+ #define ubi_dbg_is_erase_failure() 0
+ #endif
+ 
++#else
++
++#define ubi_assert(expr)                 ({})
++#define dbg_err(fmt, ...)                ({})
++#define dbg_msg(fmt, ...)                ({})
++#define dbg_gen(fmt, ...)                ({})
++#define dbg_eba(fmt, ...)                ({})
++#define dbg_wl(fmt, ...)                 ({})
++#define dbg_io(fmt, ...)                 ({})
++#define dbg_bld(fmt, ...)                ({})
++#define ubi_dbg_dump_stack()             ({})
++#define ubi_dbg_dump_ec_hdr(ec_hdr)      ({})
++#define ubi_dbg_dump_vid_hdr(vid_hdr)    ({})
++#define ubi_dbg_dump_vol_info(vol)       ({})
++#define ubi_dbg_dump_vtbl_record(r, idx) ({})
++#define ubi_dbg_dump_sv(sv)              ({})
++#define ubi_dbg_dump_seb(seb, type)      ({})
++#define ubi_dbg_dump_mkvol_req(req)      ({})
++
++#define UBI_IO_DEBUG               0
++#define DBG_DISABLE_BGT            0
++#define ubi_dbg_is_bitflip()       0
++#define ubi_dbg_is_write_failure() 0
++#define ubi_dbg_is_erase_failure() 0
++
++#endif /* !CONFIG_MTD_UBI_DEBUG */
+ #endif /* !__UBI_DEBUG_H__ */
+diff --git a/drivers/mtd/ubi/gluebi.c b/drivers/mtd/ubi/gluebi.c
+index ae76ab6..49f52dc 100644
+--- a/drivers/mtd/ubi/gluebi.c
++++ b/drivers/mtd/ubi/gluebi.c
+@@ -111,7 +111,7 @@ static int gluebi_read(struct mtd_info *mtd, loff_t from, size_t len,
+ 	struct ubi_device *ubi;
+ 	uint64_t tmp = from;
+ 
+-	dbg_msg("read %zd bytes from offset %lld", len, from);
++	dbg_gen("read %zd bytes from offset %lld", len, from);
+ 
+ 	if (len < 0 || from < 0 || from + len > mtd->size)
+ 		return -EINVAL;
+@@ -162,7 +162,7 @@ static int gluebi_write(struct mtd_info *mtd, loff_t to, size_t len,
+ 	struct ubi_device *ubi;
+ 	uint64_t tmp = to;
+ 
+-	dbg_msg("write %zd bytes to offset %lld", len, to);
++	dbg_gen("write %zd bytes to offset %lld", len, to);
+ 
+ 	if (len < 0 || to < 0 || len + to > mtd->size)
+ 		return -EINVAL;
+@@ -215,7 +215,7 @@ static int gluebi_erase(struct mtd_info *mtd, struct erase_info *instr)
+ 	struct ubi_volume *vol;
+ 	struct ubi_device *ubi;
+ 
+-	dbg_msg("erase %u bytes at offset %u", instr->len, instr->addr);
++	dbg_gen("erase %u bytes at offset %u", instr->len, instr->addr);
+ 
+ 	if (instr->addr < 0 || instr->addr > mtd->size - mtd->erasesize)
+ 		return -EINVAL;
+@@ -304,7 +304,7 @@ int ubi_create_gluebi(struct ubi_device *ubi, struct ubi_volume *vol)
+ 		return -ENFILE;
+ 	}
+ 
+-	dbg_msg("added mtd%d (\"%s\"), size %u, EB size %u",
++	dbg_gen("added mtd%d (\"%s\"), size %u, EB size %u",
+ 		mtd->index, mtd->name, mtd->size, mtd->erasesize);
+ 	return 0;
+ }
+@@ -322,7 +322,7 @@ int ubi_destroy_gluebi(struct ubi_volume *vol)
+ 	int err;
+ 	struct mtd_info *mtd = &vol->gluebi_mtd;
+ 
+-	dbg_msg("remove mtd%d", mtd->index);
++	dbg_gen("remove mtd%d", mtd->index);
+ 	err = del_mtd_device(mtd);
+ 	if (err)
+ 		return err;
+diff --git a/drivers/mtd/ubi/io.c b/drivers/mtd/ubi/io.c
+index 561e7b2..27b9c2c 100644
+--- a/drivers/mtd/ubi/io.c
++++ b/drivers/mtd/ubi/io.c
+@@ -187,7 +187,7 @@ retry:
+ 		ubi_assert(len == read);
+ 
+ 		if (ubi_dbg_is_bitflip()) {
+-			dbg_msg("bit-flip (emulated)");
++			dbg_gen("bit-flip (emulated)");
+ 			err = UBI_IO_BITFLIPS;
+ 		}
+ 	}
+@@ -1256,7 +1256,7 @@ static int paranoid_check_all_ff(struct ubi_device *ubi, int pnum, int offset,
+ 
+ fail:
+ 	ubi_err("paranoid check failed for PEB %d", pnum);
+-	dbg_msg("hex dump of the %d-%d region", offset, offset + len);
++	ubi_msg("hex dump of the %d-%d region", offset, offset + len);
+ 	print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_OFFSET, 32, 1,
+ 		       ubi->dbg_peb_buf, len, 1);
+ 	err = 1;
+diff --git a/drivers/mtd/ubi/kapi.c b/drivers/mtd/ubi/kapi.c
+index e65c8e0..5d9bcf1 100644
+--- a/drivers/mtd/ubi/kapi.c
++++ b/drivers/mtd/ubi/kapi.c
+@@ -106,7 +106,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
+ 	struct ubi_device *ubi;
+ 	struct ubi_volume *vol;
+ 
+-	dbg_msg("open device %d volume %d, mode %d", ubi_num, vol_id, mode);
++	dbg_gen("open device %d volume %d, mode %d", ubi_num, vol_id, mode);
+ 
+ 	if (ubi_num < 0 || ubi_num >= UBI_MAX_DEVICES)
+ 		return ERR_PTR(-EINVAL);
+@@ -215,7 +215,7 @@ struct ubi_volume_desc *ubi_open_volume_nm(int ubi_num, const char *name,
+ 	struct ubi_device *ubi;
+ 	struct ubi_volume_desc *ret;
+ 
+-	dbg_msg("open volume %s, mode %d", name, mode);
++	dbg_gen("open volume %s, mode %d", name, mode);
+ 
+ 	if (!name)
+ 		return ERR_PTR(-EINVAL);
+@@ -266,7 +266,7 @@ void ubi_close_volume(struct ubi_volume_desc *desc)
+ 	struct ubi_volume *vol = desc->vol;
+ 	struct ubi_device *ubi = vol->ubi;
+ 
+-	dbg_msg("close volume %d, mode %d", vol->vol_id, desc->mode);
++	dbg_gen("close volume %d, mode %d", vol->vol_id, desc->mode);
+ 
+ 	spin_lock(&ubi->volumes_lock);
+ 	switch (desc->mode) {
+@@ -323,7 +323,7 @@ int ubi_leb_read(struct ubi_volume_desc *desc, int lnum, char *buf, int offset,
+ 	struct ubi_device *ubi = vol->ubi;
+ 	int err, vol_id = vol->vol_id;
+ 
+-	dbg_msg("read %d bytes from LEB %d:%d:%d", len, vol_id, lnum, offset);
++	dbg_gen("read %d bytes from LEB %d:%d:%d", len, vol_id, lnum, offset);
+ 
+ 	if (vol_id < 0 || vol_id >= ubi->vtbl_slots || lnum < 0 ||
+ 	    lnum >= vol->used_ebs || offset < 0 || len < 0 ||
+@@ -388,7 +388,7 @@ int ubi_leb_write(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 	struct ubi_device *ubi = vol->ubi;
+ 	int vol_id = vol->vol_id;
+ 
+-	dbg_msg("write %d bytes to LEB %d:%d:%d", len, vol_id, lnum, offset);
++	dbg_gen("write %d bytes to LEB %d:%d:%d", len, vol_id, lnum, offset);
+ 
+ 	if (vol_id < 0 || vol_id >= ubi->vtbl_slots)
+ 		return -EINVAL;
+@@ -438,7 +438,7 @@ int ubi_leb_change(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 	struct ubi_device *ubi = vol->ubi;
+ 	int vol_id = vol->vol_id;
+ 
+-	dbg_msg("atomically write %d bytes to LEB %d:%d", len, vol_id, lnum);
++	dbg_gen("atomically write %d bytes to LEB %d:%d", len, vol_id, lnum);
+ 
+ 	if (vol_id < 0 || vol_id >= ubi->vtbl_slots)
+ 		return -EINVAL;
+@@ -482,7 +482,7 @@ int ubi_leb_erase(struct ubi_volume_desc *desc, int lnum)
+ 	struct ubi_device *ubi = vol->ubi;
+ 	int err;
+ 
+-	dbg_msg("erase LEB %d:%d", vol->vol_id, lnum);
++	dbg_gen("erase LEB %d:%d", vol->vol_id, lnum);
+ 
+ 	if (desc->mode == UBI_READONLY || vol->vol_type == UBI_STATIC_VOLUME)
+ 		return -EROFS;
+@@ -542,7 +542,7 @@ int ubi_leb_unmap(struct ubi_volume_desc *desc, int lnum)
+ 	struct ubi_volume *vol = desc->vol;
+ 	struct ubi_device *ubi = vol->ubi;
+ 
+-	dbg_msg("unmap LEB %d:%d", vol->vol_id, lnum);
++	dbg_gen("unmap LEB %d:%d", vol->vol_id, lnum);
+ 
+ 	if (desc->mode == UBI_READONLY || vol->vol_type == UBI_STATIC_VOLUME)
+ 		return -EROFS;
+@@ -579,7 +579,7 @@ int ubi_leb_map(struct ubi_volume_desc *desc, int lnum, int dtype)
+ 	struct ubi_volume *vol = desc->vol;
+ 	struct ubi_device *ubi = vol->ubi;
+ 
+-	dbg_msg("unmap LEB %d:%d", vol->vol_id, lnum);
++	dbg_gen("unmap LEB %d:%d", vol->vol_id, lnum);
+ 
+ 	if (desc->mode == UBI_READONLY || vol->vol_type == UBI_STATIC_VOLUME)
+ 		return -EROFS;
+@@ -621,7 +621,7 @@ int ubi_is_mapped(struct ubi_volume_desc *desc, int lnum)
+ {
+ 	struct ubi_volume *vol = desc->vol;
+ 
+-	dbg_msg("test LEB %d:%d", vol->vol_id, lnum);
++	dbg_gen("test LEB %d:%d", vol->vol_id, lnum);
+ 
+ 	if (lnum < 0 || lnum >= vol->reserved_pebs)
+ 		return -EINVAL;
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 892c2ba..40eca9c 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -932,7 +932,7 @@ struct ubi_scan_info *ubi_scan(struct ubi_device *ubi)
+ 	for (pnum = 0; pnum < ubi->peb_count; pnum++) {
+ 		cond_resched();
+ 
+-		dbg_msg("process PEB %d", pnum);
++		dbg_gen("process PEB %d", pnum);
+ 		err = process_eb(ubi, si, pnum);
+ 		if (err < 0)
+ 			goto out_vidh;
+diff --git a/drivers/mtd/ubi/upd.c b/drivers/mtd/ubi/upd.c
+index 6fa1ab3..1230a5e 100644
+--- a/drivers/mtd/ubi/upd.c
++++ b/drivers/mtd/ubi/upd.c
+@@ -56,11 +56,11 @@ static int set_update_marker(struct ubi_device *ubi, struct ubi_volume *vol)
+ 	int err;
+ 	struct ubi_vtbl_record vtbl_rec;
+ 
+-	dbg_msg("set update marker for volume %d", vol->vol_id);
++	dbg_gen("set update marker for volume %d", vol->vol_id);
+ 
+ 	if (vol->upd_marker) {
+ 		ubi_assert(ubi->vtbl[vol->vol_id].upd_marker);
+-		dbg_msg("already set");
++		dbg_gen("already set");
+ 		return 0;
+ 	}
+ 
+@@ -92,7 +92,7 @@ static int clear_update_marker(struct ubi_device *ubi, struct ubi_volume *vol,
+ 	uint64_t tmp;
+ 	struct ubi_vtbl_record vtbl_rec;
+ 
+-	dbg_msg("clear update marker for volume %d", vol->vol_id);
++	dbg_gen("clear update marker for volume %d", vol->vol_id);
+ 
+ 	memcpy(&vtbl_rec, &ubi->vtbl[vol->vol_id],
+ 	       sizeof(struct ubi_vtbl_record));
+@@ -133,7 +133,7 @@ int ubi_start_update(struct ubi_device *ubi, struct ubi_volume *vol,
+ 	int i, err;
+ 	uint64_t tmp;
+ 
+-	dbg_msg("start update of volume %d, %llu bytes", vol->vol_id, bytes);
++	dbg_gen("start update of volume %d, %llu bytes", vol->vol_id, bytes);
+ 	ubi_assert(!vol->updating && !vol->changing_leb);
+ 	vol->updating = 1;
+ 
+@@ -183,7 +183,7 @@ int ubi_start_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
+ {
+ 	ubi_assert(!vol->updating && !vol->changing_leb);
+ 
+-	dbg_msg("start changing LEB %d:%d, %u bytes",
++	dbg_gen("start changing LEB %d:%d, %u bytes",
+ 		vol->vol_id, req->lnum, req->bytes);
+ 	if (req->bytes == 0)
+ 		return ubi_eba_atomic_leb_change(ubi, vol, req->lnum, NULL, 0,
+@@ -242,7 +242,7 @@ static int write_leb(struct ubi_device *ubi, struct ubi_volume *vol, int lnum,
+ 		memset(buf + len, 0xFF, l - len);
+ 		len = ubi_calc_data_len(ubi, buf, l);
+ 		if (len == 0) {
+-			dbg_msg("all %d bytes contain 0xFF - skip", len);
++			dbg_gen("all %d bytes contain 0xFF - skip", len);
+ 			return 0;
+ 		}
+ 
+@@ -283,7 +283,7 @@ int ubi_more_update_data(struct ubi_device *ubi, struct ubi_volume *vol,
+ 	uint64_t tmp;
+ 	int lnum, offs, err = 0, len, to_write = count;
+ 
+-	dbg_msg("write %d of %lld bytes, %lld already passed",
++	dbg_gen("write %d of %lld bytes, %lld already passed",
+ 		count, vol->upd_bytes, vol->upd_received);
+ 
+ 	if (ubi->ro_mode)
+@@ -400,7 +400,7 @@ int ubi_more_leb_change_data(struct ubi_device *ubi, struct ubi_volume *vol,
+ {
+ 	int err;
+ 
+-	dbg_msg("write %d of %lld bytes, %lld already passed",
++	dbg_gen("write %d of %lld bytes, %lld already passed",
+ 		count, vol->upd_bytes, vol->upd_received);
+ 
+ 	if (ubi->ro_mode)
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index bfa7c5d..2cd886a 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -28,9 +28,9 @@
+ #include "ubi.h"
+ 
+ #ifdef CONFIG_MTD_UBI_DEBUG_PARANOID
+-static void paranoid_check_volumes(struct ubi_device *ubi);
++static int paranoid_check_volumes(struct ubi_device *ubi);
+ #else
+-#define paranoid_check_volumes(ubi)
++#define paranoid_check_volumes(ubi) 0
+ #endif
+ 
+ static ssize_t vol_attribute_show(struct device *dev,
+@@ -218,7 +218,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 	spin_lock(&ubi->volumes_lock);
+ 	if (vol_id == UBI_VOL_NUM_AUTO) {
+ 		/* Find unused volume ID */
+-		dbg_msg("search for vacant volume ID");
++		dbg_gen("search for vacant volume ID");
+ 		for (i = 0; i < ubi->vtbl_slots; i++)
+ 			if (!ubi->volumes[i]) {
+ 				vol_id = i;
+@@ -233,7 +233,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 		req->vol_id = vol_id;
+ 	}
+ 
+-	dbg_msg("volume ID %d, %llu bytes, type %d, name %s",
++	dbg_gen("volume ID %d, %llu bytes, type %d, name %s",
+ 		vol_id, (unsigned long long)req->bytes,
+ 		(int)req->vol_type, req->name);
+ 
+@@ -361,8 +361,8 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 	ubi->vol_count += 1;
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+-	paranoid_check_volumes(ubi);
+-	return 0;
++	err = paranoid_check_volumes(ubi);
++	return err;
+ 
+ out_sysfs:
+ 	/*
+@@ -414,7 +414,7 @@ int ubi_remove_volume(struct ubi_volume_desc *desc)
+ 	struct ubi_device *ubi = vol->ubi;
+ 	int i, err, vol_id = vol->vol_id, reserved_pebs = vol->reserved_pebs;
+ 
+-	dbg_msg("remove UBI volume %d", vol_id);
++	dbg_gen("remove UBI volume %d", vol_id);
+ 	ubi_assert(desc->mode == UBI_EXCLUSIVE);
+ 	ubi_assert(vol == ubi->volumes[vol_id]);
+ 
+@@ -465,8 +465,8 @@ int ubi_remove_volume(struct ubi_volume_desc *desc)
+ 	ubi->vol_count -= 1;
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+-	paranoid_check_volumes(ubi);
+-	return 0;
++	err = paranoid_check_volumes(ubi);
++	return err;
+ 
+ out_err:
+ 	ubi_err("cannot remove volume %d, error %d", vol_id, err);
+@@ -497,7 +497,7 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
+ 	if (ubi->ro_mode)
+ 		return -EROFS;
+ 
+-	dbg_msg("re-size volume %d to from %d to %d PEBs",
++	dbg_gen("re-size volume %d to from %d to %d PEBs",
+ 		vol_id, vol->reserved_pebs, reserved_pebs);
+ 
+ 	if (vol->vol_type == UBI_STATIC_VOLUME &&
+@@ -586,8 +586,8 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
+ 			(long long)vol->used_ebs * vol->usable_leb_size;
+ 	}
+ 
+-	paranoid_check_volumes(ubi);
+-	return 0;
++	err = paranoid_check_volumes(ubi);
++	return err;
+ 
+ out_acc:
+ 	if (pebs > 0) {
+@@ -615,8 +615,7 @@ int ubi_add_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+ 	int err, vol_id = vol->vol_id;
+ 	dev_t dev;
+ 
+-	dbg_msg("add volume %d", vol_id);
+-	ubi_dbg_dump_vol_info(vol);
++	dbg_gen("add volume %d", vol_id);
+ 
+ 	/* Register character device for the volume */
+ 	cdev_init(&vol->cdev, &ubi_vol_cdev_operations);
+@@ -650,8 +649,8 @@ int ubi_add_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+ 		return err;
+ 	}
+ 
+-	paranoid_check_volumes(ubi);
+-	return 0;
++	err = paranoid_check_volumes(ubi);
++	return err;
+ 
+ out_gluebi:
+ 	err = ubi_destroy_gluebi(vol);
+@@ -672,7 +671,7 @@ void ubi_free_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+ {
+ 	int err;
+ 
+-	dbg_msg("free volume %d", vol->vol_id);
++	dbg_gen("free volume %d", vol->vol_id);
+ 
+ 	ubi->volumes[vol->vol_id] = NULL;
+ 	err = ubi_destroy_gluebi(vol);
+@@ -686,8 +685,10 @@ void ubi_free_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+  * paranoid_check_volume - check volume information.
+  * @ubi: UBI device description object
+  * @vol_id: volume ID
++ *
++ * Returns zero if volume is all right and a a negative error code if not.
+  */
+-static void paranoid_check_volume(struct ubi_device *ubi, int vol_id)
++static int paranoid_check_volume(struct ubi_device *ubi, int vol_id)
+ {
+ 	int idx = vol_id2idx(ubi, vol_id);
+ 	int reserved_pebs, alignment, data_pad, vol_type, name_len, upd_marker;
+@@ -705,16 +706,7 @@ static void paranoid_check_volume(struct ubi_device *ubi, int vol_id)
+ 			goto fail;
+ 		}
+ 		spin_unlock(&ubi->volumes_lock);
+-		return;
+-	}
+-
+-	if (vol->exclusive) {
+-		/*
+-		 * The volume may be being created at the moment, do not check
+-		 * it (e.g., it may be in the middle of ubi_create_volume().
+-		 */
+-		spin_unlock(&ubi->volumes_lock);
+-		return;
++		return 0;
+ 	}
+ 
+ 	if (vol->reserved_pebs < 0 || vol->alignment < 0 || vol->data_pad < 0 ||
+@@ -830,25 +822,34 @@ static void paranoid_check_volume(struct ubi_device *ubi, int vol_id)
+ 	}
+ 
+ 	spin_unlock(&ubi->volumes_lock);
+-	return;
++	return 0;
+ 
+ fail:
+ 	ubi_err("paranoid check failed for volume %d", vol_id);
+-	ubi_dbg_dump_vol_info(vol);
+-	ubi_dbg_dump_vtbl_record(&ubi->vtbl[vol_id], vol_id);
++	if (vol) {
++		ubi_dbg_dump_vol_info(vol);
++		ubi_dbg_dump_vtbl_record(&ubi->vtbl[vol_id], vol_id);
++	}
+ 	spin_unlock(&ubi->volumes_lock);
+-	BUG();
++	return -EINVAL;
+ }
+ 
+ /**
+  * paranoid_check_volumes - check information about all volumes.
+  * @ubi: UBI device description object
++ *
++ * Returns zero if volumes are all right and a a negative error code if not.
+  */
+-static void paranoid_check_volumes(struct ubi_device *ubi)
++static int paranoid_check_volumes(struct ubi_device *ubi)
+ {
+-	int i;
++	int i, err = 0;
+ 
+-	for (i = 0; i < ubi->vtbl_slots; i++)
+-		paranoid_check_volume(ubi, i);
++	for (i = 0; i < ubi->vtbl_slots; i++) {
++		err = paranoid_check_volume(ubi, i);
++		if (err)
++			break;
++	}
++
++	return err;
+ }
+ #endif
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index 71341d7..784e28a 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -371,7 +371,7 @@ static struct ubi_vtbl_record *process_lvol(struct ubi_device *ubi,
+ 	 *    to LEB 0.
+ 	 */
+ 
+-	dbg_msg("check layout volume");
++	dbg_gen("check layout volume");
+ 
+ 	/* Read both LEB 0 and LEB 1 into memory */
+ 	ubi_rb_for_each_entry(rb, seb, &sv->root, u.rb) {
+-- 
+1.5.6.3
+

@@ -1,0 +1,1183 @@
+From 83d748521671c4318b569ef4b1c4ca2d07837ee2 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+Date: Fri, 31 Oct 2008 11:04:51 -0500
+Subject: [PATCH] ENGR00070697 MX51: Add support for Low Power modes
+
+Added support for WAIT and STOP mode with SRPG on ARM and NEON.
+WAIT is entered when the system is idle. STOP mode is entered when the system
+is in standby.
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+---
+ arch/arm/mach-mx51/Makefile      |    5 +-
+ arch/arm/mach-mx51/clock.c       |  123 +++++++++--
+ arch/arm/mach-mx51/crm_regs.h    |   65 ++++++-
+ arch/arm/mach-mx51/devices.c     |    8 +-
+ arch/arm/mach-mx51/mx51_3stack.c |   25 +++
+ arch/arm/mach-mx51/suspend.S     |  147 +++++++++++++
+ arch/arm/mach-mx51/system.c      |  113 ++++++++++-
+ arch/arm/mach-mx51/wfi.S         |  429 ++++++++++++++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mx51.h  |    1 +
+ 9 files changed, 886 insertions(+), 30 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/Makefile b/arch/arm/mach-mx51/Makefile
+index e215d9a..9aa96e7 100644
+--- a/arch/arm/mach-mx51/Makefile
++++ b/arch/arm/mach-mx51/Makefile
+@@ -4,7 +4,10 @@
+ 
+ # Object file lists.
+ 
+-obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o lpmodes.o dvfs_core.o
++
++obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o lpmodes.o dvfs_core.o pm.o
++
++obj-$(CONFIG_CPU_V7)		+= wfi.o suspend.o
+ 
+ obj-$(CONFIG_MACH_MX51_3STACK) += mx51_3stack.o mx51_3stack_gpio.o
+ 
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 2929c86..49b0f06 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -97,7 +97,6 @@ static int _clk_enable(struct clk *clk)
+ static void _clk_disable(struct clk *clk)
+ {
+ 	u32 reg;
+-
+ 	reg = __raw_readl(clk->enable_reg);
+ 	reg &= ~(MXC_CCM_CCGR_CG_MASK << clk->enable_shift);
+ 	__raw_writel(reg, clk->enable_reg);
+@@ -368,14 +367,6 @@ static struct clk pll3_sw_clk = {
+ 	.flags = RATE_PROPAGATES,
+ };
+ 
+-static struct clk gpc_dvfs_clk = {
+-	.name = "gpc_dvfs_clk",
+-	.enable_reg = MXC_CCM_CCGR5,
+-	.enable_shift = MXC_CCM_CCGR5_CG12_OFFSET,
+-	.enable = _clk_enable,
+-	.disable = _clk_disable,
+-};
+-
+ static int _clk_lp_apm_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	u32 reg;
+@@ -566,13 +557,41 @@ static struct clk ahb_clk = {
+ 	.flags = RATE_PROPAGATES,
+ };
+ 
++static int _clk_max_enable(struct clk *clk)
++{
++	u32 reg;
++
++	_clk_enable(clk);
++
++	/* Handshake with MAX when LPM is entered. */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg &= ~MXC_CCM_CLPCR_BYPASS_MAX_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
++	return 0;
++}
++
++
++static void _clk_max_disable(struct clk *clk)
++{
++	u32 reg;
++
++	_clk_disable_inwait(clk);
++
++	/* No Handshake with MAX when LPM is entered as its disabled. */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg |= MXC_CCM_CLPCR_BYPASS_MAX_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++}
++
++
+ static struct clk ahb_max_clk = {
+ 	.name = "max_clk",
+ 	.parent = &ahb_clk,
+ 	.enable_reg = MXC_CCM_CCGR0,
+ 	.enable_shift = MXC_CCM_CCGR0_CG14_OFFSET,
+-	.enable = _clk_enable,
+-	.disable = _clk_disable_inwait,
++	.enable = _clk_max_enable,
++	.disable = _clk_max_disable,
+ };
+ 
+ static int _clk_emi_slow_set_parent(struct clk *clk, struct clk *parent)
+@@ -788,6 +807,41 @@ static struct clk aips_tz2_clk = {
+ 	.disable = _clk_disable_inwait,
+ };
+ 
++static struct clk gpc_dvfs_clk = {
++	.name = "gpc_dvfs_clk",
++	.parent = &aips_tz1_clk,
++	.enable_reg = MXC_CCM_CCGR5,
++	.enable_shift = MXC_CCM_CCGR5_CG12_OFFSET,
++	.enable = _clk_enable,
++	.disable = _clk_disable,
++};
++
++static int _clk_sdma_enable(struct clk *clk)
++{
++	u32 reg;
++
++	_clk_enable(clk);
++
++	/* Handshake with SDMA when LPM is entered. */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg &= ~MXC_CCM_CLPCR_BYPASS_SDMA_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
++	return 0;
++}
++
++static void _clk_sdma_disable(struct clk *clk)
++{
++	u32 reg;
++
++	_clk_disable(clk);
++	/* No handshake with SDMA as its not enabled. */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg |= MXC_CCM_CLPCR_BYPASS_SDMA_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++}
++
++
+ static struct clk sdma_clk[] = {
+ 	{
+ 	 .name = "sdma_ahb_clk",
+@@ -799,8 +853,8 @@ static struct clk sdma_clk[] = {
+ #endif
+ 	 .enable_reg = MXC_CCM_CCGR4,
+ 	 .enable_shift = MXC_CCM_CCGR4_CG15_OFFSET,
+-	 .enable = _clk_enable,
+-	 .disable = _clk_disable,
++	 .enable = _clk_sdma_enable,
++	 .disable = _clk_sdma_disable,
+ 	 },
+ 	{
+ 	 .name = "sdma_ipg_clk",
+@@ -818,6 +872,12 @@ static int _clk_ipu_enable(struct clk *clk)
+ 	reg &= ~MXC_CCM_CCDR_IPU_HS_MASK;
+ 	__raw_writel(reg, MXC_CCM_CCDR);
+ 
++	/* Handshake with IPU when LPM is entered as its enabled. */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg &= ~MXC_CCM_CLPCR_BYPASS_IPU_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
++
+ 	return 0;
+ }
+ 
+@@ -826,10 +886,17 @@ static void _clk_ipu_disable(struct clk *clk)
+ 	u32 reg;
+ 	_clk_disable(clk);
+ 
+-	/* No handshake with IPU as its not enabled. */
++	/* No handshake with IPU whe dividers are changed
++	 * as its not enabled. */
+ 	reg = __raw_readl(MXC_CCM_CCDR);
+ 	reg |= MXC_CCM_CCDR_IPU_HS_MASK;
+ 	__raw_writel(reg, MXC_CCM_CCDR);
++
++	/* No handshake with IPU when LPM is entered as its not enabled. */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg |= MXC_CCM_CLPCR_BYPASS_IPU_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
+ }
+ 
+ 
+@@ -1062,18 +1129,26 @@ static int _clk_hsc_enable(struct clk *clk)
+ 	reg &= ~MXC_CCM_CCDR_HSC_HS_MASK;
+ 	__raw_writel(reg, MXC_CCM_CCDR);
+ 
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg &= ~MXC_CCM_CLPCR_BYPASS_HSC_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
+ 	return 0;
+ }
+ 
+ static void _clk_hsc_disable(struct clk *clk)
+ {
+ 	u32 reg;
+-	_clk_disable(clk);
+ 
+-	/* No handshake with IPU as its not enabled. */
++	_clk_disable(clk);
++	/* No handshake with HSC as its not enabled. */
+ 	reg = __raw_readl(MXC_CCM_CCDR);
+ 	reg |= MXC_CCM_CCDR_IPU_HS_MASK;
+ 	__raw_writel(reg, MXC_CCM_CCDR);
++
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg |= MXC_CCM_CLPCR_BYPASS_HSC_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
+ }
+ 
+ static struct clk mipi_esc_clk = {
+@@ -2584,7 +2659,7 @@ static void clk_tree_init(void)
+ int __init mxc_clocks_init(void)
+ {
+ 	struct clk **clkp;
+-	int i;
++	int i, reg;
+ 
+ 	for (clkp = mxc_clks; clkp < mxc_clks + ARRAY_SIZE(mxc_clks); clkp++)
+ 		clk_register(*clkp);
+@@ -2615,14 +2690,24 @@ int __init mxc_clocks_init(void)
+ 	__raw_writel(0, MXC_CCM_CCGR1);
+ 	__raw_writel(0, MXC_CCM_CCGR2);
+ 	__raw_writel(0, MXC_CCM_CCGR3);
+-	__raw_writel(0, MXC_CCM_CCGR4);
+-	__raw_writel(1 << MXC_CCM_CCGR5_CG7_OFFSET |
++	__raw_writel(3 << MXC_CCM_CCGR4_CG8_OFFSET, MXC_CCM_CCGR4);
++	__raw_writel(1 << MXC_CCM_CCGR5_CG2_OFFSET |
++		     1 << MXC_CCM_CCGR5_CG7_OFFSET |
+ 		     1 << MXC_CCM_CCGR5_CG8_OFFSET |
+ 		     1 << MXC_CCM_CCGR5_CG9_OFFSET |
+ 		     1 << MXC_CCM_CCGR5_CG10_OFFSET |
+ 		     3 << MXC_CCM_CCGR5_CG11_OFFSET, MXC_CCM_CCGR5);
+ 	__raw_writel(1 << MXC_CCM_CCGR6_CG4_OFFSET, MXC_CCM_CCGR6);
+ 
++	/*Setup the LPM bypass bits */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg |= MXC_CCM_CLPCR_BYPASS_HSC_LPM_HS
++		| MXC_CCM_CLPCR_BYPASS_IPU_LPM_HS
++		| MXC_CCM_CLPCR_BYPASS_RTIC_LPM_HS
++		| MXC_CCM_CLPCR_BYPASS_SCC_LPM_HS
++		| MXC_CCM_CLPCR_BYPASS_SDMA_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
+ 	/* This will propagate to all children and init all the clock rates */
+ 	propagate_rate(&osc_clk);
+ 	propagate_rate(&ckih_clk);
+diff --git a/arch/arm/mach-mx51/crm_regs.h b/arch/arm/mach-mx51/crm_regs.h
+index 30ae1c4..265d922 100644
+--- a/arch/arm/mach-mx51/crm_regs.h
++++ b/arch/arm/mach-mx51/crm_regs.h
+@@ -569,6 +569,7 @@
+ #define MXC_CCM_CCGR6_CG1_OFFSET			2
+ #define MXC_CCM_CCGR6_CG0_OFFSET			0
+ 
++#define MXC_CORTEXA8_BASE	IO_ADDRESS(ARM_BASE_ADDR)
+ #define MXC_GPC_BASE		IO_ADDRESS(GPC_BASE_ADDR)
+ #define MXC_DPTC_LP_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x80)
+ #define MXC_DPTC_GP_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x100)
+@@ -576,19 +577,75 @@
+ #define MXC_DPTC_PER_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x1C0)
+ #define MXC_PGC_IPU_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x220)
+ #define MXC_PGC_VPU_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x240)
+-#define MXC_SRPGC_EMI_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x280)
+-#define MXC_SRPGC_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2A0)
+-#define MXC_EMPGC0_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2C0)
+-#define MXC_EMPGC1_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2D0)
++#define MXC_PGC_GPU_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x260)
++#define MXC_SRPG_NEON_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x280)
++#define MXC_SRPG_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2A0)
++#define MXC_SRPG_EMPGC0_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2C0)
++#define MXC_SRPG_EMPGC1_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2D0)
++#define MXC_SRPG_MEGAMIX_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2E0)
++#define MXC_SRPG_EMI_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x300)
++
++/* CORTEXA8 platform */
++#define MXC_CORTEXA8_PLAT_PVID		(MXC_CORTEXA8_BASE + 0x0)
++#define MXC_CORTEXA8_PLAT_GPC		(MXC_CORTEXA8_BASE + 0x4)
++#define MXC_CORTEXA8_PLAT_PIC		(MXC_CORTEXA8_BASE + 0x8)
++#define MXC_CORTEXA8_PLAT_LPC		(MXC_CORTEXA8_BASE + 0xC)
++#define MXC_CORTEXA8_PLAT_NEON_LPC	(MXC_CORTEXA8_BASE + 0x10)
++#define MXC_CORTEXA8_PLAT_ICGC		(MXC_CORTEXA8_BASE + 0x14)
++#define MXC_CORTEXA8_PLAT_AMC		(MXC_CORTEXA8_BASE + 0x18)
++#define MXC_CORTEXA8_PLAT_NMC		(MXC_CORTEXA8_BASE + 0x20)
++#define MXC_CORTEXA8_PLAT_NMS		(MXC_CORTEXA8_BASE + 0x24)
++
+ 
+ /* GPC */
+ #define MXC_GPC_CNTR		(MXC_GPC_BASE + 0x0)
+ #define MXC_GPC_PGR		(MXC_GPC_BASE + 0x4)
+ #define MXC_GPC_VCR		(MXC_GPC_BASE + 0x8)
++#define MXC_GPC_ALL_PU		(MXC_GPC_BASE + 0xC)
++#define MXC_GPC_NEON		(MXC_GPC_BASE + 0x10)
++#define MXC_GPC_PGR_ARMPG_OFFSET	8
++#define MXC_GPC_PGR_ARMPG_MASK		(3 << 8)
+ 
++/* PGC */
+ #define MXC_PGC_IPU_PGCR	(MXC_PGC_IPU_BASE + 0x0)
+ #define MXC_PGC_IPU_PGSR	(MXC_PGC_IPU_BASE + 0xC)
+ #define MXC_PGC_VPU_PGCR	(MXC_PGC_VPU_BASE + 0x0)
+ #define MXC_PGC_VPU_PGSR	(MXC_PGC_VPU_BASE + 0xC)
++#define MXC_PGC_GPU_PGCR	(MXC_PGC_GPU_BASE + 0x0)
++#define MXC_PGC_GPU_PGSR	(MXC_PGC_GPU_BASE + 0xC)
++
++#define MXC_PGCR_PCR		1
++#define MXC_SRPGCR_PCR		1
++#define MXC_EMPGCR_PCR		1
++#define MXC_PGSR_PSR		1
++
++
++#define MXC_CORTEXA8_PLAT_LPC_DSM	(1 << 0)
++#define MXC_CORTEXA8_PLAT_LPC_DBG_DSM	(1 << 1)
++
++/* SRPG */
++#define MXC_SRPG_NEON_SRPGCR	(MXC_SRPG_NEON_BASE + 0x0)
++#define MXC_SRPG_NEON_PUPSCR	(MXC_SRPG_NEON_BASE + 0x4)
++#define MXC_SRPG_NEON_PDNSCR	(MXC_SRPG_NEON_BASE + 0x8)
++
++#define MXC_SRPG_ARM_SRPGCR	(MXC_SRPG_ARM_BASE + 0x0)
++#define MXC_SRPG_ARM_PUPSCR	(MXC_SRPG_ARM_BASE + 0x4)
++#define MXC_SRPG_ARM_PDNSCR	(MXC_SRPG_ARM_BASE + 0x8)
++
++#define MXC_SRPG_EMPGC0_SRPGCR	(MXC_SRPG_EMPGC0_BASE + 0x0)
++#define MXC_SRPG_EMPGC0_PUPSCR	(MXC_SRPG_EMPGC0_BASE + 0x4)
++#define MXC_SRPG_EMPGC0_PDNSCR	(MXC_SRPG_EMPGC0_BASE + 0x8)
++
++#define MXC_SRPG_EMPGC1_SRPGCR	(MXC_SRPG_EMPGC1_BASE + 0x0)
++#define MXC_SRPG_EMPGC1_PUPSCR	(MXC_SRPG_EMPGC1_BASE + 0x4)
++#define MXC_SRPG_EMPGC1_PDNSCR	(MXC_SRPG_EMPGC1_BASE + 0x8)
++
++#define MXC_SRPG_MEGAMIX_SRPGCR		(MXC_SRPG_MEGAMIX_BASE + 0x0)
++#define MXC_SRPG_MEGAMIX_PUPSCR		(MXC_SRPG_MEGAMIX_BASE + 0x4)
++#define MXC_SRPG_MEGAMIX_PDNSCR		(MXC_SRPG_MEGAMIX_BASE + 0x8)
++
++#define MXC_SRPGC_EMI_SRPGCR	(MXC_SRPGC_EMI_BASE + 0x0)
++#define MXC_SRPGC_EMI_PUPSCR	(MXC_SRPGC_EMI_BASE + 0x4)
++#define MXC_SRPGC_EMI_PDNSCR	(MXC_SRPGC_EMI_BASE + 0x8)
+ 
+ #endif				/* __ARCH_ARM_MACH_MX51_CRM_REGS_H__ */
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index d5bd25b..910db17 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -18,17 +18,17 @@
+ #include <linux/platform_device.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+-
+ #include <linux/spi/spi.h>
+-
+ #include <asm/hardware.h>
+-
+ #include <asm/arch/spba.h>
+ #include "iomux.h"
+ #include <asm/arch/sdma.h>
+ #include "sdma_script_code.h"
+ #include <asm/arch/mxc_scc2_driver.h>
+ 
++/* Flag used to indicate when IRAM has been initialized */
++int iram_ready;
++
+ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+ {
+ 	/* AP<->BP */
+@@ -384,7 +384,7 @@ static inline void mxc_init_scc(void)
+ 	iounmap(scm_ram_base);
+ 	iounmap(scc_base);
+ 	printk(KERN_INFO "IRAM READY\n");
+-
++	iram_ready = 1;
+ }
+ #endif
+ 
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 6bec3d0..93f4308 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -784,6 +784,30 @@ static int __init mxc_init_touchscreen(void)
+ }
+ #endif
+ 
++static int __init mxc_init_srpgconfig(void)
++{
++	struct clk *gpcclk = clk_get(NULL, "gpc_dvfs_clk");
++	clk_enable(gpcclk);
++
++	/* Setup the number of clock cycles to wait for SRPG
++	 * power up and power down requests.
++	 */
++	__raw_writel(0x010F0201, MXC_SRPG_ARM_PUPSCR);
++	__raw_writel(0x010F0201, MXC_SRPG_NEON_PUPSCR);
++	__raw_writel(0x00000008, MXC_SRPG_EMPGC0_PUPSCR);
++	__raw_writel(0x00000008, MXC_SRPG_EMPGC1_PUPSCR);
++
++	__raw_writel(0x01010101, MXC_SRPG_ARM_PDNSCR);
++	__raw_writel(0x01010101, MXC_SRPG_NEON_PDNSCR);
++	__raw_writel(0x00000018, MXC_SRPG_EMPGC0_PDNSCR);
++	__raw_writel(0x00000018, MXC_SRPG_EMPGC1_PDNSCR);
++
++	clk_disable(gpcclk);
++	clk_put(gpcclk);
++
++	return 0;
++}
++
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -829,6 +853,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_keypad();
+ 	mxc_init_nand_mtd();
+ 	mxc_init_mmc();
++	mxc_init_srpgconfig();
+ 
+ #if defined(CONFIG_I2C_MXC) || defined(CONFIG_I2C_MXC_MODULE)
+ 
+diff --git a/arch/arm/mach-mx51/suspend.S b/arch/arm/mach-mx51/suspend.S
+new file mode 100644
+index 0000000..f60c12b
+--- /dev/null
++++ b/arch/arm/mach-mx51/suspend.S
+@@ -0,0 +1,147 @@
++/*
++ *  linux/arch/arm/mach-mx51/Suspend.S
++ *
++ *  Copyright (C) 2008, Freescale Semiconductor, Inc. All Rights Reserved.
++ *   THIS SOURCE CODE, AND ITS USE AND DISTRIBUTION, IS SUBJECT TO THE TERMS
++ *  AND CONDITIONS OF THE APPLICABLE LICENSE AGREEMENT
++ */
++
++#include <linux/linkage.h>
++#include <asm/assembler.h>
++#include <asm/asm-offsets.h>
++#include <asm/elf.h>
++#include <asm/pgtable-hwdef.h>
++#include <asm/pgtable.h>
++#include <asm/hardware.h>
++
++#define ARM_CTRL_DCACHE  1 << 2
++#define ARM_CTRL_ICACHE  1 << 12
++#define ARM_AUXCR_L2EN   1 << 1
++
++
++/*
++ *	cpu_do_suspend_workaround()
++ *
++ *	Suspend the processor (eg, wait for interrupt).
++ *
++ *	IRQs are already disabled.
++ */
++ENTRY(cpu_do_suspend_workaround)
++    stmfd   sp!, {r4,r5,r7,r9,r10,r11}     @ Save registers
++
++    /* Disable L1 caches */
++    mrc     p15, 0, r0, c1, c0, 0    @ R0 = system control reg
++    bic     r0, r0, #ARM_CTRL_ICACHE @ Disable ICache
++    bic     r0, r0, #ARM_CTRL_DCACHE @ Disable DCache
++    mcr     p15, 0, r0, c1, c0, 0    @ Update system control reg
++
++    mrc     p15, 1, r0, c0, c0, 1   @ Read CLIDR
++    ands    r3, r0, #0x7000000       @ Isolate level of coherency
++    mov     r3, r3, lsr #23         @ Cache level value (naturally aligned)
++    beq     FinishedClean
++    mov     r10, #0
++Loop1Clean:
++    add     r2, r10, r10, lsr #1    @ Work out cache level
++    mov     r1, r0, lsr r2          @ R0 bottom 3 bits = Cache Type for this level
++    and     r1, r1, #7              @ Get those 3 bits alone
++    cmp     r1, #2
++    blt     SkipClean                @ No cache or only instruction cache at this level
++    mcr     p15, 2, r10, c0, c0, 0  @ Write the Cache Size selection register
++    mov     r1, #0
++    .long   0xF57FF06F              @ ISB
++    mrc     p15, 1, r1, c0, c0, 0   @ Reads current Cache Size ID register
++    and     r2, r1, #7             @ Extract the line length field
++    add     r2, r2, #4              @ Add 4 for the line length offset (log2 16 bytes)
++    ldr     r4, =0x3FF
++    ands    r4, r4, r1, lsr #3      @ R4 is the max number on the way size (right aligned)
++    clz     r5, r4                  @ R5 is the bit position of the way size increment
++    ldr     r7, =0x00007FFF
++    ands    r7, r7, r1, lsr #13     @ R7 is the max number of the index size (right aligned)
++Loop2Clean:
++    mov     r9, r4                  @ R9 working copy of the max way size (right aligned)
++Loop3Clean:
++    orr     r11, r10, r9, lsl r5    @ Factor in the way number and cache number into R11
++    orr     r11, r11, r7, lsl r2    @ Factor in the index number
++    mcr     p15, 0, r11, c7, c14, 2 @ Clean and invalidate by set/way
++    subs    r9, r9, #1              @ Decrement the way number
++    bge     Loop3Clean
++    subs    r7, r7, #1              @ Decrement the index
++    bge     Loop2Clean
++SkipClean:
++    add     r10, r10, #2            @ Increment the cache number
++    cmp     r3, r10
++    bgt     Loop1Clean
++
++FinishedClean:
++
++    /* Disable L2 cache */
++    mrc     p15, 0, r0, c1, c0, 1   @ R0 = auxiliary control reg
++    bic     r0, r0, #ARM_AUXCR_L2EN @ Disable L2 cache
++    mcr     p15, 0, r0, c1, c0, 1   @ Update aux control reg
++
++    .long     0xe320f003              @ Opcode for WFI
++
++    mov     r0, #0
++    mcr     p15, 0, r0, c7, c5, 0   @ Invalidate inst cache
++
++    /* Invalidate data caches */
++    mrc     p15, 1, r0, c0, c0, 1   @ Read CLIDR
++    ands    r3, r0, #0x7000000      @ Isolate level of coherency
++    mov     r3, r3, lsr #23         @ Cache level value (naturally aligned)
++    beq     FinishedInvalidate
++    mov     r10, #0
++Loop1Invalidate:
++    add     r2, r10, r10, lsr #1    @ Work out cache level
++    mov     r1, r0, lsr r2          @ R0 bottom 3 bits = Cache Type for this level
++    and     r1, r1, #7              @ Get those 3 bits alone
++    cmp     r1, #2
++    blt     SkipInvalidate          @ No cache or only instruction cache at this level
++    mcr     p15, 2, r10, c0, c0, 0  @ Write the Cache Size selection register
++    mov     r1, #0
++    .long   0xF57FF06F              @ ISB
++    mrc     p15, 1, r1, c0, c0, 0   @ Reads current Cache Size ID register
++    and     r2, r1, #7              @ Extract the line length field
++    add     r2, r2, #4              @ Add 4 for the line length offset (log2 16 bytes)
++    ldr     r4, =0x3FF
++    ands    r4, r4, r1, lsr #3      @ R4 is the max number on the way size (right aligned)
++    clz     r5, r4                  @ R5 is the bit position of the way size increment
++    ldr     r7, =0x00007FFF
++    ands    r7, r7, r1, lsr #13     @ R7 is the max number of the index size (right aligned)
++Loop2Invalidate:
++    mov     r9, r4                  @ R9 working copy of the max way size (right aligned)
++Loop3Invalidate:
++    orr     r11, r10, r9, lsl r5    @ Factor in the way number and cache number into R11
++    orr     r11, r11, r7, lsl r2    @ Factor in the index number
++    mcr     p15, 0, r11, c7, c6, 2  @ Invalidate by set/way
++    subs    r9, r9, #1              @ Decrement the way number
++    bge     Loop3Invalidate
++    subs    r7, r7, #1              @ Decrement the index
++    bge     Loop2Invalidate
++SkipInvalidate:
++    add     r10, r10, #2            @ Increment the cache number
++    cmp     r3, r10
++    bgt     Loop1Invalidate
++
++FinishedInvalidate:
++
++    /* Enable L2 cache */
++    mrc     p15, 0, r0, c1, c0, 1   @ R0 = auxiliary control reg
++    orr     r0, r0, #ARM_AUXCR_L2EN @ Enable L2 cache
++    mcr     p15, 0, r0, c1, c0, 1   @ Update aux control reg
++
++    /* Enable L1 caches */
++    mrc     p15, 0, r0, c1, c0, 0    @ R0 = system control reg
++    orr     r0, r0, #ARM_CTRL_ICACHE @ Enable ICache
++    orr     r0, r0, #ARM_CTRL_DCACHE @ Enable DCache
++    mcr     p15, 0, r0, c1, c0, 0    @ Update system control reg
++
++    /* Restore registers */
++    ldmfd sp!, {r4,r5,r7,r9,r10,r11}
++    mov		pc, lr
++
++	.type	cpu_do_suspend, #object
++ENTRY(cpu_do_suspend)
++	.word	cpu_do_suspend_workaround
++	.size	cpu_do_suspend_workaround, . - cpu_do_suspend_workaround
++
++
+diff --git a/arch/arm/mach-mx51/system.c b/arch/arm/mach-mx51/system.c
+index c9f984c..ae99ed7 100644
+--- a/arch/arm/mach-mx51/system.c
++++ b/arch/arm/mach-mx51/system.c
+@@ -18,6 +18,7 @@
+ #include <asm/hardware.h>
+ #include <asm/proc-fns.h>
+ #include <asm/system.h>
++#include "crm_regs.h"
+ 
+ /*!
+  * @defgroup MSL_MX51 i.MX51 Machine Specific Layer (MSL)
+@@ -31,18 +32,117 @@
+  */
+ 
+ extern int mxc_jtag_enabled;
++extern int iram_ready;
+ static struct clk *gpc_dvfs_clk;
+ 
++extern void cpu_cortexa8_do_idle(u32 addr);
++
++
++/* set cpu low power mode before WFI instruction */
++void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
++{
++	u32 plat_lpc, gpc_pgr, arm_srpgcr, ccm_clpcr;
++	u32 empgc0, empgc1;
++	int stop_mode;
++
++	/* always allow platform to issue a deep sleep mode request */
++	plat_lpc = __raw_readl(MXC_CORTEXA8_PLAT_LPC) &
++	    ~(MXC_CORTEXA8_PLAT_LPC_DSM);
++	ccm_clpcr = __raw_readl(MXC_CCM_CLPCR) & ~(MXC_CCM_CLPCR_LPM_MASK);
++	arm_srpgcr = __raw_readl(MXC_SRPG_ARM_SRPGCR) & ~(MXC_SRPGCR_PCR);
++	empgc0 = __raw_readl(MXC_SRPG_EMPGC0_SRPGCR) & ~(MXC_SRPGCR_PCR);
++	empgc1 = __raw_readl(MXC_SRPG_EMPGC1_SRPGCR) & ~(MXC_SRPGCR_PCR);
++
++	gpc_pgr = __raw_readl(MXC_GPC_PGR) & ~(MXC_GPC_PGR_ARMPG_MASK);
++
++	switch (mode) {
++	case WAIT_CLOCKED:
++		break;
++	case WAIT_UNCLOCKED:
++		ccm_clpcr |= (0x1 << MXC_CCM_CLPCR_LPM_OFFSET);
++		break;
++	case WAIT_UNCLOCKED_POWER_OFF:
++	case STOP_POWER_OFF:
++		plat_lpc |= MXC_CORTEXA8_PLAT_LPC_DSM
++			    | MXC_CORTEXA8_PLAT_LPC_DBG_DSM;
++		if (mode == WAIT_UNCLOCKED_POWER_OFF) {
++			ccm_clpcr |= (0x1 << MXC_CCM_CLPCR_LPM_OFFSET);
++			stop_mode = 0;
++		} else {
++			ccm_clpcr |= (0x2 << MXC_CCM_CLPCR_LPM_OFFSET);
++			stop_mode = 1;
++		}
++
++		arm_srpgcr |= MXC_SRPGCR_PCR;
++		gpc_pgr |= (0x1 << MXC_GPC_PGR_ARMPG_OFFSET);
++		if (stop_mode) {
++			empgc0 |= MXC_SRPGCR_PCR;
++			empgc1 |= MXC_SRPGCR_PCR;
++		}
++
++		if (tzic_enable_wake(1) != 0)
++			return;
++		break;
++	case STOP_POWER_ON:
++		ccm_clpcr |= (0x2 << MXC_CCM_CLPCR_LPM_OFFSET);
++		break;
++	default:
++		printk(KERN_WARNING "UNKNOWN cpu power mode: %d\n", mode);
++		return;
++	}
++
++	__raw_writel(plat_lpc, MXC_CORTEXA8_PLAT_LPC);
++	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
++	__raw_writel(gpc_pgr, MXC_GPC_PGR);
++	__raw_writel(arm_srpgcr, MXC_SRPG_ARM_SRPGCR);
++	__raw_writel(arm_srpgcr, MXC_SRPG_NEON_SRPGCR);
++	if (stop_mode) {
++		__raw_writel(empgc0, MXC_SRPG_EMPGC0_SRPGCR);
++		__raw_writel(empgc1, MXC_SRPG_EMPGC1_SRPGCR);
++	}
++}
++
+ void mxc_pg_enable(struct platform_device *pdev)
+ {
++	if (pdev == NULL)
++		return;
++
++	if (strcmp(pdev->name, "mxc_ipu") == 0) {
++		__raw_writel(MXC_PGCR_PCR, MXC_PGC_IPU_PGCR);
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_IPU_PGSR);
++	} else if (strcmp(pdev->name, "mxc_vpu") == 0) {
++		__raw_writel(MXC_PGCR_PCR, MXC_PGC_VPU_PGCR);
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_VPU_PGSR);
++	}
+ }
++
+ EXPORT_SYMBOL(mxc_pg_enable);
+ 
+ void mxc_pg_disable(struct platform_device *pdev)
+ {
++	if (pdev == NULL)
++		return;
++
++	if (strcmp(pdev->name, "mxc_ipu") == 0) {
++		__raw_writel(0x0, MXC_PGC_IPU_PGCR);
++		if (__raw_readl(MXC_PGC_IPU_PGSR) & MXC_PGSR_PSR)
++			dev_dbg(&pdev->dev, "power gating successful\n");
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_IPU_PGSR);
++	} else if (strcmp(pdev->name, "mxc_vpu") == 0) {
++		__raw_writel(0x0, MXC_PGC_VPU_PGCR);
++		if (__raw_readl(MXC_PGC_VPU_PGSR) & MXC_PGSR_PSR)
++			dev_dbg(&pdev->dev, "power gating successful\n");
++		__raw_writel(MXC_PGSR_PSR, MXC_PGC_VPU_PGSR);
++	}
+ }
++
+ EXPORT_SYMBOL(mxc_pg_disable);
+ 
++/* To change the idle power mode, need to set arch_idle_mode to a different
++ * power mode as in enum mxc_cpu_pwr_mode.
++ * May allow dynamically changing the idle mode.
++ */
++static int arch_idle_mode = WAIT_UNCLOCKED_POWER_OFF;
+ /*!
+  * This function puts the CPU into idle mode. It is called by default_idle()
+  * in process.c file.
+@@ -54,10 +154,19 @@ void arch_idle(void)
+ 			gpc_dvfs_clk = clk_get(NULL, "gpc_dvfs_clk");
+ 		/* gpc clock is needed for SRPG */
+ 		clk_enable(gpc_dvfs_clk);
+-		cpu_do_idle();
++		mxc_cpu_lp_set(arch_idle_mode);
++		if ((mxc_cpu_is_rev(CHIP_REV_2_0)) < 0) {
++			u32 l2_iram_addr = IRAM_AVAILABLE_ADDR;
++			if (!iram_ready)
++				return;
++			if ((l2_iram_addr + 0x1000) <
++					(IRAM_BASE_ADDR + IRAM_SIZE))
++				cpu_cortexa8_do_idle(IO_ADDRESS(l2_iram_addr));
++		} else {
++			cpu_do_idle();
++		}
+ 		clk_disable(gpc_dvfs_clk);
+ 	}
+-
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx51/wfi.S b/arch/arm/mach-mx51/wfi.S
+new file mode 100644
+index 0000000..eedc949
+--- /dev/null
++++ b/arch/arm/mach-mx51/wfi.S
+@@ -0,0 +1,429 @@
++/*
++ *  linux/arch/arm/mach-mx51/wfi.S
++ *
++ *  Copyright (C) 2008, Freescale Semiconductor, Inc. All Rights Reserved.
++ *   THIS SOURCE CODE, AND ITS USE AND DISTRIBUTION, IS SUBJECT TO THE TERMS
++ *  AND CONDITIONS OF THE APPLICABLE LICENSE AGREEMENT
++ */
++
++#include <linux/linkage.h>
++#include <asm/assembler.h>
++#include <asm/asm-offsets.h>
++#include <asm/elf.h>
++#include <asm/pgtable-hwdef.h>
++#include <asm/pgtable.h>
++#include <asm/hardware.h>
++
++#define ARM_CTRL_DCACHE  1 << 2
++#define ARM_AUXCR_L2EN   1 << 1
++/*
++ *	cpu_cortexa8_do_idle()
++ *
++ *	Idle the processor (eg, wait for interrupt).
++ *
++ *	IRQs are already disabled.
++ */
++ENTRY(cpu_cortexa8_do_idle)
++
++    mrc     p15, 0, r1, c1, c0, 1   @ R1 = auxiliary control reg
++    ands    r2, r1, #ARM_AUXCR_L2EN @ Check if L2 is disabled
++    beq     SkipL2Access
++
++    mrc     p15, 0, r2, c1, c0, 0    @ R2 = system control reg
++    bic     r2, r2, #ARM_CTRL_DCACHE @ Disable DCache
++    mcr     p15, 0, r2, c1, c0, 0    @ Update system control reg
++
++    bic     r1, r1, #ARM_AUXCR_L2EN  @ Disable L2 cache
++    mcr     p15, 0, r1, c1, c0, 1    @ Update aux control reg
++
++    ldr     r1, =(0x0 << 6)          @ A[6] = 0
++    mcr     p15, 0, r1, c15, c9, 2   @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0   @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x00]          @ Save tag info
++
++    ldr     r1, =(0x1 << 6)          @ A[6] = 1
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x04]         @ Save tag info
++
++    ldr     r1, =(0x0 << 3)         @ A[6:3] = b0000
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x08]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x0C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x10]         @ Store data info
++
++    ldr     r1, =(0x1 << 3)         @ A[6:3] = b0001
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x14]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x18]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x1C]         @ Store data info
++
++    ldr     r1, =(0x2 << 3)         @ A[6:3] = b0010
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x20]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x24]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x28]         @ Store data info
++
++    ldr     r1, =(0x3 << 3)         @ A[6:3] = b0011
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x2C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x30]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x34]         @ Store data info
++
++    ldr     r1, =(0x4 << 3)         @ A[6:3] = b0100
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x38]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x3C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x40]         @ Store data info
++
++    ldr     r1, =(0x5 << 3)         @ A[6:3] = b0101
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x44]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x48]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x4C]         @ Store data info
++
++    ldr     r1, =(0x6 << 3)         @ A[6:3] = b0110
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x50]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x54]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x58]         @ Store data info
++
++    ldr     r1, =(0x7 << 3)         @ A[6:3] = b0111
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x5C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x60]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x64]         @ Store data info
++
++    ldr     r1, =(0x8 << 3)         @ A[6:3] = b1000
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x68]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x6C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x70]         @ Store data info
++
++    ldr     r1, =(0x9 << 3)         @ A[6:3] = b1001
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x74]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x78]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x7C]         @ Store data info
++
++    ldr     r1, =(0xA << 3)         @ A[6:3] = b1010
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x80]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x84]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x88]         @ Store data info
++
++    ldr     r1, =(0xB << 3)         @ A[6:3] = b1011
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x8C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x90]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0x94]         @ Store data info
++
++    ldr     r1, =(0xC << 3)         @ A[6:3] = b1100
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0x98]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0x9C]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0xA0]         @ Store data info
++
++    ldr     r1, =(0xD << 3)         @ A[6:3] = b1101
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xA4]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0xA8]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0xAC]         @ Store data info
++
++    ldr     r1, =(0xE << 3)         @ A[6:3] = b1110
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xB0]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0xB4]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0xB8]         @ Store data info
++
++    ldr     r1, =(0xF << 3)         @ A[6:3] = b1111
++    mcr     p15, 0, r1, c15, c9, 3  @ Read L2 Data RAM into L2 data 0-2 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xBC]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 1  @ Move L2 data 1 register to R2
++    str     r2, [r0, #0xC0]         @ Store data info
++    mrc     p15, 0, r2, c15, c8, 5  @ Move L2 data 2 register to R2
++    str     r2, [r0, #0xC4]         @ Store data info
++
++    ldr     r1, =(0x2 << 29) | (0x0 << 6)   @ WAY = A[31:29] = 2, A[6] = 0
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xC8]         @ Save tag info
++
++    ldr     r1, =(0x2 << 29) | (0x1 << 6)   @ WAY = A[31:29] = 2, A[6] = 1
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xCC]         @ Save tag info
++
++    ldr     r1, =(0x4 << 29) | (0x0 << 6)   @ WAY = A[31:29] = 4, A[6] = 0
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xD0]         @ Save tag info
++
++    ldr     r1, =(0x4 << 29) | (0x1 << 6)   @ WAY = A[31:29] = 4, A[6] = 1
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xD4]         @ Save tag info
++
++    ldr     r1, =(0x6 << 29) | (0x0 << 6)   @ WAY = A[31:29] = 6, A[6] = 0
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xD8]         @ Save tag info
++
++    ldr     r1, =(0x6 << 29) | (0x1 << 6)   @ WAY = A[31:29] = 6, A[6] = 1
++    mcr     p15, 0, r1, c15, c9, 2  @ Read L2 tag RAM into L2 data 0 register
++    mrc     p15, 0, r2, c15, c8, 0  @ Move L2 data 0 register to R2
++    str     r2, [r0, #0xDC]         @ Save tag info
++
++    .long     0xe320f003              @ Opcode for WFI
++
++    ldr     r1, =(0x0 << 6)         @ A[6] = 0
++    ldr     r2, [r0, #0x00]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x1 << 6)         @ A[6] = 1
++    ldr     r2, [r0, #0x04]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x0 << 3)         @ A[6:3] = b0000
++    ldr     r2, [r0, #0x08]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x0C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x10]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x1 << 3)         @ A[6:3] = b0001
++    ldr     r2, [r0, #0x14]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x18]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x1C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x2 << 3)         @ A[6:3] = b0010
++    ldr     r2, [r0, #0x20]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x24]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x28]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x3 << 3)         @ A[6:3] = b0011
++    ldr     r2, [r0, #0x2C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x30]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x34]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x4 << 3)         @ A[6:3] = b0100
++    ldr     r2, [r0, #0x38]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x3C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x40]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x5 << 3)         @ A[6:3] = b0101
++    ldr     r2, [r0, #0x44]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x48]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x4C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x6 << 3)         @ A[6:3] = b0110
++    ldr     r2, [r0, #0x50]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x54]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x58]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x7 << 3)         @ A[6:3] = b0111
++    ldr     r2, [r0, #0x5C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x60]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x64]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x8 << 3)         @ A[6:3] = b1000
++    ldr     r2, [r0, #0x68]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x6C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x70]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x9 << 3)         @ A[6:3] = b1001
++    ldr     r2, [r0, #0x74]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x78]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x7C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0xA << 3)         @ A[6:3] = b1010
++    ldr     r2, [r0, #0x80]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x84]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x88]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0xB << 3)         @ A[6:3] = b1011
++    ldr     r2, [r0, #0x8C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x90]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0x94]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0xC << 3)         @ A[6:3] = b1100
++    ldr     r2, [r0, #0x98]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0x9C]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0xA0]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0xD << 3)         @ A[6:3] = b1101
++    ldr     r2, [r0, #0xA4]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0xA8]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0xAC]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0xE << 3)         @ A[6:3] = b1110
++    ldr     r2, [r0, #0xB0]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0xB4]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0xB8]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0xF << 3)         @ A[6:3] = b1111
++    ldr     r2, [r0, #0xBC]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    ldr     r2, [r0, #0xC0]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 1  @ Move R2 to L2 data 1 register
++    ldr     r2, [r0, #0xC4]         @ Load data info
++    mcr     p15, 0, r2, c15, c8, 5  @ Move R2 to L2 data 2 register
++    mcr     p15, 0, r1, c15, c8, 3  @ Write L2 data 0-2 registers to L2 data RAM
++
++    ldr     r1, =(0x2 << 29) | (0x0 << 6)   @ WAY = A[31:29] = 2, A[6] = 0
++    ldr     r2, [r0, #0xC8]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x2 << 29) | (0x1 << 6)   @ WAY = A[31:29] = 2, A[6] = 1
++    ldr     r2, [r0, #0xCC]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x4 << 29) | (0x0 << 6)   @ WAY = A[31:29] = 4, A[6] = 0
++    ldr     r2, [r0, #0xD0]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x4 << 29) | (0x1 << 6)   @ WAY = A[31:29] = 4, A[6] = 1
++    ldr     r2, [r0, #0xD4]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x6 << 29) | (0x0 << 6)   @ WAY = A[31:29] = 6, A[6] = 0
++    ldr     r2, [r0, #0xD8]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    ldr     r1, =(0x6 << 29) | (0x1 << 6)   @ WAY = A[31:29] = 6, A[6] = 1
++    ldr     r2, [r0, #0xDC]         @ Load tag info
++    mcr     p15, 0, r2, c15, c8, 0  @ Move R2 to L2 data 0 register
++    mcr     p15, 0, r1, c15, c8, 2  @ Write L2 data 0 register to L2 tag RAM
++
++    mrc     p15, 0, r1, c1, c0, 1   @ R1 = auxiliary control reg
++    orr     r1, r1, #ARM_AUXCR_L2EN @ Enable L2 cache
++    mcr     p15, 0, r1, c1, c0, 1   @ Update aux control reg
++
++    mrc     p15, 0, r2, c1, c0, 0    @ R2 = system control reg
++    orr     r2, r2, #ARM_CTRL_DCACHE @ Enable DCache
++    mcr     p15, 0, r2, c1, c0, 0    @ Update system control reg
++
++    b       Done
++
++SkipL2Access:
++    .long     0xe320f003              @ Opcode for WFI
++
++Done:
++    mov		pc, lr
++
++	.type	cortexa8_idle_workaround, #object
++ENTRY(cortexa8_idle_workaround)
++	.word	cpu_cortexa8_do_idle
++	.size	cortexa8_idle_workaround, . - cortexa8_idle_workaround
++
+diff --git a/include/asm-arm/arch-mxc/mx51.h b/include/asm-arm/arch-mxc/mx51.h
+index cd7cb47..0b0124b 100644
+--- a/include/asm-arm/arch-mxc/mx51.h
++++ b/include/asm-arm/arch-mxc/mx51.h
+@@ -106,6 +106,7 @@
+ #define SDMA_RAM_BASE_ADDR	(IRAM_BASE_ADDR)
+ #define SND_RAM_BASE_ADDR	(IRAM_BASE_ADDR + SDMA_IRAM_SIZE)
+ #define VPU_IRAM_BASE_ADDR	(SND_RAM_BASE_ADDR + SND_RAM_SIZE)
++#define IRAM_AVAILABLE_ADDR     (VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE)
+ 
+ /*
+  * NFC
+-- 
+1.5.4.4
+

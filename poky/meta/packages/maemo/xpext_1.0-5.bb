@@ -11,16 +11,12 @@ S = "${WORKDIR}/xpext-1.0"
 
 # ${PN} is empty so we need to tweak -dev and -dbg package dependencies
 RDEPENDS_${PN}-dev = ""
-RRECOMMENDS_${PN}-dbg = "${PN}-dev (= ${DEBPV})"
+RRECOMMENDS_${PN}-dbg = "${PN}-dev (= ${EXTENDPV})"
 
-inherit autotools pkgconfig
+inherit autotools_stage pkgconfig
 
 do_configure_prepend () {
   cd ${S}
   chmod +x ./autogen.sh
   ./autogen.sh
-}
-
-do_stage() {
-	autotools_stage_all
 }

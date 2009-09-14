@@ -1,0 +1,53 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-07-30 15:31:11.000000000 -0700
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-07-30 15:42:40.000000000 -0700
+@@ -855,8 +855,6 @@
+ #define BABY_LCD_DELAY_MS	0x8000
+ const unsigned short int baby_lcd_spi_sequence[] =
+ {
+-	/* SLPOUT                  */   BABY_LCD_START    | 0x11,
+-	/* Delay 120 ms            */   BABY_LCD_DELAY_MS | 120,
+ 	/* Power Control 1 	   */   BABY_LCD_START    | 0xc0, 0x0a,
+ 	/* Power Control 2 	   */   BABY_LCD_START    | 0xc1, 0x06, 0x06, 0x06,
+ 	/* Power Control 3 	   */   BABY_LCD_START    | 0xc2, 0x55, 0x00,
+@@ -890,6 +888,8 @@
+ 	   (idle mode off)     	   */   BABY_LCD_START    | 0xb3, 0x6a, 0x15,
+ 	/* display function set	   */   BABY_LCD_START    | 0xb6, 0x01, 0x04,
+ 	/* DISPON              	   */   BABY_LCD_START    | 0x29,
++	/* SLPOUT                  */   BABY_LCD_START    | 0x11,
++	/* Delay 120 ms            */   BABY_LCD_DELAY_MS | 200,
+ };
+ 
+ const unsigned int baby_lcd_spi_sequence_len = sizeof(baby_lcd_spi_sequence) >> 1;
+@@ -953,6 +953,7 @@
+ 	for (word = 0; word < baby_lcd_spi_sequence_len; word++) {
+ 		baby_lcd_spi_send_word(spi_clk, baby_lcd_spi_sequence[word]);
+ 	}
++
+ 	return 0;
+ }
+ 
+Index: linux-2.6.26/drivers/video/Makefile
+===================================================================
+--- linux-2.6.26.orig/drivers/video/Makefile	2009-07-30 15:30:14.000000000 -0700
++++ linux-2.6.26/drivers/video/Makefile	2009-07-30 15:31:12.000000000 -0700
+@@ -13,7 +13,7 @@
+ 
+ obj-$(CONFIG_VT)		  += console/
+ obj-$(CONFIG_LOGO)		  += logo/
+-obj-y				  += backlight/ display/
++obj-y				  += display/
+ 
+ obj-$(CONFIG_FB_CFB_FILLRECT)  += cfbfillrect.o
+ obj-$(CONFIG_FB_CFB_COPYAREA)  += cfbcopyarea.o
+@@ -129,6 +129,9 @@
+ obj-$(CONFIG_FB_BF54X_LQ043)	  += bf54x-lq043fb.o
+ obj-$(CONFIG_FB_BFIN_T350MCQB)	  += bfin-t350mcqb-fb.o
+ 
++# enable the backlight after the display is initialized
++obj-y				  += backlight/
++
+ # the test framebuffer is last
+ obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
+ 

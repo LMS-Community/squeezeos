@@ -52,6 +52,9 @@ if [ "$ACTION" = "add" ] && [ -n "$DEVNAME" ]; then
 	
 	# If the device isn't mounted at this point, it isn't configured in fstab
 	grep -q "^$DEVNAME " /proc/mounts || automount
+
+	# Restart samba
+	/etc/init.d/samba restart
 fi
 
 
@@ -65,4 +68,7 @@ if [ "$ACTION" = "remove" ] && [ -x "$UMOUNT" ] && [ -n "$DEVNAME" ]; then
 	# Remove empty directories from auto-mounter
 	name="`basename "$DEVNAME"`"
 	test -e "/tmp/.automount-$name" && rm_dir "/media/$name"
+
+	# Restart samba
+	/etc/init.d/samba restart
 fi

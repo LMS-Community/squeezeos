@@ -1,0 +1,66 @@
+From 06995dfe570afb2151e0fb8539a6254ab3785f8a Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Tue, 18 Nov 2008 13:19:56 +0800
+Subject: [PATCH] ENGR00098620 SPI: fix spi_write can not send data larger than 8 units
+
+Fix spi_write can not send data larger than 8 units. Sometime when received
+parts of the data and rests have not arrived, the RXFIFO Ready bit of the
+status register will be zero. We have not considered this case and get a
+wrong transfer.count value.
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/spi/mxc_spi.c |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/spi/mxc_spi.c b/drivers/spi/mxc_spi.c
+index 4ec095c..35d0d7e 100644
+--- a/drivers/spi/mxc_spi.c
++++ b/drivers/spi/mxc_spi.c
+@@ -155,6 +155,9 @@ struct mxc_spi_xfer {
+ 	void *rx_buf;
+ 	/* Data transfered count */
+ 	unsigned int count;
++	/* Data received count, descending sequence, zero means no more data to
++	   be received */
++	unsigned int rx_count;
+ 	/* Function to read the FIFO data to rx_buf */
+ 	void (*rx_get) (struct mxc_spi *, u32 val);
+ 	/* Function to get the data to be written to FIFO */
+@@ -700,6 +703,7 @@ static irqreturn_t mxc_spi_isr(int irq, void *dev_id)
+ 			master_drv_data->transfer.rx_get(master_drv_data,
+ 							 rx_tmp);
+ 		(master_drv_data->transfer.count)--;
++		(master_drv_data->transfer.rx_count)--;
+ 		ret = IRQ_HANDLED;
+ 		if (pass_counter-- == 0) {
+ 			break;
+@@ -710,6 +714,9 @@ static irqreturn_t mxc_spi_isr(int irq, void *dev_id)
+ 		  (MXC_CSPISTAT_RR +
+ 		   master_drv_data->spi_ver_def->int_status_dif)));
+ 
++	if (master_drv_data->transfer.rx_count)
++		return ret;
++
+ 	if (master_drv_data->transfer.count) {
+ 		if (master_drv_data->transfer.tx_buf) {
+ 			u32 count = (master_drv_data->transfer.count >
+@@ -717,6 +724,7 @@ static irqreturn_t mxc_spi_isr(int irq, void *dev_id)
+ 			    master_drv_data->transfer.count;
+ 			spi_put_tx_data(master_drv_data->base, count,
+ 					master_drv_data);
++			master_drv_data->transfer.rx_count = count;
+ 		}
+ 	} else {
+ 		complete(&master_drv_data->xfer_done);
+@@ -833,6 +841,7 @@ int mxc_spi_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 	/* Perform Tx transaction */
+ 
+ 	spi_put_tx_data(master_drv_data->base, count, master_drv_data);
++	master_drv_data->transfer.rx_count = count;
+ 
+ 	/* Wait for transfer completion */
+ 
+-- 
+1.5.4.4
+

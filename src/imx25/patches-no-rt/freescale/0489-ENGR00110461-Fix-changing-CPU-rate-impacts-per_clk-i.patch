@@ -1,0 +1,63 @@
+From 9c9876818399ce2dee36e3f867bfd90429220c77 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Mon, 30 Mar 2009 10:46:00 +0800
+Subject: [PATCH] ENGR00110461 Fix changing CPU rate impacts per_clk in MX35
+
+When changing CPU rate, per_clk is also changed in MX35 because
+MXC_CCM_PDR0 register is updated wrongly.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx35/clock.c |   15 +++++++++++++--
+ 1 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/clock.c b/arch/arm/mach-mx35/clock.c
+index 829580e..f2555a7 100644
+--- a/arch/arm/mach-mx35/clock.c
++++ b/arch/arm/mach-mx35/clock.c
+@@ -145,6 +145,7 @@ static unsigned long _clk_round_rate(struct clk *clk, unsigned long rate)
+ static int __switch_cpu_wp(struct clk *clk, unsigned long rate)
+ {
+ 	int i;
++	u32 reg_value;
+ 	if (cpu_wp_tbl[cpu_curr_wp].cpu_rate < rate) {
+ 		for (i = cpu_curr_wp + 2; i < cpu_wp_nr; i += 2) {
+ 			if (rate == cpu_wp_tbl[i].cpu_rate)
+@@ -159,7 +160,11 @@ static int __switch_cpu_wp(struct clk *clk, unsigned long rate)
+ 		return -EINVAL;
+ 	}
+       found:
+-	__raw_writel(cpu_wp_tbl[i].pdr0_reg, MXC_CCM_PDR0);
++	reg_value = __raw_readl(MXC_CCM_PDR0);
++	reg_value = (reg_value & ~(MXC_CCM_PDR0_CON_MUX_DIV_MASK |
++				   MXC_CCM_PDR0_AUTO_MUX_DIV_MASK)) |
++	    cpu_wp_tbl[i].pdr0_reg;
++	__raw_writel(reg_value, MXC_CCM_PDR0);
+ 
+ 	if (cpu_wp_tbl[i].pll_rate != cpu_wp_tbl[cpu_curr_wp].pll_rate)
+ 		clk_set_rate(clk->parent, cpu_wp_tbl[i].pll_rate);
+@@ -173,6 +178,8 @@ static int __switch_cpu_rate(struct clk *clk, unsigned long rate)
+ 	int prev;
+ 	unsigned long tmp;
+ 	int arm_div, fi, fd, start, end;
++	u32 reg_value;
++
+ 	if (cpu_wp_tbl[cpu_curr_wp].cpu_rate < rate) {
+ 		start = cpu_curr_wp + 2;
+ 		end = cpu_wp_nr;
+@@ -203,7 +210,11 @@ static int __switch_cpu_rate(struct clk *clk, unsigned long rate)
+ 	if (prev == cpu_curr_wp)
+ 		return 0;
+ 
+-	__raw_writel(cpu_wp_tbl[prev].pdr0_reg, MXC_CCM_PDR0);
++	reg_value = __raw_readl(MXC_CCM_PDR0);
++	reg_value = (reg_value & ~(MXC_CCM_PDR0_CON_MUX_DIV_MASK |
++				   MXC_CCM_PDR0_AUTO_MUX_DIV_MASK)) |
++	    cpu_wp_tbl[prev].pdr0_reg;
++	__raw_writel(reg_value, MXC_CCM_PDR0);
+ 
+ 	cpu_curr_wp = prev;
+ 	clk->rate = rate;
+-- 
+1.5.4.4
+

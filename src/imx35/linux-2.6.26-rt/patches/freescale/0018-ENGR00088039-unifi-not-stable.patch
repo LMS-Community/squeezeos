@@ -1,0 +1,100 @@
+From 85dbbb767e4dc9ef2593d3081928de30631b2299 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Fri, 15 Aug 2008 14:29:54 +0800
+Subject: [PATCH] ENGR00088039 unifi not stable
+
+Sometimes, during unifi initailization, it say
+"unifi0: Timeout waiting for SME to reply for 0."
+
+If read length < fifo length, STATUS_END_CMD_RESP and STATUS_READ_OP_DONE may
+come in a single interrupt together. In this case, it's using PIO mode, we
+ignore STATUS_READ_OP_DONE in irq handler.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ drivers/mmc/card/unifi_fs/fs_lx.c |    9 ++++++---
+ drivers/mmc/host/mxc_mmc.c        |   19 +++++++++++++------
+ 2 files changed, 19 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mmc/card/unifi_fs/fs_lx.c b/drivers/mmc/card/unifi_fs/fs_lx.c
+index fbd8999..da3936a 100644
+--- a/drivers/mmc/card/unifi_fs/fs_lx.c
++++ b/drivers/mmc/card/unifi_fs/fs_lx.c
+@@ -263,7 +263,7 @@ static void fs_unifi_power_on(int check_card)
+ 	regulator_set_voltage(reg_unifi->reg_1v5_ana_bb, 1500000);
+ 	regulator_enable(reg_unifi->reg_1v5_ana_bb);
+ 
+-	regulator_set_voltage(reg_unifi->reg_vdd_vpa, 2300000);
++	regulator_set_voltage(reg_unifi->reg_vdd_vpa, 3000000);
+ 	regulator_enable(reg_unifi->reg_vdd_vpa);
+ 
+ 	/* WL_1V5DD should come on last, 10ms after other supplies */
+@@ -296,7 +296,7 @@ static void fs_unifi_power_off(int check_card)
+ 	regulator_disable(reg_unifi->reg_vdd_vpa);
+ 
+ 	if (check_card && fsl_mmc_host)
+-		mmc_detect_change(fsl_mmc_host, msecs_to_jiffies(50));
++		mmc_detect_change(fsl_mmc_host, msecs_to_jiffies(5));
+ 
+ }
+ 
+@@ -354,7 +354,9 @@ int fs_sdio_register_driver(struct fs_driver *driver)
+ 		driver->probe(available_sdio_dev);
+ 
+ 		/* Register the IRQ handler to the SDIO IRQ. */
++		sdio_claim_host(available_sdio_dev->func);
+ 		ret = sdio_claim_irq(available_sdio_dev->func, fs_sdio_irq);
++		sdio_release_host(available_sdio_dev->func);
+ 		if (ret)
+ 			return ret;
+ 	}
+@@ -386,7 +388,8 @@ void fs_sdio_unregister_driver(struct fs_driver *driver)
+ 
+ 	/* Power down the UniFi */
+ 	fs_unifi_power_off(-1);
+-
++	/* Wait for card removed */
++	msleep(100);
+ 	/* invalidate the context to the device driver to the global */
+ 	available_driver = NULL;
+ }
+diff --git a/drivers/mmc/host/mxc_mmc.c b/drivers/mmc/host/mxc_mmc.c
+index 0e0e4e3..0b8d132 100644
+--- a/drivers/mmc/host/mxc_mmc.c
++++ b/drivers/mmc/host/mxc_mmc.c
+@@ -842,7 +842,18 @@ static irqreturn_t mxcmci_irq(int irq, void *devid)
+ #ifdef CONFIG_MMC_DEBUG
+ 	dump_status(__FUNCTION__, status);
+ #endif
+-	if (status & (STATUS_WRITE_OP_DONE | STATUS_READ_OP_DONE)) {
++	if (status & STATUS_END_CMD_RESP) {
++		__raw_writel(STATUS_END_CMD_RESP, host->base + MMC_STATUS);
++		mxcmci_cmd_done(host, status);
++	}
++#ifdef MXC_MMC_DMA_ENABLE
++	/*
++	 * If read length < fifo length, STATUS_END_CMD_RESP and
++	 * STATUS_READ_OP_DONE may come together. In this case, it's using PIO
++	 * mode, we ignore STATUS_READ_OP_DONE.
++	 */
++	if ((status & (STATUS_WRITE_OP_DONE | STATUS_READ_OP_DONE)) &&
++	     !(status & STATUS_END_CMD_RESP)) {
+ 		pr_debug(KERN_INFO "MXC MMC IO OP DONE INT.\n");
+ 		intctrl = __raw_readl(host->base + MMC_INT_CNTR);
+ 		__raw_writel((~(INT_CNTR_WRITE_OP_DONE | INT_CNTR_READ_OP_DONE)
+@@ -884,11 +895,7 @@ static irqreturn_t mxcmci_irq(int irq, void *devid)
+ 
+ 		mxcmci_data_done(host, status);
+ 	}
+-	if (status & STATUS_END_CMD_RESP) {
+-		__raw_writel(STATUS_END_CMD_RESP, host->base + MMC_STATUS);
+-		mxcmci_cmd_done(host, status);
+-	}
+-
++#endif
+ 	status = __raw_readl(host->base + MMC_STATUS);
+ 	intctrl = __raw_readl(host->base + MMC_INT_CNTR);
+ 	if ((status & STATUS_SDIO_INT_ACTIVE)
+-- 
+1.5.4.4
+

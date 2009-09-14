@@ -1,0 +1,60 @@
+From 4eac67d262c8ad29dd0fe17b10b9c1c3be616f9b Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 26 Jan 2009 16:12:20 +0200
+Subject: [PATCH] UBIFS: fix assertions
+
+I introduce wrong assertions in one of the previous commits, this
+patch fixes them.
+
+Also, initialize debugfs after the debugging check. This is a little
+nicer because we want the FS data to be accessible to external users
+after everything has been initialized.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   13 +++++++------
+ 1 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index c91337f..8730606 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1318,20 +1318,21 @@ static int mount_ubifs(struct ubifs_info *c)
+ 		else {
+ 			c->need_recovery = 0;
+ 			ubifs_msg("recovery completed");
++			/* GC LEB has to be empty and taken at this point */
++			ubifs_assert(c->lst.taken_empty_lebs == 1);
+ 		}
+-	}
++	} else
++		ubifs_assert(c->lst.taken_empty_lebs == 1);
+ 
+-	err = dbg_debugfs_init_fs(c);
++	err = dbg_check_filesystem(c);
+ 	if (err)
+ 		goto out_infos;
+ 
+-	err = dbg_check_filesystem(c);
++	err = dbg_debugfs_init_fs(c);
+ 	if (err)
+ 		goto out_infos;
+ 
+ 	c->always_chk_crc = 0;
+-	/* GC LEB has to be empty and taken at this point */
+-	ubifs_assert(c->lst.taken_empty_lebs == 1);
+ 
+ 	ubifs_msg("mounted UBI device %d, volume %d, name \"%s\"",
+ 		  c->vi.ubi_num, c->vi.vol_id, c->vi.name);
+@@ -1661,7 +1662,7 @@ static void ubifs_remount_ro(struct ubifs_info *c)
+ 	int i, err;
+ 
+ 	ubifs_assert(!c->need_recovery);
+-	ubifs_assert(!c->ro_media);
++	ubifs_assert(!(c->vfs_sb->s_flags & MS_RDONLY));
+ 
+ 	commit_on_unmount(c);
+ 	mutex_lock(&c->umount_mutex);
+-- 
+1.5.4.3
+

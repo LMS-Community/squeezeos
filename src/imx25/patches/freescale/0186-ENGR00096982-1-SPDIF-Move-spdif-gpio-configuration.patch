@@ -1,0 +1,99 @@
+From 3c677c38321ea06d4ac99ed1aad8f10aab468561 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Wed, 29 Oct 2008 15:16:25 +0800
+Subject: [PATCH] ENGR00096982-1 SPDIF: Move spdif gpio configuration into spdif driver
+
+The gpio can be dynamically requested/freed in driver module.
+The spdif gpio is shared by uart3 on MX37 platform. By moving
+gpio into driver module, the gpio confliction can be avioded
+if only spdif and uart3 are not used simultaneously.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/devices.c |    3 ---
+ arch/arm/mach-mx37/devices.c |    2 --
+ sound/arm/mxc-alsa-spdif.c   |    6 ++++++
+ 3 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index 101e604..d477ce4 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -26,8 +26,6 @@
+ #include "sdma_script_code.h"
+ #include "board-mx35_3stack.h"
+ 
+-extern void gpio_spdif_active(void);
+-
+ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+ {
+ 	sdma_script_addr->mxc_sdma_ap_2_ap_addr = ap_2_ap_ADDR;
+@@ -495,7 +493,6 @@ static inline void mxc_init_spdif(void)
+ 	clk_put(mxc_spdif_data.spdif_clk);
+ 	mxc_spdif_data.spdif_core_clk = clk_get(NULL, "spdif_clk");
+ 	clk_put(mxc_spdif_data.spdif_core_clk);
+-	gpio_spdif_active();
+ 	platform_device_register(&mxc_alsa_spdif_device);
+ }
+ 
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index 998ae4a..cd82a09 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -29,7 +29,6 @@
+ 
+ extern struct dptc_wp dptc_gp_wp_allfreq[DPTC_GP_WP_SUPPORTED];
+ extern struct dptc_wp dptc_lp_wp_allfreq[DPTC_LP_WP_SUPPORTED];
+-extern void gpio_spdif_active(void);
+ 
+ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+ {
+@@ -719,7 +718,6 @@ static inline void mxc_init_spdif(void)
+ 	clk_set_parent(mxc_spdif_data.spdif_core_clk, ckih_clk);
+ 	clk_put(ckih_clk);
+ 	clk_put(mxc_spdif_data.spdif_core_clk);
+-	gpio_spdif_active();
+ 	platform_device_register(&mxc_alsa_spdif_device);
+ }
+ 
+diff --git a/sound/arm/mxc-alsa-spdif.c b/sound/arm/mxc-alsa-spdif.c
+index 3518972..02f3091 100644
+--- a/sound/arm/mxc-alsa-spdif.c
++++ b/sound/arm/mxc-alsa-spdif.c
+@@ -2055,6 +2055,8 @@ static int snd_card_mxc_spdif_pcm(struct mxc_spdif_device *mxc_spdif)
+ 	return 0;
+ }
+ 
++extern void gpio_spdif_active(void);
++
+ /*!
+   * This function initializes the driver in terms of memory of the soundcard
+   * and some basic HW clock settings.
+@@ -2153,6 +2155,7 @@ static int mxc_alsa_spdif_probe(struct platform_device
+ 	if (err == 0) {
+ 		pr_info("MXC spdif support initialized\n");
+ 		platform_set_drvdata(pdev, card);
++		gpio_spdif_active();
+ 		return 0;
+ 	}
+ 
+@@ -2161,6 +2164,8 @@ static int mxc_alsa_spdif_probe(struct platform_device
+ 	return err;
+ }
+ 
++extern void gpio_spdif_inactive(void);
++
+ /*!
+   * This function releases the sound card and unmap the io address
+   *
+@@ -2184,6 +2189,7 @@ static int mxc_alsa_spdif_remove(struct platform_device *pdev)
+ 	platform_set_drvdata(pdev, NULL);
+ 
+ 	clk_disable(plat_data->spdif_core_clk);
++	gpio_spdif_inactive();
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

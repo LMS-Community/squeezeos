@@ -1,0 +1,118 @@
+From 43f662313d97a84a8b7bfcb217aaf9c214c16a39 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 15 Oct 2008 17:23:31 +0800
+Subject: [PATCH] ENGR00094911 i.MX35:change ahb burst setting code with platform data
+
+Move the ahb burst settting info to platform data to make coding
+style more proper. which is for optimizing ENGR00076908(gadget)
+and ENGR00089984(host).
+
+Signed-off-by: Jun Li <r65092@freescale.com>
+---
+ arch/arm/mach-mx35/usb_dr.c        |    2 ++
+ arch/arm/mach-mx35/usb_h2.c        |    2 ++
+ drivers/usb/gadget/arcotg_udc.c    |    6 +++---
+ drivers/usb/host/ehci-fsl.h        |    1 +
+ include/asm-arm/arch-mxc/fsl_usb.h |   14 ++++++++------
+ include/linux/fsl_devices.h        |    2 ++
+ 6 files changed, 18 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/usb_dr.c b/arch/arm/mach-mx35/usb_dr.c
+index a2992c0..0c6383b 100644
+--- a/arch/arm/mach-mx35/usb_dr.c
++++ b/arch/arm/mach-mx35/usb_dr.c
+@@ -32,6 +32,8 @@ static struct fsl_usb2_platform_data __maybe_unused dr_utmi_config = {
+ 	.gpio_usb_active   = gpio_usbotg_utmi_active,
+ 	.gpio_usb_inactive = gpio_usbotg_utmi_inactive,
+ 	.transceiver       = "utmi",
++	.change_ahb_burst = 1, /* defaultly i.MX35 is in INCR8 mode */
++	.ahb_burst_mode = 0, /* i.MX35 should be in INCR mode */
+ };
+ 
+ 
+diff --git a/arch/arm/mach-mx35/usb_h2.c b/arch/arm/mach-mx35/usb_h2.c
+index c41785f..fcc5350 100644
+--- a/arch/arm/mach-mx35/usb_h2.c
++++ b/arch/arm/mach-mx35/usb_h2.c
+@@ -30,6 +30,8 @@ static struct fsl_usb2_platform_data usbh2_config = {
+ 	.gpio_usb_active   = gpio_usbh2_active,
+ 	.gpio_usb_inactive = gpio_usbh2_inactive,
+ 	.transceiver       = "serial",
++	.change_ahb_burst = 1,	/* i.MX35 should work in INCR mode */
++	.ahb_burst_mode = 0,
+ };
+ 
+ static struct resource usbh2_resources[] = {
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index c380721..98ddc9c 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -315,10 +315,10 @@ static int dr_controller_setup(struct fsl_udc *udc)
+ 	}
+ 	fsl_writel(portctrl, &dr_regs->portsc1);
+ 
+-	if (cpu_is_mx35()) {
+-		/* AHB burst INCR mode if imx35 */
++	if (pdata->change_ahb_burst) {
++		/* if usb should not work in default INCRx mode */
+ 		tmp = fsl_readl(&dr_regs->sbuscfg);
+-		tmp &= ~0x07;
++		tmp = (tmp & ~0x07) | pdata->ahb_burst_mode;
+ 		fsl_writel(tmp, &dr_regs->sbuscfg);
+ 	}
+ 
+diff --git a/drivers/usb/host/ehci-fsl.h b/drivers/usb/host/ehci-fsl.h
+index af5e284..43f6d4f 100644
+--- a/drivers/usb/host/ehci-fsl.h
++++ b/drivers/usb/host/ehci-fsl.h
+@@ -19,6 +19,7 @@
+ #define _EHCI_FSL_H
+ 
+ /* offsets for the non-ehci registers in the FSL SOC USB controller */
++#define FSL_SOC_USB_SBUSCFG     0x90
+ #define FSL_SOC_USB_BURSTSIZE	0x160
+ #define FSL_SOC_USB_ULPIVP	0x170
+ #define FSL_SOC_USB_PORTSC1	0x184
+diff --git a/include/asm-arm/arch-mxc/fsl_usb.h b/include/asm-arm/arch-mxc/fsl_usb.h
+index 625a668..2dcbb0e 100644
+--- a/include/asm-arm/arch-mxc/fsl_usb.h
++++ b/include/asm-arm/arch-mxc/fsl_usb.h
+@@ -57,14 +57,16 @@ fsl_platform_set_vbus_power(struct fsl_usb2_platform_data *pdata, int on)
+ }
+ 
+ /* Set USB AHB burst length for host */
+-static inline void
+-fsl_platform_set_ahb_burst(struct usb_hcd *hcd)
++static inline void fsl_platform_set_ahb_burst(struct usb_hcd *hcd)
+ {
+-	if (cpu_is_mx35()) {
++	struct fsl_usb2_platform_data *pdata;
++
++	pdata = hcd->self.controller->platform_data;
++	if (pdata->change_ahb_burst) {
+ 		unsigned int temp;
+ 
+-		temp = readl(hcd->regs + 0x90);
+-		/* usb should work in INCR mode in i.MX35 */
+-		writel(temp & (~(0x7)), hcd->regs + 0x90);
++		temp = readl(hcd->regs + FSL_SOC_USB_SBUSCFG);
++		writel((temp & (~(0x7))) | pdata->ahb_burst_mode,
++			hcd->regs + FSL_SOC_USB_SBUSCFG);
+ 	}
+ }
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index ea6d1c9..fb2f4a4 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -122,6 +122,8 @@ struct fsl_usb2_platform_data {
+ 	unsigned			es : 1;	/* need USBMODE:ES */
+ 	unsigned			have_sysif_regs : 1;
+ 	unsigned			le_setup_buf : 1;
++	unsigned change_ahb_burst:1;
++	unsigned ahb_burst_mode:3;
+ };
+ 
+ /* Flags in fsl_usb2_mph_platform_data */
+-- 
+1.5.4.4
+

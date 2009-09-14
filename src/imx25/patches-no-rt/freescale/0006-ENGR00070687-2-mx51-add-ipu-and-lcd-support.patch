@@ -1,0 +1,395 @@
+From c6506bb6fef2f001b5a1e817027b2f8eb81e2fa7 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Fri, 5 Sep 2008 16:04:16 -0500
+Subject: [PATCH] ENGR00070687-2 mx51: add ipu and lcd support
+
+Add MIPI clocks and initialize MIPI pins to legacy mode.
+Add MX51 specific ipu, lcd, and framebuffer initialization.
+Add power gating function stubs
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |   74 +++++++++++++++++++++++++++++-
+ arch/arm/mach-mx51/clock.c              |   63 ++++++++++++++++++++++++++
+ arch/arm/mach-mx51/crm_regs.h           |    1 +
+ arch/arm/mach-mx51/devices.c            |   55 +++++++++++++++++++++++
+ arch/arm/mach-mx51/mx51_3stack.c        |   37 +++++++++++++++
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |    3 +
+ arch/arm/mach-mx51/system.c             |   11 +++++
+ 7 files changed, 241 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index 18131ce..ca5c19b 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -786,7 +786,25 @@ CONFIG_SSB_POSSIBLE=y
+ #
+ # Multimedia devices
+ #
+-# CONFIG_VIDEO_DEV is not set
++CONFIG_VIDEO_DEV=y
++CONFIG_VIDEO_V4L1=y
++CONFIG_VIDEO_V4L1_COMPAT=y
++CONFIG_VIDEO_V4L2=y
++CONFIG_VIDEO_CAPTURE_DRIVERS=y
++# CONFIG_VIDEO_ADV_DEBUG is not set
++CONFIG_VIDEO_HELPER_CHIPS_AUTO=y
++# CONFIG_VIDEO_VIVI is not set
++# CONFIG_VIDEO_PMS is not set
++# CONFIG_VIDEO_MXC_CAMERA is not set
++CONFIG_VIDEO_MXC_OUTPUT=y
++CONFIG_VIDEO_MXC_IPU_OUTPUT=y
++# CONFIG_VIDEO_MXC_IPUV1_WVGA_OUTPUT is not set
++# CONFIG_VIDEO_MXC_OPL is not set
++# CONFIG_VIDEO_CPIA is not set
++# CONFIG_VIDEO_SAA5246A is not set
++# CONFIG_VIDEO_SAA5249 is not set
++# CONFIG_TUNER_3036 is not set
++# CONFIG_RADIO_ADAPTERS is not set
+ # CONFIG_DVB_CORE is not set
+ # CONFIG_DAB is not set
+ 
+@@ -795,7 +813,38 @@ CONFIG_SSB_POSSIBLE=y
+ #
+ # CONFIG_VGASTATE is not set
+ # CONFIG_VIDEO_OUTPUT_CONTROL is not set
+-# CONFIG_FB is not set
++CONFIG_FB=y
++# CONFIG_FIRMWARE_EDID is not set
++# CONFIG_FB_DDC is not set
++CONFIG_FB_CFB_FILLRECT=y
++CONFIG_FB_CFB_COPYAREA=y
++CONFIG_FB_CFB_IMAGEBLIT=y
++# CONFIG_FB_CFB_REV_PIXELS_IN_BYTE is not set
++# CONFIG_FB_SYS_FILLRECT is not set
++# CONFIG_FB_SYS_COPYAREA is not set
++# CONFIG_FB_SYS_IMAGEBLIT is not set
++# CONFIG_FB_SYS_FOPS is not set
++CONFIG_FB_DEFERRED_IO=y
++# CONFIG_FB_SVGALIB is not set
++# CONFIG_FB_MACMODES is not set
++# CONFIG_FB_BACKLIGHT is not set
++# CONFIG_FB_MODE_HELPERS is not set
++# CONFIG_FB_TILEBLITTING is not set
++
++#
++# Frame buffer hardware drivers
++#
++CONFIG_FB_MXC=y
++CONFIG_FB_MXC_SYNC_PANEL=y
++CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL=y
++# CONFIG_FB_MXC_TVOUT_TVE is not set
++# CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
++# CONFIG_FB_MXC_TVOUT is not set
++# CONFIG_FB_MXC_TVOUT_CH7024 is not set
++# CONFIG_FB_MXC_ASYNC_PANEL is not set
++# CONFIG_FB_UVESA is not set
++# CONFIG_FB_S1D13XXX is not set
++# CONFIG_FB_VIRTUAL is not set
+ # CONFIG_BACKLIGHT_LCD_SUPPORT is not set
+ 
+ #
+@@ -809,6 +858,24 @@ CONFIG_SSB_POSSIBLE=y
+ # CONFIG_VGA_CONSOLE is not set
+ # CONFIG_MDA_CONSOLE is not set
+ CONFIG_DUMMY_CONSOLE=y
++CONFIG_FRAMEBUFFER_CONSOLE=y
++# CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY is not set
++# CONFIG_FRAMEBUFFER_CONSOLE_ROTATION is not set
++CONFIG_FONTS=y
++# CONFIG_FONT_8x8 is not set
++CONFIG_FONT_8x16=y
++# CONFIG_FONT_6x11 is not set
++# CONFIG_FONT_7x14 is not set
++# CONFIG_FONT_PEARL_8x8 is not set
++# CONFIG_FONT_ACORN_8x8 is not set
++# CONFIG_FONT_MINI_4x6 is not set
++# CONFIG_FONT_SUN8x16 is not set
++# CONFIG_FONT_SUN12x22 is not set
++# CONFIG_FONT_10x18 is not set
++CONFIG_LOGO=y
++# CONFIG_LOGO_LINUX_MONO is not set
++# CONFIG_LOGO_LINUX_VGA16 is not set
++CONFIG_LOGO_LINUX_CLUT224=y
+ 
+ #
+ # Sound
+@@ -837,7 +904,8 @@ CONFIG_RTC_LIB=y
+ #
+ # MXC support drivers
+ #
+-# CONFIG_MXC_IPU is not set
++CONFIG_MXC_IPU=y
++CONFIG_MXC_IPU_V3=y
+ 
+ #
+ # MXC SSI support
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 9b71fee..21ec7ea 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -558,6 +558,65 @@ static struct clk ipu_di_clk = {
+ 	.disable = _clk_disable,
+ };
+ 
++static int _clk_hsc_enable(struct clk *clk)
++{
++	u32 reg;
++
++	/* Clear HSC ack bypass */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg &= ~MXC_CCM_CLPCR_BYPASS_HSC_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++
++	_clk_enable(clk);
++
++	return 0;
++}
++
++static void _clk_hsc_disable(struct clk *clk)
++{
++	u32 reg;
++
++	_clk_disable(clk);
++
++	/* Set HSC ack bypass */
++	reg = __raw_readl(MXC_CCM_CLPCR);
++	reg |= MXC_CCM_CLPCR_BYPASS_HSC_LPM_HS;
++	__raw_writel(reg, MXC_CCM_CLPCR);
++}
++
++static struct clk mipi_esc_clk = {
++	.name = "mipi_esc_clk",
++	.parent = &pll2_sw_clk,
++	.enable_reg = MXC_CCM_CCGR4,
++	.enable_shift = MXC_CCM_CCGR4_CG5_OFFSET,
++};
++
++static struct clk mipi_hsc2_clk = {
++	.name = "mipi_hsc2_clk",
++	.parent = &pll2_sw_clk,
++	.enable_reg = MXC_CCM_CCGR4,
++	.enable_shift = MXC_CCM_CCGR4_CG4_OFFSET,
++	.secondary = &mipi_esc_clk,
++};
++
++static struct clk mipi_hsc1_clk = {
++	.name = "mipi_hsc1_clk",
++	.parent = &pll2_sw_clk,
++	.enable_reg = MXC_CCM_CCGR4,
++	.enable_shift = MXC_CCM_CCGR4_CG3_OFFSET,
++	.secondary = &mipi_hsc2_clk,
++};
++
++static struct clk mipi_hsp_clk = {
++	.name = "mipi_hsp_clk",
++	.parent = &ipu_clk,
++	.enable_reg = MXC_CCM_CCGR4,
++	.enable_shift = MXC_CCM_CCGR4_CG6_OFFSET,
++	.enable = _clk_hsc_enable,
++	.disable = _clk_hsc_disable,
++	.secondary = &mipi_hsc1_clk,
++};
++
+ static int _clk_tve_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	u32 reg;
+@@ -1795,6 +1854,10 @@ static struct clk *mxc_clks[] = {
+ 	&pgc_clk,
+ 	&rtc_clk,
+ 	&ata_clk,
++	&mipi_hsc1_clk,
++	&mipi_hsc2_clk,
++	&mipi_esc_clk,
++	&mipi_hsp_clk,
+ };
+ 
+ static void clk_tree_init(void)
+diff --git a/arch/arm/mach-mx51/crm_regs.h b/arch/arm/mach-mx51/crm_regs.h
+index d720a0d..928ea25 100644
+--- a/arch/arm/mach-mx51/crm_regs.h
++++ b/arch/arm/mach-mx51/crm_regs.h
+@@ -365,6 +365,7 @@
+ #define MXC_CCM_CDCR_PERIPH_CLK_DVFS_PODF_MASK		(0x3)
+ 
+ /* Define the bits in register CLPCR */
++#define MXC_CCM_CLPCR_BYPASS_HSC_LPM_HS		(0x1 << 23)
+ #define MXC_CCM_CLPCR_BYPASS_SCC_LPM_HS		(0x1 << 22)
+ #define MXC_CCM_CLPCR_BYPASS_MAX_LPM_HS		(0x1 << 21)
+ #define MXC_CCM_CLPCR_BYPASS_SDMA_LPM_HS		(0x1 << 20)
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 067c057..00e4c64 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -13,6 +13,7 @@
+ 
+ #include <linux/module.h>
+ #include <linux/kernel.h>
++#include <linux/err.h>
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
+ #include <linux/clk.h>
+@@ -178,6 +179,59 @@ static inline void mxc_init_wdt(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_MXC_IPU_V3) || defined(CONFIG_MXC_IPU_V3_MODULE)
++static struct mxc_ipu_config mxc_ipu_data = {
++	.rev = 1,
++};
++
++static struct resource ipu_resources[] = {
++	{
++	 .start = IPU_CTRL_BASE_ADDR,
++	 .end = IPU_CTRL_BASE_ADDR + SZ_512M,
++	 .flags = IORESOURCE_MEM,
++	 },
++	{
++	 .start = MXC_INT_IPU_SYN,
++	 .flags = IORESOURCE_IRQ,
++	 },
++	{
++	 .start = MXC_INT_IPU_ERR,
++	 .flags = IORESOURCE_IRQ,
++	 },
++};
++
++static struct platform_device mxc_ipu_device = {
++	.name = "mxc_ipu",
++	.id = -1,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_ipu_data,
++		},
++	.num_resources = ARRAY_SIZE(ipu_resources),
++	.resource = ipu_resources,
++};
++
++static void mxc_init_ipu(void)
++{
++	u32 base = IO_ADDRESS(MIPI_HSC_BASE_ADDR);
++	struct clk *clk;
++
++	/* Temporarily setup MIPI module to legacy mode */
++	clk = clk_get(NULL, "mipi_hsp_clk");
++	if (!IS_ERR(clk)) {
++		clk_enable(clk);
++		__raw_writel(0xF00, base);
++		clk_disable(clk);
++		clk_put(clk);
++	}
++	platform_device_register(&mxc_ipu_device);
++}
++#else
++static inline void mxc_init_ipu(void)
++{
++}
++#endif
++
+ /* SPI controller and device data */
+ #if defined(CONFIG_SPI_MXC) || defined(CONFIG_SPI_MXC_MODULE)
+ 
+@@ -490,6 +544,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_rtc();
+ 	mxc_init_dma();
+ 	mxc_init_owire();
++	mxc_init_ipu();
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 40b87a7..d65b74c 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -207,8 +207,45 @@ static struct platform_device mxc_fb_device[] = {
+ 	 },
+ };
+ 
++static void lcd_reset(void)
++{
++	static int first;
++
++	/* ensure that LCDIO(1.8V) has been turn on */
++	/* active reset line GPIO */
++	if (!first) {
++		mxc_request_iomux(MX51_PIN_DISPB2_SER_RS, IOMUX_CONFIG_GPIO);
++		first = 1;
++	}
++	mxc_set_gpio_dataout(MX51_PIN_DISPB2_SER_RS, 0);
++	mxc_set_gpio_direction(MX51_PIN_DISPB2_SER_RS, 0);
++	/* do reset */
++	msleep(10);		/* tRES >= 100us */
++	mxc_set_gpio_dataout(MX51_PIN_DISPB2_SER_RS, 1);
++	msleep(60);
++}
++
++static struct mxc_lcd_platform_data lcd_data = {
++	.core_reg = "VIOHI",
++	.io_reg = "SW4",
++	.reset = lcd_reset,
++};
++
++static struct platform_device mxc_lcd_device = {
++	.name = "lcd_spi",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &lcd_data,
++		},
++};
++
++extern void gpio_lcd_active(void);
++
+ static void mxc_init_fb(void)
+ {
++	gpio_lcd_active();
++	(void)platform_device_register(&mxc_lcd_device);
++
+ 	(void)platform_device_register(&mxc_fb_device[0]);
+ 	(void)platform_device_register(&mxc_fb_device[1]);
+ 	(void)platform_device_register(&mxc_fb_device[2]);
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 66c48d9..2594bc8 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -530,6 +530,9 @@ EXPORT_SYMBOL(sdhc_init_card_det);
+  */
+ void gpio_lcd_active(void)
+ {
++	mxc_request_iomux(MX51_PIN_DISP2_DAT15, IOMUX_CONFIG_ALT5);
++	mxc_request_iomux(MX51_PIN_DI_GP2, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_DI_GP3, IOMUX_CONFIG_ALT0);
+ }
+ 
+ /*!
+diff --git a/arch/arm/mach-mx51/system.c b/arch/arm/mach-mx51/system.c
+index f40b582..e3e4b54 100644
+--- a/arch/arm/mach-mx51/system.c
++++ b/arch/arm/mach-mx51/system.c
+@@ -13,6 +13,7 @@
+ 
+ #include <linux/kernel.h>
+ #include <linux/clk.h>
++#include <linux/platform_device.h>
+ #include <asm/io.h>
+ #include <asm/hardware.h>
+ #include <asm/proc-fns.h>
+@@ -31,6 +32,16 @@
+ 
+ extern int mxc_jtag_enabled;
+ 
++void mxc_pg_enable(struct platform_device *pdev)
++{
++}
++EXPORT_SYMBOL(mxc_pg_enable);
++
++void mxc_pg_disable(struct platform_device *pdev)
++{
++}
++EXPORT_SYMBOL(mxc_pg_disable);
++
+ /*!
+  * This function puts the CPU into idle mode. It is called by default_idle()
+  * in process.c file.
+-- 
+1.5.4.4
+

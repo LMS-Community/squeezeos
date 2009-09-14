@@ -1,0 +1,64 @@
+From ceb2d7484decc8c78a54738fbb2547eaf6cdf5c9 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Fri, 24 Oct 2008 13:40:54 +0800
+Subject: [PATCH] ENGR00096549 [MX37] Enable the sd/mmc on v2 board.
+
+Enable the esdhc on MX37 v2 board.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack_gpio.c |   31 ++++++++++++++++++++++++-------
+ 1 files changed, 24 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index 92adfec..4e8c50d 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -385,7 +385,10 @@ int sdhc_get_card_det_status(struct device *dev)
+ 	int ret;
+ 
+ 	if (to_platform_device(dev)->id == 0) {
+-		ret = mxc_get_gpio_datain(MX37_PIN_OWIRE_LINE);
++		if (board_is_mx37(BOARD_REV_2))
++			ret = mxc_get_gpio_datain(MX37_PIN_GPIO1_4);
++		else
++			ret = mxc_get_gpio_datain(MX37_PIN_OWIRE_LINE);
+ 		return ret;
+ 	} else {		/* config the det pin for SDHC2 */
+ 		return 0;
+@@ -400,12 +403,26 @@ EXPORT_SYMBOL(sdhc_get_card_det_status);
+ int sdhc_init_card_det(int id)
+ {
+ 	if (id == 0) {
+-		mxc_request_iomux(MX37_PIN_OWIRE_LINE, IOMUX_CONFIG_ALT4);
+-		mxc_iomux_set_pad(MX37_PIN_OWIRE_LINE, PAD_CTL_DRV_HIGH |
+-				  PAD_CTL_HYS_NONE | PAD_CTL_ODE_OPENDRAIN_NONE
+-				  | PAD_CTL_PKE_NONE | PAD_CTL_SRE_FAST);
+-		mxc_set_gpio_direction(MX37_PIN_OWIRE_LINE, 1);
+-		return IOMUX_TO_IRQ(MX37_PIN_OWIRE_LINE);
++		if (board_is_mx37(BOARD_REV_2)) {
++			mxc_request_iomux(MX37_PIN_GPIO1_4, IOMUX_CONFIG_ALT0);
++			mxc_iomux_set_pad(MX37_PIN_GPIO1_4,
++					  PAD_CTL_DRV_HIGH |
++					  PAD_CTL_HYS_NONE |
++					  PAD_CTL_ODE_OPENDRAIN_NONE |
++					  PAD_CTL_PKE_NONE | PAD_CTL_SRE_FAST);
++			mxc_set_gpio_direction(MX37_PIN_GPIO1_4, 1);
++			return IOMUX_TO_IRQ(MX37_PIN_GPIO1_4);
++		} else {
++			mxc_request_iomux(MX37_PIN_OWIRE_LINE,
++					  IOMUX_CONFIG_ALT4);
++			mxc_iomux_set_pad(MX37_PIN_OWIRE_LINE,
++					  PAD_CTL_DRV_HIGH |
++					  PAD_CTL_HYS_NONE |
++					  PAD_CTL_ODE_OPENDRAIN_NONE |
++					  PAD_CTL_PKE_NONE | PAD_CTL_SRE_FAST);
++			mxc_set_gpio_direction(MX37_PIN_OWIRE_LINE, 1);
++			return IOMUX_TO_IRQ(MX37_PIN_OWIRE_LINE);
++		}
+ 	} else {		/* config the det pin for SDHC2 */
+ 		return 0;
+ 
+-- 
+1.5.4.4
+

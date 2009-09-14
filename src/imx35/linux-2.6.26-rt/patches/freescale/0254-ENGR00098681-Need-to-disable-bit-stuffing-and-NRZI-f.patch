@@ -1,0 +1,129 @@
+From 0dee0ecda2c3158ff9b9001aaaef3c380308d1d2 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Mon, 1 Dec 2008 14:27:56 -0600
+Subject: [PATCH] ENGR00098681 Need to disable bit-stuffing and NRZI for USB testing
+
+For TEST_J and TEST_K portion of the USB-IF testing on systems
+with the 1504 transceivers, the SW needs to disable bit-stuffing
+and NRZI on the 1504 transceiver.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ arch/arm/plat-mxc/isp1504xc.c   |   16 ++++++++++++++++
+ arch/arm/plat-mxc/usb_common.c  |    8 ++++++++
+ drivers/usb/gadget/arcotg_udc.c |    5 ++++-
+ include/linux/usb/fsl_xcvr.h    |    6 ++++++
+ 4 files changed, 34 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/isp1504xc.c b/arch/arm/plat-mxc/isp1504xc.c
+index 37f4e92..f71f0a6 100644
+--- a/arch/arm/plat-mxc/isp1504xc.c
++++ b/arch/arm/plat-mxc/isp1504xc.c
+@@ -221,6 +221,21 @@ static void isp1504_suspend(struct fsl_xcvr_ops *this)
+ 	pr_debug("%s.\n", __func__);
+ }
+ 
++/*!
++ * Set the 1504 transceiver to the proper mode for testing purposes.
++ *
++ * @param       view  the ULPI VIEWPORT register address
++ * @param       test_mode Set the 1504 transceiver to disable bit stuffing and NRZI
++ */
++ static void isp1504_set_test_mode(volatile u32 *view, enum usb_test_mode test_mode)
++{
++	if (test_mode == USB_TEST_J || test_mode == USB_TEST_K) {
++		printk(KERN_INFO "udc: disable bit stuffing and NRZI\n");
++		/* Disable bit-stuffing and NRZI encoding. */
++		isp1504_set(0x10, 0x04, view);
++	}
++}
++
+ static struct fsl_xcvr_ops isp1504_ops = {
+ 	.name = "isp1504",
+ 	.xcvr_type = PORTSC_PTS_ULPI,
+@@ -229,6 +244,7 @@ static struct fsl_xcvr_ops isp1504_ops = {
+ 	.suspend = isp1504_suspend,
+ 	.set_vbus_power = isp1504_set_vbus_power,
+ 	.set_remote_wakeup = isp1504_set_remote_wakeup,
++	.set_test_mode = isp1504_set_test_mode,
+ };
+ 
+ extern void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops);
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 0b86b5e..f1a7af8 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -52,6 +52,7 @@ static struct clk *usb_ahb_clk;
+ 
+ extern int gpio_usbotg_hs_active(void);
+ extern int gpio_usbotg_hs_inactive(void);
++
+ /*
+  * make sure USB_CLK is running at 60 MHz +/- 1000 Hz
+  */
+@@ -93,6 +94,13 @@ void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops)
+ }
+ EXPORT_SYMBOL(fsl_usb_xcvr_register);
+ 
++void fsl_platform_set_test_mode (struct fsl_usb2_platform_data *pdata, enum usb_test_mode mode)
++{
++	if (pdata->xcvr_ops && pdata->xcvr_ops->set_test_mode)
++		pdata->xcvr_ops->set_test_mode((u32 *)(pdata->regs + ULPIVW_OFF), mode);
++}
++EXPORT_SYMBOL(fsl_platform_set_test_mode);
++
+ void fsl_usb_xcvr_unregister(struct fsl_xcvr_ops *xcvr_ops)
+ {
+ 	int i;
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 98ddc9c..400ac81 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -96,6 +96,8 @@ static void fsl_ep_fifo_flush(struct usb_ep *_ep);
+ extern struct resource *otg_get_resources(void);
+ #endif
+ 
++extern void fsl_platform_set_test_mode(struct fsl_usb2_platform_data *pdata, enum usb_test_mode mode);
++
+ #ifdef CONFIG_PPC32
+ #define fsl_readl(addr)		in_le32((addr))
+ #define fsl_writel(addr, val32) out_le32((val32), (addr))
+@@ -1514,9 +1516,10 @@ static void setup_received_irq(struct fsl_udc *udc,
+ 			u32 tmp;
+ 
+ 			mdelay(10);
++			fsl_platform_set_test_mode(udc->pdata, ptc);
+ 			tmp = fsl_readl(&dr_regs->portsc1) | (ptc << 16);
+ 			fsl_writel(tmp, &dr_regs->portsc1);
+-			printk(KERN_INFO "udc: switch to test mode %d.\n", ptc);
++			printk(KERN_INFO "udc: switch to test mode 0x%x.\n", ptc);
+ 		}
+ 
+ 		return;
+diff --git a/include/linux/usb/fsl_xcvr.h b/include/linux/usb/fsl_xcvr.h
+index e63779a..febeb53 100644
+--- a/include/linux/usb/fsl_xcvr.h
++++ b/include/linux/usb/fsl_xcvr.h
+@@ -5,6 +5,11 @@
+ 
+ struct fsl_usb2_platform_data;
+ 
++enum usb_test_mode{
++	USB_TEST_J = 1,
++	USB_TEST_K = 2,
++};
++
+ /**
+  * @name: transceiver name
+  * @xcvr_type: one of PORTSC_PTS_{UTMI,SERIAL,ULPI}
+@@ -28,6 +33,7 @@ struct fsl_xcvr_ops {
+ 			       struct fsl_usb2_platform_data *pdata, int on);
+ 	void (*set_remote_wakeup)(u32 *view);
+ 	void (*pullup)(int on);
++	void(*set_test_mode)(u32 *view, enum usb_test_mode mode);
+ };
+ 
+ struct fsl_xcvr_power {
+-- 
+1.5.4.4
+

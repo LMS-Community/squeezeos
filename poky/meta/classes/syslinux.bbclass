@@ -37,7 +37,7 @@ python build_syslinux_menu () {
 	cfgfile.write('\x07\x0C')
 
 	# The title should be configurable
-	cfgfile.write('AMD Geode Linux Boot Menu\n')
+	cfgfile.write('Linux Boot Menu\n')
 	cfgfile.write('The following targets are available on this image:\n')
 	cfgfile.write('\n')
 
@@ -126,13 +126,11 @@ python build_syslinux_cfg () {
 		cfgfile.write('DISPLAY %s\n' % (mfile.split('/')[-1]) )
 	
 	for label in labels.split():
-		from copy import deepcopy
-		localdata = deepcopy(d)
+		localdata = bb.data.createCopy(d)
 
-		overrides = bb.data.getVar('OVERRIDES', localdata)
+		overrides = bb.data.getVar('OVERRIDES', localdata, True)
 		if not overrides:
 			raise bb.build.FuncFailed('OVERRIDES not defined')
-		overrides = bb.data.expand(overrides, localdata)
 	
 		bb.data.setVar('OVERRIDES', label + ':' + overrides, localdata)
 		bb.data.update_data(localdata)
@@ -148,9 +146,9 @@ python build_syslinux_cfg () {
 			if initrd:
 				cfgfile.write('initrd=initrd ')
 
+			cfgfile.write('LABEL=%s '% (label))
+
 			cfgfile.write('%s\n' % (append))
-	
-		del localdata
-	
+
 	cfgfile.close()
 }

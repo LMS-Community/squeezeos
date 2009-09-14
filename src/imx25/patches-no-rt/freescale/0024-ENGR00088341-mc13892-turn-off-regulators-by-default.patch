@@ -1,0 +1,39 @@
+From 83e350385c7fb4eb8a01cb2af2b930ce32ac77d6 Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Tue, 19 Aug 2008 14:01:32 +0800
+Subject: [PATCH] ENGR00088341 mc13892: turn off regulators by default
+
+turn off regulators as many as possible at system start up
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ drivers/regulator/mc13892/reg-mc13892.c |   11 +++++++----
+ 1 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index 26ddd80..728858e 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -1828,12 +1828,15 @@ int reg_mc13892_probe(void)
+ 						   constraints);
+ 
+ 		reg.id = reg_mc13892[i].regulator.id;
+-		if (reg_mc13892[i].regulator.ops->enable == NULL) {
++
++		if (reg_mc13892[i].regulator.ops->enable == NULL ||
++		    reg.id == MC13892_VIOHI ||
++		    reg.id == MC13892_VGEN2 || reg.id == MC13892_VPLL) {
+ 			reg_mc13892[i].regulator.use_count = 1;
+ 		} else {
+-			/*default set all regulator on */
+-			reg_mc13892[i].regulator.use_count = 1;
+-			reg_mc13892[i].regulator.ops->enable(&reg);
++			/*default set all regulator off */
++			reg_mc13892[i].regulator.use_count = 0;
++			reg_mc13892[i].regulator.ops->disable(&reg);
+ 		}
+ 		if (ret11 < 0) {
+ 			printk(KERN_ERR "%s: failed to register %s err %d\n",
+-- 
+1.5.4.4
+

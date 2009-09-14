@@ -1,0 +1,39 @@
+From 12909fb94da1c772e6c960bf35a5e2a5dc4800e3 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 17 Feb 2009 15:14:29 +0800
+Subject: [PATCH] ENGR00107762 IPUv3: Modify the condition to enable IPU clock
+
+Modify the condition to enable IPU clock when initial IDMAC channel.
+Use a global variable to be the condition in which to enable IPU clock
+instead of checking IPU_CONF regiser.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 0ee40e8..5dc278f 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -323,8 +323,7 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 	__raw_writel(0xFFFFFFFF, IPU_INT_CTRL(9));
+ 	__raw_writel(0xFFFFFFFF, IPU_INT_CTRL(10));
+ 
+-	ipu_conf = __raw_readl(IPU_CONF);
+-	if (ipu_conf == 0) {
++	if (g_ipu_clk_enabled == false) {
+ 		g_ipu_clk_enabled = true;
+ 		clk_enable(g_ipu_clk);
+ 	}
+@@ -525,6 +524,7 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 
+ 	/* Enable IPU sub module */
+ 	g_channel_init_mask |= 1L << IPU_CHAN_ID(channel);
++	ipu_conf = __raw_readl(IPU_CONF);
+ 	if (ipu_ic_use_count == 1)
+ 		ipu_conf |= IPU_CONF_IC_EN;
+ 	if (ipu_rot_use_count == 1)
+-- 
+1.5.4.4
+

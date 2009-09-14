@@ -1,0 +1,32 @@
+From 2ef84903caeabf88ccb8f9cfc112a9d93810afd6 Mon Sep 17 00:00:00 2001
+From: Vitaliy Gusev <vgusev@openvz.org>
+Date: Wed, 5 Nov 2008 18:27:18 +0300
+Subject: [PATCH] UBI: Don't exit from ubi_thread until kthread_should_stop() is true
+
+If ubi_thread() exits but kthread_should_stop() is not true
+then kthread_stop() will never return and cleanup thread
+will forever stay in "D" state.
+
+Signed-off-by: Vitaliy Gusev <vgusev@openvz.org>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/wl.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 05d7093..dcb6dac 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -1396,7 +1396,8 @@ int ubi_thread(void *u)
+ 				ubi_msg("%s: %d consecutive failures",
+ 					ubi->bgt_name, WL_MAX_FAILURES);
+ 				ubi_ro_mode(ubi);
+-				break;
++				ubi->thread_enabled = 0;
++				continue;
+ 			}
+ 		} else
+ 			failures = 0;
+-- 
+1.5.4.3
+

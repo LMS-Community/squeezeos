@@ -1,0 +1,160 @@
+From 82811fa68039406b384767a44d90e1363e1598ff Mon Sep 17 00:00:00 2001
+From: Yves vandervennet <r55763@freescale.com>
+Date: Thu, 20 Mar 2008 02:20:54 -0500
+Subject: [PATCH] ENGR00066962 DPTC on MX31 TO1.x @ 27 Mhz not supported
+
+sets the table pointer to NULL in this case (see devices.c)
+modified plat-mxc/dptc.c such that in this case, an error
+message is printed and DPTC is not init'ed.
+
+Signed-off-by: Yves vandervennet <r55763@freescale.com>
+---
+ arch/arm/mach-mx3/devices.c |   18 +++++++++---------
+ arch/arm/mach-mx3/dptc.c    |   26 --------------------------
+ arch/arm/plat-mxc/dptc.c    |   23 ++++++++++++++++-------
+ 3 files changed, 25 insertions(+), 42 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/devices.c b/arch/arm/mach-mx3/devices.c
+index f5eea32..39805b8 100644
+--- a/arch/arm/mach-mx3/devices.c
++++ b/arch/arm/mach-mx3/devices.c
+@@ -32,7 +32,6 @@
+ 
+ #ifndef CONFIG_MXC_DPTC
+ extern struct dptc_wp dptc_wp_allfreq_26ckih[DPTC_WP_SUPPORTED];
+-extern struct dptc_wp dptc_wp_allfreq_27ckih[DPTC_WP_SUPPORTED];
+ extern struct dptc_wp dptc_wp_allfreq_26ckih_TO_2_0[DPTC_WP_SUPPORTED];
+ extern struct dptc_wp dptc_wp_allfreq_27ckih_TO_2_0[DPTC_WP_SUPPORTED];
+ /*
+@@ -715,17 +714,18 @@ static struct platform_device mxc_dptc_device = {
+ 
+ static inline void mxc_init_dptc(void)
+ {
+-	if (clk_get_rate(ckih_clk) == 27000000
+-	    && mxc_cpu_is_rev(CHIP_REV_2_0) < 0) {
+-		mxc_dptc_device.dev.platform_data = &dptc_wp_allfreq_27ckih;
++	if (clk_get_rate(ckih_clk) == 27000000) {
++
++		if (mxc_cpu_is_rev(CHIP_REV_2_0) < 0)
++			mxc_dptc_device.dev.platform_data = NULL;
++		else
++			mxc_dptc_device.dev.platform_data =
++			    &dptc_wp_allfreq_27ckih_TO_2_0;
++
+ 	} else if (clk_get_rate(ckih_clk) == 26000000
+-		   && mxc_cpu_is_rev(CHIP_REV_2_0)) {
++		   && mxc_cpu_is_rev(CHIP_REV_2_0) == 1) {
+ 		mxc_dptc_device.dev.platform_data =
+ 		    &dptc_wp_allfreq_26ckih_TO_2_0;
+-	} else if (clk_get_rate(ckih_clk) == 27000000
+-		   && mxc_cpu_is_rev(CHIP_REV_2_0)) {
+-		mxc_dptc_device.dev.platform_data =
+-		    &dptc_wp_allfreq_27ckih_TO_2_0;
+ 	}
+ 
+ 	(void)platform_device_register(&mxc_dptc_device);
+diff --git a/arch/arm/mach-mx3/dptc.c b/arch/arm/mach-mx3/dptc.c
+index dcaff03..47a36a1 100644
+--- a/arch/arm/mach-mx3/dptc.c
++++ b/arch/arm/mach-mx3/dptc.c
+@@ -75,32 +75,6 @@ struct dptc_wp dptc_wp_allfreq_26ckih_TO_2_0[DPTC_WP_SUPPORTED] = {
+ 	{0xffc00000, 0xA426E988, 0xffc00000, 0xEDB82DC0, SW_SW1A, SW1A_1_225V},
+ };
+ 
+-/* DPTC table for 27MHz */
+-struct dptc_wp dptc_wp_allfreq_27ckih[DPTC_WP_SUPPORTED] = {
+-	/* 532MHz */
+-	/* dcvr0      dcvr1       dcvr2       dcvr3       regulator voltage */
+-	/* wp0 */
+-	{0xffc00000, 0x90400000, 0xffc00000, 0xdd000000, SW_SW1A, SW1A_1_625V},
+-	{0xffc00000, 0x90629890, 0xffc00000, 0xdd34ed20, SW_SW1A, SW1A_1_6V},
+-	{0xffc00000, 0x90629890, 0xffc00000, 0xdd34ed20, SW_SW1A, SW1A_1_575V},
+-	{0xffc00000, 0x90629894, 0xffc00000, 0xdd74fd24, SW_SW1A, SW1A_1_55V},
+-	{0xffc00000, 0x90a2a894, 0xffc00000, 0xddb50d28, SW_SW1A, SW1A_1_525V},
+-	/* wp5 */
+-	{0xffc00000, 0x90e2b89c, 0xffc00000, 0xde352d30, SW_SW1A, SW1A_1_5V},
+-	{0xffc00000, 0x9162d8a0, 0xffc00000, 0xdef55d38, SW_SW1A, SW1A_1_475V},
+-	{0xffc00000, 0x91e2f8a8, 0xffc00000, 0xdfb58d44, SW_SW1A, SW1A_1_45V},
+-	{0xffc00000, 0x926308b0, 0xffc00000, 0xe0b5cd54, SW_SW1A, SW1A_1_425V},
+-	{0xffc00000, 0x92e328bc, 0xffc00000, 0xe1f60d64, SW_SW1A, SW1A_1_4V},
+-	/* wp10 */
+-	{0xffc00000, 0x93a358c0, 0xffc00000, 0xe3365d74, SW_SW1A, SW1A_1_375V},
+-	{0xffc00000, 0xf66388cc, 0xffc00000, 0xf6768d84, SW_SW1A, SW1A_1_35V},
+-	{0xffc00000, 0xf663b8d4, 0xffc00000, 0xf676dd98, SW_SW1A, SW1A_1_325V},
+-	{0xffc00000, 0xf663e8e0, 0xffc00000, 0xf6773da4, SW_SW1A, SW1A_1_3V},
+-	{0xffc00000, 0xf66418ec, 0xffc00000, 0xf6778dbc, SW_SW1A, SW1A_1_275V},
+-	/* wp15 */
+-	{0xffc00000, 0xf66458fc, 0xffc00000, 0xf677edd0, SW_SW1A, SW1A_1_25V},
+-	{0xffc00000, 0xf6648908, 0xffc00000, 0xf6783de8, SW_SW1A, SW1A_1_2V},
+-};
+ struct dptc_wp dptc_wp_allfreq_27ckih_TO_2_0[DPTC_WP_SUPPORTED] = {
+ 	/* Mx31 TO 2.0  Offset table */
+ 	/* 532MHz  */
+diff --git a/arch/arm/plat-mxc/dptc.c b/arch/arm/plat-mxc/dptc.c
+index e087b09..040825f 100644
+--- a/arch/arm/plat-mxc/dptc.c
++++ b/arch/arm/plat-mxc/dptc.c
+@@ -225,7 +225,6 @@ void dptc_suspend(void)
+ 	if (!dptc_is_active)
+ 		return;
+ 
+-
+ 	pmcr0 = __raw_readl(MXC_CCM_PMCR0);
+ 
+ 	/* disable DPTC and mask its interrupt */
+@@ -233,10 +232,8 @@ void dptc_suspend(void)
+ 	    (~MXC_CCM_PMCR0_DPVCR);
+ 
+ 	__raw_writel(pmcr0, MXC_CCM_PMCR0);
+-
+ }
+ 
+-
+ /*!
+  * This function is called to put the DPTC in a low power state.
+  *
+@@ -299,6 +296,22 @@ static int __devinit mxc_dptc_probe(struct platform_device *pdev)
+ {
+ 	int res = 0;
+ 	u32 pmcr0 = __raw_readl(MXC_CCM_PMCR0);
++	struct clk *ckih_clk;
++
++	dptc_dev = &pdev->dev;
++	dptc_wp_allfreq = pdev->dev.platform_data;
++	if (dptc_wp_allfreq == NULL) {
++		ckih_clk = clk_get(NULL, "ckih");
++		if (cpu_is_mx31() &
++		    (mxc_cpu_is_rev(CHIP_REV_2_0) < 0) &
++		    (clk_get_rate(ckih_clk) == 27000000))
++			printk(KERN_ERR "DPTC: DPTC not supported on TO1.x \
++					& ckih = 27M\n");
++		else
++			printk(KERN_ERR "DPTC: Pointer to DPTC table is NULL\
++					not started\n");
++		return -1;
++	}
+ 
+ 	INIT_DELAYED_WORK(&dptc_work, dptc_workqueue_handler);
+ 
+@@ -326,7 +339,6 @@ static int __devinit mxc_dptc_probe(struct platform_device *pdev)
+ 
+ 	__raw_writel(pmcr0, MXC_CCM_PMCR0);
+ 
+-	dptc_dev = &pdev->dev;
+ 	res = sysfs_create_file(&dptc_dev->kobj, &dev_attr_enable.attr);
+ 	if (res) {
+ 		printk(KERN_ERR
+@@ -339,10 +351,7 @@ static int __devinit mxc_dptc_probe(struct platform_device *pdev)
+ 		return res;
+ 	}
+ 
+-	dptc_wp_allfreq = pdev->dev.platform_data;
+-
+ 	curr_wp = 0;
+-
+ 	update_dptc_wp(curr_wp);
+ 
+ 	cpu_clk = clk_get(NULL, "cpu_clk");
+-- 
+1.5.4.4
+

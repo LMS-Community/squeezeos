@@ -1,0 +1,59 @@
+From a6a2ade1b897cd411e27d6e47b3c608b170ca6d0 Mon Sep 17 00:00:00 2001
+From: Albert Chen <R65187@freescale.com>
+Date: Tue, 20 Jan 2009 16:13:16 +0800
+Subject: [PATCH] ENGR00105428 Mx37-mx51 USB: switch USB host/dev mode, dev mode can't work
+
+when init, set UTMI to 16 bits mode.
+
+Signed-off-by: Albert Chen <r65187@freescale.com>
+---
+ arch/arm/plat-mxc/usb_common.c |   27 +++++++++++++--------------
+ 1 files changed, 13 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index da0e8de..a3a1111 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  *	otg_{get,set}_transceiver() are from arm/plat-omap/usb.c.
+  *	which is Copyright (C) 2004 Texas Instruments, Inc.
+@@ -637,20 +637,19 @@ static void otg_set_utmi_xcvr(void)
+ 		/* Set the PHY clock to 19.2MHz */
+ 		USB_PHY_CTR_FUNC2 &= ~USB_UTMI_PHYCTRL2_PLLDIV_MASK;
+ 		USB_PHY_CTR_FUNC2 |= 0x01;
+-	} else if (cpu_is_mx35()) {
+-		/* Workaround an IC issue for 2.6.26 kernal:
+-		 * when turn off root hub port power, EHCI set
+-		 * PORTSC reserved bits to be 0, but PTW with 0
+-		 * means 8 bits tranceiver width, here change
+-		 * it back to be 16 bits and do PHY diable and
+-		 * then enable.
+-		 */
+-		UOG_PORTSC1 |= PORTSC_PTW;
+-
+-		/* Enable UTMI interface in PHY control Reg */
+-		USB_PHY_CTR_FUNC &= ~USB_UTMI_PHYCTRL_UTMI_ENABLE;
+-		USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
+ 	}
++	/* Workaround an IC issue for 2.6.26 kernal:
++	 * when turn off root hub port power, EHCI set
++	 * PORTSC reserved bits to be 0, but PTW with 0
++	 * means 8 bits tranceiver width, here change
++	 * it back to be 16 bits and do PHY diable and
++	 * then enable.
++	 */
++	UOG_PORTSC1 |= PORTSC_PTW;
++
++	/* Enable UTMI interface in PHY control Reg */
++	USB_PHY_CTR_FUNC &= ~USB_UTMI_PHYCTRL_UTMI_ENABLE;
++	USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
+ 
+ 	if (UOG_HCSPARAMS & HCSPARAMS_PPC)
+ 		UOG_PORTSC1 |= PORTSC_PORT_POWER;
+-- 
+1.5.4.4
+

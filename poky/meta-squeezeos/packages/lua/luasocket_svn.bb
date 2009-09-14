@@ -2,10 +2,10 @@ DESCRIPTION = "LUA socket"
 SECTION = "libs"
 LICENSE = "MIT"
 
-BV = "2.0.1"
+BV = "2.0.2"
 
 PV = "${BV}+svnr${SRCREV}"
-#PR="r0"
+PR="r1"
 
 DEPENDS = "lua"
 

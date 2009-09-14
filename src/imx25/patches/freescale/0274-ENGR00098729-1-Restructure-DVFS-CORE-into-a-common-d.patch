@@ -1,0 +1,1746 @@
+From 644504a0a99a130e54c60f61c09d36dcbaa82bbc Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Mon, 15 Dec 2008 16:49:23 -0600
+Subject: [PATCH] ENGR00098729-1 Restructure DVFS CORE into a common driver
+
+Restructure DVFS CORE into a common driver
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx37/board-mx37_3stack.h |    1 +
+ arch/arm/mach-mx37/clock.c             |    7 +
+ arch/arm/mach-mx37/cpufreq.c           |   62 +++-
+ arch/arm/mach-mx37/devices.c           |   90 ++++-
+ arch/arm/mach-mx37/dvfs_core.c         |  690 --------------------------------
+ arch/arm/mach-mx37/mx37_3stack.c       |   25 +-
+ arch/arm/plat-mxc/Makefile             |    4 +-
+ arch/arm/plat-mxc/dptc.c               |    9 +
+ arch/arm/plat-mxc/dvfs_core.c          |  574 ++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/mxc.h         |   48 +++-
+ 10 files changed, 782 insertions(+), 728 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index 265c511..cc2852e 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -109,6 +109,7 @@ extern int sdhc_init_card_det(int id);
+ extern struct tve_platform_data tve_data;
+ extern struct mxc_dptc_data dptc_lp_data;
+ extern struct mxc_dptc_data dptc_gp_data;
++extern struct mxc_dvfs_platform_data dvfs_core_data;
+ 
+ extern int headphone_det_status(void);
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX37_3STACK_H__ */
+diff --git a/arch/arm/mach-mx37/clock.c b/arch/arm/mach-mx37/clock.c
+index d373199..56688a1 100644
+--- a/arch/arm/mach-mx37/clock.c
++++ b/arch/arm/mach-mx37/clock.c
+@@ -20,6 +20,7 @@
+ #include <asm/div64.h>
+ #include <asm/hardware.h>
+ #include <asm/arch/clock.h>
++#include <asm/arch/mxc_dptc.h>
+ #include <asm/arch/spba.h>
+ #include <asm/arch/mxc_uart.h>
+ 
+@@ -2992,5 +2993,11 @@ static int cpu_clk_set_wp(int wp)
+ 	pll1_sw_clk.rate = cpu_wp_tbl[wp].cpu_rate;
+ 	pll1_main_clk.rate = pll1_sw_clk.rate;
+ 	cpu_clk.rate = pll1_sw_clk.rate;
++
++	if (wp == 0)
++		dptc_resume(DPTC_GP_ID);
++	else
++		dptc_suspend(DPTC_GP_ID);
++
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx37/cpufreq.c b/arch/arm/mach-mx37/cpufreq.c
+index 3b4973a..f3b9a4e 100644
+--- a/arch/arm/mach-mx37/cpufreq.c
++++ b/arch/arm/mach-mx37/cpufreq.c
+@@ -40,9 +40,11 @@
+  * Frequencys can be set for CPU.
+  */
+ #define CPU_FREQUENCY_200000_KHZ		200000
++#define CPU_FREQUENCY_400000_KHZ		400000
+ #define CPU_FREQUENCY_532000_KHZ		532000
+ #define CPU_FREQUENCY_600000_KHZ		600000
+ #define ARM_LPM_CLK  200000000
++#define ARM_400MHZ_CLK  400000000
+ #define ARM_NORMAL_CLK  532000000
+ #define ARM_HIGH_CLK  600000000
+ 
+@@ -50,6 +52,7 @@
+ #define LP_NORMAL_CLK  133000000
+ #define GP_LPM_VOLTAGE 850000
+ #define LP_LPM_VOLTAGE 1000000
++#define GP_400MHZ_VOLTAGE 900000
+ #define GP_NORMAL_VOLTAGE 1000000
+ #define LP_NORMAL_VOLTAGE 1200000
+ #define GP_HIGH_VOLTAGE 1200000
+@@ -76,11 +79,14 @@ static struct clk *osc;
+ static struct regulator *gp_regulator;
+ static struct regulator *lp_regulator;
+ 
++extern int dvfs_core_is_active;
++
+ /* does need to be in ascending order for calc_frequency_khz() below */
+ static struct cpufreq_frequency_table imx37_freq_table[] = {
+ 	{0x01, CPU_FREQUENCY_200000_KHZ},
+-	{0x02, CPU_FREQUENCY_532000_KHZ},
+-	{0x02, CPU_FREQUENCY_600000_KHZ},
++	{0x02, CPU_FREQUENCY_400000_KHZ},
++	{0x03, CPU_FREQUENCY_532000_KHZ},
++	{0x04, CPU_FREQUENCY_600000_KHZ},
+ 	{0, CPUFREQ_TABLE_END},
+ };
+ 
+@@ -95,11 +101,12 @@ int set_cpu_freq(int freq)
+ 
+ 	if (freq == ARM_NORMAL_CLK) {
+ 		/*Set the voltage to 1.00v for the GP domain. */
+-
+-		ret = regulator_set_voltage(gp_regulator, GP_NORMAL_VOLTAGE);
+-		if (ret < 0) {
+-			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+-			return ret;
++		if (freq > org_cpu_rate) {
++			ret = regulator_set_voltage(gp_regulator, GP_NORMAL_VOLTAGE);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
++				return ret;
++			}
+ 		}
+ 
+ 		ret = clk_set_rate(cpu_clk, ARM_NORMAL_CLK);
+@@ -107,6 +114,14 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "cannot set CPU clock rate\n");
+ 			return ret;
+ 		}
++
++		if (freq < org_cpu_rate) {
++			ret = regulator_set_voltage(gp_regulator, GP_NORMAL_VOLTAGE);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
++				return ret;
++			}
++		}
+ 	} else if (freq == ARM_LPM_CLK) {
+ 		ret = clk_set_rate(cpu_clk, ARM_LPM_CLK);
+ 		if (ret != 0) {
+@@ -120,6 +135,30 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
+ 			return ret;
+ 		}
++	} else if (freq == ARM_400MHZ_CLK) {
++		if (freq > org_cpu_rate) {
++			/* Set the voltage to 0.9v for the GP domain. */
++			ret = regulator_set_voltage(gp_regulator, GP_400MHZ_VOLTAGE);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
++				return ret;
++			}
++		}
++
++		ret = clk_set_rate(cpu_clk, ARM_400MHZ_CLK);
++		if (ret != 0) {
++			printk(KERN_DEBUG "cannot set CPU clock rate\n");
++			return ret;
++		}
++
++		if (freq < org_cpu_rate) {
++			/* Set the voltage to 0.9v for the GP domain. */
++			ret = regulator_set_voltage(gp_regulator, GP_400MHZ_VOLTAGE);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
++				return ret;
++			}
++		}
+ 	} else if (freq == ARM_HIGH_CLK) {
+ 		/* Set the voltage to 1.2v for the GP domain. */
+ 		ret = regulator_set_voltage(gp_regulator, GP_HIGH_VOLTAGE);
+@@ -301,6 +340,9 @@ static int mx37_set_target(struct cpufreq_policy *policy,
+ 	freqs.cpu = 0;
+ 	freqs.flags = 0;
+ 
++	if ((freqs.old == freqs.new) && (freqs.new != ARM_LPM_CLK))
++		return 0;
++
+ 	low_freq_bus_ready = low_freq_bus_used();
+ 
+ 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+@@ -308,12 +350,14 @@ static int mx37_set_target(struct cpufreq_policy *policy,
+ 	if ((freq_Hz == ARM_LPM_CLK) && (!low_bus_freq_mode)
+ 	    && (low_freq_bus_ready)) {
+ 		set_low_bus_freq();
+-		ret = set_cpu_freq(freq_Hz);
++		if (!dvfs_core_is_active)
++			ret = set_cpu_freq(freq_Hz);
+ 	} else {
+ 		if (!high_bus_freq_mode)
+ 			set_high_bus_freq();
+ 
+-		ret = set_cpu_freq(freq_Hz);
++		if (!dvfs_core_is_active)
++			ret = set_cpu_freq(freq_Hz);
+ 		if (low_bus_freq_mode) {
+ 			if (ret == 0)
+ 				set_high_bus_freq();
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index ce5e61f..746d23a 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -571,6 +571,80 @@ static struct resource tve_resources[] = {
+ 	 },
+ };
+ 
++static struct platform_device mxc_tve_device = {
++	.name = "tve",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &tve_data,
++		},
++	.num_resources = ARRAY_SIZE(tve_resources),
++	.resource = tve_resources,
++};
++
++void __init mxc_init_tve(void)
++{
++	platform_device_register(&mxc_tve_device);
++}
++
++/*!
++ * Resource definition for the DVFS CORE
++ */
++static struct resource dvfs_core_resources[] = {
++	[0] = {
++	       .start = MXC_DVFS_CORE_BASE,
++	       .end = MXC_DVFS_CORE_BASE + 8 * SZ_16 - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_GPC1,
++	       .end = MXC_INT_GPC1,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Platform Data for DVFS CORE */
++struct mxc_dvfs_platform_data dvfs_core_data = {
++	.reg_id = "SW1",
++	.clk1_id = "cpu_clk",
++	.clk2_id = "gpc_dvfs_clk",
++	.gpc_cntr_reg_addr = MXC_GPC_CNTR,
++	.gpc_vcr_reg_addr = MXC_GPC_VCR,
++	.dvfs_thrs_reg_addr = MXC_DVFSTHRS,
++	.dvfs_coun_reg_addr = MXC_DVFSCOUN,
++	.dvfs_emac_reg_addr = MXC_DVFSEMAC,
++	.dvfs_cntr_reg_addr = MXC_DVFSCNTR,
++	.div3ck_mask = 0x00000006,
++	.div3ck_offset = 1,
++	.div3ck_val = 3,
++	.emac_val = 0x20,
++	.upthr_val = 28,
++	.dnthr_val = 10,
++	.pncthr_val = 33,
++	.upcnt_val = 5,
++	.dncnt_val = 5,
++	.delay_time = 100,
++	.num_wp = 3,
++};
++
++/*! Device Definition for MXC DVFS core */
++static struct platform_device mxc_dvfs_core_device = {
++	.name = "mxc_dvfs_core",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &dvfs_core_data,
++		},
++	.num_resources = ARRAY_SIZE(dvfs_core_resources),
++	.resource = dvfs_core_resources,
++};
++
++static inline void mxc_init_dvfs(void)
++{
++	if (platform_device_register(&mxc_dvfs_core_device) < 0)
++		dev_err(&mxc_dvfs_core_device.dev,
++			"Unable to register DVFS core device\n");
++}
++
+ /*!
+  * Resource definition for the DPTC GP
+  */
+@@ -694,21 +768,6 @@ static inline void mxc_init_dptc(void)
+ 	}
+ }
+ 
+-static struct platform_device mxc_tve_device = {
+-	.name = "tve",
+-	.dev = {
+-		.release = mxc_nop_release,
+-		.platform_data = &tve_data,
+-		},
+-	.num_resources = ARRAY_SIZE(tve_resources),
+-	.resource = tve_resources,
+-};
+-
+-void __init mxc_init_tve(void)
+-{
+-	platform_device_register(&mxc_tve_device);
+-}
+-
+ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ 	{
+ 	 .num = 0,
+@@ -843,6 +902,7 @@ int __init mxc_init_devices(void)
+ 	mxc_init_spdif();
+ 	mxc_init_tve();
+ 	mx37_init_lpmode();
++	mxc_init_dvfs();
+ 	mxc_init_dptc();
+ 	/* SPBA configuration for SSI2 - SDMA and MCU are set */
+ 	spba_take_ownership(SPBA_SSI2, SPBA_MASTER_C | SPBA_MASTER_A);
+diff --git a/arch/arm/mach-mx37/dvfs_core.c b/arch/arm/mach-mx37/dvfs_core.c
+deleted file mode 100644
+index 4660fb0..0000000
+--- a/arch/arm/mach-mx37/dvfs_core.c
++++ /dev/null
+@@ -1,690 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file dvfs_core.c
+- *
+- * @brief A simplied driver for the Freescale Semiconductor MXC DVFS module.
+- *
+- * Upon initialization, the DVFS driver initializes the DVFS hardware
+- * sets up driver nodes attaches to the DVFS interrupt and initializes internal
+- * data structures. When the DVFS interrupt occurs the driver checks the cause
+- * of the interrupt (lower frequency, increase frequency or emergency) and
+- * changes the CPU voltage according to translation table that is loaded into
+- * the driver.
+- *
+- * @ingroup PM
+- */
+-
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/init.h>
+-#include <linux/fs.h>
+-#include <linux/interrupt.h>
+-#include <linux/jiffies.h>
+-#include <linux/device.h>
+-#include <linux/sysdev.h>
+-#include <linux/delay.h>
+-#include <linux/clk.h>
+-#include <linux/i2c.h>
+-#include <linux/regulator/regulator.h>
+-#include <linux/input.h>
+-
+-#include <asm/arch/gpio.h>
+-
+-#include "iomux.h"
+-#include "crm_regs.h"
+-
+-#define DRIVER_NAME "DVFSCORE"
+-
+-#define MXC_DVFSTHRS_UPTHR_MASK               0x0FC00000
+-#define MXC_DVFSTHRS_UPTHR_OFFSET             22
+-#define MXC_DVFSTHRS_DNTHR_MASK               0x003F0000
+-#define MXC_DVFSTHRS_DNTHR_OFFSET             16
+-#define MXC_DVFSTHRS_PNCTHR_MASK              0x0000003F
+-#define MXC_DVFSTHRS_PNCTHR_OFFSET            0
+-
+-#define MXC_DVFSCOUN_DNCNT_MASK               0x00FF0000
+-#define MXC_DVFSCOUN_DNCNT_OFFSET             16
+-#define MXC_DVFSCOUN_UPCNT_MASK              0x000000FF
+-#define MXC_DVFSCOUN_UPCNT_OFFSET            0
+-
+-#define MXC_DVFSCNTR_LBMI                    0x08000000
+-#define MXC_DVFSCNTR_DVFIS                   0x01000000
+-#define MXC_DVFSCNTR_FSVAIM                  0x00400000
+-#define MXC_DVFSCNTR_FSVAI_MASK              0x00300000
+-#define MXC_DVFSCNTR_FSVAI_OFFSET            20
+-#define MXC_DVFSCNTR_MAXF_MASK               0x00040000
+-#define MXC_DVFSCNTR_MAXF_OFFSET             18
+-#define MXC_DVFSCNTR_MINF_MASK               0x00020000
+-#define MXC_DVFSCNTR_MINF_OFFSET             17
+-#define MXC_DVFSCNTR_LTBRSR_MASK             0x00000018
+-#define MXC_DVFSCNTR_LTBRSR_OFFSET           3
+-#define MXC_DVFSCNTR_DIV3CK_MASK             0x00000006
+-#define MXC_DVFSCNTR_DIV3CK_OFFSET           1
+-#define MXC_DVFSCNTR_DVFEN                   0x00000001
+-
+-#define MXC_GPCCNTR_GPCIRQ                   0x00100000
+-#define MXC_GPCCNTR_DVFS0CR                  0x00010000
+-#define MXC_GPCCNTR_ADU                      0x00008000
+-#define MXC_GPCCNTR_STRT                     0x00004000
+-#define MXC_GPCCNTR_FUPD                     0x00002000
+-#define MXC_GPCCNTR_HTRI_MASK                0x0000000F
+-#define MXC_GPCCNTR_HTRI_OFFSET              0
+-
+-#define MXC_GPCVCR_VINC_MASK                 0x00020000
+-#define MXC_GPCVCR_VINC_OFFSET               17
+-
+-/*
+- * Voltage can be set for core.
+- */
+-#define GP_VOLTAGE_MAX_uV		1000000
+-#define VOLTAGE_CHANGED_STEP_uV		25000
+-
+-/*
+- * Maximum and minimum values of ARM_PODF.
+- */
+-#define ARM_PODF_MIN		0
+-#define ARM_PODF_MAX		7
+-
+-static struct regulator *vddgp_reg;
+-static struct delayed_work dvfs_core_work;
+-static int dvfs_is_active;
+-static int upthr;
+-static int dnthr;
+-static int pncthr;
+-static int dncnt;
+-static int upcnt;
+-static int maxf;		/* 1=maximum freq reached */
+-static int minf;		/* 1=minimum freq reached */
+-static int arm_podf;
+-static int fupd;		/* freq update needed if = 1 */
+-static int vinc;		/* 1=freq up; 0=freq down */
+-static int dvfs_int_no;
+-static int div3ck;
+-static int ltbrsr;
+-static int ARM_FREQ_SHIFT_DIVIDER;
+-static int htri;
+-static int vddgp;
+-static int irq_times;
+-
+-/* Used for tracking the number of interrupts */
+-static u32 dvfs_nr_up[4];
+-static u32 dvfs_nr_dn[4];
+-
+-/*
+- * Clock structures
+- */
+-static struct clk *cpu_clk;
+-static struct clk *ahb_clk;
+-
+-enum {
+-	FSVAI_FREQ_NOCHANGE = 0x0,
+-	FSVAI_FREQ_INCREASE,
+-	FSVAI_FREQ_DECREASE,
+-	FSVAI_FREQ_EMERG,
+-};
+-
+-DEFINE_SPINLOCK(mxc_dvfs_core_lock);
+-
+-static int start_dvfs(void)
+-{
+-	u32 reg, flags;
+-
+-	if (dvfs_is_active)
+-		return 0;
+-
+-	irq_times = 0;
+-	dvfs_int_no = 0;
+-	htri = 0;
+-
+-	/* config reg GPC_CNTR */
+-	reg = __raw_readl(MXC_GPC_CNTR);
+-
+-	/* GPCIRQ=1, select ARM IRQ */
+-	reg |= MXC_GPCCNTR_GPCIRQ;
+-	/* ADU=1, select ARM domain */
+-	reg |= MXC_GPCCNTR_ADU;
+-	__raw_writel(reg, MXC_GPC_CNTR);
+-
+-	/* Set DVFS regs for freq-down for the first dvfs routine */
+-	upthr = 53;
+-	dnthr = 33;
+-	pncthr = 55;
+-	div3ck = 3;
+-	ltbrsr = 1;
+-	reg = 0;
+-	reg |= upthr << MXC_DVFSTHRS_UPTHR_OFFSET;
+-	reg |= dnthr << MXC_DVFSTHRS_DNTHR_OFFSET;
+-	reg |= pncthr << MXC_DVFSTHRS_PNCTHR_OFFSET;
+-	__raw_writel(reg, MXC_DVFSTHRS);
+-
+-	dncnt = 0x0a;
+-	upcnt = 0x05;
+-	reg = 0;
+-	reg |= dncnt << MXC_DVFSCOUN_DNCNT_OFFSET;
+-	reg |= upcnt << MXC_DVFSCOUN_UPCNT_OFFSET;
+-	__raw_writel(reg, MXC_DVFSCOUN);
+-
+-	/* EMAC=0x100 */
+-	__raw_writel(0x100, MXC_DVFSEMAC);
+-
+-	/* set MAXF, MINF according to ARM_PODF */
+-	maxf = 0;
+-	minf = 0;
+-	arm_podf = __raw_readl(MXC_CCM_CACRR) & MXC_CCM_CACRR_ARM_PODF_MASK;
+-	if (arm_podf == ARM_PODF_MIN)
+-		maxf = 1;
+-	if (arm_podf == ARM_PODF_MAX)
+-		minf = 1;
+-	vddgp = GP_VOLTAGE_MAX_uV;
+-
+-	/* Set the voltage for the GP domain. */
+-	vddgp_reg = regulator_get(NULL, "DCDC1");
+-
+-	spin_lock_irqsave(&mxc_dvfs_core_lock, flags);
+-
+-	/* Mask load buffer full interrupt */
+-	reg = __raw_readl(MXC_DVFSCNTR);
+-	reg |= MXC_DVFSCNTR_LBMI;
+-	/* Select ARM domain */
+-	reg |= MXC_DVFSCNTR_DVFIS;
+-	/* Enable DVFS frequency adjustment interrupt */
+-	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
+-	/* Set MAXF, MINF */
+-	reg = (reg & ~(MXC_DVFSCNTR_MAXF_MASK | MXC_DVFSCNTR_MINF_MASK));
+-	reg |= maxf << MXC_DVFSCNTR_MAXF_OFFSET;
+-	reg |= minf << MXC_DVFSCNTR_MINF_OFFSET;
+-	/* Set load tracking buffer register source */
+-	reg = (reg & ~MXC_DVFSCNTR_LTBRSR_MASK);
+-	reg |= ltbrsr << MXC_DVFSCNTR_LTBRSR_OFFSET;
+-	/* DIV3CK=3 */
+-	reg = (reg & ~MXC_DVFSCNTR_DIV3CK_MASK);
+-	reg |= div3ck << MXC_DVFSCNTR_DIV3CK_OFFSET;
+-	/* Enable DVFS */
+-	reg |= MXC_DVFSCNTR_DVFEN;
+-	__raw_writel(reg, MXC_DVFSCNTR);
+-
+-	dvfs_is_active = 1;
+-
+-	spin_unlock_irqrestore(&mxc_dvfs_core_lock, flags);
+-
+-	pr_info("DVFS is started\n");
+-
+-	return 0;
+-}
+-
+-/*!
+- * This function is called for module initialization.
+- * It sets up the DVFS hardware.
+- * It sets default values for DVFS thresholds and counters. The default
+- * values was chosen from a set of different reasonable values. They was tested
+- * and the default values in the driver gave the best results.
+- * More work should be done to find optimal values.
+- *
+- * @return   0 if successful; non-zero otherwise.
+- *
+- */
+-static int init_dvfs_controller(void)
+-{
+-	mxc_request_iomux(MX37_PIN_BOOT_MODE0, IOMUX_CONFIG_ALT5);
+-	mxc_iomux_set_pad(MX37_PIN_BOOT_MODE0, 0x0);
+-
+-	mxc_request_iomux(MX37_PIN_BOOT_MODE1, IOMUX_CONFIG_ALT5);
+-	mxc_iomux_set_pad(MX37_PIN_BOOT_MODE1, 0x0);
+-
+-	__raw_writel(0x01090080, MXC_CCM_CCOSR);
+-	return 0;
+-}
+-
+-static irqreturn_t dvfs_irq(int irq, void *dev_id)
+-{
+-	u32 reg;
+-
+-	/* Check if DVFS0 (ARM) id requesting for freqency/voltage update */
+-	if ((__raw_readl(MXC_GPC_CNTR) & MXC_GPCCNTR_DVFS0CR) == 0)
+-		return IRQ_HANDLED;
+-
+-	dvfs_int_no++;
+-
+-	/* Mask DVFS irq */
+-	reg = __raw_readl(MXC_DVFSCNTR);
+-	/* FSVAIM=1 */
+-	reg |= MXC_DVFSCNTR_FSVAIM;
+-	__raw_writel(reg, MXC_DVFSCNTR);
+-
+-	schedule_delayed_work(&dvfs_core_work, 0);
+-
+-	return IRQ_HANDLED;
+-}
+-
+-static void dvfs_core_workqueue_handler(struct work_struct *work)
+-{
+-	u32 fsvai;
+-	u32 reg;
+-
+-	/* Check DVFS frequency adjustment interrupt status */
+-	reg = __raw_readl(MXC_DVFSCNTR);
+-	fsvai = (reg & MXC_DVFSCNTR_FSVAI_MASK) >> MXC_DVFSCNTR_FSVAI_OFFSET;
+-	/* Get MAXF, MINF */
+-	maxf = (reg & MXC_DVFSCNTR_MAXF_MASK) >> MXC_DVFSCNTR_MAXF_OFFSET;
+-	minf = (reg & MXC_DVFSCNTR_MINF_MASK) >> MXC_DVFSCNTR_MINF_OFFSET;
+-	printk(KERN_WARNING "maxf = %d, minf = %d\n", maxf, minf);
+-	printk(KERN_WARNING "fsvai= 0x%x\n", fsvai);
+-
+-	/* Check FSVAI, FSVAI=0 is error */
+-	if (fsvai == FSVAI_FREQ_NOCHANGE) {
+-		/* Do nothing. Freq change is not required */
+-		printk(KERN_WARNING "fsvai should not be 0\n");
+-		return;
+-	}
+-
+-	/* If FSVAI indicate freq up, check arm-clk is not in highest mode */
+-	if ((fsvai == FSVAI_FREQ_INCREASE) || (fsvai == FSVAI_FREQ_EMERG)) {
+-		if (maxf == 1) {
+-			/* Do nothing. Freq change is not required */
+-			printk(KERN_WARNING "fsvai can not go up any more\n");
+-			return;
+-		} else {
+-			fupd = 1;
+-			vinc = 1;	/* freq up */
+-		}
+-	}
+-
+-	/* If FSVAI indicate freq down, check arm-clk is not in lowest mode */
+-	if (fsvai == FSVAI_FREQ_DECREASE) {
+-		if (minf == 1) {
+-			/* Do nothing. Freq change is not required */
+-			printk(KERN_WARNING "fsvai can not go down any more\n");
+-			return;
+-		} else {
+-			fupd = 1;
+-			vinc = 0;	/* freq down */
+-		}
+-	}
+-	printk(KERN_WARNING "fupd = %d, vinc = %d\n", fupd, vinc);
+-
+-	/* expect freq-down for first dvfs routine */
+-	if ((dvfs_int_no == 1) && (vinc == 1)) {
+-		/* Do nothing. Freq change is not required */
+-		printk(KERN_WARNING "fsvai can not go up any more\n");
+-		return;
+-	}
+-
+-	/* ARM_FREQ_SHIFT_DIVIDER=1: change arm_podf only */
+-	ARM_FREQ_SHIFT_DIVIDER = 1;
+-
+-	/* Set ARM_FREQ_SHIFT_DIVIDER = 1 */
+-	reg = __raw_readl(MXC_CCM_CDCR);
+-	reg = (reg & ~MXC_CCM_CDCR_ARM_FREQ_SHIFT_DIVIDER);
+-	reg |= MXC_CCM_CDCR_ARM_FREQ_SHIFT_DIVIDER;
+-	__raw_writel(reg, MXC_CCM_CDCR);
+-
+-	/* Get ARM_PODF */
+-	reg = __raw_readl(MXC_CCM_CACRR);
+-	arm_podf =
+-	    (reg & MXC_CCM_CACRR_ARM_PODF_MASK) >>
+-	    MXC_CCM_CACRR_ARM_PODF_OFFSET;
+-	printk(KERN_WARNING "arm_podf = %d\n", arm_podf);
+-
+-	if ((dvfs_int_no == 1) && (vinc == 0)) {
+-		arm_podf++;
+-		/* set ARM_PODF */
+-		reg = (reg & ~MXC_CCM_CACRR_ARM_PODF_MASK);
+-		reg |= arm_podf;
+-		__raw_writel(reg, MXC_CCM_CACRR);
+-
+-		/* Set voltage VDDGP */
+-		vddgp -= VOLTAGE_CHANGED_STEP_uV;
+-		printk(KERN_WARNING "Change voltage to %d uV (1st)\n", vddgp);
+-		regulator_set_voltage(vddgp_reg, vddgp);
+-	} else if ((vinc == 0) && (arm_podf == ARM_PODF_MIN)) {
+-		arm_podf++;	/* freq down */
+-		/* Set ARM_PODF */
+-		reg = (reg & ~MXC_CCM_CACRR_ARM_PODF_MASK);
+-		reg |= arm_podf;
+-		__raw_writel(reg, MXC_CCM_CACRR);
+-
+-		vddgp -= VOLTAGE_CHANGED_STEP_uV;
+-		printk(KERN_WARNING "Change voltage to %d uV\n", vddgp);
+-		regulator_set_voltage(vddgp_reg, vddgp);
+-	} else if ((vinc == 0) && (arm_podf > 0)) {
+-		if (arm_podf < ARM_PODF_MAX) {
+-			printk(KERN_WARNING "arm_podf is less than 7 now\n");
+-			arm_podf++;	/* freq down */
+-			/* set ARM_PODF */
+-			reg = (reg & ~MXC_CCM_CACRR_ARM_PODF_MASK);
+-			reg |= arm_podf;
+-			__raw_writel(reg, MXC_CCM_CACRR);
+-
+-			vddgp -= VOLTAGE_CHANGED_STEP_uV;
+-			printk(KERN_WARNING "Change voltage to %d uV\n", vddgp);
+-			regulator_set_voltage(vddgp_reg, vddgp);
+-		} else {
+-			printk(KERN_WARNING "freq can not be changed\n");
+-			return;
+-		}
+-
+-	} else if ((vinc == 1) && (arm_podf > 0)) {
+-		arm_podf -= 1;	/* freq up */
+-		if (arm_podf >= ARM_PODF_MIN) {
+-			vddgp += VOLTAGE_CHANGED_STEP_uV;
+-			printk(KERN_WARNING "Change voltage to %d uV\n", vddgp);
+-			regulator_set_voltage(vddgp_reg, vddgp);
+-
+-			/* set ARM_PODF */
+-			reg = (reg & ~MXC_CCM_CACRR_ARM_PODF_MASK);
+-			reg |= arm_podf;
+-			__raw_writel(reg, MXC_CCM_CACRR);
+-		}
+-	} else {
+-		printk(KERN_WARNING "freq can not be changed\n");
+-		return;
+-	}
+-
+-	reg = __raw_readl(MXC_CCM_CDHIPR);
+-	if (ARM_FREQ_SHIFT_DIVIDER == 1) {
+-		if ((reg & MXC_CCM_CDHIPR_ARM_PODF_BUSY) == 0x0) {
+-			/* ARM_PODF_BUSY = 1 */
+-			printk(KERN_WARNING "ARM_PODF_BUSY = 0\n");
+-			return;
+-		}
+-	} else {
+-		if ((reg & MXC_CCM_CDHIPR_ARM_PODF_BUSY) != 0x0) {
+-			/* ARM_PODF_BUSY = 0 */
+-			printk(KERN_WARNING "ARM_PODF_BUSY = 1\n");
+-			return;
+-		}
+-	}
+-
+-	/* START the GPC main control FSM */
+-	/*  If FUPD=1, freq update needed */
+-	if (fupd == 1) {
+-		printk(KERN_WARNING "START the GPC main control FSM\n");
+-		/* set VINC */
+-		reg = __raw_readl(MXC_GPC_VCR);
+-		reg = (reg & ~MXC_GPCVCR_VINC_MASK);
+-		reg |= vinc << MXC_GPCVCR_VINC_OFFSET;
+-		__raw_writel(reg, MXC_GPC_VCR);
+-
+-		if (vinc == 0) {
+-			/* freq down */
+-			printk(KERN_WARNING "freq down\n");
+-		}
+-
+-		reg = __raw_readl(MXC_GPC_CNTR);
+-		/* STRT=1 */
+-		reg |= MXC_GPCCNTR_STRT;
+-		/* set FUPD */
+-		reg = (reg & ~MXC_GPCCNTR_FUPD);
+-		reg |= MXC_GPCCNTR_FUPD;
+-		/* set GPC_CNTR.HTRI */
+-		reg = (reg & ~MXC_GPCCNTR_HTRI_MASK);
+-		reg |= (htri << MXC_GPCCNTR_HTRI_OFFSET);
+-		__raw_writel(reg, MXC_GPC_CNTR);
+-	}
+-
+-	htri++;
+-	if (htri > 15)
+-		htri = 0;
+-
+-	if (arm_podf == ARM_PODF_MAX) {
+-		/* freq-up for all routines except the first routine */
+-		printk(KERN_WARNING "freq-up\n");
+-		upthr = 31;
+-		dnthr = 28;
+-		pncthr = 63;	/* freq up only */
+-		reg = 0;
+-		reg |= upthr << MXC_DVFSTHRS_UPTHR_OFFSET;
+-		reg |= dnthr << MXC_DVFSTHRS_DNTHR_OFFSET;
+-		reg |= pncthr;
+-		__raw_writel(reg, MXC_DVFSTHRS);
+-
+-		dncnt = 33;
+-		upcnt = 33;
+-		reg = 0;
+-		reg |= dncnt << MXC_DVFSCOUN_DNCNT_OFFSET;
+-		reg |= upcnt << MXC_DVFSCOUN_UPCNT_OFFSET;
+-		__raw_writel(reg, MXC_DVFSCOUN);
+-	}
+-
+-	if (arm_podf == ARM_PODF_MIN) {
+-		/* freq-up for all routines except the first routine */
+-		printk(KERN_WARNING "freq-down\n");
+-		upthr = 53;
+-		dnthr = 33;
+-		pncthr = 55;	/* freq up only */
+-		reg = 0;
+-		reg |= upthr << MXC_DVFSTHRS_UPTHR_OFFSET;
+-		reg |= dnthr << MXC_DVFSTHRS_DNTHR_OFFSET;
+-		reg |= pncthr << MXC_DVFSTHRS_PNCTHR_OFFSET;
+-		__raw_writel(reg, MXC_DVFSTHRS);
+-
+-		dncnt = 0x0a;
+-		upcnt = 0x05;
+-		reg = 0;
+-		reg |= dncnt << MXC_DVFSCOUN_DNCNT_OFFSET;
+-		reg |= upcnt << MXC_DVFSCOUN_UPCNT_OFFSET;
+-		__raw_writel(reg, MXC_DVFSCOUN);
+-	}
+-
+-	/* Set MAXF, MINF for next routine according to ARM_PODF */
+-	maxf = 0;
+-	minf = 0;
+-	arm_podf = __raw_readl(MXC_CCM_CACRR) & MXC_CCM_CACRR_ARM_PODF_MASK;
+-	if (arm_podf == ARM_PODF_MIN)
+-		maxf = 1;
+-	if (arm_podf == ARM_PODF_MAX)
+-		minf = 1;
+-
+-	/* Enable FVFS interrupt */
+-	reg = __raw_readl(MXC_DVFSCNTR);
+-	/* FSVAIM=0 */
+-	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
+-	/* Set MAXF, MINF */
+-	reg = (reg & ~(MXC_DVFSCNTR_MAXF_MASK | MXC_DVFSCNTR_MINF_MASK));
+-	reg |= maxf << MXC_DVFSCNTR_MAXF_OFFSET;
+-	reg |= minf << MXC_DVFSCNTR_MINF_OFFSET;
+-	__raw_writel(reg, MXC_DVFSCNTR);
+-}
+-
+-/*!
+- * This function disables the DVFS module.
+- */
+-static void stop_dvfs(void)
+-{
+-	u32 reg = 0;
+-	u32 flags;
+-
+-	if (dvfs_is_active) {
+-		spin_lock_irqsave(&mxc_dvfs_core_lock, flags);
+-
+-		/* Mask dvfs irq, disable DVFS */
+-		reg = __raw_readl(MXC_DVFSCNTR);
+-		/* FSVAIM=1 */
+-		reg |= MXC_DVFSCNTR_FSVAIM;
+-		reg = (reg & ~MXC_DVFSCNTR_DVFEN);
+-		__raw_writel(reg, MXC_DVFSCNTR);
+-
+-		dvfs_is_active = 0;
+-		spin_unlock_irqrestore(&mxc_dvfs_core_lock, flags);
+-
+-		if (arm_podf > 0) {
+-			arm_podf = 0;
+-			vddgp = GP_VOLTAGE_MAX_uV;
+-			printk(KERN_WARNING "Change voltage to %d uV\n", vddgp);
+-			regulator_set_voltage(vddgp_reg, vddgp);
+-
+-			/* set ARM_PODF */
+-			reg = (reg & ~MXC_CCM_CACRR_ARM_PODF_MASK);
+-			reg |= arm_podf;
+-			__raw_writel(reg, MXC_CCM_CACRR);
+-		}
+-
+-	}
+-
+-	pr_info("DVFS is stopped\n");
+-}
+-
+-static ssize_t dvfs_enable_store(struct sys_device *dev, const char *buf,
+-				 size_t size)
+-{
+-	if (strstr(buf, "1") != NULL) {
+-		if (start_dvfs() != 0)
+-			printk(KERN_ERR "Failed to start DVFS\n");
+-	} else if (strstr(buf, "0") != NULL)
+-		stop_dvfs();
+-
+-	return size;
+-}
+-
+-static ssize_t dvfs_status_show(struct sys_device *dev, char *buf)
+-{
+-	int size = 0;
+-
+-	if (dvfs_is_active)
+-		size = sprintf(buf, "DVFS is enabled\n");
+-	else
+-		size = sprintf(buf, "DVFS is disabled\n");
+-
+-	return size;
+-}
+-
+-static ssize_t dvfs_status_store(struct sys_device *dev, const char *buf,
+-				 size_t size)
+-{
+-	if (strstr(buf, "reset") != NULL) {
+-		int i;
+-		for (i = 0; i < 4; i++) {
+-			dvfs_nr_up[i] = 0;
+-			dvfs_nr_dn[i] = 0;
+-		}
+-	}
+-
+-	return size;
+-}
+-
+-static SYSDEV_ATTR(enable, 0200, NULL, dvfs_enable_store);
+-static SYSDEV_ATTR(status, 0644, dvfs_status_show, dvfs_status_store);
+-
+-static struct sysdev_class dvfs_sysclass = {
+-	set_kset_name("dvfs"),
+-};
+-
+-static struct sys_device dvfs_device = {
+-	.id = 0,
+-	.cls = &dvfs_sysclass,
+-};
+-
+-static int dvfs_sysdev_ctrl_init(void)
+-{
+-	int err;
+-
+-	err = sysdev_class_register(&dvfs_sysclass);
+-	if (!err)
+-		err = sysdev_register(&dvfs_device);
+-	if (!err) {
+-		err = sysdev_create_file(&dvfs_device, &attr_enable);
+-		err = sysdev_create_file(&dvfs_device, &attr_status);
+-	}
+-
+-	return err;
+-}
+-
+-static void dvfs_sysdev_ctrl_exit(void)
+-{
+-	sysdev_remove_file(&dvfs_device, &attr_enable);
+-	sysdev_remove_file(&dvfs_device, &attr_status);
+-	sysdev_unregister(&dvfs_device);
+-	sysdev_class_unregister(&dvfs_sysclass);
+-}
+-
+-static int dvfs_i2c_remove(struct i2c_client *client)
+-{
+-	int err;
+-
+-	stop_dvfs();
+-
+-	/* release the DVFS interrupt */
+-	free_irq(MXC_INT_GPC1, NULL);
+-
+-	dvfs_sysdev_ctrl_exit();
+-
+-	clk_put(cpu_clk);
+-	clk_put(ahb_clk);
+-
+-	err = i2c_detach_client(client);
+-	if (err) {
+-		dev_err(&client->dev, "Client deregistration failed, "
+-			"client not detached.\n");
+-		return err;
+-	}
+-
+-	return 0;
+-}
+-
+-static int dvfs_i2c_probe(struct i2c_client *client)
+-{
+-	int err = 0;
+-
+-	INIT_DELAYED_WORK(&dvfs_core_work, dvfs_core_workqueue_handler);
+-
+-	cpu_clk = clk_get(NULL, "cpu_clk");
+-	ahb_clk = clk_get(NULL, "ahb_clk");
+-	err = init_dvfs_controller();
+-	if (err) {
+-		printk(KERN_ERR "DVFS: Unable to initialize DVFS");
+-		return err;
+-	}
+-
+-	/* request the DVFS interrupt */
+-	err = request_irq(MXC_INT_GPC1, dvfs_irq, IRQF_DISABLED, "dvfs", NULL);
+-	if (err)
+-		printk(KERN_ERR "DVFS: Unable to attach to DVFS interrupt");
+-
+-	err = dvfs_sysdev_ctrl_init();
+-	if (err) {
+-		printk(KERN_ERR
+-		       "DVFS: Unable to register sysdev entry for dvfs");
+-		return err;
+-	}
+-
+-	return err;
+-}
+-
+-static struct i2c_driver dvfs_driver = {
+-	.driver = {
+-		   .name = DRIVER_NAME,
+-		   },
+-	.probe = dvfs_i2c_probe,
+-	.remove = dvfs_i2c_remove,
+-	.command = NULL,
+-};
+-
+-static int __init dvfs_init(void)
+-{
+-	printk(KERN_ERR "DVFS: dvfs_init");
+-	return i2c_add_driver(&dvfs_driver);
+-}
+-
+-static void __exit dvfs_cleanup(void)
+-{
+-	i2c_del_driver(&dvfs_driver);
+-}
+-
+-module_init(dvfs_init);
+-module_exit(dvfs_cleanup);
+-
+-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-MODULE_DESCRIPTION("DVFS driver");
+-MODULE_LICENSE("GPL");
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 7419f63..00d84b8 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -72,21 +72,32 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .pdf = 0,
+ 	 .mfi = 5,
+ 	 .mfd = 23,
+-	 .mfn = 13,},
++	 .mfn = 13,
++	 .cpu_voltage = 1000000,},
++	{
++	 .pll_rate = 400000000,
++	 .cpu_rate = 400000000,
++	 .pdf = 1,
++	 .mfi = 8,
++	 .mfd = 2,
++	 .mfn = 1,
++	 .cpu_voltage = 900000,},
+ 	{
+ 	 .pll_rate = 200000000,
+ 	 .cpu_rate = 200000000,
+ 	 .pdf = 3,
+ 	 .mfi = 8,
+ 	 .mfd = 2,
+-	 .mfn = 1,},
++	 .mfn = 1,
++	 .cpu_voltage = 850000,},
+ 	{
+ 	 .pll_rate = 600000000,
+ 	 .cpu_rate = 600000000,
+ 	 .pdf = 0,
+ 	 .mfi = 6,
+ 	 .mfd = 3,
+-	 .mfn = 1,},
++	 .mfn = 1,
++	 .cpu_voltage = 1200000,},
+ };
+ 
+ struct cpu_wp *get_cpu_wp(int *wp)
+@@ -254,11 +265,6 @@ static struct mxc_lcd_platform_data lcd_data = {
+ 	.reset = lcd_reset,
+ };
+ 
+-static struct mxc_dvfs_platform_data dvfs_data = {
+-	.vddgp_reg = "SW1",
+-	.vcclp_reg = "SW2",
+-};
+-
+ #if defined(CONFIG_KEYBOARD_MPR084) || defined(CONFIG_KEYBOARD_MPR084_MODULE)
+ /*!
+  * These functions are used to configure and the GPIO pins for keypad to
+@@ -805,8 +811,7 @@ static void mx37_3stack_fixup_for_board_v1(void)
+ 	tve_data.dig_reg = "LDO3";
+ 	lcd_data.core_reg = "LDO1";
+ 	lcd_data.io_reg = "DCDC6";
+-	dvfs_data.vddgp_reg = "DCDC1";
+-	dvfs_data.vcclp_reg = "DCDC4";
++	dvfs_core_data.reg_id = "DCDC1";
+ 	ls_data.vdd_reg = "DCDC3";
+ 	mxc_bt_data.bt_vdd = "DCDC3";
+ 	mxc_bt_data.bt_vusb = "DCDC6";
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 264ff01..1d11800 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -20,8 +20,8 @@ obj-$(CONFIG_ARCH_MX25) +=
+ obj-$(CONFIG_ARCH_MX27) += dma_mx2.o usb_common.o
+ obj-$(CONFIG_ARCH_MX3) += dptc.o usb_common.o
+ obj-$(CONFIG_ARCH_MX35) += usb_common.o serialxc.o
+-obj-$(CONFIG_ARCH_MX37)     += usb_common.o utmixc.o dptc.o
+-obj-$(CONFIG_ARCH_MX51)	+= usb_common.o utmixc.o
++obj-$(CONFIG_ARCH_MX37) += usb_common.o utmixc.o dptc.o dvfs_core.o
++obj-$(CONFIG_ARCH_MX51) += usb_common.o utmixc.o dvfs_core.o
+ 
+ # LEDs support
+ obj-$(CONFIG_LEDS) += leds.o
+diff --git a/arch/arm/plat-mxc/dptc.c b/arch/arm/plat-mxc/dptc.c
+index 0c41b22..efc9f91 100644
+--- a/arch/arm/plat-mxc/dptc.c
++++ b/arch/arm/plat-mxc/dptc.c
+@@ -332,6 +332,15 @@ void dptc_resume(int id)
+ 	if (!drv_data->dptc_is_active)
+ 		return;
+ 
++	__raw_writel(dptc_data->dptc_wp_allfreq[0].dcvr0,
++		     dptc_data->dcvr0_reg_addr);
++	__raw_writel(dptc_data->dptc_wp_allfreq[0].dcvr1,
++		     dptc_data->dcvr0_reg_addr + 0x4);
++	__raw_writel(dptc_data->dptc_wp_allfreq[0].dcvr2,
++		     dptc_data->dcvr0_reg_addr + 0x8);
++	__raw_writel(dptc_data->dptc_wp_allfreq[0].dcvr3,
++		     dptc_data->dcvr0_reg_addr + 0xC);
++
+ 	dptccr = __raw_readl(dptc_data->dptccr_reg_addr);
+ 
+ 	/* Enable DPTC and unmask its interrupt */
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+new file mode 100644
+index 0000000..854b4de
+--- /dev/null
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -0,0 +1,574 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file dvfs_core.c
++ *
++ * @brief A simplied driver for the Freescale Semiconductor MXC DVFS module.
++ *
++ * Upon initialization, the DVFS driver initializes the DVFS hardware
++ * sets up driver nodes attaches to the DVFS interrupt and initializes internal
++ * data structures. When the DVFS interrupt occurs the driver checks the cause
++ * of the interrupt (lower frequency, increase frequency or emergency) and
++ * changes the CPU voltage according to translation table that is loaded into
++ * the driver.
++ *
++ * @ingroup PM
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/fs.h>
++#include <linux/interrupt.h>
++#include <linux/jiffies.h>
++#include <linux/device.h>
++#include <linux/sysdev.h>
++#include <linux/delay.h>
++#include <linux/clk.h>
++#include <linux/regulator/regulator.h>
++#include <linux/input.h>
++#include <linux/platform_device.h>
++
++#define MXC_DVFSTHRS_UPTHR_MASK               0x0FC00000
++#define MXC_DVFSTHRS_UPTHR_OFFSET             22
++#define MXC_DVFSTHRS_DNTHR_MASK               0x003F0000
++#define MXC_DVFSTHRS_DNTHR_OFFSET             16
++#define MXC_DVFSTHRS_PNCTHR_MASK              0x0000003F
++#define MXC_DVFSTHRS_PNCTHR_OFFSET            0
++
++#define MXC_DVFSCOUN_DNCNT_MASK               0x00FF0000
++#define MXC_DVFSCOUN_DNCNT_OFFSET             16
++#define MXC_DVFSCOUN_UPCNT_MASK              0x000000FF
++#define MXC_DVFSCOUN_UPCNT_OFFSET            0
++
++#define MXC_DVFSEMAC_EMAC_MASK               0x000001FF
++#define MXC_DVFSEMAC_EMAC_OFFSET             0
++
++#define MXC_DVFSCNTR_DVFEV                   0x10000000
++#define MXC_DVFSCNTR_LBMI                    0x08000000
++#define MXC_DVFSCNTR_LBFL                    0x06000000
++#define MXC_DVFSCNTR_DVFIS                   0x01000000
++#define MXC_DVFSCNTR_FSVAIM                  0x00400000
++#define MXC_DVFSCNTR_FSVAI_MASK              0x00300000
++#define MXC_DVFSCNTR_FSVAI_OFFSET            20
++#define MXC_DVFSCNTR_WFIM                    0x00080000
++#define MXC_DVFSCNTR_WFIM_OFFSET             19
++#define MXC_DVFSCNTR_MAXF_MASK               0x00040000
++#define MXC_DVFSCNTR_MAXF_OFFSET             18
++#define MXC_DVFSCNTR_MINF_MASK               0x00020000
++#define MXC_DVFSCNTR_MINF_OFFSET             17
++#define MXC_DVFSCNTR_LTBRSR_MASK             0x00000018
++#define MXC_DVFSCNTR_LTBRSR_OFFSET           3
++#define MXC_DVFSCNTR_DVFEN                   0x00000001
++
++#define MXC_GPCCNTR_GPCIRQ                   0x00100000
++#define MXC_GPCCNTR_DVFS0CR                  0x00010000
++#define MXC_GPCCNTR_ADU                      0x00008000
++#define MXC_GPCCNTR_STRT                     0x00004000
++#define MXC_GPCCNTR_FUPD                     0x00002000
++#define MXC_GPCCNTR_HTRI_MASK                0x0000000F
++#define MXC_GPCCNTR_HTRI_OFFSET              0
++
++#define MXC_GPCVCR_VINC_MASK                 0x00020000
++#define MXC_GPCVCR_VINC_OFFSET               17
++#define MXC_GPCVCR_VCNTU_MASK                0x00010000
++#define MXC_GPCVCR_VCNTU_OFFSET              16
++#define MXC_GPCVCR_VCNT_MASK                 0x00007FFF
++#define MXC_GPCVCR_VCNT_OFFSET               0
++
++static struct delayed_work dvfs_core_work;
++static struct mxc_dvfs_platform_data *dvfs_data;
++static struct device *dvfs_dev;
++static struct cpu_wp *cpu_wp_tbl;
++int curr_wp;
++int dvfs_core_is_active;
++
++/*
++ * Clock structures
++ */
++static struct clk *cpu_clk;
++static struct clk *dvfs_clk;
++static struct regulator *core_regulator;
++
++enum {
++	FSVAI_FREQ_NOCHANGE = 0x0,
++	FSVAI_FREQ_INCREASE,
++	FSVAI_FREQ_DECREASE,
++	FSVAI_FREQ_EMERG,
++};
++
++/*
++ * Load tracking buffer source: 1 for ld_add; 0 for pre_ld_add; 2 for after EMA
++ */
++#define DVFS_LTBRSR		(2 << MXC_DVFSCNTR_LTBRSR_OFFSET)
++
++DEFINE_SPINLOCK(mxc_dvfs_core_lock);
++
++static void dvfs_load_config(void)
++{
++	u32 reg;
++
++	reg = 0;
++	reg |= dvfs_data->upthr_val << MXC_DVFSTHRS_UPTHR_OFFSET;
++	reg |= dvfs_data->dnthr_val << MXC_DVFSTHRS_DNTHR_OFFSET;
++	reg |= dvfs_data->pncthr_val;
++	__raw_writel(reg, dvfs_data->dvfs_thrs_reg_addr);
++
++	reg = 0;
++	reg |= dvfs_data->dncnt_val << MXC_DVFSCOUN_DNCNT_OFFSET;
++	reg |= dvfs_data->upcnt_val << MXC_DVFSCOUN_UPCNT_OFFSET;
++	__raw_writel(reg, dvfs_data->dvfs_coun_reg_addr);
++}
++
++static int start_dvfs(void)
++{
++	u32 reg, flags;
++
++	if (dvfs_core_is_active)
++		return 0;
++
++	spin_lock_irqsave(&mxc_dvfs_core_lock, flags);
++
++	clk_enable(dvfs_clk);
++
++	/* config reg GPC_CNTR */
++	reg = __raw_readl(dvfs_data->gpc_cntr_reg_addr);
++
++	/* GPCIRQ=1, select ARM IRQ */
++	reg |= MXC_GPCCNTR_GPCIRQ;
++	/* ADU=1, select ARM domain */
++	reg |= MXC_GPCCNTR_ADU;
++	__raw_writel(reg, dvfs_data->gpc_cntr_reg_addr);
++
++	/* Enable DVFS interrupt */
++	reg = __raw_readl(dvfs_data->dvfs_cntr_reg_addr);
++	/* FSVAIM=0 */
++	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
++	/* Set MAXF, MINF */
++	reg = (reg & ~(MXC_DVFSCNTR_MAXF_MASK | MXC_DVFSCNTR_MINF_MASK));
++	reg |= 1 << MXC_DVFSCNTR_MAXF_OFFSET;
++	/* Select ARM domain */
++	reg |= MXC_DVFSCNTR_DVFIS;
++	/* Enable DVFS frequency adjustment interrupt */
++	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
++	/* Set load tracking buffer register source */
++	reg = (reg & ~MXC_DVFSCNTR_LTBRSR_MASK);
++	reg |= DVFS_LTBRSR;
++	/* Set DIV3CK */
++	reg = (reg & ~(dvfs_data->div3ck_mask));
++	reg |= (dvfs_data->div3ck_val) << (dvfs_data->div3ck_offset);
++	/* Enable DVFS */
++	reg |= MXC_DVFSCNTR_DVFEN;
++	__raw_writel(reg, dvfs_data->dvfs_cntr_reg_addr);
++
++	dvfs_core_is_active = 1;
++
++	spin_unlock_irqrestore(&mxc_dvfs_core_lock, flags);
++
++	printk(KERN_DEBUG "DVFS is started\n");
++
++	return 0;
++}
++
++/*!
++ * This function is called for module initialization.
++ * It sets up the DVFS hardware.
++ * It sets default values for DVFS thresholds and counters. The default
++ * values was chosen from a set of different reasonable values. They was tested
++ * and the default values in the driver gave the best results.
++ * More work should be done to find optimal values.
++ *
++ * @return   0 if successful; non-zero otherwise.
++ *
++ */
++static int init_dvfs_controller(void)
++{
++	/* DVFS loading config */
++	dvfs_load_config();
++
++	/* Set EMAC value */
++	__raw_writel((dvfs_data->emac_val << MXC_DVFSEMAC_EMAC_OFFSET),
++				 dvfs_data->dvfs_emac_reg_addr);
++
++	return 0;
++}
++
++static irqreturn_t dvfs_irq(int irq, void *dev_id)
++{
++	u32 reg;
++
++	/* Check if DVFS0 (ARM) id requesting for freqency/voltage update */
++	if ((__raw_readl(dvfs_data->gpc_cntr_reg_addr) & MXC_GPCCNTR_DVFS0CR) ==
++		0)
++		return IRQ_NONE;
++
++	/* Mask DVFS irq */
++	reg = __raw_readl(dvfs_data->dvfs_cntr_reg_addr);
++	/* FSVAIM=1 */
++	reg |= MXC_DVFSCNTR_FSVAIM;
++	__raw_writel(reg, dvfs_data->dvfs_cntr_reg_addr);
++
++	schedule_delayed_work(&dvfs_core_work, 0);
++
++	return IRQ_HANDLED;
++}
++
++static void dvfs_core_workqueue_handler(struct work_struct *work)
++{
++	u32 fsvai;
++	u32 reg;
++	u32 curr_cpu;
++	unsigned long rate = 0;
++	int ret = 0;
++	int uvol;
++	int maxf = 0, minf = 0;
++
++	/* Check DVFS frequency adjustment interrupt status */
++	reg = __raw_readl(dvfs_data->dvfs_cntr_reg_addr);
++	fsvai = (reg & MXC_DVFSCNTR_FSVAI_MASK) >> MXC_DVFSCNTR_FSVAI_OFFSET;
++
++	/* Check FSVAI, FSVAI=0 is error */
++	if (fsvai == FSVAI_FREQ_NOCHANGE) {
++		/* Do nothing. Freq change is not required */
++		goto END;
++	}
++
++	curr_cpu = clk_get_rate(cpu_clk);
++
++	/* If FSVAI indicate freq down,
++	   check arm-clk is not in lowest frequency 200 MHz */
++	if (fsvai == FSVAI_FREQ_DECREASE) {
++		if (curr_cpu == cpu_wp_tbl[dvfs_data->num_wp - 1].cpu_rate) {
++			minf = 1;
++			goto END;
++		} else {
++			/* freq down */
++			curr_wp++;
++			if (curr_wp >= dvfs_data->num_wp) {
++				curr_wp = dvfs_data->num_wp - 1;
++				goto END;
++			}
++
++			rate = cpu_wp_tbl[curr_wp].cpu_rate;
++			uvol = cpu_wp_tbl[curr_wp].cpu_voltage;
++			if (curr_wp == dvfs_data->num_wp - 1)
++				minf = 1;
++
++			ret = clk_set_rate(cpu_clk, rate);
++			if (ret != 0) {
++				printk(KERN_DEBUG
++				       "cannot set CPU clock rate\n");
++				goto END;
++			}
++
++			/* START the GPC main control FSM */
++			/* set VINC */
++			reg = __raw_readl(dvfs_data->gpc_vcr_reg_addr);
++			reg &=
++			    ~(MXC_GPCVCR_VINC_MASK | MXC_GPCVCR_VCNTU_MASK |
++			      MXC_GPCVCR_VCNT_MASK);
++			reg |=
++			    (1 << MXC_GPCVCR_VCNTU_OFFSET) |
++			    (100 << MXC_GPCVCR_VCNT_OFFSET);
++			__raw_writel(reg, dvfs_data->gpc_vcr_reg_addr);
++
++			/* Set the voltage for the GP domain. */
++			ret = regulator_set_voltage(core_regulator, uvol);
++			if (ret < 0) {
++				printk(KERN_DEBUG
++				       "COULD NOT SET CORE VOLTAGE!!!!!\n");
++				goto END;
++			}
++			udelay(dvfs_data->delay_time);
++		}
++	} else {
++		if (curr_cpu == cpu_wp_tbl[0].cpu_rate) {
++			maxf = 1;
++			goto END;
++		} else {
++			/* freq up */
++			curr_wp = 0;
++			rate = cpu_wp_tbl[curr_wp].cpu_rate;
++			/* START the GPC main control FSM */
++			/* set VINC */
++			reg = __raw_readl(dvfs_data->gpc_vcr_reg_addr);
++			reg &=
++			    ~(MXC_GPCVCR_VINC_MASK | MXC_GPCVCR_VCNTU_MASK |
++			      MXC_GPCVCR_VCNT_MASK);
++			reg |=
++			    (1 << MXC_GPCVCR_VCNTU_OFFSET) |
++			    (100 << MXC_GPCVCR_VCNT_OFFSET);
++			__raw_writel(reg, dvfs_data->gpc_vcr_reg_addr);
++
++			ret = regulator_set_voltage(core_regulator,
++										cpu_wp_tbl[curr_wp].cpu_voltage);
++			if (ret < 0) {
++				printk(KERN_DEBUG
++				       "COULD NOT SET CORE VOLTAGE!!!!\n");
++				goto END;
++			}
++			udelay(dvfs_data->delay_time);
++
++			ret = clk_set_rate(cpu_clk, cpu_wp_tbl[curr_wp].cpu_rate);
++			if (ret != 0)
++				printk(KERN_DEBUG
++				       "cannot set CPU clock rate\n");
++			maxf = 1;
++		}
++	}
++
++END:			/* Set MAXF, MINF */
++	reg = __raw_readl(dvfs_data->dvfs_cntr_reg_addr);
++	reg = (reg & ~(MXC_DVFSCNTR_MAXF_MASK | MXC_DVFSCNTR_MINF_MASK));
++	reg |= maxf << MXC_DVFSCNTR_MAXF_OFFSET;
++	reg |= minf << MXC_DVFSCNTR_MINF_OFFSET;
++
++	/* Enable FVFS interrupt */
++	/* FSVAIM=0 */
++	reg = (reg & ~MXC_DVFSCNTR_FSVAIM);
++	/* LBFL=1 */
++	reg = (reg & ~MXC_DVFSCNTR_LBFL);
++	reg |= MXC_DVFSCNTR_LBFL;
++	__raw_writel(reg, dvfs_data->dvfs_cntr_reg_addr);
++}
++
++/*!
++ * This function disables the DVFS module.
++ */
++static void stop_dvfs(void)
++{
++	u32 reg = 0;
++	u32 flags;
++	u32 curr_cpu;
++
++	if (dvfs_core_is_active) {
++		spin_lock_irqsave(&mxc_dvfs_core_lock, flags);
++
++		/* Mask dvfs irq, disable DVFS */
++		reg = __raw_readl(dvfs_data->dvfs_cntr_reg_addr);
++		/* FSVAIM=1 */
++		reg |= MXC_DVFSCNTR_FSVAIM;
++		reg = (reg & ~MXC_DVFSCNTR_DVFEN);
++		__raw_writel(reg, dvfs_data->dvfs_cntr_reg_addr);
++
++		dvfs_core_is_active = 0;
++		spin_unlock_irqrestore(&mxc_dvfs_core_lock, flags);
++
++		curr_wp = 0;
++		curr_cpu = clk_get_rate(cpu_clk);
++		if (curr_cpu != cpu_wp_tbl[curr_wp].cpu_rate) {
++			if (regulator_set_voltage(core_regulator,
++									  cpu_wp_tbl[curr_wp].cpu_voltage) == 0)
++				clk_set_rate(cpu_clk, cpu_wp_tbl[curr_wp].cpu_rate);
++		}
++
++		clk_disable(dvfs_clk);
++	}
++
++	printk(KERN_DEBUG "DVFS is stopped\n");
++}
++
++static ssize_t dvfs_enable_show(struct device *dev,
++								struct device_attribute *attr, char *buf)
++{
++	if (dvfs_core_is_active)
++		return sprintf(buf, "DVFS is enabled\n");
++	else
++		return sprintf(buf, "DVFS is disabled\n");
++}
++
++
++static ssize_t dvfs_enable_store(struct device *dev,
++								 struct device_attribute *attr,
++								 const char *buf, size_t size)
++{
++	if (strstr(buf, "1") != NULL) {
++		if (start_dvfs() != 0)
++			printk(KERN_ERR "Failed to start DVFS\n");
++	} else if (strstr(buf, "0") != NULL)
++		stop_dvfs();
++
++	return size;
++}
++
++static DEVICE_ATTR(enable, 0644, dvfs_enable_show, dvfs_enable_store);
++
++/*!
++ * This is the probe routine for the DVFS driver.
++ *
++ * @param   pdev   The platform device structure
++ *
++ * @return         The function returns 0 on success
++ */
++static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
++{
++	int err = 0;
++	struct resource *res;
++	int cpu_wp_nr;
++	int irq;
++
++	printk(KERN_INFO "mxc_dvfs_core_probe\n");
++	dvfs_dev = &pdev->dev;
++	dvfs_data = pdev->dev.platform_data;
++
++	INIT_DELAYED_WORK(&dvfs_core_work, dvfs_core_workqueue_handler);
++
++	cpu_clk = clk_get(NULL, dvfs_data->clk1_id);
++	if (IS_ERR(cpu_clk)) {
++		printk(KERN_ERR "%s: failed to get cpu clock\n", __func__);
++		return PTR_ERR(cpu_clk);
++	}
++
++	dvfs_clk = clk_get(NULL, dvfs_data->clk2_id);
++	if (IS_ERR(dvfs_clk)) {
++		printk(KERN_ERR "%s: failed to get dvfs clock\n", __func__);
++		return PTR_ERR(dvfs_clk);
++	}
++
++	core_regulator = regulator_get(NULL, dvfs_data->reg_id);
++	if (IS_ERR(core_regulator)) {
++		clk_put(cpu_clk);
++		clk_put(dvfs_clk);
++		printk(KERN_ERR "%s: failed to get gp regulator\n", __func__);
++		return PTR_ERR(core_regulator);
++	}
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (res == NULL) {
++		err = -ENODEV;
++		goto err1;
++	}
++
++	/*
++	 * Request the DVFS interrupt
++	 */
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0) {
++		err = irq;
++		goto err1;
++	}
++
++	/* request the DVFS interrupt */
++	err = request_irq(irq, dvfs_irq, IRQF_SHARED, "dvfs", dvfs_dev);
++	if (err)
++		printk(KERN_ERR
++		       "DVFS: Unable to attach to DVFS interrupt,err = %d",
++		       err);
++
++	clk_enable(dvfs_clk);
++	err = init_dvfs_controller();
++	if (err) {
++		printk(KERN_ERR "DVFS: Unable to initialize DVFS");
++		return err;
++	}
++	clk_disable(dvfs_clk);
++
++	err = sysfs_create_file(&dvfs_dev->kobj, &dev_attr_enable.attr);
++	if (err) {
++		printk(KERN_ERR
++		       "DVFS: Unable to register sysdev entry for DVFS");
++		return err;
++	}
++
++	/* Set the current working point. */
++	cpu_wp_tbl = get_cpu_wp(&cpu_wp_nr);
++	curr_wp = 0;
++
++	return err;
++
++err1:
++	dev_err(&pdev->dev, "Failed to probe DVFS CORE\n");
++	return err;
++}
++
++/*!
++ * This function is called to put DPTC in a low power state.
++ *
++ * @param   pdev  the device structure
++ * @param   state the power state the device is entering
++ *
++ * @return  The function always returns 0.
++ */
++static int mxc_dvfs_core_suspend(struct platform_device *pdev,
++								 pm_message_t state)
++{
++	if (dvfs_core_is_active)
++		stop_dvfs();
++
++	return 0;
++}
++
++/*!
++ * This function is called to resume the MU from a low power state.
++ *
++ * @param   dev   the device structure
++ * @param   level the stage in device suspension process that we want the
++ *                device to be put in
++ *
++ * @return  The function always returns 0.
++ */
++static int mxc_dvfs_core_resume(struct platform_device *pdev)
++{
++	if (dvfs_core_is_active)
++		start_dvfs();
++
++	return 0;
++}
++
++static struct platform_driver mxc_dvfs_core_driver = {
++	.driver = {
++		   .name = "mxc_dvfs_core",
++		   },
++	.probe = mxc_dvfs_core_probe,
++	.suspend = mxc_dvfs_core_suspend,
++	.resume = mxc_dvfs_core_resume,
++};
++
++static int __init dvfs_init(void)
++{
++	if (platform_driver_register(&mxc_dvfs_core_driver) != 0) {
++		printk(KERN_ERR "mxc_dvfs_core_driver register failed\n");
++		return -ENODEV;
++	}
++
++	printk(KERN_INFO "DVFS driver module loaded\n");
++
++	return 0;
++}
++
++static void __exit dvfs_cleanup(void)
++{
++	stop_dvfs();
++
++	/* release the DVFS interrupt */
++	free_irq(MXC_INT_GPC1, NULL);
++
++	sysfs_remove_file(&dvfs_dev->kobj, &dev_attr_enable.attr);
++
++	/* Unregister the device structure */
++	platform_driver_unregister(&mxc_dvfs_core_driver);
++
++	clk_put(cpu_clk);
++	clk_put(dvfs_clk);
++
++	printk(KERN_INFO "DVFS driver module unloaded\n");
++
++}
++
++module_init(dvfs_init);
++module_exit(dvfs_cleanup);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("DVFS driver");
++MODULE_LICENSE("GPL");
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 932b192..82ba438 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -124,8 +124,51 @@ struct mxc_lcd_platform_data {
+ };
+ 
+ struct mxc_dvfs_platform_data {
+-	char *vddgp_reg;
+-	char *vcclp_reg;
++	/** Supply voltage regulator name string */
++	char *reg_id;
++	/* CPU clock name string */
++	char *clk1_id;
++	/* DVFS clock name string */
++	char *clk2_id;
++	/* GPC control reg address */
++	unsigned int gpc_cntr_reg_addr;
++	/* GPC voltage counter reg address */
++	unsigned int gpc_vcr_reg_addr;
++	/* DVFS threshold reg address */
++	unsigned int dvfs_thrs_reg_addr;
++	/* DVFS counters reg address */
++	unsigned int dvfs_coun_reg_addr;
++	/* DVFS EMAC reg address */
++	unsigned int dvfs_emac_reg_addr;
++	/* DVFS control reg address */
++	unsigned int dvfs_cntr_reg_addr;
++	/* DIV3CK mask */
++	u32 div3ck_mask;
++	/* DIV3CK offset */
++	int div3ck_offset;
++	/* DIV3CK value */
++	int div3ck_val;
++	/* EMAC value */
++	int emac_val;
++	/* Frequency increase threshold. Increase frequency change request
++	   will be sent if DVFS counter value will be more than this value */
++	int upthr_val;
++	/* Frequency decrease threshold. Decrease frequency change request
++	   will be sent if DVFS counter value will be less than this value */
++	int dnthr_val;
++	/* Panic threshold. Panic frequency change request
++	   will be sent if DVFS counter value will be more than this value */
++	int pncthr_val;
++	/* The amount of times the up threshold should be exceeded
++	   before DVFS will trigger frequency increase request */
++	int upcnt_val;
++	/* The amount of times the down threshold should be exceeded
++	   before DVFS will trigger frequency decrease request */
++	int dncnt_val;
++	/* Delay time in us */
++	int delay_time;
++	/* Number of woking points supported */
++	int num_wp;
+ };
+ 
+ struct mxc_tsc_platform_data {
+@@ -338,6 +381,7 @@ struct cpu_wp {
+ 	u32 mfi;
+ 	u32 mfd;
+ 	u32 mfn;
++	u32 cpu_voltage;
+ };
+ 
+ struct cpu_wp *get_cpu_wp(int *wp);
+-- 
+1.5.4.4
+

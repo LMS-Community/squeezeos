@@ -1,0 +1,602 @@
+From e768de3d261405ee462db1fc4b2dd60abb0af1b1 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 19 May 2007 19:00:51 -0400
+Subject: [PATCH] mmap: applied main mmap patch
+
+Resolved the following conflicts:
+
+Conflicts:
+
+	fs/unionfs/Makefile
+	fs/unionfs/file.c
+---
+ fs/unionfs/Makefile |    3 +-
+ fs/unionfs/copyup.c |    4 +
+ fs/unionfs/file.c   |  106 +++++-------------
+ fs/unionfs/inode.c  |    8 ++
+ fs/unionfs/main.c   |    6 -
+ fs/unionfs/mmap.c   |  296 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/unionfs/super.c  |    9 +-
+ fs/unionfs/union.h  |    1 +
+ 8 files changed, 346 insertions(+), 87 deletions(-)
+ create mode 100644 fs/unionfs/mmap.c
+
+diff --git a/fs/unionfs/Makefile b/fs/unionfs/Makefile
+index e9f8ad3..883427c 100644
+--- a/fs/unionfs/Makefile
++++ b/fs/unionfs/Makefile
+@@ -2,7 +2,8 @@ obj-$(CONFIG_UNION_FS) += unionfs.o
+ 
+ unionfs-y := subr.o dentry.o file.o inode.o main.o super.o \
+ 	rdstate.o copyup.o dirhelper.o rename.o \
+-	unlink.o lookup.o commonfops.o dirfops.o sioq.o
++	unlink.o lookup.o commonfops.o dirfops.o sioq.o \
++	mmap.o
+ 
+ unionfs-$(CONFIG_UNION_FS_XATTR) += xattr.o
+ 
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index c7d0f0d..ea8f24e 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -274,8 +274,12 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 
+ 	kfree(buf);
+ 
++	if (!err)
++		err = output_file->f_op->fsync(output_file, new_hidden_dentry, 0);
++
+ 	if (err)
+ 		goto out_close_out;
++
+ 	if (copyup_file) {
+ 		*copyup_file = output_file;
+ 		goto out_close_in;
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 7c0553c..caf4f9d 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -22,110 +22,62 @@
+  * File Operations *
+  *******************/
+ 
+-static loff_t unionfs_llseek(struct file *file, loff_t offset, int origin)
++static ssize_t unionfs_read(struct file *file, char __user *buf,
++			    size_t count, loff_t *ppos)
+ {
+-	loff_t err;
+-	struct file *hidden_file = NULL;
++	int err;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
+ 	if ((err = unionfs_file_revalidate(file, 0)))
+ 		goto out;
+ 
+-	hidden_file = unionfs_lower_file(file);
+-	/* always set hidden position to this one */
+-	hidden_file->f_pos = file->f_pos;
++	err = do_sync_read(unionfs_lower_file(file), buf, count, ppos);
+ 
+-	memcpy(&hidden_file->f_ra, &file->f_ra, sizeof(struct file_ra_state));
+-
+-	if (hidden_file->f_op && hidden_file->f_op->llseek)
+-		err = hidden_file->f_op->llseek(hidden_file, offset, origin);
+-	else
+-		err = generic_file_llseek(hidden_file, offset, origin);
++	/* FIXME: why? */
++	if (err >= 0)
++		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
++				unionfs_lower_dentry(file->f_path.dentry));
+ 
+-	if (err < 0)
+-		goto out;
+-	if (err != file->f_pos) {
+-		file->f_pos = err;
+-		file->f_version++;
+-	}
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 	unionfs_check_file(file);
+ 	return err;
+ }
+ 
+-static ssize_t unionfs_read(struct file *file, char __user *buf,
+-			    size_t count, loff_t *ppos)
++static ssize_t unionfs_aio_read(struct kiocb *iocb, const struct iovec *iov,
++				unsigned long nr_segs, loff_t pos)
+ {
+-	struct file *hidden_file;
+-	loff_t pos = *ppos;
++	struct file *file = iocb->ki_filp;
+ 	int err;
++#error fixme fxn check_file? read_unlock?
++	err = generic_file_aio_read(iocb, iov, nr_segs, pos);
+ 
+-	unionfs_read_lock(file->f_dentry->d_sb);
+-	if ((err = unionfs_file_revalidate(file, 0)))
+-		goto out;
+-
+-	err = -EINVAL;
+-	hidden_file = unionfs_lower_file(file);
+-	if (!hidden_file->f_op || !hidden_file->f_op->read)
+-		goto out;
++	if (err == -EIOCBQUEUED)
++		err = wait_on_sync_kiocb(iocb);
+ 
+-	err = hidden_file->f_op->read(hidden_file, buf, count, &pos);
+-	*ppos = pos;
++	/* FIXME: why? */
++	if (err >= 0)
++		touch_atime(unionfs_lower_mnt(file->f_path.dentry),
++				unionfs_lower_dentry(file->f_path.dentry));
+ 
++#if 0
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 	unionfs_check_file(file);
++#endif
+ 	return err;
+ }
+-
+-static ssize_t unionfs_write(struct file *file, const char __user *buf,
+-			     size_t count, loff_t *ppos)
++static ssize_t unionfs_write(struct file * file, const char __user * buf,
++			size_t count, loff_t * ppos)
+ {
+-	int err;
+-	struct file *hidden_file = NULL;
+-	struct inode *inode;
+-	struct inode *hidden_inode;
+-	loff_t pos = *ppos;
+-	int bstart, bend;
++	int err = 0;
+ 
+ 	unionfs_read_lock(file->f_dentry->d_sb);
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
+ 
+-	inode = file->f_dentry->d_inode;
+-
+-	bstart = fbstart(file);
+-	bend = fbend(file);
+-
+-	BUG_ON(bstart == -1);
+-
+-	hidden_file = unionfs_lower_file(file);
+-	hidden_inode = hidden_file->f_dentry->d_inode;
+-
+-	if (!hidden_file->f_op || !hidden_file->f_op->write) {
+-		err = -EINVAL;
+-		goto out;
+-	}
+-
+-	/* adjust for append -- seek to the end of the file */
+-	if (file->f_flags & O_APPEND)
+-		pos = inode->i_size;
+-
+-	err = hidden_file->f_op->write(hidden_file, buf, count, &pos);
+-
+-	/*
+-	 * copy ctime and mtime from lower layer attributes
+-	 * atime is unchanged for both layers
+-	 */
+-	if (err >= 0)
+-		fsstack_copy_attr_times(inode, hidden_inode);
+-
+-	*ppos = pos;
++	err = do_sync_write(file, buf, count, ppos);
+ 
+-	/* update this inode's size */
+-	if (pos > inode->i_size)
+-		inode->i_size = pos;
+ out:
+ 	unionfs_read_unlock(file->f_dentry->d_sb);
+ 	unionfs_check_file(file);
+@@ -249,16 +201,16 @@ out:
+ }
+ 
+ struct file_operations unionfs_main_fops = {
+-	.llseek		= unionfs_llseek,
++	.llseek		= generic_file_llseek,
+ 	.read		= unionfs_read,
++	.aio_read       = unionfs_aio_read,
+ 	.write		= unionfs_write,
++	.aio_write      = generic_file_aio_write,
+ 	.readdir	= unionfs_file_readdir,
+-	.poll		= unionfs_poll,
+ 	.unlocked_ioctl	= unionfs_ioctl,
+ 	.mmap		= unionfs_mmap,
+ 	.open		= unionfs_open,
+ 	.flush		= unionfs_flush,
+ 	.release	= unionfs_file_release,
+-	.fsync		= unionfs_fsync,
+-	.fasync		= unionfs_fasync,
++	.fsync		= file_fsync,
+ };
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 5f5dccc..79abe8a 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -1084,6 +1084,14 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 		break;
+ 	}
+ 
++	if (ia->ia_valid & ATTR_SIZE) {
++		if (ia->ia_size != i_size_read(inode)) {
++			err = vmtruncate(inode, ia->ia_size);
++			if (err)
++				printk("unionfs_setattr: vmtruncate failed\n");
++		}
++	}
++
+ 	/* get the size from the first hidden inode */
+ 	hidden_inode = unionfs_lower_inode(dentry->d_inode);
+ 	fsstack_copy_attr_all(inode, hidden_inode, unionfs_get_nlinks);
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index f5bec5b..f83ea00 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -125,12 +125,6 @@ fill_i_info:
+ 	    S_ISFIFO(hidden_inode->i_mode) || S_ISSOCK(hidden_inode->i_mode))
+ 		init_special_inode(inode, hidden_inode->i_mode,
+ 				   hidden_inode->i_rdev);
+-	/*
+-	 * Fix our inode's address operations to that of the lower inode
+-	 * (Unionfs is FiST-Lite)
+-	 */
+-	if (inode->i_mapping->a_ops != hidden_inode->i_mapping->a_ops)
+-		inode->i_mapping->a_ops = hidden_inode->i_mapping->a_ops;
+ 
+ 	/* all well, copy inode attributes */
+ 	fsstack_copy_attr_all(inode, hidden_inode, unionfs_get_nlinks);
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+new file mode 100644
+index 0000000..57792d5
+--- /dev/null
++++ b/fs/unionfs/mmap.c
+@@ -0,0 +1,296 @@
++/*
++ * Copyright (c) 2003-2007 Erez Zadok
++ * Copyright (c) 2003-2006 Charles P. Wright
++ * Copyright (c) 2005-2007 Josef 'Jeff' Sipek
++ * Copyright (c) 2005-2006 Junjiro Okajima
++ * Copyright (c) 2006      Shaya Potter
++ * Copyright (c) 2005      Arun M. Krishnakumar
++ * Copyright (c) 2004-2006 David P. Quigley
++ * Copyright (c) 2003-2004 Mohammad Nayyer Zubair
++ * Copyright (c) 2003      Puja Gupta
++ * Copyright (c) 2003      Harikesavan Krishnan
++ * Copyright (c) 2003-2007 Stony Brook University
++ * Copyright (c) 2003-2007 The Research Foundation of State University of New York
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#include "union.h"
++
++int unionfs_writepage(struct page *page, struct writeback_control *wbc)
++{
++	int err = -EIO;
++	struct inode *inode;
++	struct inode *lower_inode;
++	struct page *lower_page;
++	char *kaddr, *lower_kaddr;
++
++	inode = page->mapping->host;
++	lower_inode = unionfs_lower_inode(inode);
++
++	/* find lower page (returns a locked page) */
++	lower_page = grab_cache_page(lower_inode->i_mapping, page->index);
++	if (!lower_page)
++		goto out;
++
++	/* get page address, and encode it */
++	kaddr = kmap(page);
++	lower_kaddr = kmap(lower_page);
++
++	memcpy(lower_kaddr, kaddr, PAGE_CACHE_SIZE);
++
++	kunmap(page);
++	kunmap(lower_page);
++
++	/* call lower writepage (expects locked page) */
++	err = lower_inode->i_mapping->a_ops->writepage(lower_page, wbc);
++
++	/*
++	 * update mtime and ctime of lower level file system
++	 * unionfs' mtime and ctime are updated by generic_file_write
++	 */
++	lower_inode->i_mtime = lower_inode->i_ctime = CURRENT_TIME;
++
++	page_cache_release(lower_page);	/* b/c grab_cache_page increased refcnt */
++
++	if (err)
++		ClearPageUptodate(page);
++	else
++		SetPageUptodate(page);
++
++out:
++	unlock_page(page);
++
++	return err;
++}
++
++/*
++ * readpage is called from generic_page_read and the fault handler.
++ * If your file system uses generic_page_read for the read op, it
++ * must implement readpage.
++ *
++ * Readpage expects a locked page, and must unlock it.
++ */
++int unionfs_do_readpage(struct file *file, struct page *page)
++{
++	int err = -EIO;
++	struct dentry *dentry;
++	struct file *lower_file = NULL;
++	struct inode *inode, *lower_inode;
++	char *page_data;
++	struct page *lower_page;
++	char *lower_page_data;
++
++	dentry = file->f_dentry;
++	if (UNIONFS_F(file) == NULL) {
++		err = -ENOENT;
++		goto out_err;
++	}
++
++	lower_file = unionfs_lower_file(file);
++	inode = dentry->d_inode;
++	lower_inode = unionfs_lower_inode(inode);
++
++	lower_page = NULL;
++
++	/* find lower page (returns a locked page) */
++	lower_page = read_cache_page(lower_inode->i_mapping,
++				     page->index,
++				     (filler_t *) lower_inode->i_mapping->
++				     a_ops->readpage, (void *)lower_file);
++
++	if (IS_ERR(lower_page)) {
++		err = PTR_ERR(lower_page);
++		lower_page = NULL;
++		goto out_release;
++	}
++
++	/*
++	 * wait for the page data to show up
++	 * (signaled by readpage as unlocking the page)
++	 */
++	wait_on_page_locked(lower_page);
++	if (!PageUptodate(lower_page)) {
++		/*
++		 * call readpage() again if we returned from wait_on_page with a
++		 * page that's not up-to-date; that can happen when a partial
++		 * page has a few buffers which are ok, but not the whole
++		 * page.
++		 */
++		lock_page(lower_page);
++		err = lower_inode->i_mapping->a_ops->readpage(lower_file,
++							      lower_page);
++		if (err) {
++			lower_page = NULL;
++			goto out_release;
++		}
++
++		wait_on_page_locked(lower_page);
++		if (!PageUptodate(lower_page)) {
++			err = -EIO;
++			goto out_release;
++		}
++	}
++
++	/* map pages, get their addresses */
++	page_data = (char *)kmap(page);
++	lower_page_data = (char *)kmap(lower_page);
++
++	memcpy(page_data, lower_page_data, PAGE_CACHE_SIZE);
++
++	err = 0;
++
++	kunmap(lower_page);
++	kunmap(page);
++
++out_release:
++	if (lower_page)
++		page_cache_release(lower_page);	/* undo read_cache_page */
++
++	if (err == 0)
++		SetPageUptodate(page);
++	else
++		ClearPageUptodate(page);
++
++out_err:
++	return err;
++}
++
++int unionfs_readpage(struct file *file, struct page *page)
++{
++	int err;
++
++	err = unionfs_do_readpage(file, page);
++
++	/*
++	 * we have to unlock our page, b/c we _might_ have gotten a locked page.
++	 * but we no longer have to wakeup on our page here, b/c UnlockPage does
++	 * it
++	 */
++
++	unlock_page(page);
++
++	return err;
++}
++
++int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
++			  unsigned to)
++{
++	return 0;
++}
++
++int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
++			 unsigned to)
++{
++	int err = -ENOMEM;
++	struct inode *inode, *lower_inode;
++	struct file *lower_file = NULL;
++	loff_t pos;
++	unsigned bytes = to - from;
++	char *page_data = NULL;
++	mm_segment_t old_fs;
++
++	BUG_ON(file == NULL);
++
++	inode = page->mapping->host;	/* CPW: Moved below print_entry_location */
++	lower_inode = unionfs_lower_inode(inode);
++
++	if (UNIONFS_F(file) != NULL)
++		lower_file = unionfs_lower_file(file);
++
++	BUG_ON(lower_file == NULL);	/* FIXME: is this assertion right here? */
++
++	page_data = (char *)kmap(page);
++	lower_file->f_pos = (page->index << PAGE_CACHE_SHIFT) + from;
++
++	/* SP: I use vfs_write instead of copying page data and the
++	 * prepare_write/commit_write combo because file system's like
++	 * GFS/OCFS2 don't like things touching those directly,
++	 * calling the underlying write op, while a little bit slower, will
++	 * call all the FS specific code as well
++	 */
++	old_fs = get_fs();
++	set_fs(KERNEL_DS);
++	err = vfs_write(lower_file, page_data + from, bytes, &lower_file->f_pos);
++	set_fs(old_fs);
++
++	kunmap(page);
++
++	if (err < 0)
++		goto out;
++
++	inode->i_blocks = lower_inode->i_blocks;
++	/* we may have to update i_size */
++	pos = ((loff_t) page->index << PAGE_CACHE_SHIFT) + to;
++	if (pos > i_size_read(inode))
++		i_size_write(inode, pos);
++
++	/*
++	 * update mtime and ctime of lower level file system
++	 * unionfs' mtime and ctime are updated by generic_file_write
++	 */
++	lower_inode->i_mtime = lower_inode->i_ctime = CURRENT_TIME;
++
++	mark_inode_dirty_sync(inode);
++
++out:
++	if (err < 0)
++		ClearPageUptodate(page);
++
++	return err;		/* assume all is ok */
++}
++
++/* FIXME: does this make sense? */
++sector_t unionfs_bmap(struct address_space * mapping, sector_t block)
++{
++	int err = 0;
++	struct inode *inode, *lower_inode;
++
++	inode = (struct inode *)mapping->host;
++	lower_inode = unionfs_lower_inode(inode);
++
++	if (lower_inode->i_mapping->a_ops->bmap)
++		err =
++		    lower_inode->i_mapping->a_ops->bmap(lower_inode->i_mapping,
++							block);
++	return err;
++}
++
++void unionfs_sync_page(struct page *page)
++{
++	struct inode *inode;
++	struct inode *lower_inode;
++	struct page *lower_page;
++	struct address_space *mapping = page->mapping;
++
++	inode = page->mapping->host;	/* CPW: Moved below print_entry_location */
++	lower_inode = unionfs_lower_inode(inode);
++
++	/* find lower page (returns a locked page) */
++	lower_page = grab_cache_page(lower_inode->i_mapping, page->index);
++	if (!lower_page)
++		goto out;
++
++	/* do the actual sync */
++	if (mapping && mapping->a_ops && mapping->a_ops->sync_page)
++		mapping->a_ops->sync_page(page);
++
++	unlock_page(lower_page);	/* b/c grab_cache_page locked it */
++	page_cache_release(lower_page);	/* b/c grab_cache_page increased refcnt */
++
++out:
++
++	return;
++}
++
++struct address_space_operations unionfs_aops = {
++	.writepage	= unionfs_writepage,
++	.readpage	= unionfs_readpage,
++	.prepare_write	= unionfs_prepare_write,
++	.commit_write	= unionfs_commit_write,
++	.bmap		= unionfs_bmap,
++	.sync_page	= unionfs_sync_page,
++};
++
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 86a0b01..d68b4ed 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -26,7 +26,7 @@ static struct kmem_cache *unionfs_inode_cachep;
+ 
+ static void unionfs_read_inode(struct inode *inode)
+ {
+-	static struct address_space_operations unionfs_empty_aops;
++	extern struct address_space_operations unionfs_aops;
+ 	int size;
+ 	struct unionfs_inode_info *info = UNIONFS_I(inode);
+ 
+@@ -58,8 +58,7 @@ static void unionfs_read_inode(struct inode *inode)
+ 	inode->i_op = &unionfs_main_iops;
+ 	inode->i_fop = &unionfs_main_fops;
+ 
+-	/* I don't think ->a_ops is ever allowed to be NULL */
+-	inode->i_mapping->a_ops = &unionfs_empty_aops;
++	inode->i_mapping->a_ops = &unionfs_aops;
+ }
+ 
+ /*
+@@ -72,6 +71,10 @@ static void unionfs_read_inode(struct inode *inode)
+ static void unionfs_delete_inode(struct inode *inode)
+ {
+ 	inode->i_size = 0;	/* every f/s seems to do that */
++
++	if (inode->i_data.nrpages)
++		truncate_inode_pages(&inode->i_data, 0);
++
+ 	clear_inode(inode);
+ }
+ 
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index d4e004f..bb8d2b8 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -38,6 +38,7 @@
+ #include <linux/string.h>
+ #include <linux/vmalloc.h>
+ #include <linux/writeback.h>
++#include <linux/buffer_head.h>
+ #include <linux/xattr.h>
+ #include <linux/fs_stack.h>
+ #include <linux/magic.h>
+-- 
+1.5.4.3
+

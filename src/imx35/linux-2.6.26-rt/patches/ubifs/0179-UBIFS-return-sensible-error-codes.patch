@@ -1,0 +1,75 @@
+From 9f4308164d485100b723157c545492522942aec1 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 29 Jan 2009 16:22:54 +0200
+Subject: [PATCH] UBIFS: return sensible error codes
+
+When mounting/re-mounting, UBIFS returns EINVAL even if the ENOSPC
+or EROFS codes are are much better, just because we have not found
+references to ENOSPC/EROFS in mount (2) man pages. This patch
+changes this behaviour and makes UBIFS return real error code,
+because:
+
+1. It is just less confusing and more logical
+2. mount is not described in SuSv3, so it seems to be not really
+   well-standartized
+3. we do not cover all cases, and any random undocumented in man
+   pages error code may be returned anyway
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/master.c |    2 +-
+ fs/ubifs/super.c  |   11 +++--------
+ 2 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/fs/ubifs/master.c b/fs/ubifs/master.c
+index 71d5493..a88f338 100644
+--- a/fs/ubifs/master.c
++++ b/fs/ubifs/master.c
+@@ -354,7 +354,7 @@ int ubifs_write_master(struct ubifs_info *c)
+ 	int err, lnum, offs, len;
+ 
+ 	if (c->ro_media)
+-		return -EINVAL;
++		return -EROFS;
+ 
+ 	lnum = UBIFS_MST_LNUM;
+ 	offs = c->mst_offs + c->mst_node_alsz;
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 9007e73..05400f2 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1083,12 +1083,7 @@ static int check_free_space(struct ubifs_info *c)
+ 		ubifs_err("insufficient free space to mount in read/write mode");
+ 		dbg_dump_budg(c);
+ 		dbg_dump_lprops(c);
+-		/*
+-		 * We return %-EINVAL instead of %-ENOSPC because it seems to
+-		 * be the closest error code mentioned in the mount function
+-		 * documentation.
+-		 */
+-		return -EINVAL;
++		return -ENOSPC;
+ 	}
+ 	return 0;
+ }
+@@ -1788,7 +1783,7 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
+ 	if ((sb->s_flags & MS_RDONLY) && !(*flags & MS_RDONLY)) {
+ 		if (c->ro_media) {
+ 			ubifs_msg("cannot re-mount due to prior errors");
+-			return -EINVAL;
++			return -EROFS;
+ 		}
+ 		err = ubifs_remount_rw(c);
+ 		if (err)
+@@ -1796,7 +1791,7 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
+ 	} else if (!(sb->s_flags & MS_RDONLY) && (*flags & MS_RDONLY)) {
+ 		if (c->ro_media) {
+ 			ubifs_msg("cannot re-mount due to prior errors");
+-			return -EINVAL;
++			return -EROFS;
+ 		}
+ 		ubifs_remount_ro(c);
+ 	}
+-- 
+1.5.4.3
+

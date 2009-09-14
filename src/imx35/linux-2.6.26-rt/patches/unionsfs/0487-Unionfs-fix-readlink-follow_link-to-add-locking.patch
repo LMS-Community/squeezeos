@@ -1,0 +1,133 @@
+From 533cbbca255d07e78fb2b2b10e5ab7e9abb12628 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 18 Sep 2008 21:49:47 -0400
+Subject: [PATCH] Unionfs: fix readlink/follow_link to add locking
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   67 +++++++++++++++++++++++++++++----------------------
+ 1 files changed, 38 insertions(+), 29 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 36ceaaf..e9450d1 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -637,21 +637,12 @@ out:
+ 	return err;
+ }
+ 
+-static int unionfs_readlink(struct dentry *dentry, char __user *buf,
+-			    int bufsiz)
++/* requires sb, dentry, and parent to already be locked */
++static int __unionfs_readlink(struct dentry *dentry, char __user *buf,
++			      int bufsiz)
+ {
+ 	int err;
+ 	struct dentry *lower_dentry;
+-	struct dentry *parent;
+-
+-	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+-	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
+-	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+-
+-	if (unlikely(!__unionfs_d_revalidate(dentry, parent, NULL, false))) {
+-		err = -ESTALE;
+-		goto out;
+-	}
+ 
+ 	lower_dentry = unionfs_lower_dentry(dentry);
+ 
+@@ -663,11 +654,32 @@ static int unionfs_readlink(struct dentry *dentry, char __user *buf,
+ 
+ 	err = lower_dentry->d_inode->i_op->readlink(lower_dentry,
+ 						    buf, bufsiz);
+-	if (err > 0)
++	if (err >= 0)
+ 		fsstack_copy_attr_atime(dentry->d_inode,
+ 					lower_dentry->d_inode);
+ 
+ out:
++	return err;
++}
++
++static int unionfs_readlink(struct dentry *dentry, char __user *buf,
++			    int bufsiz)
++{
++	int err;
++	struct dentry *parent;
++
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
++
++	if (unlikely(!__unionfs_d_revalidate(dentry, parent, NULL, false))) {
++		err = -ESTALE;
++		goto out;
++	}
++
++	err = __unionfs_readlink(dentry, buf, bufsiz);
++
++out:
+ 	unionfs_check_dentry(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_unlock_parent(dentry, parent);
+@@ -676,22 +688,16 @@ out:
+ 	return err;
+ }
+ 
+-/*
+- * unionfs_follow_link takes a dentry, but it is simple.  It only needs to
+- * allocate some memory and then call our ->readlink method.  Our
+- * unionfs_readlink *does* lock our dentry and revalidate the dentry.
+- * Therefore, we do not have to lock our dentry here, to prevent a deadlock;
+- * nor do we need to revalidate it either.  It is safe to not lock our
+- * dentry here, nor revalidate it, because unionfs_follow_link does not do
+- * anything (prior to calling ->readlink) which could become inconsistent
+- * due to branch management.  We also don't need to lock our super because
+- * this function isn't affected by branch-management.
+- */
+ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ {
+ 	char *buf;
+ 	int len = PAGE_SIZE, err;
+ 	mm_segment_t old_fs;
++	struct dentry *parent;
++
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	parent = unionfs_lock_parent(dentry, UNIONFS_DMUTEX_PARENT);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	/* This is freed by the put_link method assuming a successful call. */
+ 	buf = kmalloc(len, GFP_KERNEL);
+@@ -703,7 +709,7 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	/* read the symlink, and then we will follow it */
+ 	old_fs = get_fs();
+ 	set_fs(KERNEL_DS);
+-	err = dentry->d_inode->i_op->readlink(dentry, (char __user *)buf, len);
++	err = __unionfs_readlink(dentry, buf, len);
+ 	set_fs(old_fs);
+ 	if (err < 0) {
+ 		kfree(buf);
+@@ -715,12 +721,15 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	err = 0;
+ 
+ out:
+-	if (!err) {
+-		unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
++	if (err >= 0) {
++		unionfs_check_nd(nd);
+ 		unionfs_check_dentry(dentry);
+-		unionfs_unlock_dentry(dentry);
+ 	}
+-	unionfs_check_nd(nd);
++
++	unionfs_unlock_dentry(dentry);
++	unionfs_unlock_parent(dentry, parent);
++	unionfs_read_unlock(dentry->d_sb);
++
+ 	return ERR_PTR(err);
+ }
+ 
+-- 
+1.5.4.3
+

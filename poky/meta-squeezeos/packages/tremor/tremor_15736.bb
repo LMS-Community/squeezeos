@@ -16,3 +16,6 @@ EXTRA_OECONF=" --enable-shared --disable-rpath  "
 do_stage() {
 	autotools_stage_all
 }
+
+ARM_INSTRUCTION_SET = "arm"
+

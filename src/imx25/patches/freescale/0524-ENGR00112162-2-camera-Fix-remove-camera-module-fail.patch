@@ -1,0 +1,119 @@
+From e3ed1e831eaa0fd953c3be8ee49d67ff35a6521a Mon Sep 17 00:00:00 2001
+From: Xie xiaobo <X.Xie@freescale.com>
+Date: Mon, 4 May 2009 16:05:47 +0800
+Subject: [PATCH] ENGR00112162-2 camera: Fix remove camera module failure case on MX25
+
+Camera module on MX25 cannot be removed successfully. This patch is to
+add free csi irq before camera exit.
+
+Signed-off-by: Guoqing Jiang <b22156@freescale.com>
+---
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |    6 ++----
+ drivers/media/video/mxc/capture/fsl_csi.c          |   16 ++++++++++++++--
+ drivers/media/video/mxc/capture/fsl_csi.h          |    3 ++-
+ 3 files changed, 18 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+index 937154f..fa2778b 100644
+--- a/drivers/media/video/mxc/capture/csi_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -754,7 +754,7 @@ static void init_camera_struct(cam_data *cam)
+ 	cam->win.w.top = 0;
+ 	cam->still_counter = 0;
+ 
+-	csi_set_callback(cam);
++	csi_start_callback(cam);
+ 	init_waitqueue_head(&cam->power_queue);
+ 	spin_lock_init(&cam->int_lock);
+ }
+@@ -902,10 +902,7 @@ static int csi_v4l2_master_attach(struct v4l2_int_device *slave)
+  */
+ static void csi_v4l2_master_detach(struct v4l2_int_device *slave)
+ {
+-	cam_data *cam = slave->u.slave->master->priv;
+ 	pr_debug("In MVC: %s\n", __func__);
+-	/* vidioc_int_dev_exit(slave); */
+-	free_irq(MXC_INT_CSI, cam);
+ }
+ 
+ /*!
+@@ -979,6 +976,7 @@ static void __exit camera_exit(void)
+ 	} else {
+ 		pr_info("V4L2 freeing image input device\n");
+ 		v4l2_int_device_unregister(&csi_v4l2_int_device);
++		csi_stop_callback(g_cam);
+ 		video_unregister_device(g_cam->video_dev);
+ 		platform_driver_unregister(&csi_v4l2_driver);
+ 		platform_device_unregister(&csi_v4l2_devices);
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.c b/drivers/media/video/mxc/capture/fsl_csi.c
+index 29dccc8..3f79426 100644
+--- a/drivers/media/video/mxc/capture/fsl_csi.c
++++ b/drivers/media/video/mxc/capture/fsl_csi.c
+@@ -154,6 +154,7 @@ void csi_init_interface(void)
+ 	val |= 0x4000;
+ 	__raw_writel(val, CSI_CSICR3);
+ }
++
+ EXPORT_SYMBOL(csi_init_interface);
+ 
+ /*!
+@@ -175,6 +176,7 @@ void csi_enable_prpif(uint32_t enable)
+ 
+ 	csihw_set_config(&g_csi_cfg);
+ }
++
+ EXPORT_SYMBOL(csi_enable_prpif);
+ 
+ /*!
+@@ -203,6 +205,7 @@ int32_t csi_enable_mclk(int src, bool flag, bool wait)
+ 
+ 	return 0;
+ }
++
+ EXPORT_SYMBOL(csi_enable_mclk);
+ 
+ /*!
+@@ -214,9 +217,10 @@ int csi_read_mclk_flag(void)
+ {
+ 	return 0;
+ }
++
+ EXPORT_SYMBOL(csi_read_mclk_flag);
+ 
+-void csi_set_callback(void *data)
++void csi_start_callback(void *data)
+ {
+ 	cam_data *cam = (cam_data *)data;
+ 
+@@ -224,7 +228,15 @@ void csi_set_callback(void *data)
+ 		pr_debug("CSI error: irq request fail\n");
+ 
+ }
+-EXPORT_SYMBOL(csi_set_callback);
++EXPORT_SYMBOL(csi_start_callback);
++
++void csi_stop_callback(void *data)
++{
++	cam_data *cam = (cam_data *)data;
++
++	free_irq(MXC_INT_CSI, cam);
++}
++EXPORT_SYMBOL(csi_stop_callback);
+ 
+ static void _mclk_recalc(struct clk *clk)
+ {
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.h b/drivers/media/video/mxc/capture/fsl_csi.h
+index fc8c1e3..999c9a7 100644
+--- a/drivers/media/video/mxc/capture/fsl_csi.h
++++ b/drivers/media/video/mxc/capture/fsl_csi.h
+@@ -185,5 +185,6 @@ typedef void (*csi_irq_callback_t) (void *data, unsigned long status);
+ int32_t csi_enable_mclk(int src, bool flag, bool wait);
+ void csi_init_interface(void);
+ int csi_read_mclk_flag(void);
+-void csi_set_callback(void *data);
++void csi_start_callback(void *data);
++void csi_stop_callback(void *data);
+ void csi_enable_prpif(uint32_t enable);
+-- 
+1.5.4.4
+

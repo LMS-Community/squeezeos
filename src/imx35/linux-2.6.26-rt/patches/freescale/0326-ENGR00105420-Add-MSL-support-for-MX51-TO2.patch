@@ -1,0 +1,1606 @@
+From e311af4af8dd8e2cce0d748bcade089f5200088e Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Mon, 19 Jan 2009 14:29:07 -0600
+Subject: [PATCH] ENGR00105420 Add MSL support for MX51 TO2
+
+Add MSL support for MX51 TO2. This includes changes that will allow the
+same kernel image to work on both TO1 and TO2.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |   10 +-
+ arch/arm/mach-mx51/board-mx51_3stack.h  |    3 +-
+ arch/arm/mach-mx51/clock.c              |  103 ++++++--
+ arch/arm/mach-mx51/crm_regs.h           |    6 +-
+ arch/arm/mach-mx51/devices.c            |   23 ++-
+ arch/arm/mach-mx51/iomux.c              |  104 ++++++--
+ arch/arm/mach-mx51/iomux.h              |   19 +-
+ arch/arm/mach-mx51/mm.c                 |    9 +-
+ arch/arm/mach-mx51/mx51_3stack.c        |   77 +++++-
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |  161 ++++++++---
+ arch/arm/mach-mx51/mx51_pins.h          |  497 ++++++++++++++++---------------
+ arch/arm/mach-mx51/system.c             |    2 +-
+ include/asm-arm/arch-mxc/mx51.h         |   26 +-
+ 13 files changed, 683 insertions(+), 357 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index 5c2d06d..ad14586 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Thu Nov 27 11:34:22 2008
++# Tue Dec 30 11:34:33 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -989,6 +989,8 @@ CONFIG_VIDEO_MXC_CAMERA=m
+ #
+ CONFIG_VIDEO_MXC_IPU_CAMERA=y
+ # CONFIG_MXC_CAMERA_MC521DA is not set
++# CONFIG_MXC_EMMA_CAMERA_MICRON111 is not set
++# CONFIG_MXC_CAMERA_OV2640_EMMA is not set
+ # CONFIG_MXC_CAMERA_MICRON111 is not set
+ # CONFIG_MXC_CAMERA_OV2640 is not set
+ CONFIG_MXC_CAMERA_OV3640=m
+@@ -1156,8 +1158,8 @@ CONFIG_SND_MXC_SOC_IRAM=y
+ # CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_AK4647 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_WM8580 is not set
+-CONFIG_SND_SOC_IMX_3STACK_WM8903=y
+-# CONFIG_SND_SOC_IMX_3STACK_SGTL5000 is not set
++# CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
++CONFIG_SND_SOC_IMX_3STACK_SGTL5000=y
+ 
+ #
+ # ALSA SoC audio for Freescale SOCs
+@@ -1166,7 +1168,7 @@ CONFIG_SND_SOC_IMX_3STACK_WM8903=y
+ #
+ # SoC Audio for the Texas Instruments OMAP
+ #
+-CONFIG_SND_SOC_WM8903=y
++CONFIG_SND_SOC_SGTL5000=y
+ 
+ #
+ # Open Sound System
+diff --git a/arch/arm/mach-mx51/board-mx51_3stack.h b/arch/arm/mach-mx51/board-mx51_3stack.h
+index ef76f9d..4b8918c 100644
+--- a/arch/arm/mach-mx51/board-mx51_3stack.h
++++ b/arch/arm/mach-mx51/board-mx51_3stack.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -123,5 +123,6 @@
+ extern unsigned int sdhc_get_card_det_status(struct device *dev);
+ extern int sdhc_write_protect(struct device *dev);
+ extern int sdhc_init_card_det(int id);
++extern int headphone_det_status(void);
+ 
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX51_3STACK_H__ */
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 0b97052..d94c971 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -43,6 +43,7 @@ static struct clk ddr_clk;
+ static struct clk ipu_clk[];
+ static struct clk axi_a_clk;
+ static struct clk axi_b_clk;
++static struct clk ddr_hf_clk;
+ static int cpu_wp_nr;
+ static int cpu_curr_wp;
+ static struct cpu_wp *cpu_wp_tbl;
+@@ -131,6 +132,28 @@ static inline u32 _get_mux(struct clk *parent, struct clk *m0,
+ 	return 0;
+ }
+ 
++/*
++ * For the ddr muxed input clock
++ */
++static inline u32 _get_mux_ddr(struct clk *parent, struct clk *m0,
++			   struct clk *m1, struct clk *m2, struct clk *m3, struct clk *m4)
++{
++	if (parent == m0)
++		return 0;
++	else if (parent == m1)
++		return 1;
++	else if (parent == m2)
++		return 2;
++	else if (parent == m3)
++		return 3;
++	else if (parent == m4)
++		return 4;
++	else
++		BUG();
++
++	return 0;
++}
++
+ static inline unsigned long _get_pll_base(struct clk *pll)
+ {
+ 	if (pll == &pll1_main_clk)
+@@ -522,6 +545,23 @@ static struct clk axi_a_clk = {
+ 	.flags = RATE_PROPAGATES,
+ };
+ 
++static void _clk_ddr_hf_recalc(struct clk *clk)
++{
++	u32 reg, div;
++
++	reg = __raw_readl(MXC_CCM_CBCDR);
++	div = ((reg & MXC_CCM_CBCDR_DDR_PODF_MASK) >>
++	       MXC_CCM_CBCDR_DDR_PODF_OFFSET) + 1;
++	clk->rate = clk->parent->rate / div;
++}
++
++static struct clk ddr_hf_clk = {
++	.name = "ddr_hf_clk",
++	.parent = &pll1_sw_clk,
++	.recalc = _clk_ddr_hf_recalc,
++	.flags = RATE_PROPAGATES,
++};
++
+ static void _clk_axi_b_recalc(struct clk *clk)
+ {
+ 	u32 reg, div;
+@@ -2330,19 +2370,26 @@ static struct clk spdif1_clk[] = {
+ 
+ static int _clk_ddr_set_parent(struct clk *clk, struct clk *parent)
+ {
+-	u32 reg, mux;
++	u32 reg, reg2, mux;
+ 	reg = __raw_readl(MXC_CCM_CBCMR);
+-	mux = _get_mux(parent, &axi_a_clk, &axi_b_clk, &emi_slow_clk, &ahb_clk);
+-	reg = (reg & ~MXC_CCM_CBCMR_DDR_CLK_SEL_MASK) |
+-	    (mux << MXC_CCM_CBCMR_DDR_CLK_SEL_OFFSET);
+-	__raw_writel(reg, MXC_CCM_CBCMR);
++	reg2 = __raw_readl(MXC_CCM_CBCDR);
++	mux = _get_mux_ddr(parent, &axi_a_clk, &axi_b_clk, &emi_slow_clk, &ahb_clk, &ddr_hf_clk);
++	if (mux < 4) {
++		reg = (reg & ~MXC_CCM_CBCMR_DDR_CLK_SEL_MASK) |
++		    (mux << MXC_CCM_CBCMR_DDR_CLK_SEL_OFFSET);
++		__raw_writel(reg, MXC_CCM_CBCMR);
++	} else {
++		reg2 = (reg2 & ~MXC_CCM_CBCDR_DDR_HF_SEL) |
++			(MXC_CCM_CBCDR_DDR_HF_SEL);
++		__raw_writel(reg2, MXC_CCM_CBCDR);
++	}
+ 
+ 	return 0;
+ }
+ 
+ static struct clk ddr_clk = {
+ 	.name = "ddr_clk",
+-	.parent = &axi_a_clk,
++	.parent = &ddr_hf_clk,
+ 	.set_parent = _clk_ddr_set_parent,
+ 	.flags = RATE_PROPAGATES,
+ };
+@@ -2384,7 +2431,6 @@ static int _clk_vpu_set_parent(struct clk *clk, struct clk *parent)
+ static struct clk vpu_clk[] = {
+ 	{
+ 	 .name = "vpu_clk",
+-	 .parent = &ahb_clk,
+ 	 .set_parent = _clk_vpu_set_parent,
+ 	 .enable = _clk_enable,
+ 	 .enable_reg = MXC_CCM_CCGR5,
+@@ -2394,7 +2440,6 @@ static struct clk vpu_clk[] = {
+ 	 },
+ 	{
+ 	 .name = "vpu_core_clk",
+-	 .parent = &ahb_clk,
+ 	 .set_parent = _clk_vpu_set_parent,
+ 	 .enable = _clk_enable,
+ 	 .enable_reg = MXC_CCM_CCGR5,
+@@ -2686,11 +2731,12 @@ static struct clk *mxc_clks[] = {
+ 	&gpu3d_clk,
+ 	&garb_clk,
+ 	&emi_garb_clk,
++	&ddr_hf_clk,
+ };
+ 
+ static void clk_tree_init(void)
+ {
+-	u32 reg, dp_ctl;
++	u32 reg, reg2, dp_ctl;
+ 
+ 	/* set pll1_main_clk parent */
+ 	pll1_main_clk.parent = &osc_clk;
+@@ -2727,14 +2773,21 @@ static void clk_tree_init(void)
+ 	/* set DDR clock parent */
+ 	reg = __raw_readl(MXC_CCM_CBCMR) & MXC_CCM_CBCMR_DDR_CLK_SEL_MASK;
+ 	reg >>= MXC_CCM_CBCMR_DDR_CLK_SEL_OFFSET;
+-	if (reg == 0) {
+-		ddr_clk.parent = &axi_a_clk;
+-	} else if (reg == 1) {
+-		ddr_clk.parent = &axi_b_clk;
+-	} else if (reg == 2) {
+-		ddr_clk.parent = &emi_slow_clk;
++	reg2 = __raw_readl(MXC_CCM_CBCDR) & MXC_CCM_CBCDR_DDR_HF_SEL;
++	reg2 >>= MXC_CCM_CBCDR_DDR_HF_SEL_OFFSET;
++
++	if (reg2) {
++		ddr_clk.parent = &ddr_hf_clk;
+ 	} else {
+-		ddr_clk.parent = &ahb_clk;
++		if (reg == 0) {
++			ddr_clk.parent = &axi_a_clk;
++		} else if (reg == 1) {
++			ddr_clk.parent = &axi_b_clk;
++		} else if (reg == 2) {
++			ddr_clk.parent = &emi_slow_clk;
++		} else {
++			ddr_clk.parent = &ahb_clk;
++		}
+ 	}
+ }
+ 
+@@ -2802,7 +2855,21 @@ int __init mxc_clocks_init(void)
+ 	clk_enable(&main_bus_clk);
+ 	clk_enable(&gpt_clk[1]);
+ 
+-	clk_set_parent(&ddr_clk, &axi_a_clk);
++	reg = __raw_readl(MXC_CCM_CBCDR) & MXC_CCM_CBCDR_DDR_HF_SEL;
++	reg >>= MXC_CCM_CBCDR_DDR_HF_SEL_OFFSET;
++
++	if (reg)
++		clk_set_parent(&ddr_clk, &ddr_hf_clk);
++	else
++		clk_set_parent(&ddr_clk, &axi_a_clk);
++
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++		clk_set_parent(&vpu_clk[0], &ahb_clk);
++		clk_set_parent(&vpu_clk[1], &ahb_clk);
++	} else {
++		clk_set_parent(&vpu_clk[0], &axi_a_clk);
++		clk_set_parent(&vpu_clk[1], &axi_a_clk);
++	}
+ 
+ 	/* Set the current working point. */
+ 	cpu_wp_tbl = get_cpu_wp(&cpu_wp_nr);
+diff --git a/arch/arm/mach-mx51/crm_regs.h b/arch/arm/mach-mx51/crm_regs.h
+index 2ee3be2..aa807fd 100644
+--- a/arch/arm/mach-mx51/crm_regs.h
++++ b/arch/arm/mach-mx51/crm_regs.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -150,6 +150,10 @@
+ /* Define the bits in register CBCDR */
+ #define MXC_CCM_CBCDR_EMI_CLK_SEL			(0x1 << 26)
+ #define MXC_CCM_CBCDR_PERIPH_CLK_SEL			(0x1 << 25)
++#define MXC_CCM_CBCDR_DDR_HF_SEL_OFFSET		(30)
++#define MXC_CCM_CBCDR_DDR_HF_SEL			(0x1 << 30)
++#define MXC_CCM_CBCDR_DDR_PODF_OFFSET		(27)
++#define MXC_CCM_CBCDR_DDR_PODF_MASK			(0x7 << 27)
+ #define MXC_CCM_CBCDR_EMI_PODF_OFFSET		(22)
+ #define MXC_CCM_CBCDR_EMI_PODF_MASK			(0x7 << 22)
+ #define MXC_CCM_CBCDR_AXI_B_PODF_OFFSET		(19)
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 83767be..b894911 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -235,6 +235,10 @@ static void mxc_init_ipu(void)
+ 	struct clk *clk;
+ 	uint32_t temp;
+ 
++	/* Select IPUv3 h/w version */
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0)
++		mxc_ipu_data.rev = 2;
++
+ 	mxc_ipu_data.di_clk[1] = clk_get(NULL, "ipu_di_clk");
+ 	clk = clk_get(NULL, "tve_clk");
+ 	clk_set_parent(mxc_ipu_data.di_clk[1], clk);
+@@ -252,6 +256,11 @@ static void mxc_init_ipu(void)
+ 		temp = __raw_readl(reg_hsc_mxt_conf);
+ 		__raw_writel(temp | 0x0FF, reg_hsc_mxt_conf);
+ 
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++			temp = __raw_readl(reg_hsc_mxt_conf);
++			__raw_writel(temp | 0x10000, reg_hsc_mxt_conf);
++		}
++
+ 		clk_disable(clk);
+ 		clk_put(clk);
+ 	}
+@@ -319,6 +328,10 @@ static inline void mxc_init_scc(void)
+ 	uint32_t scc_partno;
+ 	void *scm_ram_base;
+ 	void *scc_base;
++	uint8_t iram_partitions = 16;
++
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0)
++		iram_partitions = 12;
+ 
+ 	scc_base = ioremap((uint32_t) SCC_BASE_ADDR, 0x140);
+ 	if (scc_base == NULL) {
+@@ -331,7 +344,7 @@ static inline void mxc_init_scc(void)
+ 		return;
+ 	}
+ 
+-	for (partition_no = 0; partition_no < IRAM_PARTITIONS; partition_no++) {
++	for (partition_no = 0; partition_no < iram_partitions; partition_no++) {
+ 		reg_value = ((partition_no << SCM_ZCMD_PART_SHIFT) &
+ 			     SCM_ZCMD_PART_MASK) | ((0x03 <<
+ 						     SCM_ZCMD_CCMD_SHIFT)
+@@ -356,7 +369,7 @@ static inline void mxc_init_scc(void)
+ 		return;
+ 	}
+ 
+-	for (partition_no = 0; partition_no < IRAM_PARTITIONS; partition_no++) {
++	for (partition_no = 0; partition_no < iram_partitions; partition_no++) {
+ 		MAP_base = scm_ram_base + (partition_no * 0x2000);
+ 		UMID_base = (uint8_t *) MAP_base + 0x10;
+ 
+@@ -370,8 +383,8 @@ static inline void mxc_init_scc(void)
+ 	}
+ 
+ 	/* Freeing 2 partitions for SCC2 */
+-	scc_partno = IRAM_PARTITIONS - (SCC_IRAM_SIZE / SZ_8K);
+-	for (partition_no = scc_partno; partition_no < IRAM_PARTITIONS;
++	scc_partno = iram_partitions - (SCC_IRAM_SIZE / SZ_8K);
++	for (partition_no = scc_partno; partition_no < iram_partitions;
+ 	     partition_no++) {
+ 		reg_value = ((partition_no << SCM_ZCMD_PART_SHIFT) &
+ 			     SCM_ZCMD_PART_MASK) | ((0x03 <<
+diff --git a/arch/arm/mach-mx51/iomux.c b/arch/arm/mach-mx51/iomux.c
+index 95d9c47..1b247fa 100644
+--- a/arch/arm/mach-mx51/iomux.c
++++ b/arch/arm/mach-mx51/iomux.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -35,21 +35,69 @@
+ enum iomux_reg_addr {
+ 	IOMUXGPR0 = IO_ADDRESS(IOMUXC_BASE_ADDR),
+ 	IOMUXGPR1 = IO_ADDRESS(IOMUXC_BASE_ADDR) + 0x004,
+-	IOMUXSW_MUX_CTL = IO_ADDRESS(IOMUXC_BASE_ADDR) + MUX_I_START,
++	IOMUXSW_MUX_CTL = IO_ADDRESS(IOMUXC_BASE_ADDR),
+ 	IOMUXSW_MUX_END = IO_ADDRESS(IOMUXC_BASE_ADDR) + MUX_I_END,
+ 	IOMUXSW_PAD_CTL = IO_ADDRESS(IOMUXC_BASE_ADDR) + PAD_I_START,
+-	IOMUXSW_PAD_END = IO_ADDRESS(IOMUXC_BASE_ADDR) + PAD_I_END,
+-	IOMUXSW_INPUT_CTL = IO_ADDRESS(IOMUXC_BASE_ADDR) + INPUT_CTL_START,
+-	IOMUXSW_INPUT_END = IO_ADDRESS(IOMUXC_BASE_ADDR) + INPUT_CTL_END,
++	IOMUXSW_INPUT_CTL = IO_ADDRESS(IOMUXC_BASE_ADDR),
+ };
+ 
+-#define MUX_PIN_NUM_MAX	(((IOMUXSW_MUX_END - IOMUXSW_MUX_CTL) >> 2) + 1)
+-#define MUX_INPUT_NUM_MUX	(((IOMUXSW_INPUT_END - IOMUXSW_INPUT_CTL)>> \
+-				    2) + 1)
++#define MUX_PIN_NUM_MAX	(((MUX_I_END - MUX_I_START) >> 2) + 1)
+ 
+ static u8 iomux_pin_res_table[MUX_PIN_NUM_MAX];
+ static DEFINE_SPINLOCK(gpio_mux_lock);
+ 
++static inline u32 _get_mux_reg(iomux_pin_name_t pin)
++{
++	u32 mux_reg = PIN_TO_IOMUX_MUX(pin);
++
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++		if ((pin == MX51_PIN_NANDF_RB5) ||
++			(pin == MX51_PIN_NANDF_RB6) ||
++			(pin == MX51_PIN_NANDF_RB7))
++			; /* Do nothing */
++		else if (mux_reg >= 0x2FC)
++			mux_reg += 8;
++		else if (mux_reg >= 0x130)
++			mux_reg += 0xC;
++	}
++	mux_reg += IOMUXSW_MUX_CTL;
++	return mux_reg;
++}
++
++static inline u32 _get_pad_reg(iomux_pin_name_t pin)
++{
++	u32 pad_reg = PIN_TO_IOMUX_PAD(pin);
++
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++		if ((pin == MX51_PIN_NANDF_RB5) ||
++			(pin == MX51_PIN_NANDF_RB6) ||
++			(pin == MX51_PIN_NANDF_RB7))
++			; /* Do nothing */
++		else if (pad_reg == 0x4D0 - PAD_I_START)
++			pad_reg += 0x4C;
++		else if (pad_reg == 0x860 - PAD_I_START)
++			pad_reg += 0x9C;
++		else if (pad_reg >= 0x804 - PAD_I_START)
++			pad_reg += 0xB0;
++		else if (pad_reg >= 0x7FC - PAD_I_START)
++			pad_reg += 0xB4;
++		else if (pad_reg >= 0x4E4 - PAD_I_START)
++			pad_reg += 0xCC;
++		else
++			pad_reg += 8;
++	}
++	pad_reg += IOMUXSW_PAD_CTL;
++	return pad_reg;
++}
++
++static inline u32 _get_mux_end()
++{
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0)
++		return(IO_ADDRESS(IOMUXC_BASE_ADDR) + (0x3F8 - 4));
++	else
++		return(IO_ADDRESS(IOMUXC_BASE_ADDR) + (0x3F0 - 4));
++}
++
+ /*!
+  * This function is used to configure a pin through the IOMUX module.
+  * @param  pin		a pin number as defined in \b #iomux_pin_name_t
+@@ -61,11 +109,11 @@ static int iomux_config_mux(iomux_pin_name_t pin, iomux_pin_cfg_t config)
+ {
+ 	u32 ret = 0;
+ 	u32 pin_index = PIN_TO_IOMUX_INDEX(pin);
+-	u32 mux_reg = IOMUXSW_MUX_CTL + PIN_TO_IOMUX_MUX(pin);
++	u32 mux_reg = _get_mux_reg(pin);
+ 	u32 mux_data = 0;
+ 	u8 *rp;
+ 
+-	BUG_ON((mux_reg > IOMUXSW_MUX_END) || (mux_reg < IOMUXSW_MUX_CTL));
++	BUG_ON((mux_reg > _get_mux_end()) || (mux_reg < IOMUXSW_MUX_CTL));
+ 	spin_lock(&gpio_mux_lock);
+ 
+ 	if (config == IOMUX_CONFIG_GPIO)
+@@ -148,24 +196,18 @@ EXPORT_SYMBOL(mxc_free_iomux);
+  */
+ void mxc_iomux_set_pad(iomux_pin_name_t pin, u32 config)
+ {
+-	u32 pad_reg = IOMUXSW_PAD_CTL + PIN_TO_IOMUX_PAD(pin);
++	u32 pad_reg = _get_pad_reg(pin);
+ 
+-	BUG_ON((pad_reg > IOMUXSW_PAD_END) || (pad_reg < IOMUXSW_PAD_CTL));
+-	spin_lock(&gpio_mux_lock);
++	BUG_ON(pad_reg < IOMUXSW_PAD_CTL);
+ 	__raw_writel(config, pad_reg);
+-	spin_unlock(&gpio_mux_lock);
+ }
+ EXPORT_SYMBOL(mxc_iomux_set_pad);
+ 
+ unsigned int mxc_iomux_get_pad(iomux_pin_name_t pin)
+ {
+-	u32 pad_reg = IOMUXSW_PAD_CTL + PIN_TO_IOMUX_PAD(pin);
+-	u32 val;
++	u32 pad_reg = _get_pad_reg(pin);
+ 
+-	spin_lock(&gpio_mux_lock);
+-	val = __raw_readl(pad_reg);
+-	spin_unlock(&gpio_mux_lock);
+-	return val;
++	return __raw_readl(pad_reg);
+ }
+ EXPORT_SYMBOL(mxc_iomux_get_pad);
+ 
+@@ -179,6 +221,28 @@ void mxc_iomux_set_input(iomux_input_select_t input, u32 config)
+ {
+ 	u32 reg = IOMUXSW_INPUT_CTL + (input << 2);
+ 
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++		if (input == MUX_IN_IPU_IPP_DI_0_IND_DISPB_SD_D_SELECT_INPUT)
++			input -= 4;
++		else if (input == MUX_IN_IPU_IPP_DI_1_IND_DISPB_SD_D_SELECT_INPUT)
++			input -= 3;
++		else if (input >= MUX_IN_KPP_IPP_IND_COL_6_SELECT_INPUT)
++			input -= 2;
++		else if (input >= MUX_IN_HSC_MIPI_MIX_PAR_SISG_TRIG_SELECT_INPUT)
++			input -= 5;
++		else if (input >= MUX_IN_HSC_MIPI_MIX_IPP_IND_SENS1_DATA_EN_SELECT_INPUT)
++			input -= 3;
++		else if (input >= MUX_IN_ECSPI2_IPP_IND_SS_B_3_SELECT_INPUT)
++			input -= 2;
++		else if (input >= MUX_IN_CCM_PLL1_BYPASS_CLK_SELECT_INPUT)
++			input -= 1;
++
++		reg += INPUT_CTL_START_TO1;
++	} else {
++		reg += INPUT_CTL_START;
++	}
++
++
+ 	BUG_ON(input >= MUX_INPUT_NUM_MUX);
+ 	__raw_writel(config, reg);
+ }
+diff --git a/arch/arm/mach-mx51/iomux.h b/arch/arm/mach-mx51/iomux.h
+index 1a4ae81..642070b 100644
+--- a/arch/arm/mach-mx51/iomux.h
++++ b/arch/arm/mach-mx51/iomux.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -90,6 +90,8 @@ typedef enum iomux_input_select {
+ 	MUX_IN_AUDMUX_P6_INPUT_TXCLK_AMX_SELECT_INPUT,
+ 	MUX_IN_AUDMUX_P6_INPUT_TXFS_AMX_SELECT_INPUT,
+ 	MUX_IN_CCM_IPP_DI_CLK_SELECT_INPUT,
++	/* TO2 */
++	MUX_IN_CCM_IPP_DI1_CLK_SELECT_INPUT,
+ 	MUX_IN_CCM_PLL1_BYPASS_CLK_SELECT_INPUT,
+ 	MUX_IN_CCM_PLL2_BYPASS_CLK_SELECT_INPUT,
+ 	MUX_IN_CSPI_IPP_CSPI_CLK_IN_SELECT_INPUT,
+@@ -99,6 +101,8 @@ typedef enum iomux_input_select {
+ 	MUX_IN_CSPI_IPP_IND_SS_B_2_SELECT_INPUT,
+ 	MUX_IN_CSPI_IPP_IND_SS_B_3_SELECT_INPUT,
+ 	MUX_IN_DPLLIP1_L1T_TOG_EN_SELECT_INPUT,
++	/* TO2 */
++	MUX_IN_ECSPI2_IPP_IND_SS_B_1_SELECT_INPUT,
+ 	MUX_IN_ECSPI2_IPP_IND_SS_B_3_SELECT_INPUT,
+ 	MUX_IN_EMI_IPP_IND_RDY_INT_SELECT_INPUT,
+ 	MUX_IN_ESDHC3_IPP_DAT0_IN_SELECT_INPUT,
+@@ -124,18 +128,24 @@ typedef enum iomux_input_select {
+ 	MUX_IN_GPIO3_IPP_IND_G_IN_6_SELECT_INPUT,
+ 	MUX_IN_GPIO3_IPP_IND_G_IN_7_SELECT_INPUT,
+ 	MUX_IN_GPIO3_IPP_IND_G_IN_8_SELECT_INPUT,
++	/* TO2 */
++	MUX_IN_GPIO3_IPP_IND_G_IN_12_SELECT_INPUT,
+ 	MUX_IN_HSC_MIPI_MIX_IPP_IND_SENS1_DATA_EN_SELECT_INPUT,
+ 	MUX_IN_HSC_MIPI_MIX_IPP_IND_SENS2_DATA_EN_SELECT_INPUT,
++	/* TO2 */
++	MUX_IN_HSC_MIPI_MIX_PAR_VSYNC_SELECT_INPUT,
++	/* TO2 */
++	MUX_IN_HSC_MIPI_MIX_PAR_DI_WAIT_SELECT_INPUT,
+ 	MUX_IN_HSC_MIPI_MIX_PAR_SISG_TRIG_SELECT_INPUT,
+ 	MUX_IN_I2C1_IPP_SCL_IN_SELECT_INPUT,
+ 	MUX_IN_I2C1_IPP_SDA_IN_SELECT_INPUT,
+ 	MUX_IN_I2C2_IPP_SCL_IN_SELECT_INPUT,
+ 	MUX_IN_I2C2_IPP_SDA_IN_SELECT_INPUT,
+-	MUX_IN_IPU_IPP_DI_0_IND_DISPB_D0_VSYNC_SELECT_INPUT,
++
+ 	MUX_IN_IPU_IPP_DI_0_IND_DISPB_SD_D_SELECT_INPUT,
+-	MUX_IN_IPU_IPP_DI_1_EXT_CLK_SELECT_INPUT,
++
+ 	MUX_IN_IPU_IPP_DI_1_IND_DISPB_SD_D_SELECT_INPUT,
+-	MUX_IN_IPU_IPP_DI_1_WAIT_SELECT_INPUT,
++
+ 	MUX_IN_KPP_IPP_IND_COL_6_SELECT_INPUT,
+ 	MUX_IN_KPP_IPP_IND_COL_7_SELECT_INPUT,
+ 	MUX_IN_KPP_IPP_IND_ROW_4_SELECT_INPUT,
+@@ -160,6 +170,7 @@ typedef enum iomux_input_select {
+ 	MUX_IN_USBOH3_IPP_IND_UH3_DIR_SELECT_INPUT,
+ 	MUX_IN_USBOH3_IPP_IND_UH3_NXT_SELECT_INPUT,
+ 	MUX_IN_USBOH3_IPP_IND_UH3_STP_SELECT_INPUT,
++	MUX_INPUT_NUM_MUX,
+ } iomux_input_select_t;
+ 
+ /*!
+diff --git a/arch/arm/mach-mx51/mm.c b/arch/arm/mach-mx51/mm.c
+index dc0205a..f69e21e 100644
+--- a/arch/arm/mach-mx51/mm.c
++++ b/arch/arm/mach-mx51/mm.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -73,5 +73,12 @@ static struct map_desc mxc_io_desc[] __initdata = {
+  */
+ void __init mxc_map_io(void)
+ {
++	u32 tzic_addr;
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0)
++		tzic_addr = 0x8FFFC000;
++	else
++		tzic_addr = 0xE0003000;
++
++	mxc_io_desc[2].pfn =  __phys_to_pfn(tzic_addr);
+ 	iotable_init(mxc_io_desc, ARRAY_SIZE(mxc_io_desc));
+ }
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 765d80e..937910b 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -216,7 +216,8 @@ static inline void mxc_init_keypad(void)
+ 	|| defined(CONFIG_MTD_NAND_MXC_MODULE) \
+ 	|| defined(CONFIG_MTD_NAND_MXC_V2) \
+ 	|| defined(CONFIG_MTD_NAND_MXC_V2_MODULE) \
+-	|| defined(CONFIG_MTD_NAND_MXC_V3)
++	|| defined(CONFIG_MTD_NAND_MXC_V3) \
++	|| defined(CONFIG_MTD_NAND_MXC_V3_MODULE)
+ 
+ static struct mtd_partition mxc_nand_partitions[] = {
+ 	{
+@@ -313,6 +314,11 @@ static struct platform_device mxc_fb_device[] = {
+ 	 },
+ };
+ 
++static void lcd_reset_to2(void)
++{
++	return;
++}
++
+ static void lcd_reset(void)
+ {
+ 	static int first;
+@@ -350,6 +356,10 @@ extern void gpio_lcd_active(void);
+ static void mxc_init_fb(void)
+ {
+ 	gpio_lcd_active();
++
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0)
++		lcd_data.reset = lcd_reset_to2;
++
+ 	(void)platform_device_register(&mxc_lcd_device);
+ 
+ 	(void)platform_device_register(&mxc_fb_device[0]);
+@@ -388,6 +398,10 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	 .type = "wm8903-i2c",
+ 	 .addr = 0x1a,
+ 	 },
++	 {
++	.type = "sgtl5000-i2c",
++	.addr = 0x0a,
++	},
+ 	{
+ 	 .type = "tsc2007",
+ 	 .addr = 0x48,
+@@ -648,6 +662,17 @@ static void expio_unmask_irq(u32 irq)
+ 	__raw_writew(reg, brd_io + INTR_MASK_REG);
+ }
+ 
++static void mxc_init_iram()
++{
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++		if (TOTAL_IRAM_NEEDED > (12*SZ_8K))
++			pr_err("IRAM exceeded\n");
++	} else {
++		if (TOTAL_IRAM_NEEDED > (16*SZ_8K))
++			pr_err("IRAM exceeded\n");
++	}
++}
++
+ static struct irq_chip expio_irq_chip = {
+ 	.ack = expio_ack_irq,
+ 	.mask = expio_mask_irq,
+@@ -846,6 +871,51 @@ static void __init mxc_init_audio(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) \
++    || defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000_MODULE)
++
++static struct mxc_sgtl5000_platform_data sgtl5000_data = {
++	.ssi_num = 1,
++	.src_port = 2,
++	.ext_port = 3,
++	.hp_irq = IOMUX_TO_IRQ(MX51_PIN_EIM_A26),
++	.hp_status = headphone_det_status,
++	.amp_gpo = "GPO2",
++	.vddio = 1800000,
++	.vdda = 1800000,
++	.vddd = 12000000,
++	.sysclk = 12000000,
++};
++
++static struct platform_device sgtl5000_device = {
++	.name = "sgtl5000-imx",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &sgtl5000_data,
++	},
++};
++
++static void mxc_sgtl5000_init(void)
++{
++	int err, pin;
++
++	pin = MX51_PIN_EIM_A26;
++	err = mxc_request_iomux(pin, IOMUX_CONFIG_GPIO);
++	if (err) {
++		sgtl5000_data.hp_irq = -1;
++		printk(KERN_ERR "Error: sgtl5000_init request gpio failed!\n");
++		return;
++	}
++	mxc_iomux_set_pad(pin, PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PU);
++	mxc_set_gpio_direction(pin, 1);
++
++	platform_device_register(&sgtl5000_device);
++}
++#else
++static inline void mxc_sgtl5000_init(void)
++{
++}
++#endif
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -884,6 +954,7 @@ static void __init mxc_board_init(void)
+ 	early_console_setup(saved_command_line);
+ 	mxc_init_devices();
+ 
++	mxc_init_iram();
+ 	mxc_expio_init();
+ 	mxc_init_enet();
+ 	mxc_init_pata();
+@@ -912,6 +983,8 @@ static void __init mxc_board_init(void)
+ #endif
+ 	mxc_init_touchscreen();
+ 	mxc_init_audio();
++
++	mxc_sgtl5000_init();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 5cf9a7f..29bbb98 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -239,17 +239,34 @@ void gpio_spi_active(int cspi_mod)
+ 				  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
+ 				  PAD_CTL_PKE_ENABLE);
+ 
+-		mxc_request_iomux(MX51_PIN_NANDF_RB4, IOMUX_CONFIG_ALT2);
+-		mxc_iomux_set_pad(MX51_PIN_NANDF_RB4, PAD_CTL_HYS_ENABLE |
+-				  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
+-				  PAD_CTL_PKE_ENABLE);
+-
+-		mxc_request_iomux(MX51_PIN_NANDF_RB7, IOMUX_CONFIG_ALT2);
+-		mxc_iomux_set_pad(MX51_PIN_NANDF_RB7, PAD_CTL_DRV_VOT_HIGH |
+-				  PAD_CTL_HYS_ENABLE | PAD_CTL_PKE_ENABLE |
+-				  PAD_CTL_PUE_KEEPER | PAD_CTL_100K_PU |
+-				  PAD_CTL_ODE_OPENDRAIN_NONE |
+-				  PAD_CTL_DRV_HIGH);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++			mxc_request_iomux(MX51_PIN_NANDF_RB4, IOMUX_CONFIG_ALT2);
++			mxc_iomux_set_pad(MX51_PIN_NANDF_RB4, PAD_CTL_HYS_ENABLE |
++					  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
++					  PAD_CTL_PKE_ENABLE);
++
++			mxc_request_iomux(MX51_PIN_NANDF_RB7, IOMUX_CONFIG_ALT2);
++			mxc_iomux_set_pad(MX51_PIN_NANDF_RB7, PAD_CTL_DRV_VOT_HIGH |
++					  PAD_CTL_HYS_ENABLE | PAD_CTL_PKE_ENABLE |
++					  PAD_CTL_PUE_KEEPER | PAD_CTL_100K_PU |
++					  PAD_CTL_ODE_OPENDRAIN_NONE |
++					  PAD_CTL_DRV_HIGH);
++		} else {
++			mxc_request_iomux(MX51_PIN_NANDF_RDY_INT, IOMUX_CONFIG_ALT2);
++			mxc_iomux_set_pad(MX51_PIN_NANDF_RDY_INT, PAD_CTL_HYS_ENABLE |
++					  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
++					  PAD_CTL_PKE_ENABLE);
++
++			mxc_request_iomux(MX51_PIN_NANDF_D15, IOMUX_CONFIG_ALT2);
++			mxc_iomux_set_pad(MX51_PIN_NANDF_D15, PAD_CTL_HYS_ENABLE |
++					  PAD_CTL_DRV_HIGH | PAD_CTL_PKE_ENABLE |
++					  PAD_CTL_PUE_KEEPER);
++
++			mxc_request_iomux(MX51_PIN_NANDF_D12, IOMUX_CONFIG_ALT2);
++			mxc_iomux_set_pad(MX51_PIN_NANDF_D12, PAD_CTL_HYS_ENABLE |
++					  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
++					  PAD_CTL_PKE_ENABLE);
++		}
+ 		break;
+ 	case 2:
+ 		/* SPI3 */
+@@ -290,28 +307,32 @@ void gpio_spi_inactive(int cspi_mod)
+ 	switch (cspi_mod) {
+ 	case 0:
+ 		/* SPI1 */
++		mxc_free_iomux(MX51_PIN_CSPI1_MISO, IOMUX_CONFIG_ALT0);
++		mxc_free_iomux(MX51_PIN_CSPI1_MOSI, IOMUX_CONFIG_ALT0);
++		mxc_free_iomux(MX51_PIN_CSPI1_RDY, IOMUX_CONFIG_ALT0);
++		mxc_free_iomux(MX51_PIN_CSPI1_SCLK, IOMUX_CONFIG_ALT0);
++		mxc_free_iomux(MX51_PIN_CSPI1_SS0, IOMUX_CONFIG_ALT0);
++		mxc_free_iomux(MX51_PIN_CSPI1_SS1, IOMUX_CONFIG_ALT0);
+ 		break;
+ 	case 1:
+ 		/* SPI2 */
+-		mxc_request_iomux(MX51_PIN_NANDF_RB2, IOMUX_CONFIG_ALT0);
+-		mxc_iomux_set_pad(MX51_PIN_NANDF_RB2, PAD_CTL_PUE_KEEPER |
+-				  PAD_CTL_PKE_ENABLE);
+-
+-		mxc_request_iomux(MX51_PIN_NANDF_RB3, IOMUX_CONFIG_ALT0);
+-		mxc_iomux_set_pad(MX51_PIN_NANDF_RB3, PAD_CTL_PUE_KEEPER |
+-				  PAD_CTL_PKE_ENABLE);
+-
+-		mxc_request_iomux(MX51_PIN_NANDF_RB4, IOMUX_CONFIG_ALT0);
+-		mxc_iomux_set_pad(MX51_PIN_NANDF_RB4, PAD_CTL_PUE_KEEPER |
+-				  PAD_CTL_PKE_ENABLE);
+-
+-		mxc_request_iomux(MX51_PIN_NANDF_RB7, IOMUX_CONFIG_ALT0);
+-		mxc_iomux_set_pad(MX51_PIN_NANDF_RB7, PAD_CTL_DRV_VOT_HIGH |
+-				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
+-				  PAD_CTL_100K_PU);
++		mxc_free_iomux(MX51_PIN_NANDF_RB2, IOMUX_CONFIG_ALT2);
++		mxc_free_iomux(MX51_PIN_NANDF_RB3, IOMUX_CONFIG_ALT2);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0) {
++			mxc_free_iomux(MX51_PIN_NANDF_RB4, IOMUX_CONFIG_ALT2);
++			mxc_free_iomux(MX51_PIN_NANDF_RB7, IOMUX_CONFIG_ALT2);
++		} else {
++			mxc_free_iomux(MX51_PIN_NANDF_RDY_INT, IOMUX_CONFIG_ALT2);
++			mxc_free_iomux(MX51_PIN_NANDF_D15, IOMUX_CONFIG_ALT2);
++			mxc_free_iomux(MX51_PIN_NANDF_D12, IOMUX_CONFIG_ALT2);
++		}
+ 		break;
+ 	case 2:
+ 		/* SPI3 */
++		mxc_free_iomux(MX51_PIN_USBH1_NXT, IOMUX_CONFIG_ALT1);
++		mxc_free_iomux(MX51_PIN_USBH1_DIR, IOMUX_CONFIG_ALT1);
++		mxc_free_iomux(MX51_PIN_USBH1_CLK, IOMUX_CONFIG_ALT1);
++		mxc_free_iomux(MX51_PIN_USBH1_DATA5, IOMUX_CONFIG_ALT1);
+ 		break;
+ 	default:
+ 		break;
+@@ -679,9 +700,18 @@ EXPORT_SYMBOL(sdhc_write_protect);
+  */
+ void gpio_lcd_active(void)
+ {
+-	mxc_request_iomux(MX51_PIN_DISP2_DAT15, IOMUX_CONFIG_ALT5);
+-	mxc_request_iomux(MX51_PIN_DI_GP2, IOMUX_CONFIG_ALT0);
+-	mxc_request_iomux(MX51_PIN_DI_GP3, IOMUX_CONFIG_ALT0);
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++		mxc_request_iomux(MX51_PIN_DI1_D1_CS, IOMUX_CONFIG_ALT4);
++		mxc_set_gpio_direction(MX51_PIN_DI1_D1_CS, 0);
++		mxc_request_iomux(MX51_PIN_DI1_D0_CS, IOMUX_CONFIG_ALT1);
++		mxc_request_iomux(MX51_PIN_DI1_PIN11, IOMUX_CONFIG_ALT1);
++		mxc_request_iomux(MX51_PIN_DI1_PIN12, IOMUX_CONFIG_ALT1);
++		mxc_request_iomux(MX51_PIN_DI1_PIN13, IOMUX_CONFIG_ALT1);
++	} else {
++		mxc_request_iomux(MX51_PIN_DISP2_DAT15, IOMUX_CONFIG_ALT5);
++		mxc_request_iomux(MX51_PIN_DI_GP2, IOMUX_CONFIG_ALT0);
++		mxc_request_iomux(MX51_PIN_DI_GP3, IOMUX_CONFIG_ALT0);
++	}
+ }
+ 
+ /*!
+@@ -740,13 +770,34 @@ void gpio_sensor_active(unsigned int csi)
+ 
+ 		mxc_iomux_set_pad(MX51_PIN_CSI1_PIXCLK, PAD_CTL_HYS_NONE);
+ 
+-		mxc_request_iomux(MX51_PIN_EIM_EB2, IOMUX_CONFIG_ALT1);
+-		mxc_iomux_set_pad(MX51_PIN_EIM_EB2, PAD_CTL_HYS_NONE |
+-				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
+-				  PAD_CTL_100K_PD | PAD_CTL_ODE_OPENDRAIN_NONE |
+-				  PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW);
+-		mxc_set_gpio_direction(MX51_PIN_EIM_EB2, 0);
+-		mxc_set_gpio_dataout(MX51_PIN_EIM_EB2, 0);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++			/* Camera low power */
++			mxc_request_iomux(MX51_PIN_CSI1_D8, IOMUX_CONFIG_ALT3);
++			mxc_iomux_set_pad(MX51_PIN_CSI1_D8, PAD_CTL_HYS_NONE |
++					  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_LOW |
++					  PAD_CTL_SRE_SLOW);
++			mxc_iomux_set_input
++			    (MUX_IN_GPIO3_IPP_IND_G_IN_12_SELECT_INPUT,
++			     INPUT_CTL_PATH1);
++			mxc_set_gpio_direction(MX51_PIN_CSI1_D8, 0);
++			mxc_set_gpio_dataout(MX51_PIN_CSI1_D8, 0);
++
++			/* Camera reset */
++			mxc_request_iomux(MX51_PIN_CSI1_D9, IOMUX_CONFIG_ALT3);
++			mxc_iomux_set_pad(MX51_PIN_CSI1_D9, PAD_CTL_HYS_NONE |
++					  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_LOW |
++					  PAD_CTL_SRE_SLOW);
++			mxc_set_gpio_direction(MX51_PIN_CSI1_D9, 0);
++			mxc_set_gpio_dataout(MX51_PIN_CSI1_D9, 1);
++		} else {
++			mxc_request_iomux(MX51_PIN_EIM_EB2, IOMUX_CONFIG_ALT1);
++			mxc_iomux_set_pad(MX51_PIN_EIM_EB2, PAD_CTL_HYS_NONE |
++					  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++					  PAD_CTL_100K_PD | PAD_CTL_ODE_OPENDRAIN_NONE |
++					  PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW);
++			mxc_set_gpio_direction(MX51_PIN_EIM_EB2, 0);
++			mxc_set_gpio_dataout(MX51_PIN_EIM_EB2, 0);
++		}
+ 
+ 		mxc_request_iomux(MX51_PIN_EIM_A26, IOMUX_CONFIG_ALT5);
+ 		mxc_iomux_set_input
+@@ -824,8 +875,16 @@ void gpio_sensor_inactive(unsigned int csi)
+ {
+ 	switch (csi) {
+ 	case 0:
+-		mxc_free_iomux(MX51_PIN_EIM_EB2, IOMUX_CONFIG_GPIO);
+-		mxc_request_iomux(MX51_PIN_EIM_EB2, IOMUX_CONFIG_ALT0);
++		if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++			mxc_free_iomux(MX51_PIN_CSI1_D8, IOMUX_CONFIG_GPIO);
++			mxc_request_iomux(MX51_PIN_CSI1_D8, IOMUX_CONFIG_ALT0);
++
++			mxc_free_iomux(MX51_PIN_CSI1_D9, IOMUX_CONFIG_GPIO);
++			mxc_request_iomux(MX51_PIN_CSI1_D9, IOMUX_CONFIG_ALT0);
++		} else {
++			mxc_free_iomux(MX51_PIN_EIM_EB2, IOMUX_CONFIG_GPIO);
++			mxc_request_iomux(MX51_PIN_EIM_EB2, IOMUX_CONFIG_ALT0);
++		}
+ 		mxc_request_iomux(MX51_PIN_EIM_A26, IOMUX_CONFIG_ALT0);
+ 		break;
+ 	case 1:
+@@ -892,8 +951,13 @@ void gpio_ata_active(void)
+ 	mxc_iomux_set_pad(MX51_PIN_NANDF_WP_B, ATA_PAD_CONFIG);
+ 
+ 	/*PATA_INTRQ */
+-	mxc_request_iomux(MX51_PIN_NANDF_RB5, IOMUX_CONFIG_ALT1);
+-	mxc_iomux_set_pad(MX51_PIN_NANDF_RB5, ATA_PAD_CONFIG);
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++		mxc_request_iomux(MX51_PIN_GPIO_NAND, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_GPIO_NAND, ATA_PAD_CONFIG);
++	} else {
++		mxc_request_iomux(MX51_PIN_NANDF_RB5, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB5, ATA_PAD_CONFIG);
++	}
+ 
+ 	/*PATA_IORDY */
+ 	mxc_request_iomux(MX51_PIN_NANDF_RB1, IOMUX_CONFIG_ALT1);
+@@ -1004,7 +1068,11 @@ void gpio_ata_inactive(void)
+ 	mxc_request_iomux(MX51_PIN_NANDF_WP_B, IOMUX_CONFIG_ALT0);
+ 
+ 	/*PATA_INTRQ */
+-	mxc_request_iomux(MX51_PIN_NANDF_RB5, IOMUX_CONFIG_ALT0);
++	if (cpu_is_mx51_rev(CHIP_REV_2_0) > 0) {
++		mxc_request_iomux(MX51_PIN_GPIO_NAND, IOMUX_CONFIG_ALT0);
++	} else {
++		mxc_request_iomux(MX51_PIN_NANDF_RB5, IOMUX_CONFIG_ALT0);
++	}
+ 
+ 	/*PATA_IORDY */
+ 	mxc_request_iomux(MX51_PIN_NANDF_RB1, IOMUX_CONFIG_ALT0);
+@@ -1583,3 +1651,10 @@ void gpio_spdif_inactive(void)
+ }
+ 
+ EXPORT_SYMBOL(gpio_spdif_inactive);
++
++int headphone_det_status(void)
++{
++	return mxc_get_gpio_datain(MX51_PIN_EIM_A26);
++}
++
++EXPORT_SYMBOL(headphone_det_status);
+diff --git a/arch/arm/mach-mx51/mx51_pins.h b/arch/arm/mach-mx51/mx51_pins.h
+index b05df03..5b08a5f 100644
+--- a/arch/arm/mach-mx51/mx51_pins.h
++++ b/arch/arm/mach-mx51/mx51_pins.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -73,15 +73,14 @@
+ 
+ #define NON_MUX_I		PIN_TO_MUX_MASK
+ #define MUX_I_START		0x001C
++#define PAD_I_START		0x3F0
++#define INPUT_CTL_START		0x8C4
++#define INPUT_CTL_START_TO1	0x928
+ #define MUX_I_END		(PAD_I_START - 4)
+-#define PAD_I_START		0x3F8
+-#define PAD_I_END		(INPUT_CTL_START - 4)
+-#define INPUT_CTL_START	0x928
+-#define INPUT_CTL_END		0xA80
+ 
+ #define _MXC_BUILD_PIN(gp, gi, ga, mi, pi) \
+ 	(((gp) << MUX_IO_P) | ((gi) << MUX_IO_I) | \
+-	((mi - MUX_I_START) << MUX_I) | \
++	((mi) << MUX_I) | \
+ 	((pi - PAD_I_START) << PAD_I) | \
+ 	((ga) << GPIO_I))
+ 
+@@ -104,246 +103,258 @@
+  * value is constructed based on the rules described above.
+  */
+ enum iomux_pins {
+-	MX51_PIN_EIM_DA0 = _MXC_BUILD_NON_GPIO_PIN(0x1C, 0x874),
+-	MX51_PIN_EIM_DA1 = _MXC_BUILD_NON_GPIO_PIN(0x20, 0x874),
+-	MX51_PIN_EIM_DA2 = _MXC_BUILD_NON_GPIO_PIN(0x24, 0x874),
+-	MX51_PIN_EIM_DA3 = _MXC_BUILD_NON_GPIO_PIN(0x28, 0x874),
+-	MX51_PIN_EIM_DA4 = _MXC_BUILD_NON_GPIO_PIN(0x2C, 0x878),
+-	MX51_PIN_EIM_DA5 = _MXC_BUILD_NON_GPIO_PIN(0x30, 0x878),
+-	MX51_PIN_EIM_DA6 = _MXC_BUILD_NON_GPIO_PIN(0x34, 0x878),
+-	MX51_PIN_EIM_DA7 = _MXC_BUILD_NON_GPIO_PIN(0x38, 0x878),
+-	MX51_PIN_EIM_DA8 = _MXC_BUILD_NON_GPIO_PIN(0x3C, 0x87C),
+-	MX51_PIN_EIM_DA9 = _MXC_BUILD_NON_GPIO_PIN(0x40, 0x87C),
+-	MX51_PIN_EIM_DA10 = _MXC_BUILD_NON_GPIO_PIN(0x44, 0x87C),
+-	MX51_PIN_EIM_DA11 = _MXC_BUILD_NON_GPIO_PIN(0x48, 0x87C),
+-	MX51_PIN_EIM_DA12 = _MXC_BUILD_NON_GPIO_PIN(0x4C, 0x888),
+-	MX51_PIN_EIM_DA13 = _MXC_BUILD_NON_GPIO_PIN(0x50, 0x888),
+-	MX51_PIN_EIM_DA14 = _MXC_BUILD_NON_GPIO_PIN(0x54, 0x888),
+-	MX51_PIN_EIM_DA15 = _MXC_BUILD_NON_GPIO_PIN(0x58, 0x888),
+-	MX51_PIN_EIM_D16 = _MXC_BUILD_GPIO_PIN(1, 0, 1, 0x5C, 0x3F8),
+-	MX51_PIN_EIM_D17 = _MXC_BUILD_GPIO_PIN(1, 1, 1, 0x60, 0x3FC),
+-	MX51_PIN_EIM_D18 = _MXC_BUILD_GPIO_PIN(1, 2, 1, 0x64, 0x400),
+-	MX51_PIN_EIM_D19 = _MXC_BUILD_GPIO_PIN(1, 3, 1, 0x68, 0x404),
+-	MX51_PIN_EIM_D20 = _MXC_BUILD_GPIO_PIN(1, 4, 1, 0x6C, 0x408),
+-	MX51_PIN_EIM_D21 = _MXC_BUILD_GPIO_PIN(1, 5, 1, 0x70, 0x40C),
+-	MX51_PIN_EIM_D22 = _MXC_BUILD_GPIO_PIN(1, 6, 1, 0x74, 0x410),
+-	MX51_PIN_EIM_D23 = _MXC_BUILD_GPIO_PIN(1, 7, 1, 0x78, 0x414),
+-	MX51_PIN_EIM_D24 = _MXC_BUILD_GPIO_PIN(1, 8, 1, 0x7C, 0x418),
+-	MX51_PIN_EIM_D25 = _MXC_BUILD_NON_GPIO_PIN(0x80, 0x41C),
+-	MX51_PIN_EIM_D26 = _MXC_BUILD_NON_GPIO_PIN(0x84, 0x420),
+-	MX51_PIN_EIM_D27 = _MXC_BUILD_GPIO_PIN(1, 9, 1, 0x88, 0x424),
+-	MX51_PIN_EIM_D28 = _MXC_BUILD_NON_GPIO_PIN(0x8C, 0x428),
+-	MX51_PIN_EIM_D29 = _MXC_BUILD_NON_GPIO_PIN(0x90, 0x42C),
+-	MX51_PIN_EIM_D30 = _MXC_BUILD_NON_GPIO_PIN(0x94, 0x430),
+-	MX51_PIN_EIM_D31 = _MXC_BUILD_NON_GPIO_PIN(0x98, 0x434),
+-	MX51_PIN_EIM_A16 = _MXC_BUILD_GPIO_PIN(1, 10, 1, 0x9C, 0x438),
+-	MX51_PIN_EIM_A17 = _MXC_BUILD_GPIO_PIN(1, 11, 1, 0xA0, 0x43C),
+-	MX51_PIN_EIM_A18 = _MXC_BUILD_GPIO_PIN(1, 12, 1, 0xA4, 0x440),
+-	MX51_PIN_EIM_A19 = _MXC_BUILD_GPIO_PIN(1, 13, 1, 0xA8, 0x444),
+-	MX51_PIN_EIM_A20 = _MXC_BUILD_GPIO_PIN(1, 14, 1, 0xAC, 0x448),
+-	MX51_PIN_EIM_A21 = _MXC_BUILD_GPIO_PIN(1, 15, 1, 0xB0, 0x44C),
+-	MX51_PIN_EIM_A22 = _MXC_BUILD_GPIO_PIN(1, 16, 1, 0xB4, 0x450),
+-	MX51_PIN_EIM_A23 = _MXC_BUILD_GPIO_PIN(1, 17, 1, 0xB8, 0x454),
+-	MX51_PIN_EIM_A24 = _MXC_BUILD_GPIO_PIN(1, 18, 1, 0xBC, 0x458),
+-	MX51_PIN_EIM_A25 = _MXC_BUILD_GPIO_PIN(1, 19, 1, 0xC0, 0x45C),
+-	MX51_PIN_EIM_A26 = _MXC_BUILD_GPIO_PIN(1, 20, 1, 0xC4, 0x460),
+-	MX51_PIN_EIM_A27 = _MXC_BUILD_GPIO_PIN(1, 21, 1, 0xC8, 0x464),
+-	MX51_PIN_EIM_EB0 = _MXC_BUILD_NON_GPIO_PIN(0xCC, 0x468),
+-	MX51_PIN_EIM_EB1 = _MXC_BUILD_NON_GPIO_PIN(0xD0, 0x46C),
+-	MX51_PIN_EIM_EB2 = _MXC_BUILD_GPIO_PIN(1, 22, 1, 0xD4, 0x470),
+-	MX51_PIN_EIM_EB3 = _MXC_BUILD_GPIO_PIN(1, 23, 1, 0xD8, 0x474),
+-	MX51_PIN_EIM_OE = _MXC_BUILD_GPIO_PIN(1, 24, 1, 0xDC, 0x478),
+-	MX51_PIN_EIM_CS0 = _MXC_BUILD_GPIO_PIN(1, 25, 1, 0xE0, 0x47C),
+-	MX51_PIN_EIM_CS1 = _MXC_BUILD_GPIO_PIN(1, 26, 1, 0xE4, 0x480),
+-	MX51_PIN_EIM_CS2 = _MXC_BUILD_GPIO_PIN(1, 27, 1, 0xE8, 0x484),
+-	MX51_PIN_EIM_CS3 = _MXC_BUILD_GPIO_PIN(1, 28, 1, 0xEC, 0x488),
+-	MX51_PIN_EIM_CS4 = _MXC_BUILD_GPIO_PIN(1, 29, 1, 0xF0, 0x48C),
+-	MX51_PIN_EIM_CS5 = _MXC_BUILD_GPIO_PIN(1, 30, 1, 0xF4, 0x490),
+-	MX51_PIN_EIM_DTACK = _MXC_BUILD_GPIO_PIN(1, 31, 1, 0xF8, 0x494),
+-	MX51_PIN_EIM_LBA = _MXC_BUILD_GPIO_PIN(2, 1, 1, 0xFC, 0x49C),
+-	MX51_PIN_EIM_CRE = _MXC_BUILD_GPIO_PIN(2, 2, 1, 0x100, 0x4A8),
+-	MX51_PIN_DRAM_CS1 = _MXC_BUILD_NON_GPIO_PIN(0x104, 0x51C),
+-	MX51_PIN_NANDF_WE_B = _MXC_BUILD_GPIO_PIN(2, 3, 3, 0x108, 0x5B0),
+-	MX51_PIN_NANDF_RE_B = _MXC_BUILD_GPIO_PIN(2, 4, 3, 0x10C, 0x5B4),
+-	MX51_PIN_NANDF_ALE = _MXC_BUILD_GPIO_PIN(2, 5, 3, 0x110, 0x5B8),
+-	MX51_PIN_NANDF_CLE = _MXC_BUILD_GPIO_PIN(2, 6, 3, 0x114, 0x5BC),
+-	MX51_PIN_NANDF_WP_B = _MXC_BUILD_GPIO_PIN(2, 7, 3, 0x118, 0x5C0),
+-	MX51_PIN_NANDF_RB0 = _MXC_BUILD_GPIO_PIN(2, 8, 3, 0x11C, 0x5C4),
+-	MX51_PIN_NANDF_RB1 = _MXC_BUILD_GPIO_PIN(2, 9, 3, 0x120, 0x5C8),
+-	MX51_PIN_NANDF_RB2 = _MXC_BUILD_GPIO_PIN(2, 10, 3, 0x124, 0x5CC),
+-	MX51_PIN_NANDF_RB3 = _MXC_BUILD_GPIO_PIN(2, 11, 3, 0x128, 0x5D0),
+-	MX51_PIN_NANDF_RB4 = _MXC_BUILD_GPIO_PIN(2, 12, 3, 0x12C, 0x5D4),
++	MX51_PIN_EIM_DA0 = _MXC_BUILD_NON_GPIO_PIN(0x1C, 0x7A8),
++	MX51_PIN_EIM_DA1 = _MXC_BUILD_NON_GPIO_PIN(0x20, 0x7A8),
++	MX51_PIN_EIM_DA2 = _MXC_BUILD_NON_GPIO_PIN(0x24, 0x7A8),
++	MX51_PIN_EIM_DA3 = _MXC_BUILD_NON_GPIO_PIN(0x28, 0x7A8),
++	MX51_PIN_EIM_DA4 = _MXC_BUILD_NON_GPIO_PIN(0x2C, 0x7AC),
++	MX51_PIN_EIM_DA5 = _MXC_BUILD_NON_GPIO_PIN(0x30, 0x7AC),
++	MX51_PIN_EIM_DA6 = _MXC_BUILD_NON_GPIO_PIN(0x34, 0x7AC),
++	MX51_PIN_EIM_DA7 = _MXC_BUILD_NON_GPIO_PIN(0x38, 0x7AC),
++	MX51_PIN_EIM_DA8 = _MXC_BUILD_NON_GPIO_PIN(0x3C, 0x7B0),
++	MX51_PIN_EIM_DA9 = _MXC_BUILD_NON_GPIO_PIN(0x40, 0x7B0),
++	MX51_PIN_EIM_DA10 = _MXC_BUILD_NON_GPIO_PIN(0x44, 0x7B0),
++	MX51_PIN_EIM_DA11 = _MXC_BUILD_NON_GPIO_PIN(0x48, 0x7B0),
++	MX51_PIN_EIM_DA12 = _MXC_BUILD_NON_GPIO_PIN(0x4C, 0x7BC),
++	MX51_PIN_EIM_DA13 = _MXC_BUILD_NON_GPIO_PIN(0x50, 0x7BC),
++	MX51_PIN_EIM_DA14 = _MXC_BUILD_NON_GPIO_PIN(0x54, 0x7BC),
++	MX51_PIN_EIM_DA15 = _MXC_BUILD_NON_GPIO_PIN(0x58, 0x7BC),
++	MX51_PIN_EIM_D16 = _MXC_BUILD_GPIO_PIN(1, 0, 1, 0x5C, 0x3F0),
++	MX51_PIN_EIM_D17 = _MXC_BUILD_GPIO_PIN(1, 1, 1, 0x60, 0x3F4),
++	MX51_PIN_EIM_D18 = _MXC_BUILD_GPIO_PIN(1, 2, 1, 0x64, 0x3F8),
++	MX51_PIN_EIM_D19 = _MXC_BUILD_GPIO_PIN(1, 3, 1, 0x68, 0x3FC),
++	MX51_PIN_EIM_D20 = _MXC_BUILD_GPIO_PIN(1, 4, 1, 0x6C, 0x400),
++	MX51_PIN_EIM_D21 = _MXC_BUILD_GPIO_PIN(1, 5, 1, 0x70, 0x404),
++	MX51_PIN_EIM_D22 = _MXC_BUILD_GPIO_PIN(1, 6, 1, 0x74, 0x408),
++	MX51_PIN_EIM_D23 = _MXC_BUILD_GPIO_PIN(1, 7, 1, 0x78, 0x40C),
++	MX51_PIN_EIM_D24 = _MXC_BUILD_GPIO_PIN(1, 8, 1, 0x7C, 0x410),
++	MX51_PIN_EIM_D25 = _MXC_BUILD_NON_GPIO_PIN(0x80, 0x414),
++	MX51_PIN_EIM_D26 = _MXC_BUILD_NON_GPIO_PIN(0x84, 0x418),
++	MX51_PIN_EIM_D27 = _MXC_BUILD_GPIO_PIN(1, 9, 1, 0x88, 0x41C),
++	MX51_PIN_EIM_D28 = _MXC_BUILD_NON_GPIO_PIN(0x8C, 0x420),
++	MX51_PIN_EIM_D29 = _MXC_BUILD_NON_GPIO_PIN(0x90, 0x424),
++	MX51_PIN_EIM_D30 = _MXC_BUILD_NON_GPIO_PIN(0x94, 0x428),
++	MX51_PIN_EIM_D31 = _MXC_BUILD_NON_GPIO_PIN(0x98, 0x42C),
++	MX51_PIN_EIM_A16 = _MXC_BUILD_GPIO_PIN(1, 10, 1, 0x9C, 0x430),
++	MX51_PIN_EIM_A17 = _MXC_BUILD_GPIO_PIN(1, 11, 1, 0xA0, 0x434),
++	MX51_PIN_EIM_A18 = _MXC_BUILD_GPIO_PIN(1, 12, 1, 0xA4, 0x438),
++	MX51_PIN_EIM_A19 = _MXC_BUILD_GPIO_PIN(1, 13, 1, 0xA8, 0x43C),
++	MX51_PIN_EIM_A20 = _MXC_BUILD_GPIO_PIN(1, 14, 1, 0xAC, 0x440),
++	MX51_PIN_EIM_A21 = _MXC_BUILD_GPIO_PIN(1, 15, 1, 0xB0, 0x444),
++	MX51_PIN_EIM_A22 = _MXC_BUILD_GPIO_PIN(1, 16, 1, 0xB4, 0x448),
++	MX51_PIN_EIM_A23 = _MXC_BUILD_GPIO_PIN(1, 17, 1, 0xB8, 0x44C),
++	MX51_PIN_EIM_A24 = _MXC_BUILD_GPIO_PIN(1, 18, 1, 0xBC, 0x450),
++	MX51_PIN_EIM_A25 = _MXC_BUILD_GPIO_PIN(1, 19, 1, 0xC0, 0x454),
++	MX51_PIN_EIM_A26 = _MXC_BUILD_GPIO_PIN(1, 20, 1, 0xC4, 0x458),
++	MX51_PIN_EIM_A27 = _MXC_BUILD_GPIO_PIN(1, 21, 1, 0xC8, 0x45C),
++	MX51_PIN_EIM_EB0 = _MXC_BUILD_NON_GPIO_PIN(0xCC, 0x460),
++	MX51_PIN_EIM_EB1 = _MXC_BUILD_NON_GPIO_PIN(0xD0, 0x464),
++	MX51_PIN_EIM_EB2 = _MXC_BUILD_GPIO_PIN(1, 22, 1, 0xD4, 0x468),
++	MX51_PIN_EIM_EB3 = _MXC_BUILD_GPIO_PIN(1, 23, 1, 0xD8, 0x46C),
++	MX51_PIN_EIM_OE = _MXC_BUILD_GPIO_PIN(1, 24, 1, 0xDC, 0x470),
++	MX51_PIN_EIM_CS0 = _MXC_BUILD_GPIO_PIN(1, 25, 1, 0xE0, 0x474),
++	MX51_PIN_EIM_CS1 = _MXC_BUILD_GPIO_PIN(1, 26, 1, 0xE4, 0x478),
++	MX51_PIN_EIM_CS2 = _MXC_BUILD_GPIO_PIN(1, 27, 1, 0xE8, 0x47C),
++	MX51_PIN_EIM_CS3 = _MXC_BUILD_GPIO_PIN(1, 28, 1, 0xEC, 0x480),
++	MX51_PIN_EIM_CS4 = _MXC_BUILD_GPIO_PIN(1, 29, 1, 0xF0, 0x484),
++	MX51_PIN_EIM_CS5 = _MXC_BUILD_GPIO_PIN(1, 30, 1, 0xF4, 0x488),
++	MX51_PIN_EIM_DTACK = _MXC_BUILD_GPIO_PIN(1, 31, 1, 0xF8, 0x48C),
++	MX51_PIN_EIM_LBA = _MXC_BUILD_GPIO_PIN(2, 1, 1, 0xFC, 0x494),
++	MX51_PIN_EIM_CRE = _MXC_BUILD_GPIO_PIN(2, 2, 1, 0x100, 0x4A0),
++	MX51_PIN_DRAM_CS1 = _MXC_BUILD_NON_GPIO_PIN(0x104, 0x4D0),
++	MX51_PIN_NANDF_WE_B = _MXC_BUILD_GPIO_PIN(2, 3, 3, 0x108, 0x4E4),
++	MX51_PIN_NANDF_RE_B = _MXC_BUILD_GPIO_PIN(2, 4, 3, 0x10C, 0x4E8),
++	MX51_PIN_NANDF_ALE = _MXC_BUILD_GPIO_PIN(2, 5, 3, 0x110, 0x4EC),
++	MX51_PIN_NANDF_CLE = _MXC_BUILD_GPIO_PIN(2, 6, 3, 0x114, 0x4F0),
++	MX51_PIN_NANDF_WP_B = _MXC_BUILD_GPIO_PIN(2, 7, 3, 0x118, 0x4F4),
++	MX51_PIN_NANDF_RB0 = _MXC_BUILD_GPIO_PIN(2, 8, 3, 0x11C, 0x4F8),
++	MX51_PIN_NANDF_RB1 = _MXC_BUILD_GPIO_PIN(2, 9, 3, 0x120, 0x4FC),
++	MX51_PIN_NANDF_RB2 = _MXC_BUILD_GPIO_PIN(2, 10, 3, 0x124, 0x500),
++	MX51_PIN_NANDF_RB3 = _MXC_BUILD_GPIO_PIN(2, 11, 3, 0x128, 0x504),
++	MX51_PIN_GPIO_NAND = _MXC_BUILD_GPIO_PIN(2, 12, 3, 0x12C, 0x514),
++	MX51_PIN_NANDF_RB4 = MX51_PIN_GPIO_NAND,
+ 	MX51_PIN_NANDF_RB5 = _MXC_BUILD_GPIO_PIN(2, 13, 3, 0x130, 0x5D8),
+ 	MX51_PIN_NANDF_RB6 = _MXC_BUILD_GPIO_PIN(2, 14, 3, 0x134, 0x5DC),
+ 	MX51_PIN_NANDF_RB7 = _MXC_BUILD_GPIO_PIN(2, 15, 3, 0x138, 0x5E0),
+-	MX51_PIN_NANDF_CS0 = _MXC_BUILD_GPIO_PIN(2, 16, 3, 0x13C, 0x5E4),
+-	MX51_PIN_NANDF_CS1 = _MXC_BUILD_GPIO_PIN(2, 17, 3, 0x140, 0x5E8),
+-	MX51_PIN_NANDF_CS2 = _MXC_BUILD_GPIO_PIN(2, 18, 3, 0x144, 0x5EC),
+-	MX51_PIN_NANDF_CS3 = _MXC_BUILD_GPIO_PIN(2, 19, 3, 0x148, 0x5F0),
+-	MX51_PIN_NANDF_CS4 = _MXC_BUILD_GPIO_PIN(2, 20, 3, 0x14C, 0x5F4),
+-	MX51_PIN_NANDF_CS5 = _MXC_BUILD_GPIO_PIN(2, 21, 3, 0x150, 0x5F8),
+-	MX51_PIN_NANDF_CS6 = _MXC_BUILD_GPIO_PIN(2, 22, 3, 0x154, 0x5FC),
+-	MX51_PIN_NANDF_CS7 = _MXC_BUILD_GPIO_PIN(2, 23, 3, 0x158, 0x600),
+-	MX51_PIN_NANDF_RDY_INT = _MXC_BUILD_GPIO_PIN(2, 24, 3, 0x15C, 0x604),
+-	MX51_PIN_NANDF_D15 = _MXC_BUILD_GPIO_PIN(2, 25, 3, 0x160, 0x608),
+-	MX51_PIN_NANDF_D14 = _MXC_BUILD_GPIO_PIN(2, 26, 3, 0x164, 0x60C),
+-	MX51_PIN_NANDF_D13 = _MXC_BUILD_GPIO_PIN(2, 27, 3, 0x168, 0x610),
+-	MX51_PIN_NANDF_D12 = _MXC_BUILD_GPIO_PIN(2, 28, 3, 0x16C, 0x614),
+-	MX51_PIN_NANDF_D11 = _MXC_BUILD_GPIO_PIN(2, 29, 3, 0x170, 0x618),
+-	MX51_PIN_NANDF_D10 = _MXC_BUILD_GPIO_PIN(2, 30, 3, 0x174, 0x61C),
+-	MX51_PIN_NANDF_D9 = _MXC_BUILD_GPIO_PIN(2, 31, 3, 0x178, 0x620),
+-	MX51_PIN_NANDF_D8 = _MXC_BUILD_GPIO_PIN(3, 0, 3, 0x17C, 0x624),
+-	MX51_PIN_NANDF_D7 = _MXC_BUILD_GPIO_PIN(3, 1, 3, 0x180, 0x628),
+-	MX51_PIN_NANDF_D6 = _MXC_BUILD_GPIO_PIN(3, 2, 3, 0x184, 0x62C),
+-	MX51_PIN_NANDF_D5 = _MXC_BUILD_GPIO_PIN(3, 3, 3, 0x188, 0x630),
+-	MX51_PIN_NANDF_D4 = _MXC_BUILD_GPIO_PIN(3, 4, 3, 0x18C, 0x634),
+-	MX51_PIN_NANDF_D3 = _MXC_BUILD_GPIO_PIN(3, 5, 3, 0x190, 0x638),
+-	MX51_PIN_NANDF_D2 = _MXC_BUILD_GPIO_PIN(3, 6, 3, 0x194, 0x63C),
+-	MX51_PIN_NANDF_D1 = _MXC_BUILD_GPIO_PIN(3, 7, 3, 0x198, 0x640),
+-	MX51_PIN_NANDF_D0 = _MXC_BUILD_GPIO_PIN(3, 8, 3, 0x19C, 0x644),
+-	MX51_PIN_CSI1_D8 = _MXC_BUILD_NON_GPIO_PIN(0x1A0, 0x648),
+-	MX51_PIN_CSI1_D9 = _MXC_BUILD_NON_GPIO_PIN(0x1A4, 0x64C),
+-	MX51_PIN_CSI1_D10 = _MXC_BUILD_NON_GPIO_PIN(0x1A8, 0x650),
+-	MX51_PIN_CSI1_D11 = _MXC_BUILD_NON_GPIO_PIN(0x1AC, 0x654),
+-	MX51_PIN_CSI1_D12 = _MXC_BUILD_NON_GPIO_PIN(0x1B0, 0x658),
+-	MX51_PIN_CSI1_D13 = _MXC_BUILD_NON_GPIO_PIN(0x1B4, 0x65C),
+-	MX51_PIN_CSI1_D14 = _MXC_BUILD_NON_GPIO_PIN(0x1B8, 0x660),
+-	MX51_PIN_CSI1_D15 = _MXC_BUILD_NON_GPIO_PIN(0x1BC, 0x664),
+-	MX51_PIN_CSI1_D16 = _MXC_BUILD_NON_GPIO_PIN(0x1C0, 0x668),
+-	MX51_PIN_CSI1_D17 = _MXC_BUILD_NON_GPIO_PIN(0x1C4, 0x66C),
+-	MX51_PIN_CSI1_D18 = _MXC_BUILD_NON_GPIO_PIN(0x1C8, 0x670),
+-	MX51_PIN_CSI1_D19 = _MXC_BUILD_NON_GPIO_PIN(0x1CC, 0x674),
+-	MX51_PIN_CSI1_VSYNC = _MXC_BUILD_NON_GPIO_PIN(0x1D0, 0x678),
+-	MX51_PIN_CSI1_HSYNC = _MXC_BUILD_NON_GPIO_PIN(0x1D4, 0x67C),
+-	MX51_PIN_CSI1_PIXCLK = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x680),
+-	MX51_PIN_CSI1_MCLK = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x684),
+-	MX51_PIN_CSI1_PKE0 = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x8FC),
+-	MX51_PIN_CSI2_D12 = _MXC_BUILD_GPIO_PIN(3, 9, 3, 0x1D8, 0x688),
+-	MX51_PIN_CSI2_D13 = _MXC_BUILD_GPIO_PIN(3, 10, 3, 0x1DC, 0x68C),
+-	MX51_PIN_CSI2_D18 = _MXC_BUILD_GPIO_PIN(3, 11, 3, 0x1F0, 0x6a0),
+-	MX51_PIN_CSI2_D19 = _MXC_BUILD_GPIO_PIN(3, 12, 3, 0x1F4, 0x6A4),
+-	MX51_PIN_CSI2_VSYNC = _MXC_BUILD_GPIO_PIN(3, 13, 3, 0x1F8, 0x6A8),
+-	MX51_PIN_CSI2_HSYNC = _MXC_BUILD_GPIO_PIN(3, 14, 3, 0x1FC, 0x6AC),
+-	MX51_PIN_CSI2_PIXCLK = _MXC_BUILD_GPIO_PIN(3, 15, 3, 0x200, 0x6B0),
+-	MX51_PIN_CSI2_PKE0 = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x8CC),
+-	MX51_PIN_I2C1_CLK = _MXC_BUILD_GPIO_PIN(3, 16, 3, 0x204, 0x6B4),
+-	MX51_PIN_I2C1_DAT = _MXC_BUILD_GPIO_PIN(3, 17, 3, 0x208, 0x6B8),
+-	MX51_PIN_AUD3_BB_TXD = _MXC_BUILD_GPIO_PIN(3, 18, 3, 0x20C, 0x6BC),
+-	MX51_PIN_AUD3_BB_RXD = _MXC_BUILD_GPIO_PIN(3, 19, 3, 0x210, 0x6C0),
+-	MX51_PIN_AUD3_BB_CK = _MXC_BUILD_GPIO_PIN(3, 20, 3, 0x214, 0x6C4),
+-	MX51_PIN_AUD3_BB_FS = _MXC_BUILD_GPIO_PIN(3, 21, 3, 0x218, 0x6C8),
+-	MX51_PIN_CSPI1_MOSI = _MXC_BUILD_GPIO_PIN(3, 22, 3, 0x21C, 0x6CC),
+-	MX51_PIN_CSPI1_MISO = _MXC_BUILD_GPIO_PIN(3, 23, 3, 0x220, 0x6D0),
+-	MX51_PIN_CSPI1_SS0 = _MXC_BUILD_GPIO_PIN(3, 24, 3, 0x224, 0x6D4),
+-	MX51_PIN_CSPI1_SS1 = _MXC_BUILD_GPIO_PIN(3, 25, 3, 0x228, 0x6D8),
+-	MX51_PIN_CSPI1_RDY = _MXC_BUILD_GPIO_PIN(3, 26, 3, 0x22C, 0x6DC),
+-	MX51_PIN_CSPI1_SCLK = _MXC_BUILD_GPIO_PIN(3, 27, 3, 0x230, 0x6E0),
+-	MX51_PIN_UART1_RXD = _MXC_BUILD_GPIO_PIN(3, 28, 3, 0x234, 0x6E4),
+-	MX51_PIN_UART1_TXD = _MXC_BUILD_GPIO_PIN(3, 29, 3, 0x238, 0x6E8),
+-	MX51_PIN_UART1_RTS = _MXC_BUILD_GPIO_PIN(3, 30, 3, 0x23C, 0x6EC),
+-	MX51_PIN_UART1_CTS = _MXC_BUILD_GPIO_PIN(3, 31, 3, 0x240, 0x6F0),
+-	MX51_PIN_UART2_RXD = _MXC_BUILD_GPIO_PIN(0, 20, 3, 0x244, 0x6F4),
+-	MX51_PIN_UART2_TXD = _MXC_BUILD_GPIO_PIN(0, 21, 3, 0x248, 0x6F8),
+-	MX51_PIN_UART3_RXD = _MXC_BUILD_GPIO_PIN(0, 22, 3, 0x24C, 0x6FC),
+-	MX51_PIN_UART3_TXD = _MXC_BUILD_GPIO_PIN(0, 23, 3, 0x250, 0x700),
+-	MX51_PIN_OWIRE_LINE = _MXC_BUILD_GPIO_PIN(0, 24, 3, 0x254, 0x704),
+-	MX51_PIN_KEY_ROW0 = _MXC_BUILD_NON_GPIO_PIN(0x258, 0x708),
+-	MX51_PIN_KEY_ROW1 = _MXC_BUILD_NON_GPIO_PIN(0x25C, 0x70c),
+-	MX51_PIN_KEY_ROW2 = _MXC_BUILD_NON_GPIO_PIN(0x260, 0x710),
+-	MX51_PIN_KEY_ROW3 = _MXC_BUILD_NON_GPIO_PIN(0x264, 0x714),
+-	MX51_PIN_KEY_COL0 = _MXC_BUILD_NON_GPIO_PIN(0x268, 0x718),
+-	MX51_PIN_KEY_COL1 = _MXC_BUILD_NON_GPIO_PIN(0x26C, 0x71C),
+-	MX51_PIN_KEY_COL2 = _MXC_BUILD_NON_GPIO_PIN(0x270, 0x720),
+-	MX51_PIN_KEY_COL3 = _MXC_BUILD_NON_GPIO_PIN(0x274, 0x724),
+-	MX51_PIN_KEY_COL4 = _MXC_BUILD_NON_GPIO_PIN(0x278, 0x728),
+-	MX51_PIN_KEY_COL5 = _MXC_BUILD_NON_GPIO_PIN(0x27C, 0x72C),
+-	MX51_PIN_USBH1_CLK = _MXC_BUILD_GPIO_PIN(0, 25, 2, 0x284, 0x744),
+-	MX51_PIN_USBH1_DIR = _MXC_BUILD_GPIO_PIN(0, 26, 2, 0x288, 0x748),
+-	MX51_PIN_USBH1_STP = _MXC_BUILD_GPIO_PIN(0, 27, 2, 0x28C, 0x74C),
+-	MX51_PIN_USBH1_NXT = _MXC_BUILD_GPIO_PIN(0, 28, 2, 0x290, 0x750),
+-	MX51_PIN_USBH1_DATA0 = _MXC_BUILD_GPIO_PIN(0, 11, 2, 0x294, 0x754),
+-	MX51_PIN_USBH1_DATA1 = _MXC_BUILD_GPIO_PIN(0, 12, 2, 0x298, 0x758),
+-	MX51_PIN_USBH1_DATA2 = _MXC_BUILD_GPIO_PIN(0, 13, 2, 0x29C, 0x75C),
+-	MX51_PIN_USBH1_DATA3 = _MXC_BUILD_GPIO_PIN(0, 14, 2, 0x2A0, 0x760),
+-	MX51_PIN_USBH1_DATA4 = _MXC_BUILD_GPIO_PIN(0, 15, 2, 0x2A4, 0x764),
+-	MX51_PIN_USBH1_DATA5 = _MXC_BUILD_GPIO_PIN(0, 16, 2, 0x2A8, 0x768),
+-	MX51_PIN_USBH1_DATA6 = _MXC_BUILD_GPIO_PIN(0, 17, 2, 0x2AC, 0x76C),
+-	MX51_PIN_USBH1_DATA7 = _MXC_BUILD_GPIO_PIN(0, 18, 2, 0x2B0, 0x770),
+-	MX51_PIN_DI1_PIN11 = _MXC_BUILD_GPIO_PIN(2, 0, 4, 0x2B4, 0x774),
+-	MX51_PIN_DI1_PIN12 = _MXC_BUILD_GPIO_PIN(2, 1, 4, 0x2B8, 0x778),
+-	MX51_PIN_DI1_PIN13 = _MXC_BUILD_GPIO_PIN(2, 2, 4, 0x2BC, 0x77C),
+-	MX51_PIN_DI1_D0_CS = _MXC_BUILD_GPIO_PIN(2, 3, 4, 0x2C0, 0x780),
+-	MX51_PIN_DI1_D1_CS = _MXC_BUILD_GPIO_PIN(2, 4, 4, 0x2C4, 0x784),
+-	MX51_PIN_DISPB2_SER_DIN = _MXC_BUILD_GPIO_PIN(2, 5, 4, 0x2C8, 0x788),
+-	MX51_PIN_DISPB2_SER_DIO = _MXC_BUILD_GPIO_PIN(2, 6, 4, 0x2CC, 0x78C),
+-	MX51_PIN_DISPB2_SER_CLK = _MXC_BUILD_GPIO_PIN(2, 7, 4, 0x2D0, 0x790),
+-	MX51_PIN_DISPB2_SER_RS = _MXC_BUILD_GPIO_PIN(2, 8, 4, 0x2D4, 0x794),
+-	MX51_PIN_DISP1_DAT6 = _MXC_BUILD_NON_GPIO_PIN(0x2F0, 0x7B0),
+-	MX51_PIN_DISP1_DAT7 = _MXC_BUILD_NON_GPIO_PIN(0x2F4, 0x7B4),
+-	MX51_PIN_DISP1_DAT8 = _MXC_BUILD_NON_GPIO_PIN(0x2F8, 0x7B8),
+-	MX51_PIN_DISP1_DAT9 = _MXC_BUILD_NON_GPIO_PIN(0x2FC, 0x7BC),
+-	MX51_PIN_DISP1_DAT10 = _MXC_BUILD_NON_GPIO_PIN(0x300, 0x7C0),
+-	MX51_PIN_DISP1_DAT12 = _MXC_BUILD_NON_GPIO_PIN(0x304, 0x7C8),
+-	MX51_PIN_DISP1_DAT13 = _MXC_BUILD_NON_GPIO_PIN(0x308, 0x7CC),
+-	MX51_PIN_DISP1_DAT14 = _MXC_BUILD_NON_GPIO_PIN(0x30C, 0x7D0),
+-	MX51_PIN_DISP1_DAT15 = _MXC_BUILD_NON_GPIO_PIN(0x310, 0x7D4),
+-	MX51_PIN_DISP1_DAT16 = _MXC_BUILD_NON_GPIO_PIN(0x314, 0x7D8),
+-	MX51_PIN_DISP1_DAT17 = _MXC_BUILD_NON_GPIO_PIN(0x318, 0x7DC),
+-	MX51_PIN_DISP1_DAT18 = _MXC_BUILD_NON_GPIO_PIN(0x31C, 0x7E0),
+-	MX51_PIN_DISP1_DAT19 = _MXC_BUILD_NON_GPIO_PIN(0x320, 0x7E4),
+-	MX51_PIN_DISP1_DAT20 = _MXC_BUILD_NON_GPIO_PIN(0x324, 0x7E8),
+-	MX51_PIN_DISP1_DAT21 = _MXC_BUILD_NON_GPIO_PIN(0x328, 0x7EC),
+-	MX51_PIN_DISP1_DAT22 = _MXC_BUILD_NON_GPIO_PIN(0x32C, 0x7F0),
+-	MX51_PIN_DISP1_DAT23 = _MXC_BUILD_NON_GPIO_PIN(0x330, 0x7F4),
+-	MX51_PIN_DI1_PIN3 = _MXC_BUILD_NON_GPIO_PIN(0x334, 0x7F8),
+-	MX51_PIN_DI1_PIN2 = _MXC_BUILD_NON_GPIO_PIN(0x338, 0x800),
+-	MX51_PIN_DI_GP1 = _MXC_BUILD_NON_GPIO_PIN(0x33C, 0x808),
+-	MX51_PIN_DI_GP2 = _MXC_BUILD_NON_GPIO_PIN(0x340, 0x80C),
+-	MX51_PIN_DI_GP3 = _MXC_BUILD_NON_GPIO_PIN(0x344, 0x810),
+-	MX51_PIN_DI2_PIN4 = _MXC_BUILD_NON_GPIO_PIN(0x348, 0x814),
+-	MX51_PIN_DI2_PIN2 = _MXC_BUILD_NON_GPIO_PIN(0x34C, 0x818),
+-	MX51_PIN_DI2_PIN3 = _MXC_BUILD_NON_GPIO_PIN(0x350, 0x81C),
+-	MX51_PIN_DI2_DISP_CLK = _MXC_BUILD_NON_GPIO_PIN(0x354, 0x820),
+-	MX51_PIN_DI_GP4 = _MXC_BUILD_NON_GPIO_PIN(0x358, 0x824),
+-	MX51_PIN_DISP2_DAT0 = _MXC_BUILD_NON_GPIO_PIN(0x35C, 0x828),
+-	MX51_PIN_DISP2_DAT1 = _MXC_BUILD_NON_GPIO_PIN(0x360, 0x82C),
+-	MX51_PIN_DISP2_DAT2 = _MXC_BUILD_NON_GPIO_PIN(0x364, 0x830),
+-	MX51_PIN_DISP2_DAT3 = _MXC_BUILD_NON_GPIO_PIN(0x368, 0x834),
+-	MX51_PIN_DISP2_DAT4 = _MXC_BUILD_NON_GPIO_PIN(0x36C, 0x838),
+-	MX51_PIN_DISP2_DAT5 = _MXC_BUILD_NON_GPIO_PIN(0x370, 0x83C),
+-	MX51_PIN_DISP2_DAT6 = _MXC_BUILD_GPIO_PIN(0, 19, 5, 0x374, 0x840),
+-	MX51_PIN_DISP2_DAT7 = _MXC_BUILD_GPIO_PIN(0, 29, 5, 0x378, 0x844),
+-	MX51_PIN_DISP2_DAT8 = _MXC_BUILD_GPIO_PIN(0, 30, 5, 0x37C, 0x848),
+-	MX51_PIN_DISP2_DAT9 = _MXC_BUILD_GPIO_PIN(0, 31, 5, 0x380, 0x84C),
+-	MX51_PIN_DISP2_DAT10 = _MXC_BUILD_NON_GPIO_PIN(0x384, 0x850),
+-	MX51_PIN_DISP2_DAT11 = _MXC_BUILD_NON_GPIO_PIN(0x388, 0x854),
+-	MX51_PIN_DISP2_DAT12 = _MXC_BUILD_NON_GPIO_PIN(0x38C, 0x858),
+-	MX51_PIN_DISP2_DAT13 = _MXC_BUILD_NON_GPIO_PIN(0x390, 0x85C),
+-	MX51_PIN_DISP2_DAT14 = _MXC_BUILD_NON_GPIO_PIN(0x394, 0x860),
+-	MX51_PIN_DISP2_DAT15 = _MXC_BUILD_NON_GPIO_PIN(0x398, 0x864),
+-	MX51_PIN_SD1_CMD = _MXC_BUILD_NON_GPIO_PIN(0x39C, 0x868),
+-	MX51_PIN_SD1_CLK = _MXC_BUILD_NON_GPIO_PIN(0x3A0, 0x86C),
+-	MX51_PIN_SD1_DATA0 = _MXC_BUILD_NON_GPIO_PIN(0x3A4, 0x870),
+-	MX51_PIN_SD1_DATA1 = _MXC_BUILD_NON_GPIO_PIN(0x3A8, 0x874),
+-	MX51_PIN_SD1_DATA2 = _MXC_BUILD_NON_GPIO_PIN(0x3AC, 0x878),
+-	MX51_PIN_SD1_DATA3 = _MXC_BUILD_NON_GPIO_PIN(0x3B0, 0x87C),
+-	MX51_PIN_GPIO1_0 = _MXC_BUILD_GPIO_PIN(0, 0, 1, 0x3B4, 0x880),
+-	MX51_PIN_GPIO1_1 = _MXC_BUILD_GPIO_PIN(0, 1, 1, 0x3B8, 0x884),
+-	MX51_PIN_SD2_CMD = _MXC_BUILD_NON_GPIO_PIN(0x3BC, 0x888),
+-	MX51_PIN_SD2_CLK = _MXC_BUILD_NON_GPIO_PIN(0x3C0, 0x88C),
+-	MX51_PIN_SD2_DATA0 = _MXC_BUILD_NON_GPIO_PIN(0x3C4, 0x890),
+-	MX51_PIN_SD2_DATA1 = _MXC_BUILD_NON_GPIO_PIN(0x3C8, 0x894),
+-	MX51_PIN_SD2_DATA2 = _MXC_BUILD_NON_GPIO_PIN(0x3CC, 0x898),
+-	MX51_PIN_SD2_DATA3 = _MXC_BUILD_NON_GPIO_PIN(0x3D0, 0x89C),
+-	MX51_PIN_GPIO1_2 = _MXC_BUILD_GPIO_PIN(0, 2, 0, 0x3D4, 0x8A0),
+-	MX51_PIN_GPIO1_3 = _MXC_BUILD_GPIO_PIN(0, 3, 0, 0x3D8, 0x8A4),
+-	MX51_PIN_PMIC_INT_REQ = _MXC_BUILD_NON_GPIO_PIN(0x3DC, 0x8B0),
+-	MX51_PIN_GPIO1_4 = _MXC_BUILD_GPIO_PIN(0, 4, 0, 0x3E0, 0x8B4),
+-	MX51_PIN_GPIO1_5 = _MXC_BUILD_GPIO_PIN(0, 5, 0, 0x3E4, 0x8B8),
+-	MX51_PIN_GPIO1_6 = _MXC_BUILD_GPIO_PIN(0, 6, 0, 0x3E8, 0x8BC),
+-	MX51_PIN_GPIO1_7 = _MXC_BUILD_GPIO_PIN(0, 7, 0, 0x3EC, 0x8C0),
+-	MX51_PIN_GPIO1_8 = _MXC_BUILD_GPIO_PIN(0, 8, 0, 0x3F0, 0x8C4),
+-	MX51_PIN_GPIO1_9 = _MXC_BUILD_GPIO_PIN(0, 9, 0, 0x3F4, 0x8C8),
++	MX51_PIN_NANDF_CS0 = _MXC_BUILD_GPIO_PIN(2, 16, 3, 0x130, 0x518),
++	MX51_PIN_NANDF_CS1 = _MXC_BUILD_GPIO_PIN(2, 17, 3, 0x134, 0x51C),
++	MX51_PIN_NANDF_CS2 = _MXC_BUILD_GPIO_PIN(2, 18, 3, 0x138, 0x520),
++	MX51_PIN_NANDF_CS3 = _MXC_BUILD_GPIO_PIN(2, 19, 3, 0x13C, 0x524),
++	MX51_PIN_NANDF_CS4 = _MXC_BUILD_GPIO_PIN(2, 20, 3, 0x140, 0x528),
++	MX51_PIN_NANDF_CS5 = _MXC_BUILD_GPIO_PIN(2, 21, 3, 0x144, 0x52C),
++	MX51_PIN_NANDF_CS6 = _MXC_BUILD_GPIO_PIN(2, 22, 3, 0x148, 0x530),
++	MX51_PIN_NANDF_CS7 = _MXC_BUILD_GPIO_PIN(2, 23, 3, 0x14C, 0x534),
++	MX51_PIN_NANDF_RDY_INT = _MXC_BUILD_GPIO_PIN(2, 24, 3, 0x150, 0x538),
++	MX51_PIN_NANDF_D15 = _MXC_BUILD_GPIO_PIN(2, 25, 3, 0x154, 0x53C),
++	MX51_PIN_NANDF_D14 = _MXC_BUILD_GPIO_PIN(2, 26, 3, 0x158, 0x540),
++	MX51_PIN_NANDF_D13 = _MXC_BUILD_GPIO_PIN(2, 27, 3, 0x15C, 0x544),
++	MX51_PIN_NANDF_D12 = _MXC_BUILD_GPIO_PIN(2, 28, 3, 0x160, 0x548),
++	MX51_PIN_NANDF_D11 = _MXC_BUILD_GPIO_PIN(2, 29, 3, 0x164, 0x54C),
++	MX51_PIN_NANDF_D10 = _MXC_BUILD_GPIO_PIN(2, 30, 3, 0x168, 0x550),
++	MX51_PIN_NANDF_D9 = _MXC_BUILD_GPIO_PIN(2, 31, 3, 0x16C, 0x554),
++	MX51_PIN_NANDF_D8 = _MXC_BUILD_GPIO_PIN(3, 0, 3, 0x170, 0x558),
++	MX51_PIN_NANDF_D7 = _MXC_BUILD_GPIO_PIN(3, 1, 3, 0x174, 0x55C),
++	MX51_PIN_NANDF_D6 = _MXC_BUILD_GPIO_PIN(3, 2, 3, 0x178, 0x560),
++	MX51_PIN_NANDF_D5 = _MXC_BUILD_GPIO_PIN(3, 3, 3, 0x17C, 0x564),
++	MX51_PIN_NANDF_D4 = _MXC_BUILD_GPIO_PIN(3, 4, 3, 0x180, 0x568),
++	MX51_PIN_NANDF_D3 = _MXC_BUILD_GPIO_PIN(3, 5, 3, 0x184, 0x56C),
++	MX51_PIN_NANDF_D2 = _MXC_BUILD_GPIO_PIN(3, 6, 3, 0x188, 0x570),
++	MX51_PIN_NANDF_D1 = _MXC_BUILD_GPIO_PIN(3, 7, 3, 0x18C, 0x574),
++	MX51_PIN_NANDF_D0 = _MXC_BUILD_GPIO_PIN(3, 8, 3, 0x190, 0x578),
++	MX51_PIN_CSI1_D8 = _MXC_BUILD_GPIO_PIN(2, 12, 3, 0x194, 0x57C),
++	MX51_PIN_CSI1_D9 = _MXC_BUILD_GPIO_PIN(2, 13, 3, 0x198, 0x580),
++	MX51_PIN_CSI1_D10 = _MXC_BUILD_NON_GPIO_PIN(0x19C, 0x584),
++	MX51_PIN_CSI1_D11 = _MXC_BUILD_NON_GPIO_PIN(0x1A0, 0x588),
++	MX51_PIN_CSI1_D12 = _MXC_BUILD_NON_GPIO_PIN(0x1A4, 0x58C),
++	MX51_PIN_CSI1_D13 = _MXC_BUILD_NON_GPIO_PIN(0x1A8, 0x590),
++	MX51_PIN_CSI1_D14 = _MXC_BUILD_NON_GPIO_PIN(0x1AC, 0x594),
++	MX51_PIN_CSI1_D15 = _MXC_BUILD_NON_GPIO_PIN(0x1B0, 0x598),
++	MX51_PIN_CSI1_D16 = _MXC_BUILD_NON_GPIO_PIN(0x1B4, 0x59C),
++	MX51_PIN_CSI1_D17 = _MXC_BUILD_NON_GPIO_PIN(0x1B8, 0x5A0),
++	MX51_PIN_CSI1_D18 = _MXC_BUILD_NON_GPIO_PIN(0x1BC, 0x5A4),
++	MX51_PIN_CSI1_D19 = _MXC_BUILD_NON_GPIO_PIN(0x1C0, 0x5A8),
++	MX51_PIN_CSI1_VSYNC = _MXC_BUILD_NON_GPIO_PIN(0x1C4, 0x5AC),
++	MX51_PIN_CSI1_HSYNC = _MXC_BUILD_NON_GPIO_PIN(0x1C8, 0x5B0),
++	MX51_PIN_CSI1_PIXCLK = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x5B4),
++	MX51_PIN_CSI1_MCLK = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x5B8),
++	MX51_PIN_CSI1_PKE0 = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x860),
++	MX51_PIN_CSI2_D12 = _MXC_BUILD_GPIO_PIN(3, 9, 3, 0x1CC, 0x5BC),
++	MX51_PIN_CSI2_D13 = _MXC_BUILD_GPIO_PIN(3, 10, 3, 0x1D0, 0x5C0),
++	MX51_PIN_CSI2_D14 = _MXC_BUILD_GPIO_PIN(3, 11, 3, 0x1D4, 0x5C4),
++	MX51_PIN_CSI2_D15 = _MXC_BUILD_GPIO_PIN(3, 12, 3, 0x1D8, 0x5C8),
++	MX51_PIN_CSI2_D16 = _MXC_BUILD_GPIO_PIN(3, 11, 3, 0x1DC, 0x5CC),
++	MX51_PIN_CSI2_D17 = _MXC_BUILD_GPIO_PIN(3, 12, 3, 0x1E0, 0x5D0),
++	MX51_PIN_CSI2_D18 = _MXC_BUILD_GPIO_PIN(3, 11, 3, 0x1E4, 0x5D4),
++	MX51_PIN_CSI2_D19 = _MXC_BUILD_GPIO_PIN(3, 12, 3, 0x1E8, 0x5D8),
++	MX51_PIN_CSI2_VSYNC = _MXC_BUILD_GPIO_PIN(3, 13, 3, 0x1EC, 0x5DC),
++	MX51_PIN_CSI2_HSYNC = _MXC_BUILD_GPIO_PIN(3, 14, 3, 0x1F0, 0x5E0),
++	MX51_PIN_CSI2_PIXCLK = _MXC_BUILD_GPIO_PIN(3, 15, 3, 0x1F4, 0x5E4),
++	MX51_PIN_CSI2_PKE0 = _MXC_BUILD_NON_GPIO_PIN(NON_MUX_I, 0x81C),
++	MX51_PIN_I2C1_CLK = _MXC_BUILD_GPIO_PIN(3, 16, 3, 0x1F8, 0x5E8),
++	MX51_PIN_I2C1_DAT = _MXC_BUILD_GPIO_PIN(3, 17, 3, 0x1FC, 0x5EC),
++	MX51_PIN_AUD3_BB_TXD = _MXC_BUILD_GPIO_PIN(3, 18, 3, 0x200, 0x5F0),
++	MX51_PIN_AUD3_BB_RXD = _MXC_BUILD_GPIO_PIN(3, 19, 3, 0x204, 0x5F4),
++	MX51_PIN_AUD3_BB_CK = _MXC_BUILD_GPIO_PIN(3, 20, 3, 0x208, 0x5F8),
++	MX51_PIN_AUD3_BB_FS = _MXC_BUILD_GPIO_PIN(3, 21, 3, 0x20C, 0x5FC),
++	MX51_PIN_CSPI1_MOSI = _MXC_BUILD_GPIO_PIN(3, 22, 3, 0x210, 0x600),
++	MX51_PIN_CSPI1_MISO = _MXC_BUILD_GPIO_PIN(3, 23, 3, 0x214, 0x604),
++	MX51_PIN_CSPI1_SS0 = _MXC_BUILD_GPIO_PIN(3, 24, 3, 0x218, 0x608),
++	MX51_PIN_CSPI1_SS1 = _MXC_BUILD_GPIO_PIN(3, 25, 3, 0x21C, 0x60C),
++	MX51_PIN_CSPI1_RDY = _MXC_BUILD_GPIO_PIN(3, 26, 3, 0x220, 0x610),
++	MX51_PIN_CSPI1_SCLK = _MXC_BUILD_GPIO_PIN(3, 27, 3, 0x224, 0x614),
++	MX51_PIN_UART1_RXD = _MXC_BUILD_GPIO_PIN(3, 28, 3, 0x228, 0x618),
++	MX51_PIN_UART1_TXD = _MXC_BUILD_GPIO_PIN(3, 29, 3, 0x22C, 0x61C),
++	MX51_PIN_UART1_RTS = _MXC_BUILD_GPIO_PIN(3, 30, 3, 0x230, 0x620),
++	MX51_PIN_UART1_CTS = _MXC_BUILD_GPIO_PIN(3, 31, 3, 0x234, 0x624),
++	MX51_PIN_UART2_RXD = _MXC_BUILD_GPIO_PIN(0, 20, 3, 0x238, 0x628),
++	MX51_PIN_UART2_TXD = _MXC_BUILD_GPIO_PIN(0, 21, 3, 0x23C, 0x62C),
++	MX51_PIN_UART3_RXD = _MXC_BUILD_GPIO_PIN(0, 22, 3, 0x240, 0x630),
++	MX51_PIN_UART3_TXD = _MXC_BUILD_GPIO_PIN(0, 23, 3, 0x244, 0x634),
++	MX51_PIN_OWIRE_LINE = _MXC_BUILD_GPIO_PIN(0, 24, 3, 0x248, 0x638),
++	MX51_PIN_KEY_ROW0 = _MXC_BUILD_NON_GPIO_PIN(0x24C, 0x63C),
++	MX51_PIN_KEY_ROW1 = _MXC_BUILD_NON_GPIO_PIN(0x250, 0x640),
++	MX51_PIN_KEY_ROW2 = _MXC_BUILD_NON_GPIO_PIN(0x254, 0x644),
++	MX51_PIN_KEY_ROW3 = _MXC_BUILD_NON_GPIO_PIN(0x258, 0x648),
++	MX51_PIN_KEY_COL0 = _MXC_BUILD_NON_GPIO_PIN(0x25C, 0x64C),
++	MX51_PIN_KEY_COL1 = _MXC_BUILD_NON_GPIO_PIN(0x260, 0x650),
++	MX51_PIN_KEY_COL2 = _MXC_BUILD_NON_GPIO_PIN(0x264, 0x654),
++	MX51_PIN_KEY_COL3 = _MXC_BUILD_NON_GPIO_PIN(0x268, 0x658),
++	MX51_PIN_KEY_COL4 = _MXC_BUILD_NON_GPIO_PIN(0x26C, 0x65C),
++	MX51_PIN_KEY_COL5 = _MXC_BUILD_NON_GPIO_PIN(0x270, 0x660),
++	MX51_PIN_USBH1_CLK = _MXC_BUILD_GPIO_PIN(0, 25, 2, 0x278, 0x678),
++	MX51_PIN_USBH1_DIR = _MXC_BUILD_GPIO_PIN(0, 26, 2, 0x27C, 0x67C),
++	MX51_PIN_USBH1_STP = _MXC_BUILD_GPIO_PIN(0, 27, 2, 0x280, 0x680),
++	MX51_PIN_USBH1_NXT = _MXC_BUILD_GPIO_PIN(0, 28, 2, 0x284, 0x684),
++	MX51_PIN_USBH1_DATA0 = _MXC_BUILD_GPIO_PIN(0, 11, 2, 0x288, 0x688),
++	MX51_PIN_USBH1_DATA1 = _MXC_BUILD_GPIO_PIN(0, 12, 2, 0x28C, 0x68C),
++	MX51_PIN_USBH1_DATA2 = _MXC_BUILD_GPIO_PIN(0, 13, 2, 0x290, 0x690),
++	MX51_PIN_USBH1_DATA3 = _MXC_BUILD_GPIO_PIN(0, 14, 2, 0x294, 0x694),
++	MX51_PIN_USBH1_DATA4 = _MXC_BUILD_GPIO_PIN(0, 15, 2, 0x298, 0x698),
++	MX51_PIN_USBH1_DATA5 = _MXC_BUILD_GPIO_PIN(0, 16, 2, 0x29C, 0x69C),
++	MX51_PIN_USBH1_DATA6 = _MXC_BUILD_GPIO_PIN(0, 17, 2, 0x2A0, 0x6A0),
++	MX51_PIN_USBH1_DATA7 = _MXC_BUILD_GPIO_PIN(0, 18, 2, 0x2A4, 0x6A4),
++	MX51_PIN_DI1_PIN11 = _MXC_BUILD_GPIO_PIN(2, 0, 4, 0x2A8, 0x6A8),
++	MX51_PIN_DI1_PIN12 = _MXC_BUILD_GPIO_PIN(2, 1, 4, 0x2AC, 0x6AC),
++	MX51_PIN_DI1_PIN13 = _MXC_BUILD_GPIO_PIN(2, 2, 4, 0x2B0, 0x6B0),
++	MX51_PIN_DI1_D0_CS = _MXC_BUILD_GPIO_PIN(2, 3, 4, 0x2B4, 0x6B4),
++	MX51_PIN_DI1_D1_CS = _MXC_BUILD_GPIO_PIN(2, 4, 4, 0x2B8, 0x6B8),
++	MX51_PIN_DISPB2_SER_DIN = _MXC_BUILD_GPIO_PIN(2, 5, 4, 0x2BC, 0x6BC),
++	MX51_PIN_DISPB2_SER_DIO = _MXC_BUILD_GPIO_PIN(2, 6, 4, 0x2C0, 0x6C0),
++	MX51_PIN_DISPB2_SER_CLK = _MXC_BUILD_GPIO_PIN(2, 7, 4, 0x2C4, 0x6C4),
++	MX51_PIN_DISPB2_SER_RS = _MXC_BUILD_GPIO_PIN(2, 8, 4, 0x2C8, 0x6C8),
++	MX51_PIN_DISP1_DAT0 = _MXC_BUILD_NON_GPIO_PIN(0x2CC, 0x6CC),
++	MX51_PIN_DISP1_DAT1 = _MXC_BUILD_NON_GPIO_PIN(0x2D0, 0x6D0),
++	MX51_PIN_DISP1_DAT2 = _MXC_BUILD_NON_GPIO_PIN(0x2D4, 0x6D4),
++	MX51_PIN_DISP1_DAT3 = _MXC_BUILD_NON_GPIO_PIN(0x2D8, 0x6D8),
++	MX51_PIN_DISP1_DAT4 = _MXC_BUILD_NON_GPIO_PIN(0x2DC, 0x6DC),
++	MX51_PIN_DISP1_DAT5 = _MXC_BUILD_NON_GPIO_PIN(0x2E0, 0x6E0),
++	MX51_PIN_DISP1_DAT6 = _MXC_BUILD_NON_GPIO_PIN(0x2E4, 0x6E4),
++	MX51_PIN_DISP1_DAT7 = _MXC_BUILD_NON_GPIO_PIN(0x2E8, 0x6E8),
++	MX51_PIN_DISP1_DAT8 = _MXC_BUILD_NON_GPIO_PIN(0x2EC, 0x6EC),
++	MX51_PIN_DISP1_DAT9 = _MXC_BUILD_NON_GPIO_PIN(0x2F0, 0x6F0),
++	MX51_PIN_DISP1_DAT10 = _MXC_BUILD_NON_GPIO_PIN(0x2F4, 0x6F4),
++	MX51_PIN_DISP1_DAT11 = _MXC_BUILD_NON_GPIO_PIN(0x2F8, 0x6F8),
++	MX51_PIN_DISP1_DAT12 = _MXC_BUILD_NON_GPIO_PIN(0x2FC, 0x6FC),
++	MX51_PIN_DISP1_DAT13 = _MXC_BUILD_NON_GPIO_PIN(0x300, 0x700),
++	MX51_PIN_DISP1_DAT14 = _MXC_BUILD_NON_GPIO_PIN(0x304, 0x704),
++	MX51_PIN_DISP1_DAT15 = _MXC_BUILD_NON_GPIO_PIN(0x308, 0x708),
++	MX51_PIN_DISP1_DAT16 = _MXC_BUILD_NON_GPIO_PIN(0x30C, 0x70C),
++	MX51_PIN_DISP1_DAT17 = _MXC_BUILD_NON_GPIO_PIN(0x310, 0x710),
++	MX51_PIN_DISP1_DAT18 = _MXC_BUILD_NON_GPIO_PIN(0x314, 0x714),
++	MX51_PIN_DISP1_DAT19 = _MXC_BUILD_NON_GPIO_PIN(0x318, 0x718),
++	MX51_PIN_DISP1_DAT20 = _MXC_BUILD_NON_GPIO_PIN(0x31C, 0x71C),
++	MX51_PIN_DISP1_DAT21 = _MXC_BUILD_NON_GPIO_PIN(0x320, 0x720),
++	MX51_PIN_DISP1_DAT22 = _MXC_BUILD_NON_GPIO_PIN(0x324, 0x724),
++	MX51_PIN_DISP1_DAT23 = _MXC_BUILD_NON_GPIO_PIN(0x328, 0x728),
++	MX51_PIN_DI1_PIN3 = _MXC_BUILD_NON_GPIO_PIN(0x32C, 0x72C),
++	MX51_PIN_DI1_PIN2 = _MXC_BUILD_NON_GPIO_PIN(0x330, 0x734),
++	MX51_PIN_DI_GP1 = _MXC_BUILD_NON_GPIO_PIN(0x334, 0x73C),
++	MX51_PIN_DI_GP2 = _MXC_BUILD_NON_GPIO_PIN(0x338, 0x740),
++	MX51_PIN_DI_GP3 = _MXC_BUILD_NON_GPIO_PIN(0x33C, 0x744),
++	MX51_PIN_DI2_PIN4 = _MXC_BUILD_NON_GPIO_PIN(0x340, 0x748),
++	MX51_PIN_DI2_PIN2 = _MXC_BUILD_NON_GPIO_PIN(0x344, 0x74C),
++	MX51_PIN_DI2_PIN3 = _MXC_BUILD_NON_GPIO_PIN(0x348, 0x750),
++	MX51_PIN_DI2_DISP_CLK = _MXC_BUILD_NON_GPIO_PIN(0x34C, 0x754),
++	MX51_PIN_DI_GP4 = _MXC_BUILD_NON_GPIO_PIN(0x350, 0x758),
++	MX51_PIN_DISP2_DAT0 = _MXC_BUILD_NON_GPIO_PIN(0x354, 0x75C),
++	MX51_PIN_DISP2_DAT1 = _MXC_BUILD_NON_GPIO_PIN(0x358, 0x760),
++	MX51_PIN_DISP2_DAT2 = _MXC_BUILD_NON_GPIO_PIN(0x35C, 0x764),
++	MX51_PIN_DISP2_DAT3 = _MXC_BUILD_NON_GPIO_PIN(0x360, 0x768),
++	MX51_PIN_DISP2_DAT4 = _MXC_BUILD_NON_GPIO_PIN(0x364, 0x76C),
++	MX51_PIN_DISP2_DAT5 = _MXC_BUILD_NON_GPIO_PIN(0x368, 0x770),
++	MX51_PIN_DISP2_DAT6 = _MXC_BUILD_GPIO_PIN(0, 19, 5, 0x36C, 0x774),
++	MX51_PIN_DISP2_DAT7 = _MXC_BUILD_GPIO_PIN(0, 29, 5, 0x370, 0x778),
++	MX51_PIN_DISP2_DAT8 = _MXC_BUILD_GPIO_PIN(0, 30, 5, 0x374, 0x77C),
++	MX51_PIN_DISP2_DAT9 = _MXC_BUILD_GPIO_PIN(0, 31, 5, 0x378, 0x780),
++	MX51_PIN_DISP2_DAT10 = _MXC_BUILD_NON_GPIO_PIN(0x37C, 0x784),
++	MX51_PIN_DISP2_DAT11 = _MXC_BUILD_NON_GPIO_PIN(0x380, 0x788),
++	MX51_PIN_DISP2_DAT12 = _MXC_BUILD_NON_GPIO_PIN(0x384, 0x78C),
++	MX51_PIN_DISP2_DAT13 = _MXC_BUILD_NON_GPIO_PIN(0x388, 0x790),
++	MX51_PIN_DISP2_DAT14 = _MXC_BUILD_NON_GPIO_PIN(0x38C, 0x794),
++	MX51_PIN_DISP2_DAT15 = _MXC_BUILD_NON_GPIO_PIN(0x390, 0x798),
++	MX51_PIN_SD1_CMD = _MXC_BUILD_NON_GPIO_PIN(0x394, 0x79C),
++	MX51_PIN_SD1_CLK = _MXC_BUILD_NON_GPIO_PIN(0x398, 0x7A0),
++	MX51_PIN_SD1_DATA0 = _MXC_BUILD_NON_GPIO_PIN(0x39C, 0x7A4),
++	MX51_PIN_SD1_DATA1 = _MXC_BUILD_NON_GPIO_PIN(0x3A0, 0x7A8),
++	MX51_PIN_SD1_DATA2 = _MXC_BUILD_NON_GPIO_PIN(0x3A4, 0x7AC),
++	MX51_PIN_SD1_DATA3 = _MXC_BUILD_NON_GPIO_PIN(0x3A8, 0x7B0),
++	MX51_PIN_GPIO1_0 = _MXC_BUILD_GPIO_PIN(0, 0, 1, 0x3AC, 0x7B4),
++	MX51_PIN_GPIO1_1 = _MXC_BUILD_GPIO_PIN(0, 1, 1, 0x3B0, 0x7B8),
++	MX51_PIN_SD2_CMD = _MXC_BUILD_NON_GPIO_PIN(0x3B4, 0x7BC),
++	MX51_PIN_SD2_CLK = _MXC_BUILD_NON_GPIO_PIN(0x3B8, 0x7C0),
++	MX51_PIN_SD2_DATA0 = _MXC_BUILD_NON_GPIO_PIN(0x3BC, 0x7C4),
++	MX51_PIN_SD2_DATA1 = _MXC_BUILD_NON_GPIO_PIN(0x3C0, 0x7C8),
++	MX51_PIN_SD2_DATA2 = _MXC_BUILD_NON_GPIO_PIN(0x3C4, 0x7CC),
++	MX51_PIN_SD2_DATA3 = _MXC_BUILD_NON_GPIO_PIN(0x3C8, 0x7D0),
++	MX51_PIN_GPIO1_2 = _MXC_BUILD_GPIO_PIN(0, 2, 0, 0x3CC, 0x7D4),
++	MX51_PIN_GPIO1_3 = _MXC_BUILD_GPIO_PIN(0, 3, 0, 0x3D0, 0x7D8),
++	MX51_PIN_PMIC_INT_REQ = _MXC_BUILD_NON_GPIO_PIN(0x3D4, 0x7FC),
++	MX51_PIN_GPIO1_4 = _MXC_BUILD_GPIO_PIN(0, 4, 0, 0x3D8, 0x804),
++	MX51_PIN_GPIO1_5 = _MXC_BUILD_GPIO_PIN(0, 5, 0, 0x3DC, 0x808),
++	MX51_PIN_GPIO1_6 = _MXC_BUILD_GPIO_PIN(0, 6, 0, 0x3E0, 0x80C),
++	MX51_PIN_GPIO1_7 = _MXC_BUILD_GPIO_PIN(0, 7, 0, 0x3E4, 0x810),
++	MX51_PIN_GPIO1_8 = _MXC_BUILD_GPIO_PIN(0, 8, 0, 0x3E8, 0x814),
++	MX51_PIN_GPIO1_9 = _MXC_BUILD_GPIO_PIN(0, 9, 0, 0x3EC, 0x818),
+ };
+ 
+ #endif				/* __ASSEMBLY__ */
+diff --git a/arch/arm/mach-mx51/system.c b/arch/arm/mach-mx51/system.c
+index ae99ed7..bb330e8 100644
+--- a/arch/arm/mach-mx51/system.c
++++ b/arch/arm/mach-mx51/system.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+diff --git a/include/asm-arm/arch-mxc/mx51.h b/include/asm-arm/arch-mxc/mx51.h
+index 0b0124b..a57000c 100644
+--- a/include/asm-arm/arch-mxc/mx51.h
++++ b/include/asm-arm/arch-mxc/mx51.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -69,8 +69,8 @@
+  */
+ #define IRAM_BASE_ADDR		0x1FFE8000	/* internal ram */
+ #define IRAM_BASE_ADDR_VIRT	0xFA3E8000
+-#define IRAM_PARTITIONS		12
+-#define IRAM_SIZE		(IRAM_PARTITIONS*SZ_8K)	/* 96KB */
++
++#define IRAM_SIZE		(16*SZ_8K)
+ 
+ #if defined(CONFIG_MXC_SECURITY_SCC2) \
+     || defined(CONFIG_MXC_SECURITY_SCC2_MODULE)
+@@ -97,16 +97,14 @@
+ #define VPU_IRAM_SIZE 0
+ #endif
+ 
+-#if (IRAM_SIZE < (SDMA_IRAM_SIZE + SND_RAM_SIZE + VPU_IRAM_SIZE + \
+-	SCC_IRAM_SIZE))
+-#error "IRAM size exceeded"
+-#endif
++#define TOTAL_IRAM_NEEDED	(SDMA_IRAM_SIZE + SND_RAM_SIZE + VPU_IRAM_SIZE + \
++	SCC_IRAM_SIZE)
+ 
+-#define SCC_IRAM_BASE_ADDR	(IRAM_BASE_ADDR + IRAM_SIZE - SCC_IRAM_SIZE)
+ #define SDMA_RAM_BASE_ADDR	(IRAM_BASE_ADDR)
+ #define SND_RAM_BASE_ADDR	(IRAM_BASE_ADDR + SDMA_IRAM_SIZE)
+ #define VPU_IRAM_BASE_ADDR	(SND_RAM_BASE_ADDR + SND_RAM_SIZE)
+-#define IRAM_AVAILABLE_ADDR     (VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE)
++#define SCC_IRAM_BASE_ADDR	(VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE)
++#define IRAM_AVAILABLE_ADDR	(SCC_IRAM_BASE_ADDR + SCC_IRAM_SIZE)
+ 
+ /*
+  * NFC
+@@ -122,7 +120,7 @@
+ 
+ #define TZIC_BASE_ADDR		0x8FFFC000
+ #define TZIC_BASE_ADDR_VIRT	0xFA100000
+-#define TZIC_SIZE		SZ_1M
++#define TZIC_SIZE		SZ_16K
+ 
+ #define DEBUG_BASE_ADDR	0x60000000
+ #define DEBUG_BASE_ADDR_VIRT	0xFA200000
+@@ -482,8 +480,8 @@
+ #define MXC_INT_MCG_ERR		81
+ #define MXC_INT_MCG_TMR		82
+ #define MXC_INT_MCG_FUNC		83
+-#define MXC_INT_RESV84		84
+-#define MXC_INT_RESV85		85
++#define MXC_INT_GPU2_IRQ	84
++#define MXC_INT_GPU2_BUSY	85
+ #define MXC_INT_RESV86		86
+ #define MXC_INT_FEC		87
+ #define MXC_INT_OWIRE		88
+@@ -495,11 +493,11 @@
+ #define MXC_INT_PWM2			94
+ #define MXC_INT_SLIM_EXP		95
+ #define MXC_INT_SSI3			96
+-#define MXC_INT_RESV97			97
++#define MXC_INT_EMI_BOOT		97
+ #define MXC_INT_CTI1_TG3		98
+ #define MXC_INT_SMC_RX			99
+ #define MXC_INT_VPU_IDLE		100
+-#define MXC_INT_RESV101		101
++#define MXC_INT_EMI_NFC		101
+ #define MXC_INT_GPU_IDLE		102
+ 
+ #define MXC_MAX_INT_LINES       128
+-- 
+1.5.4.4
+

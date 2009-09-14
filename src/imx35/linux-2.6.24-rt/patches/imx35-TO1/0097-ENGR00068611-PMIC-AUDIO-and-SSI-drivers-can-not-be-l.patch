@@ -1,0 +1,331 @@
+From f71736ab9de02118ede51323b3a751c58845d598 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 25 Mar 2008 11:11:42 +0800
+Subject: [PATCH] ENGR00068611 PMIC AUDIO and SSI drivers can not be loadable modules
+
+Merge ENGR0006861
+Remove platform_device register in mxc-alsa-pmic.c
+Move clk_put to device.c
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx27/devices.c          |   13 ++++++++-----
+ arch/arm/mach-mx27/mx27ads.c          |   12 +++---------
+ arch/arm/mach-mx3/devices.c           |    2 ++
+ arch/arm/mach-mx3/mx31ads.c           |    4 +++-
+ arch/arm/mach-mx3/mx3_3stack.c        |    4 +++-
+ drivers/mxc/pmic/mc13783/pmic_audio.c |    1 +
+ sound/arm/Makefile                    |    3 ++-
+ sound/arm/mxc-alsa-mixer.c            |    4 +++-
+ sound/arm/mxc-alsa-pmic.c             |   33 ++++++++++++++++++++++++---------
+ 9 files changed, 49 insertions(+), 27 deletions(-)
+
+diff --git a/arch/arm/mach-mx27/devices.c b/arch/arm/mach-mx27/devices.c
+index 6a4c4ea..d21ad6a 100644
+--- a/arch/arm/mach-mx27/devices.c
++++ b/arch/arm/mach-mx27/devices.c
+@@ -9,7 +9,7 @@
+  * licensed "as is" without any warranty of any kind, whether express
+  * or implied.
+  *
+- * Copyright 2006-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2006-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ #include <linux/module.h>
+ #include <linux/kernel.h>
+@@ -422,10 +422,7 @@ static inline void mxc_init_spi(void)
+ #endif
+ 
+ #if defined(CONFIG_SND_MXC_PMIC) || defined(CONFIG_SND_MXC_PMIC_MODULE)
+-static struct mxc_audio_platform_data mxc_audio_data = {
+-	.ssi_num = 2,
+-	.src_port = 0,
+-};
++static struct mxc_audio_platform_data mxc_audio_data;
+ 
+ static struct platform_device mxc_alsa_device = {
+ 	.name = "mxc_alsa",
+@@ -439,6 +436,12 @@ static struct platform_device mxc_alsa_device = {
+ 
+ static void mxc_init_audio(void)
+ {
++	mxc_audio_data.ssi_clk[0] = clk_get(NULL, "ssi_clk.0");
++	clk_put(audio_data->ssi_clk[0]);
++	mxc_audio_data.ssi_clk[1] = clk_get(NULL, "ssi_clk.1");
++	clk_put(audio_data->ssi_clk[1]);
++	mxc_audio_data.ssi_num = 2;
++	mxc_audio_data.src_port = 0;
+ 	platform_device_register(&mxc_alsa_device);
+ }
+ #else
+diff --git a/arch/arm/mach-mx27/mx27ads.c b/arch/arm/mach-mx27/mx27ads.c
+index cc4525a..094affb 100644
+--- a/arch/arm/mach-mx27/mx27ads.c
++++ b/arch/arm/mach-mx27/mx27ads.c
+@@ -681,12 +681,13 @@ static inline int mxc_init_extuart(void)
+ }
+ #endif
+ 
+-#if defined(CONFIG_MXC_PMIC_MC13783) && defined(CONFIG_SND_MXC_PMIC)
++#if (defined(CONFIG_MXC_PMIC_MC13783) || \
++	defined(CONFIG_MXC_PMIC_MC13783_MODULE)) \
++	&& (defined(CONFIG_SND_MXC_PMIC) || defined(CONFIG_SND_MXC_PMIC_MODULE))
+ extern void gpio_ssi_active(int ssi_num);
+ 
+ static void __init mxc_init_pmic_audio(void)
+ {
+-	struct clk *ssi_clk;
+ 	struct clk *ckih_clk;
+ 	struct clk *cko_clk;
+ 
+@@ -703,13 +704,6 @@ static void __init mxc_init_pmic_audio(void)
+ 	clk_put(ckih_clk);
+ 	clk_put(cko_clk);
+ 
+-	ssi_clk = clk_get(NULL, "ssi_clk.0");
+-	clk_enable(ssi_clk);
+-	clk_put(ssi_clk);
+-	ssi_clk = clk_get(NULL, "ssi_clk.1");
+-	clk_enable(ssi_clk);
+-	clk_put(ssi_clk);
+-
+ 	gpio_ssi_active(0);
+ 	gpio_ssi_active(1);
+ }
+diff --git a/arch/arm/mach-mx3/devices.c b/arch/arm/mach-mx3/devices.c
+index 39805b8..7ecec84 100644
+--- a/arch/arm/mach-mx3/devices.c
++++ b/arch/arm/mach-mx3/devices.c
+@@ -268,12 +268,14 @@ static void mxc_init_audio(void)
+ 	pll_clk = clk_get(NULL, "usb_pll");
+ 	mxc_audio_data.ssi_clk[0] = clk_get(NULL, "ssi_clk.0");
+ 	clk_set_parent(mxc_audio_data.ssi_clk[0], pll_clk);
++	clk_put(mxc_audio_data.ssi_clk[0]);
+ 	if (machine_is_mx31_3ds()) {
+ 		mxc_audio_data.ssi_num = 1;
+ 	} else {
+ 		mxc_audio_data.ssi_num = 2;
+ 		mxc_audio_data.ssi_clk[1] = clk_get(NULL, "ssi_clk.1");
+ 		clk_set_parent(mxc_audio_data.ssi_clk[1], pll_clk);
++		clk_put(mxc_audio_data.ssi_clk[1]);
+ 	}
+ 	clk_put(pll_clk);
+ 	mxc_audio_data.src_port = 0;
+diff --git a/arch/arm/mach-mx3/mx31ads.c b/arch/arm/mach-mx3/mx31ads.c
+index c4d0a87..b89a5bf 100644
+--- a/arch/arm/mach-mx3/mx31ads.c
++++ b/arch/arm/mach-mx3/mx31ads.c
+@@ -734,7 +734,9 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 	mxc_cpu_init();
+ }
+ 
+-#if defined(CONFIG_MXC_PMIC_MC13783) && defined(CONFIG_SND_MXC_PMIC)
++#if (defined(CONFIG_MXC_PMIC_MC13783) || \
++	defined(CONFIG_MXC_PMIC_MC13783_MODULE)) \
++	&& (defined(CONFIG_SND_MXC_PMIC) || defined(CONFIG_SND_MXC_PMIC_MODULE))
+ extern void gpio_activate_audio_ports(void);
+ 
+ static void __init mxc_init_pmic_audio(void)
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index b2eba0f..573df8a 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -503,7 +503,9 @@ static int __init mxc_init_regulator(void)
+ 
+ module_init(mxc_init_regulator);
+ 
+-#if defined(CONFIG_MXC_PMIC_MC13783) && defined(CONFIG_SND_MXC_PMIC)
++#if (defined(CONFIG_MXC_PMIC_MC13783) || \
++	defined(CONFIG_MXC_PMIC_MC13783_MODULE)) \
++	&& (defined(CONFIG_SND_MXC_PMIC) || defined(CONFIG_SND_MXC_PMIC_MODULE))
+ static void __init mxc_init_pmic_audio(void)
+ {
+ 	struct clk *ckih_clk;
+diff --git a/drivers/mxc/pmic/mc13783/pmic_audio.c b/drivers/mxc/pmic/mc13783/pmic_audio.c
+index 9f53d2f..922627f 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_audio.c
++++ b/drivers/mxc/pmic/mc13783/pmic_audio.c
+@@ -113,6 +113,7 @@ EXPORT_SYMBOL(pmic_audio_stdac_enable_mixer);
+ EXPORT_SYMBOL(pmic_audio_stdac_disable_mixer);
+ EXPORT_SYMBOL(pmic_audio_output_set_port);
+ EXPORT_SYMBOL(pmic_audio_output_get_port);
++EXPORT_SYMBOL(pmic_audio_output_clear_port);
+ EXPORT_SYMBOL(pmic_audio_output_set_stereo_in_gain);
+ EXPORT_SYMBOL(pmic_audio_output_get_stereo_in_gain);
+ EXPORT_SYMBOL(pmic_audio_output_set_pgaGain);
+diff --git a/sound/arm/Makefile b/sound/arm/Makefile
+index a8a75b5..e666aa5 100644
+--- a/sound/arm/Makefile
++++ b/sound/arm/Makefile
+@@ -18,7 +18,8 @@ snd-pxa2xx-ac97-objs		:= pxa2xx-ac97.o
+ # Define the header file locations for PMIC drivers.
+ #
+ CFLAGS_mxc-alsa-pmic.o  = -I$(TOPDIR)/drivers/mxc
+-obj-$(CONFIG_SND_MXC_PMIC)	+= mxc-alsa-pmic.o mxc-alsa-mixer.o
++obj-$(CONFIG_SND_MXC_PMIC)	+= snd-mxc-alsa.o
++snd-mxc-alsa-objs		:= mxc-alsa-pmic.o mxc-alsa-mixer.o
+ 
+ CFLGS_mxc_alsa_spdif.o = -I$(TOPDIR)/drivers/mxc
+ obj-$(CONFIG_SND_MXC_SPDIF)	+= mxc-alsa-spdif.o
+diff --git a/sound/arm/mxc-alsa-mixer.c b/sound/arm/mxc-alsa-mixer.c
+index 0676c93..f11b50c 100644
+--- a/sound/arm/mxc-alsa-mixer.c
++++ b/sound/arm/mxc-alsa-mixer.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -357,3 +357,5 @@ int mxc_alsa_create_ctl(struct snd_card *card, void *p_value)
+ 
+ 	return 0;
+ }
++
++EXPORT_SYMBOL(mxc_alsa_create_ctl);
+diff --git a/sound/arm/mxc-alsa-pmic.c b/sound/arm/mxc-alsa-pmic.c
+index 6392c59..3665f30 100644
+--- a/sound/arm/mxc-alsa-pmic.c
++++ b/sound/arm/mxc-alsa-pmic.c
+@@ -502,8 +502,6 @@ static struct snd_pcm_hw_constraint_list hw_capture_rates = {
+ 	.mask = 0,
+ };
+ 
+-static struct platform_device *device;
+-
+ #ifdef CONFIG_HEADSET_DETECT_ENABLE
+ static PMIC_HS_STATE hs_state;
+ 
+@@ -1147,6 +1145,8 @@ int set_mixer_input_device(PMIC_AUDIO_HANDLE handle, INPUT_DEVICES dev,
+ 	return 0;
+ }
+ 
++EXPORT_SYMBOL(set_mixer_input_device);
++
+ int get_mixer_input_device()
+ {
+ 	int val;
+@@ -1154,6 +1154,8 @@ int get_mixer_input_device()
+ 	return val;
+ }
+ 
++EXPORT_SYMBOL(get_mixer_input_device);
++
+ /*!
+   * This function sets the PMIC input device's gain.
+   * Note that the gain is the input volume
+@@ -1189,6 +1191,8 @@ int set_mixer_input_gain(PMIC_AUDIO_HANDLE handle, int val)
+ 	return 0;
+ }
+ 
++EXPORT_SYMBOL(set_mixer_input_gain);
++
+ int get_mixer_input_gain()
+ {
+ 	int val;
+@@ -1196,6 +1200,8 @@ int get_mixer_input_gain()
+ 	return val;
+ }
+ 
++EXPORT_SYMBOL(get_mixer_input_gain);
++
+ /*!
+   * This function sets the PMIC output device's volume.
+   *
+@@ -1238,6 +1244,8 @@ int set_mixer_output_volume(PMIC_AUDIO_HANDLE handle, int volume,
+ 	return 0;
+ }
+ 
++EXPORT_SYMBOL(set_mixer_output_volume);
++
+ int get_mixer_output_volume()
+ {
+ 	int val;
+@@ -1245,6 +1253,8 @@ int get_mixer_output_volume()
+ 	return val;
+ }
+ 
++EXPORT_SYMBOL(get_mixer_output_volume);
++
+ /*!
+   * This function sets the PMIC output device's balance.
+   *
+@@ -1292,6 +1302,8 @@ int set_mixer_output_balance(int bal)
+ 	return 0;
+ }
+ 
++EXPORT_SYMBOL(set_mixer_output_balance);
++
+ int get_mixer_output_balance()
+ {
+ 	int val;
+@@ -1299,6 +1311,8 @@ int get_mixer_output_balance()
+ 	return val;
+ }
+ 
++EXPORT_SYMBOL(get_mixer_output_balance);
++
+ /*!
+   * This function sets the PMIC output device's mono adder config.
+   *
+@@ -1325,6 +1339,8 @@ int set_mixer_output_mono_adder(PMIC_AUDIO_MONO_ADDER_MODE mode)
+ 	return 0;
+ }
+ 
++EXPORT_SYMBOL(set_mixer_output_mono_adder);
++
+ int get_mixer_output_mono_adder()
+ {
+ 	int val;
+@@ -1332,6 +1348,8 @@ int get_mixer_output_mono_adder()
+ 	return val;
+ }
+ 
++EXPORT_SYMBOL(get_mixer_output_mono_adder);
++
+ /*!
+   * This function sets the output device(s) in PMIC. It takes an
+   * ALSA value and modifies registers using PMIC-specific values.
+@@ -1482,6 +1500,8 @@ int set_mixer_output_device(PMIC_AUDIO_HANDLE handle, OUTPUT_SOURCE src,
+ 
+ }
+ 
++EXPORT_SYMBOL(set_mixer_output_device);
++
+ int get_mixer_output_device()
+ {
+ 	int val;
+@@ -1489,6 +1509,8 @@ int get_mixer_output_device()
+ 	return val;
+ }
+ 
++EXPORT_SYMBOL(get_mixer_output_device);
++
+ /*!
+   * This function configures the CODEC for playback/recording.
+   *
+@@ -3842,12 +3864,6 @@ static int __init mxc_alsa_audio_probe(struct platform_device *pdev)
+ 
+ static int mxc_alsa_audio_remove(struct platform_device *dev)
+ {
+-	if (audio_data->ssi_num == 1) {
+-		clk_put(audio_data->ssi_clk[SSI1]);
+-	} else {
+-		clk_put(audio_data->ssi_clk[SSI1]);
+-		clk_put(audio_data->ssi_clk[SSI2]);
+-	}
+ 	snd_card_free(mxc_audio->card);
+ 	kfree(mxc_audio);
+ 	platform_set_drvdata(dev, NULL);
+@@ -3879,7 +3895,6 @@ static int __init mxc_alsa_audio_init(void)
+ 
+ static void __exit mxc_alsa_audio_exit(void)
+ {
+-	platform_device_unregister(device);
+ 	platform_driver_unregister(&mxc_alsa_audio_driver);
+ }
+ 
+-- 
+1.5.4.4
+

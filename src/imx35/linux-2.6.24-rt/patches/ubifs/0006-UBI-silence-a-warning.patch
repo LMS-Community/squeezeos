@@ -1,0 +1,47 @@
+From 54f17643a57040d151e4867269ccd7e03a42b780 Mon Sep 17 00:00:00 2001
+From: Jesper Juhl <jesper.juhl@gmail.com>
+Date: Thu, 13 Dec 2007 23:53:08 +0100
+Subject: [PATCH] UBI: silence a warning
+
+This patch silences the following warning :
+
+  drivers/mtd/ubi/vmt.c:73: warning: 'ret' may be used uninitialized in this function
+
+gcc can't see that we always initialize ret in all situations where it is
+actually used. The one case where it's not initialized is when we BUG(),
+but gcc doesn't know that we won't then continue and use an uninitialized
+'ret'.
+
+This patch results in code that does exactely the same as before, but it
+also makes gcc shut up, so we generate one less line of warning noise.
+
+Signed-off-by: Jesper Juhl <jesper.juhl@gmail.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/vmt.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 88629a3..e44948d 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -70,13 +70,14 @@ static struct device_attribute attr_vol_upd_marker =
+ static ssize_t vol_attribute_show(struct device *dev,
+ 				  struct device_attribute *attr, char *buf)
+ {
+-	int ret;
++	int ret = -ENODEV;
++
+ 	struct ubi_volume *vol = container_of(dev, struct ubi_volume, dev);
+ 
+ 	spin_lock(&vol->ubi->volumes_lock);
+ 	if (vol->removed) {
+ 		spin_unlock(&vol->ubi->volumes_lock);
+-		return -ENODEV;
++		return ret;
+ 	}
+ 	if (attr == &attr_vol_reserved_ebs)
+ 		ret = sprintf(buf, "%d\n", vol->reserved_pebs);
+-- 
+1.5.6.3
+

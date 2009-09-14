@@ -329,6 +329,7 @@ def inheritFromOS(d):
     for s in os.environ.keys():
         try:
             setVar(s, os.environ[s], d)
+            setVarFlag(s, "export", True, d)
         except TypeError:
             pass
 
@@ -552,7 +553,9 @@ def inherits_class(klass, d):
 def _test():
     """Start a doctest run on this module"""
     import doctest
+    import bb
     from bb import data
+    bb.msg.set_debug_level(0)
     doctest.testmod(data)
 
 if __name__ == "__main__":

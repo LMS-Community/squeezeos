@@ -1,0 +1,64 @@
+From f0a0eb96986d573b600d59aa639800a0c553e9bf Mon Sep 17 00:00:00 2001
+From: Eric Sesterhenn <snakebyte@gmx.de>
+Date: Fri, 13 Feb 2009 09:13:11 +0100
+Subject: [PATCH] UBIFS: list usage cleanup
+
+Trivial cleanup, list_del(); list_add{,_tail}() is equivalent
+to list_move{,_tail}(). Semantic patch for coccinelle can be
+found at www.cccmz.de/~snakebyte/list_move_tail.spatch
+
+Signed-off-by: Eric Sesterhenn <snakebyte@gmx.de>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/log.c      |    3 +--
+ fs/ubifs/shrinker.c |    6 ++----
+ 2 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/fs/ubifs/log.c b/fs/ubifs/log.c
+index e14829e..7ef1e0a 100644
+--- a/fs/ubifs/log.c
++++ b/fs/ubifs/log.c
+@@ -367,7 +367,6 @@ static void remove_buds(struct ubifs_info *c)
+ 				bud->jhead, c->leb_size - bud->start,
+ 				c->cmt_bud_bytes);
+ 			rb_erase(p1, &c->buds);
+-			list_del(&bud->list);
+ 			/*
+ 			 * If the commit does not finish, the recovery will need
+ 			 * to replay the journal, in which case the old buds
+@@ -375,7 +374,7 @@ static void remove_buds(struct ubifs_info *c)
+ 			 * commit i.e. do not allow them to be garbage
+ 			 * collected.
+ 			 */
+-			list_add(&bud->list, &c->old_buds);
++			list_move(&bud->list, &c->old_buds);
+ 		}
+ 	}
+ 	spin_unlock(&c->buds_lock);
+diff --git a/fs/ubifs/shrinker.c b/fs/ubifs/shrinker.c
+index f248533..e6c6d69 100644
+--- a/fs/ubifs/shrinker.c
++++ b/fs/ubifs/shrinker.c
+@@ -206,8 +206,7 @@ static int shrink_tnc_trees(int nr, int age, int *contention)
+ 		 * Move this one to the end of the list to provide some
+ 		 * fairness.
+ 		 */
+-		list_del(&c->infos_list);
+-		list_add_tail(&c->infos_list, &ubifs_infos);
++		list_move_tail(&c->infos_list, &ubifs_infos);
+ 		mutex_unlock(&c->umount_mutex);
+ 		if (freed >= nr)
+ 			break;
+@@ -263,8 +262,7 @@ static int kick_a_thread(void)
+ 			}
+ 
+ 			if (i == 1) {
+-				list_del(&c->infos_list);
+-				list_add_tail(&c->infos_list, &ubifs_infos);
++				list_move_tail(&c->infos_list, &ubifs_infos);
+ 				spin_unlock(&ubifs_infos_lock);
+ 
+ 				ubifs_request_bg_commit(c);
+-- 
+1.5.4.3
+

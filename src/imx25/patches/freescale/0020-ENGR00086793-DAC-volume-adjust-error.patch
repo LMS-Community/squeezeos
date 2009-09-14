@@ -1,0 +1,79 @@
+From 05b86ceec50543d1d56a07418b0d6053ef70affb Mon Sep 17 00:00:00 2001
+From: Jingyu Zhou <b02241@freescale.com>
+Date: Mon, 18 Aug 2008 17:25:10 +0800
+Subject: [PATCH] ENGR00086793 DAC volume adjust error
+
+Fix DAC volume adjust error
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/mxc/pmic/mc13783/pmic_audio.c |    9 ++-------
+ sound/arm/mxc-alsa-mixer.c            |    2 +-
+ sound/arm/mxc-alsa-pmic.h             |    4 ++--
+ 3 files changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/mxc/pmic/mc13783/pmic_audio.c b/drivers/mxc/pmic/mc13783/pmic_audio.c
+index 8db6c41..f4a4bd2 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_audio.c
++++ b/drivers/mxc/pmic/mc13783/pmic_audio.c
+@@ -867,7 +867,7 @@ PMIC_STATUS pmic_audio_set_autodetect(int val)
+ 	reg_mask = 0;
+ 	if (val == 1) {
+ 		reg_write = SET_BITS(regAUDIO_RX_0, HSDETEN, 1) |
+-			SET_BITS(regAUDIO_RX_0, HSDETAUTOB, 1);
++		    SET_BITS(regAUDIO_RX_0, HSDETAUTOB, 1);
+ 	} else {
+ 		reg_write = 0;
+ 	}
+@@ -4625,12 +4625,7 @@ PMIC_STATUS pmic_audio_output_set_pgaGain(const PMIC_AUDIO_HANDLE handle,
+ 		rc = PMIC_NOT_SUPPORTED;
+ 		pr_debug("output set PGA gain - wrong gain value\n");
+ 	} else {
+-		if ((gain >= OUTPGA_GAIN_MINUS_33DB)
+-		    && (gain <= OUTPGA_GAIN_PLUS_6DB)) {
+-			reg_gain = gain + 2;
+-		} else {
+-			reg_gain = gain;
+-		}
++		reg_gain = gain + 2;
+ 		if ((handle == extStereoIn.handle) &&
+ 		    (extStereoIn.handleState == HANDLE_IN_USE)) {
+ 			reg_mask = SET_BITS(regAUDIO_RX_1, ARXIN, 15) |
+diff --git a/sound/arm/mxc-alsa-mixer.c b/sound/arm/mxc-alsa-mixer.c
+index bbeeecb..12ea4a2 100644
+--- a/sound/arm/mxc-alsa-mixer.c
++++ b/sound/arm/mxc-alsa-mixer.c
+@@ -212,7 +212,7 @@ static int pmic_pb_volume_info(struct snd_kcontrol *kcontrol,
+ 
+ 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+ 	uinfo->count = 1;
+-	uinfo->value.integer.min = 0;
++	uinfo->value.integer.min = 1;
+ 	uinfo->value.integer.max = 100;
+ 	uinfo->value.integer.step = 1;
+ 	return 0;
+diff --git a/sound/arm/mxc-alsa-pmic.h b/sound/arm/mxc-alsa-pmic.h
+index 9fcb50a..46c5ca4 100644
+--- a/sound/arm/mxc-alsa-pmic.h
++++ b/sound/arm/mxc-alsa-pmic.h
+@@ -13,7 +13,7 @@
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+  *
+- * Copyright (C) 2007 Freescale Inc Ltd
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+  /*!
+@@ -76,7 +76,7 @@
+ /* -39dB */
+ #define PMIC_OUTPUT_VOLUME_MIN			PMIC_INPUT_VOLUME_MIN
+ /* +6dB */
+-#define PMIC_OUTPUT_VOLUME_MAX            		0xf
++#define PMIC_OUTPUT_VOLUME_MAX            		0xd
+ /* -8dB */
+ #define INPUT_VOLUME_MIN				0x0
+ /* +23dB */
+-- 
+1.5.4.4
+

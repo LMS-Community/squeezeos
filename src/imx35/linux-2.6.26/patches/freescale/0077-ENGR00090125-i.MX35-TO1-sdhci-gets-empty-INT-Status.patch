@@ -1,0 +1,66 @@
+From 5fb66ffa356f37ff60cb11507b6bbb7fbb9e903f Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Wed, 3 Sep 2008 15:47:55 +0800
+Subject: [PATCH] ENGR00090125 i.MX35 TO1 sdhci gets empty INT Status when INT is triggered
+
+There is a risk to miss update interrupt status register when operating
+status enable register.
+Just operate singal enable register to enable or disable sdio interrupt.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ drivers/mmc/host/mx_sdhci.c |   10 +++++-----
+ 1 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index 50691d8..f9892b2 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -224,7 +224,7 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ 		writel(SDHCI_WML_128_WORDS, host->ioaddr + SDHCI_WML);
+ 	else
+ 		writel(SDHCI_WML_16_WORDS, host->ioaddr + SDHCI_WML);
+-	writel(mask_u32, host->ioaddr + SDHCI_INT_ENABLE);
++	writel(mask_u32 | SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(mask_u32, host->ioaddr + SDHCI_SIGNAL_ENABLE);
+ }
+ 
+@@ -248,7 +248,7 @@ static void sdhci_init(struct sdhci_host *host)
+ 		writel(SDHCI_WML_128_WORDS, host->ioaddr + SDHCI_WML);
+ 	else
+ 		writel(SDHCI_WML_16_WORDS, host->ioaddr + SDHCI_WML);
+-	writel(intmask, host->ioaddr + SDHCI_INT_ENABLE);
++	writel(intmask | SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(intmask, host->ioaddr + SDHCI_SIGNAL_ENABLE);
+ }
+ 
+@@ -1004,7 +1004,7 @@ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ 		if (--(host->sdio_enable))
+ 			goto exit_unlock;
+ 	}
+-	ier = readl(host->ioaddr + SDHCI_INT_ENABLE);
++	ier = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE);
+ 	prot = readl(host->ioaddr + SDHCI_HOST_CONTROL);
+ 	clk = readl(host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+@@ -1020,7 +1020,6 @@ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ 	writel(SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_STATUS);
+ 
+ 	writel(prot, host->ioaddr + SDHCI_HOST_CONTROL);
+-	writel(ier, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(ier, host->ioaddr + SDHCI_SIGNAL_ENABLE);
+ 	writel(clk, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+@@ -1434,7 +1433,8 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 	intmask &= ~SDHCI_INT_BUS_POWER;
+ 
+ 	if (intmask & SDHCI_INT_CARD_INT)
+-		cardint = 1;
++		cardint = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE) &
++			SDHCI_INT_CARD_INT;
+ 
+ 	intmask &= ~SDHCI_INT_CARD_INT;
+ 
+-- 
+1.5.4.4
+

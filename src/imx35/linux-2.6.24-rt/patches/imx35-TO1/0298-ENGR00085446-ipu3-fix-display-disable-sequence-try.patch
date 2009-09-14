@@ -1,0 +1,100 @@
+From 1ca7d648472ff82cc0613f29bd4b57b9b7a18f58 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Fri, 25 Jul 2008 17:13:52 -0500
+Subject: [PATCH] ENGR00085446 ipu3: fix display disable sequence try 3
+
+The change in commit "ENGR00080623 ipu3: delay DI disabling after DC disable"
+broke TV enable/disable. The original problem with the LCD enable/disable is
+related to the panel commands in relation to turning off the pixel clock.
+
+Moving the DI disable back to the DC FC interrupt handler and adding a delay
+before the panel off commands fixes both problems.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c       |    8 ++++----
+ drivers/mxc/ipu3/ipu_disp.c         |   14 +++++++-------
+ drivers/video/mxc/mxcfb_epson_vga.c |    2 ++
+ 3 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 3215c65..8c723b6 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -1030,10 +1030,6 @@ int32_t ipu_enable_channel(ipu_channel_t channel)
+ 	out_dma = channel_2_dma(channel, IPU_OUTPUT_BUFFER);
+ 	in_dma = channel_2_dma(channel, IPU_VIDEO_IN_BUFFER);
+ 
+-	if ((channel == MEM_DC_SYNC) || (channel == MEM_BG_SYNC) ||
+-	    (channel == MEM_FG_SYNC))
+-		_ipu_dp_dc_enable(channel);
+-
+ 	spin_lock_irqsave(&ipu_lock, lock_flags);
+ 
+ 	if (idma_is_valid(in_dma)) {
+@@ -1045,6 +1041,10 @@ int32_t ipu_enable_channel(ipu_channel_t channel)
+ 		__raw_writel(reg | idma_mask(out_dma), IDMAC_CHA_EN(out_dma));
+ 	}
+ 
++	if ((channel == MEM_DC_SYNC) || (channel == MEM_BG_SYNC) ||
++	    (channel == MEM_FG_SYNC))
++		_ipu_dp_dc_enable(channel);
++
+ 	if (IPU_CHAN_ID(channel) <= IPU_CHAN_ID(MEM_PP_MEM))
+ 		_ipu_ic_enable_task(channel);
+ 
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 652a26f..068fbfc 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -453,6 +453,13 @@ static irqreturn_t dc_irq_handler(int irq, void *dev_id)
+ 		return IRQ_HANDLED;
+ 	}
+ 
++	reg = __raw_readl(IPU_DISP_GEN);
++	if (g_ipu_di_channel[0] == channel)
++		reg &= ~DI0_COUNTER_RELEASE;
++	else if (g_ipu_di_channel[1] == channel)
++		reg &= ~DI1_COUNTER_RELEASE;
++	__raw_writel(reg, IPU_DISP_GEN);
++
+ 	reg = __raw_readl(dc_ch_conf);
+ 	reg &= ~DC_WR_CH_CONF_PROG_TYPE_MASK;
+ 	__raw_writel(reg, dc_ch_conf);
+@@ -518,13 +525,6 @@ void _ipu_dp_dc_disable(ipu_channel_t channel)
+ 	}
+ 	ret = wait_for_completion_timeout(&dc_comp, msecs_to_jiffies(50));
+ 
+-	reg = __raw_readl(IPU_DISP_GEN);
+-	if (g_ipu_di_channel[0] == channel)
+-		reg &= ~DI0_COUNTER_RELEASE;
+-	else if (g_ipu_di_channel[1] == channel)
+-		reg &= ~DI1_COUNTER_RELEASE;
+-	__raw_writel(reg, IPU_DISP_GEN);
+-
+ 	dev_dbg(g_ipu_dev, "DC stop timeout - %d * 10ms\n", 5 - ret);
+ 	ipu_free_irq(irq, &dc_comp);
+ }
+diff --git a/drivers/video/mxc/mxcfb_epson_vga.c b/drivers/video/mxc/mxcfb_epson_vga.c
+index 07899c4..c75c4b4 100644
+--- a/drivers/video/mxc/mxcfb_epson_vga.c
++++ b/drivers/video/mxc/mxcfb_epson_vga.c
+@@ -225,6 +225,7 @@ static void lcd_poweron(void)
+ 		return;
+ 
+ 	dev_dbg(&lcd_spi->dev, "turning on LCD\n");
++	msleep(60);
+ 	spi_write(lcd_spi, (const u8 *)&slpout, 1);
+ 	msleep(60);
+ 	spi_write(lcd_spi, (const u8 *)&dison, 1);
+@@ -244,6 +245,7 @@ static void lcd_poweroff(void)
+ 		return;
+ 
+ 	dev_dbg(&lcd_spi->dev, "turning off LCD\n");
++	msleep(60);
+ 	spi_write(lcd_spi, (const u8 *)&disoff, 1);
+ 	msleep(60);
+ 	spi_write(lcd_spi, (const u8 *)&slpin, 1);
+-- 
+1.5.4.4
+

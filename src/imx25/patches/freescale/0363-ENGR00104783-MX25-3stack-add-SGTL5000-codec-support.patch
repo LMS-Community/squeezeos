@@ -1,0 +1,304 @@
+From 46334fb2e8792d2a769a6c1f54e38b508c6fdeb9 Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Thu, 22 Jan 2009 22:27:05 -0700
+Subject: [PATCH] ENGR00104783 MX25 3stack: add SGTL5000 codec support
+
+This patch adds SGTL5000 codec support for i.MX25 3-Stack, on
+the ASoC codec infrastructure.
+
+On MX25, some of the audio pins are in grouped pad configurations,
+and therefore have no dedicated pad configuration register.
+Thus it is expedient to use the pin index as the reservation
+table index.
+
+Signed-off-by: Quinn Jensen <quinn.jensen@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    8 +++-
+ arch/arm/mach-mx25/board-mx25_3stack.h  |    4 +-
+ arch/arm/mach-mx25/iomux.c              |   11 +++--
+ arch/arm/mach-mx25/mx25_3stack.c        |   63 ++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx25/mx25_3stack_gpio.c   |   60 +++++++++++++++++++++++++++++-
+ include/asm-arm/arch-mxc/mx25.h         |    8 ++++
+ 6 files changed, 144 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index b1de98b..ad1b60f 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -918,13 +918,16 @@ CONFIG_SND_VERBOSE_PROCFS=y
+ #
+ # System on Chip audio support
+ #
+-# CONFIG_SND_SOC is not set
+-# CONFIG_SND_MXC_SOC is not set
++CONFIG_SND_SOC=y
++CONFIG_SND_MXC_SOC=y
++CONFIG_SND_MXC_SOC_SSI=y
+ # CONFIG_SND_MXC_SOC_IRAM is not set
+ # CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_AK4647 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_WM8580 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
++CONFIG_SND_SOC_IMX_3STACK_SGTL5000=y
++# CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH is not set
+ 
+ #
+ # ALSA SoC audio for Freescale SOCs
+@@ -933,6 +936,7 @@ CONFIG_SND_VERBOSE_PROCFS=y
+ #
+ # SoC Audio for the Texas Instruments OMAP
+ #
++CONFIG_SND_SOC_SGTL5000=y
+ 
+ #
+ # Open Sound System
+diff --git a/arch/arm/mach-mx25/board-mx25_3stack.h b/arch/arm/mach-mx25/board-mx25_3stack.h
+index 9a504f5..966df63 100644
+--- a/arch/arm/mach-mx25/board-mx25_3stack.h
++++ b/arch/arm/mach-mx25/board-mx25_3stack.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -163,6 +163,8 @@ extern struct sys_timer mxc_timer;
+ extern void mxc_cpu_common_init(void);
+ extern int mxc_clocks_init(void);
+ extern void __init early_console_setup(char *);
++extern int headphone_det_status(void);
++extern void sgtl5000_enable_amp(void);
+ 
+ #endif				/* CONFIG_MACH_MX25_3DS */
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX25_3STACK_H__ */
+diff --git a/arch/arm/mach-mx25/iomux.c b/arch/arm/mach-mx25/iomux.c
+index 29f5248..28a1b48 100644
+--- a/arch/arm/mach-mx25/iomux.c
++++ b/arch/arm/mach-mx25/iomux.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -50,14 +50,15 @@ enum iomux_reg_addr {
+ };
+ 
+ #define MUX_PIN_NUM_MAX		\
+-		(((IOMUXSW_PAD_END - IOMUXSW_PAD_CTL) >> 2) + 1)
++		(((IOMUXSW_MUX_END - IOMUXSW_MUX_CTL) >> 2) + 1)
+ #define MUX_INPUT_NUM_MUX	\
+ 		(((IOMUXSW_INPUT_END - IOMUXSW_INPUT_CTL) >> 2) + 1)
+ 
+-#define PIN_TO_IOMUX_INDEX(pin) ((PIN_TO_IOMUX_PAD(pin) - 0x22C) >> 2)
++#define PIN_TO_IOMUX_INDEX(pin) (PIN_TO_IOMUX_MUX(pin) >> 2)
+ 
+ static DEFINE_SPINLOCK(gpio_mux_lock);
+ static u8 iomux_pin_res_table[MUX_PIN_NUM_MAX];
++#define MUX_USED 0x80
+ 
+ /*!
+  * This function is used to configure a pin through the IOMUX module.
+@@ -85,7 +86,7 @@ static int iomux_config_mux(iomux_pin_name_t pin, iomux_pin_cfg_t cfg)
+ 		 * Log a warning if a pin changes ownership
+ 		 */
+ 		rp = iomux_pin_res_table + pin_index;
+-		if ((cfg & *rp) && (*rp != cfg)) {
++		if (*rp && *rp != (cfg | MUX_USED)) {
+ 			/*Console: how to do */
+ 			printk(KERN_ERR "iomux_config_mux: Warning: iomux pin"
+ 			       " config changed, index=%d register=%d, "
+@@ -93,7 +94,7 @@ static int iomux_config_mux(iomux_pin_name_t pin, iomux_pin_cfg_t cfg)
+ 			       *rp, cfg);
+ 			ret = -EINVAL;
+ 		}
+-		*rp = cfg;
++		*rp = cfg | MUX_USED;
+ 		spin_unlock(&gpio_mux_lock);
+ 	}
+ 
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index 0480cc7..6a24f4c 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -224,8 +224,68 @@ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	 .type = "mc34704",
+ 	 .addr = 0x54,
+ 	 },
++	{
++	 .type = "sgtl5000-i2c",
++	 .addr = 0x0a,
++	 },
++};
++
++#if defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) \
++    || defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000_MODULE)
++static struct mxc_sgtl5000_platform_data sgtl5000_data = {
++	.ssi_num = 2,
++	.src_port = 1,
++	.ext_port = 4,
++	.hp_irq = IOMUX_TO_IRQ(MX25_PIN_A10),
++	.hp_status = headphone_det_status,
++	.vddio = 1800000,
++	.vdda = 3300000,
++	.vddd = 0,
++	.sysclk = 8300000,
++};
++
++static struct platform_device sgtl5000_device = {
++	.name = "sgtl5000-imx",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &sgtl5000_data,
++		},
+ };
+ 
++static void mxc_sgtl5000_init(void)
++{
++	struct clk *cko1, *parent;
++	unsigned long rate;
++
++	/* cko1 clock */
++	mxc_request_iomux(MX25_PIN_CLKO, MUX_CONFIG_FUNC);
++
++	cko1 = clk_get(NULL, "clko_clk");
++	if (IS_ERR(cko1))
++		return;
++	parent = clk_get(NULL, "ipg_clk");
++	if (IS_ERR(parent))
++		return;
++	clk_set_parent(cko1, parent);
++	rate = clk_round_rate(cko1, 13000000);
++	if (rate < 8000000 || rate > 27000000) {
++		pr_err("Error: SGTL5000 mclk freq %ld out of range!\n", rate);
++		clk_put(parent);
++		clk_put(cko1);
++		return;
++	}
++	clk_set_rate(cko1, rate);
++	clk_enable(cko1);
++	sgtl5000_data.sysclk = rate;
++	sgtl5000_enable_amp();
++	platform_device_register(&sgtl5000_device);
++}
++#else
++static inline void mxc_sgtl5000_init(void)
++{
++}
++#endif
++
+ #if  defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
+ static struct resource smsc911x_resources[] = {
+ 	{
+@@ -315,6 +375,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_fb();
+ 	mxc_init_bl();
+ 	mxc_init_nand_mtd();
++	mxc_sgtl5000_init();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx25/mx25_3stack_gpio.c b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+index cb72e90..892bfb2 100644
+--- a/arch/arm/mach-mx25/mx25_3stack_gpio.c
++++ b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1368,3 +1368,61 @@ void gpio_can_inactive(int id)
+ 	}
+ }
+ EXPORT_SYMBOL(gpio_can_inactive);
++
++/*!
++ * This function activates DAM port 4 to enable
++ * audio I/O.
++ */
++void gpio_activate_audio_ports(void)
++{
++	mxc_request_iomux(MX25_PIN_EB0, MUX_CONFIG_ALT4); /*SSI4_STXD*/
++	mxc_request_iomux(MX25_PIN_EB1, MUX_CONFIG_ALT4); /*SSI4_SRXD*/
++	mxc_request_iomux(MX25_PIN_RW, MUX_CONFIG_ALT4); /*SSI4_STXFS*/
++	mxc_request_iomux(MX25_PIN_OE, MUX_CONFIG_ALT4); /*SSI4_SCK*/
++	mxc_request_iomux(MX25_PIN_A10, MUX_CONFIG_ALT5); /*HP_DEC*/
++	mxc_request_iomux(MX25_PIN_D13, MUX_CONFIG_ALT5); /*AMP_SHUTDOWN*/
++
++	mxc_iomux_set_pad(MX25_PIN_EB0, PAD_CTL_SRE_FAST);
++	mxc_iomux_set_pad(MX25_PIN_EB1, PAD_CTL_SRE_FAST);
++	mxc_iomux_set_pad(MX25_PIN_RW, PAD_CTL_SRE_FAST);
++	mxc_iomux_set_pad(MX25_PIN_OE, PAD_CTL_SRE_FAST);
++	mxc_iomux_set_pad(MX25_PIN_D13, PAD_CTL_DRV_3_3V);
++
++	mxc_set_gpio_direction(MX25_PIN_A10, 1);
++	mxc_set_gpio_direction(MX25_PIN_D13, 0);
++}
++EXPORT_SYMBOL(gpio_activate_audio_ports);
++
++/*!
++ * This function inactivates DAM port 4 for
++ * audio I/O
++ */
++void gpio_inactive_audio_ports(void)
++{
++	mxc_request_gpio(MX25_PIN_EB0); /*SSI4_STXD*/
++	mxc_request_gpio(MX25_PIN_EB1); /*SSI4_SRXD*/
++	mxc_request_gpio(MX25_PIN_RW); /*SSI4_STXFS*/
++	mxc_request_gpio(MX25_PIN_OE); /*SSI4_SCK*/
++	mxc_request_gpio(MX25_PIN_A10); /*HP_DEC*/
++	mxc_request_gpio(MX25_PIN_D13); /*AMP_SHUTDOWN*/
++
++	mxc_free_iomux(MX25_PIN_EB0, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_EB1, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_RW, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_OE, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_A10, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX25_PIN_D13, MUX_CONFIG_GPIO);
++}
++EXPORT_SYMBOL(gpio_inactive_audio_ports);
++
++int headphone_det_status(void)
++{
++	return mxc_get_gpio_datain(MX25_PIN_A10);
++}
++EXPORT_SYMBOL(headphone_det_status);
++
++void sgtl5000_enable_amp(void)
++{
++	mxc_set_gpio_dataout(MX25_PIN_D13, 1);
++}
++EXPORT_SYMBOL(sgtl5000_enable_amp);
+diff --git a/include/asm-arm/arch-mxc/mx25.h b/include/asm-arm/arch-mxc/mx25.h
+index d9cb2b8..13b257a 100644
+--- a/include/asm-arm/arch-mxc/mx25.h
++++ b/include/asm-arm/arch-mxc/mx25.h
+@@ -95,6 +95,14 @@
+ #define IRAM_BASE_ADDR_VIRT  0xFC500000
+ #define IRAM_SIZE            SZ_128K
+ 
++#ifdef CONFIG_SND_MXC_SOC_IRAM
++#define SND_RAM_SIZE 0x10000
++#else
++#define SND_RAM_SIZE 0
++#endif
++
++#define SND_RAM_BASE_ADDR	IRAM_BASE_ADDR
++
+ /*
+  * AIPS 1
+  */
+-- 
+1.5.4.4
+

@@ -6,14 +6,12 @@ export TZ=/etc/localtime
 [ -f /etc/udev/udev.conf ] && . /etc/udev/udev.conf
 
 kill_udevd() {
-        if [ -x /sbin/pidof ]; then
-                pid=`/sbin/pidof -x udevd`
-                [ -n "$pid" ] && kill $pid
+        if [ -x /usr/bin/killall ]; then
+		killall udevd
         fi
 }
 
 export ACTION=add
-# propagate /dev from /sys
 echo -n "Starting udev"
 
 # mount the tmpfs on /dev, if not already done
@@ -31,19 +29,20 @@ fi
 # make_extra_nodes
 kill_udevd > "/dev/null" 2>&1
 
-        # trigger the sorted events
-        echo -e '\000\000\000\000' > /proc/sys/kernel/hotplug
-        /sbin/udevd -d
+# trigger the sorted events
+echo -e '\000\000\000\000' > /proc/sys/kernel/hotplug
+/sbin/udevd -d
 
-        /sbin/udevcontrol env STARTUP=1
-		if [ "$not_first_boot" != "" ];then
-			/sbin/udevtrigger --subsystem-nomatch=tty --subsystem-nomatch=mem --subsystem-nomatch=vc --subsystem-nomatch=vtconsole --subsystem-nomatch=misc --subsystem-nomatch=dcon --subsystem-nomatch=pci_bus  --subsystem-nomatch=graphics  --subsystem-nomatch=backlight --subsystem-nomatch=video4linux  --subsystem-nomatch=platform
-			(/sbin/udevsettle --timeout=3; /sbin/udevcontrol env STARTUP=)&
-		else
-			/sbin/udevtrigger
-			/sbin/udevsettle
-			(cd /; tar cf /etc/dev.tar /dev)
-		fi
+/sbin/udevcontrol env STARTUP=1
+
+if [ "$not_first_boot" != "" ];then
+	/sbin/udevtrigger --subsystem-match=firmware --subsystem-match=usb --subsystem-match=mmc --subsystem-match=block
+	(/sbin/udevsettle --timeout=3; /sbin/udevcontrol env STARTUP=)&
+else
+	/sbin/udevtrigger
+	/sbin/udevsettle
+	(cd /; tar cf /etc/dev.tar /dev) &
+fi
 
 echo
 

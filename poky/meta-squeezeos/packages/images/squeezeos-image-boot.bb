@@ -23,3 +23,7 @@ do_rootfs_prepend() {
 	echo "${DISTRO_VERSION} ${DATETIME}" 
 
 }
+
+do_rm_work() {
+	true
+}

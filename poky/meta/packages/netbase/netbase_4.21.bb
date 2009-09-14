@@ -2,7 +2,7 @@ DESCRIPTION = "This package provides the necessary \
 infrastructure for basic TCP/IP based networking."
 SECTION = "base"
 LICENSE = "GPL"
-PR = "r17"
+PR = "r23"
 
 inherit update-rc.d
 
@@ -15,7 +15,6 @@ INITSCRIPT_PARAMS_openmn = "start 85 1 2 3 4 5 . stop 85 0 6 1 ."
 INITSCRIPT_PARAMS_slugos = "start 42 S 0 6 ."
 
 SRC_URI = "${DEBIAN_MIRROR}/main/n/netbase/netbase_${PV}.tar.gz \
-           file://options \
            file://init \
            file://hosts \
            file://interfaces"
@@ -28,7 +27,6 @@ do_install () {
 		   ${D}${sysconfdir}/network/if-up.d \
 		   ${D}${sysconfdir}/network/if-down.d \
 		   ${D}${sysconfdir}/network/if-post-down.d
-	install -m 0644 ${WORKDIR}/options ${D}${sysconfdir}/network/options
 	install -m 0755 ${WORKDIR}/init ${D}${sysconfdir}/init.d/networking
 	install -m 0644 ${WORKDIR}/hosts ${D}${sysconfdir}/hosts
 	install -m 0644 etc-rpc ${D}${sysconfdir}/rpc
@@ -37,6 +35,21 @@ do_install () {
 	install -m 0755 update-inetd ${D}${sbindir}/
 	install -m 0644 update-inetd.8 ${D}${mandir}/man8/
 	install -m 0644 ${WORKDIR}/interfaces ${D}${sysconfdir}/network/interfaces
+
+	# Disable network manager on machines that commonly do NFS booting
+	case "${MACHINE}" in
+		"omap-3430sdp" | "omap-3430ldp" | "omap-2430sdp" | "qemuarm" | "qemux86" )
+			touch ${D}${sysconfdir}/network/nm-disabled-eth0
+			;;
+		*)
+			;;
+	esac
 }
 
-CONFFILES_${PN} = "${sysconfdir}/network/options ${sysconfdir}/hosts ${sysconfdir}/network/interfaces"
+CONFFILES_${PN} = "${sysconfdir}/hosts ${sysconfdir}/network/interfaces"
+
+PACKAGE_ARCH_omap-3430sdp = "${MACHINE_ARCH}"
+PACKAGE_ARCH_omap-3430ldp = "${MACHINE_ARCH}"
+PACKAGE_ARCH_omap-2430sdp = "${MACHINE_ARCH}"
+PACKAGE_ARCH_qemuarm = "${MACHINE_ARCH}"
+PACKAGE_ARCH_qemux86 = "${MACHINE_ARCH}"

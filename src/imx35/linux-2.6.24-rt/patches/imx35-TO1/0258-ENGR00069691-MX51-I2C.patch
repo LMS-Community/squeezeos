@@ -1,0 +1,323 @@
+From 412ffd826887b62a88cc9b8f6ac0429df96d5e1f Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b02248@freescale.com>
+Date: Wed, 16 Jul 2008 09:41:58 +0800
+Subject: [PATCH] ENGR00069691 MX51: I2C
+
+MX51: I2C
+
+Signed-off-by: Guoxing Wu <b02248@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |   54 ++++++++++++++++--
+ arch/arm/mach-mx51/clock.c              |    4 +-
+ arch/arm/mach-mx51/devices.c            |    8 +-
+ arch/arm/mach-mx51/mx51_3stack.c        |   29 +++++++++
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |   96 +++++++++++++++++++++++++++++++
+ 5 files changed, 180 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index cfb5707..2ef0ae1 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Wed Jun  4 17:05:53 2008
++# Mon Jul 14 10:13:21 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -161,8 +161,11 @@ CONFIG_ARCH_MX51=y
+ # CONFIG_ARCH_MX3 is not set
+ # CONFIG_ARCH_MX27 is not set
+ # CONFIG_ARCH_MX21 is not set
++# CONFIG_I2C_MXC_SELECT1 is not set
++CONFIG_I2C_MXC_SELECT2=y
+ CONFIG_MXC_SDMA_API=y
+ # CONFIG_SDMA_IRAM is not set
++# CONFIG_I2C_MXC_SELECT3 is not set
+ CONFIG_ARCH_MXC_HAS_NFC_V3=y
+ 
+ #
+@@ -435,6 +438,8 @@ CONFIG_MTD_CFI_I2=y
+ #
+ # Self-contained MTD device drivers
+ #
++# CONFIG_MTD_DATAFLASH is not set
++# CONFIG_MTD_M25P80 is not set
+ # CONFIG_MTD_SLRAM is not set
+ # CONFIG_MTD_PHRAM is not set
+ # CONFIG_MTD_MTDRAM is not set
+@@ -671,12 +676,50 @@ CONFIG_HW_RANDOM=y
+ # CONFIG_RAW_DRIVER is not set
+ # CONFIG_TCG_TPM is not set
+ CONFIG_DEVPORT=y
+-# CONFIG_I2C is not set
++CONFIG_I2C=y
++CONFIG_I2C_BOARDINFO=y
++CONFIG_I2C_CHARDEV=y
++
++#
++# I2C Algorithms
++#
++# CONFIG_I2C_ALGOBIT is not set
++# CONFIG_I2C_ALGOPCF is not set
++# CONFIG_I2C_ALGOPCA is not set
++
++#
++# I2C Hardware Bus support
++#
++# CONFIG_I2C_ELEKTOR is not set
++CONFIG_I2C_MXC=y
++# CONFIG_I2C_OCORES is not set
++# CONFIG_I2C_PARPORT_LIGHT is not set
++# CONFIG_I2C_SIMTEC is not set
++# CONFIG_I2C_TAOS_EVM is not set
++# CONFIG_I2C_STUB is not set
++# CONFIG_I2C_PCA_ISA is not set
++
++#
++# Miscellaneous I2C Chip support
++#
++# CONFIG_SENSORS_DS1337 is not set
++# CONFIG_SENSORS_DS1374 is not set
++# CONFIG_DS1682 is not set
++# CONFIG_SENSORS_EEPROM is not set
++# CONFIG_SENSORS_PCF8574 is not set
++# CONFIG_SENSORS_PCA9539 is not set
++# CONFIG_SENSORS_PCF8591 is not set
++# CONFIG_SENSORS_MAX6875 is not set
++# CONFIG_SENSORS_TSL2550 is not set
++# CONFIG_I2C_DEBUG_CORE is not set
++# CONFIG_I2C_DEBUG_ALGO is not set
++# CONFIG_I2C_DEBUG_BUS is not set
++# CONFIG_I2C_DEBUG_CHIP is not set
+ # CONFIG_I2C_SLAVE is not set
+ 
+- #
+- # SPI support
+- #
++#
++# SPI support
++#
+ CONFIG_SPI=y
+ CONFIG_SPI_MASTER=y
+ 
+@@ -795,6 +838,7 @@ CONFIG_RTC_LIB=y
+ #
+ # MXC PMIC support
+ #
++# CONFIG_MXC_SPI_PMIC_CORE is not set
+ # CONFIG_MXC_I2C_MCU_PMIC_CORE is not set
+ # CONFIG_MXC_PMIC is not set
+ 
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 2804683..9b71fee 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -786,7 +786,7 @@ static struct clk i2c_clk[] = {
+ 	{
+ 	 .name = "i2c_clk",
+ 	 .id = 0,
+-	 .parent = &ipg_clk,
++	 .parent = &ipg_perclk,
+ 	 .enable_reg = MXC_CCM_CCGR1,
+ 	 .enable_shift = MXC_CCM_CCGR1_CG9_OFFSET,
+ 	 .enable = _clk_enable,
+@@ -795,7 +795,7 @@ static struct clk i2c_clk[] = {
+ 	{
+ 	 .name = "i2c_clk",
+ 	 .id = 1,
+-	 .parent = &ipg_clk,
++	 .parent = &ipg_perclk,
+ 	 .enable_reg = MXC_CCM_CCGR1,
+ 	 .enable_shift = MXC_CCM_CCGR1_CG10_OFFSET,
+ 	 .enable = _clk_enable,
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index ac9e459..067c057 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -322,13 +322,13 @@ void __init mxc_init_spi(void)
+  */
+ static struct resource mxci2c1_resources[] = {
+ 	[0] = {
+-	       .start = I2C_BASE_ADDR,
+-	       .end = I2C_BASE_ADDR + SZ_4K - 1,
++	       .start = I2C1_BASE_ADDR,
++	       .end = I2C1_BASE_ADDR + SZ_4K - 1,
+ 	       .flags = IORESOURCE_MEM,
+ 	       },
+ 	[1] = {
+-	       .start = MXC_INT_I2C,
+-	       .end = MXC_INT_I2C,
++	       .start = MXC_INT_I2C1,
++	       .end = MXC_INT_I2C1,
+ 	       .flags = IORESOURCE_IRQ,
+ 	       },
+ };
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index de8288b..d5564d9 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -219,6 +219,20 @@ static inline void mxc_init_fb(void)
+ }
+ #endif
+ 
++#ifdef CONFIG_I2C_MXC
++
++#ifdef CONFIG_I2C_MXC_SELECT1
++static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
++};
++#endif
++
++#ifdef CONFIG_I2C_MXC_SELECT2
++static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
++};
++#endif
++
++#endif
++
+ static u32 cpld_base_addr;
+ 
+ /*lan9217 device*/
+@@ -436,6 +450,21 @@ static void __init mxc_board_init(void)
+ 	mxc_init_fb();
+ 	mxc_init_keypad();
+ 	mxc_init_nand_mtd();
++
++#ifdef CONFIG_I2C_MXC
++
++#ifdef CONFIG_I2C_MXC_SELECT1
++	i2c_register_board_info(0, mxc_i2c0_board_info,
++				ARRAY_SIZE(mxc_i2c0_board_info));
++#endif
++
++#ifdef CONFIG_I2C_MXC_SELECT2
++	i2c_register_board_info(1, mxc_i2c1_board_info,
++				ARRAY_SIZE(mxc_i2c1_board_info));
++#endif
++
++#endif
++
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index a4625c3..cba6fae 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -341,7 +341,68 @@ EXPORT_SYMBOL(gpio_owire_inactive);
+  */
+ void gpio_i2c_active(int i2c_num)
+ {
++	switch (i2c_num) {
++	case 0:
++		/*i2c1 sda */
++		mxc_request_iomux(MX51_PIN_CSPI1_MOSI,
++				  IOMUX_CONFIG_ALT1 | IOMUX_CONFIG_SION);
++		mxc_iomux_set_input(MUX_IN_I2C1_IPP_SDA_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH1);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_MOSI,
++				  PAD_CTL_SRE_FAST |
++				  PAD_CTL_ODE_OPENDRAIN_ENABLE |
++				  PAD_CTL_DRV_HIGH |
++				  PAD_CTL_100K_PU |
++				  PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_VOT_LOW | PAD_CTL_DDR_INPUT_CMOS);
++
++		/*i2c1 scl */
++		mxc_request_iomux(MX51_PIN_CSPI1_SCLK,
++				  IOMUX_CONFIG_ALT1 | IOMUX_CONFIG_SION);
++		mxc_iomux_set_input(MUX_IN_I2C1_IPP_SCL_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH1);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_SCLK,
++				  PAD_CTL_SRE_FAST |
++				  PAD_CTL_ODE_OPENDRAIN_ENABLE |
++				  PAD_CTL_DRV_HIGH |
++				  PAD_CTL_100K_PU |
++				  PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_VOT_LOW | PAD_CTL_DDR_INPUT_CMOS);
++		break;
++	case 1:
++		mxc_request_iomux(MX51_PIN_GPIO1_2,
++				  IOMUX_CONFIG_ALT2 | IOMUX_CONFIG_SION);
++		mxc_request_iomux(MX51_PIN_GPIO1_3,
++				  IOMUX_CONFIG_ALT2 | IOMUX_CONFIG_SION);
++
++		mxc_iomux_set_input(MUX_IN_I2C2_IPP_SDA_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH3);
++		mxc_iomux_set_input(MUX_IN_I2C2_IPP_SCL_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH3);
++
++		mxc_iomux_set_pad(MX51_PIN_GPIO1_2,
++				  PAD_CTL_SRE_FAST |
++				  PAD_CTL_ODE_OPENDRAIN_ENABLE |
++				  PAD_CTL_DRV_HIGH |
++				  PAD_CTL_100K_PU |
++				  PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_VOT_LOW | PAD_CTL_DDR_INPUT_CMOS);
++		mxc_iomux_set_pad(MX51_PIN_GPIO1_3,
++				  PAD_CTL_SRE_FAST |
++				  PAD_CTL_ODE_OPENDRAIN_ENABLE |
++				  PAD_CTL_DRV_HIGH |
++				  PAD_CTL_100K_PU |
++				  PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_VOT_LOW | PAD_CTL_DDR_INPUT_CMOS);
++
++		break;
++	case 2:
++		break;
++	default:
++		break;
++	}
+ }
++EXPORT_SYMBOL(gpio_i2c_active);
+ 
+ /*!
+  * Setup GPIO for an I2C device to be inactive
+@@ -350,7 +411,42 @@ void gpio_i2c_active(int i2c_num)
+  */
+ void gpio_i2c_inactive(int i2c_num)
+ {
++	switch (i2c_num) {
++	case 0:
++		/*i2c1 sda */
++		mxc_request_iomux(MX51_PIN_CSPI1_MOSI, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_input(MUX_IN_I2C1_IPP_SDA_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_MOSI,
++				  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE);
++		/*i2c1 scl */
++		mxc_request_iomux(MX51_PIN_CSPI1_SCLK, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_input(MUX_IN_I2C1_IPP_SCL_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_SCLK,
++				  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE);
++		break;
++	case 1:
++		mxc_request_iomux(MX51_PIN_GPIO1_2, IOMUX_CONFIG_ALT0);
++		mxc_request_iomux(MX51_PIN_GPIO1_3, IOMUX_CONFIG_ALT0);
++
++		mxc_iomux_set_input(MUX_IN_I2C2_IPP_SDA_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH0);
++		mxc_iomux_set_input(MUX_IN_I2C2_IPP_SCL_IN_SELECT_INPUT,
++				    INPUT_CTL_PATH0);
++
++		mxc_iomux_set_pad(MX51_PIN_GPIO1_2,
++				  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE);
++		mxc_iomux_set_pad(MX51_PIN_GPIO1_3,
++				  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE);
++		break;
++	case 2:
++		break;
++	default:
++		break;
++	}
+ }
++EXPORT_SYMBOL(gpio_i2c_inactive);
+ 
+ /*!
+  * This function activates DAM ports 4 & 5 to enable
+-- 
+1.5.4.4
+

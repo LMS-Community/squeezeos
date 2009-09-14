@@ -1,0 +1,963 @@
+From 118e6ed8a20c13ab30f43afd737d7d32b355483e Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Fri, 25 Apr 2008 10:51:53 +0800
+Subject: [PATCH] ENGR00058766 MX35 USB HOST support on Host2 and OTG
+
+required to support USB-HOST driver in MX35 platform
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |  159 +++++++++++++-
+ arch/arm/mach-mx35/Makefile             |    2 +-
+ arch/arm/mach-mx35/mx35_3stack_gpio.c   |   48 ++++
+ arch/arm/mach-mx35/usb.c                |  366 +++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/Kconfig               |   15 +-
+ arch/arm/plat-mxc/Makefile              |    3 +
+ arch/arm/plat-mxc/usb_common.c          |   59 +++++-
+ drivers/usb/core/hub.c                  |    2 +-
+ drivers/usb/host/Kconfig                |    2 +-
+ include/asm-arm/arch-mxc/arc_otg.h      |   23 ++-
+ 10 files changed, 663 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index d860631..21f5033 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Sat Apr 19 14:39:46 2008
++# Mon Apr 21 17:55:59 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -180,6 +180,8 @@ CONFIG_ARCH_MXC_HAS_NFC_V2_1=y
+ CONFIG_MXC_PSEUDO_IRQS=y
+ CONFIG_ARCH_HAS_EVTMON=y
+ CONFIG_DMA_ZONE_SIZE=24
++CONFIG_INTERN_UTMI=y
++# CONFIG_ISP1504_MXC is not set
+ 
+ #
+ # Processor Type
+@@ -473,6 +475,7 @@ CONFIG_MTD_NAND_MXC_V2=y
+ # CONFIG_MTD_NAND_MXC_FORCE_CE is not set
+ # CONFIG_MXC_NAND_LOW_LEVEL_ERASE is not set
+ # CONFIG_MTD_NAND_PLATFORM is not set
++# CONFIG_MTD_ALAUDA is not set
+ # CONFIG_MTD_ONENAND is not set
+ 
+ #
+@@ -495,6 +498,7 @@ CONFIG_BLK_DEV=y
+ CONFIG_BLK_DEV_LOOP=y
+ # CONFIG_BLK_DEV_CRYPTOLOOP is not set
+ # CONFIG_BLK_DEV_NBD is not set
++# CONFIG_BLK_DEV_UB is not set
+ # CONFIG_BLK_DEV_RAM is not set
+ # CONFIG_CDROM_PKTCDVD is not set
+ # CONFIG_ATA_OVER_ETH is not set
+@@ -602,6 +606,15 @@ CONFIG_NET_PCI=y
+ #
+ # CONFIG_WLAN_PRE80211 is not set
+ # CONFIG_WLAN_80211 is not set
++
++#
++# USB Network Adapters
++#
++# CONFIG_USB_CATC is not set
++# CONFIG_USB_KAWETH is not set
++# CONFIG_USB_PEGASUS is not set
++# CONFIG_USB_RTL8150 is not set
++# CONFIG_USB_USBNET is not set
+ CONFIG_NET_PCMCIA=y
+ # CONFIG_PCMCIA_3C589 is not set
+ # CONFIG_PCMCIA_3C574 is not set
+@@ -736,6 +749,7 @@ CONFIG_I2C_MXC=y
+ # CONFIG_I2C_SIMTEC is not set
+ # CONFIG_I2C_TAOS_EVM is not set
+ # CONFIG_I2C_STUB is not set
++# CONFIG_I2C_TINY_USB is not set
+ # CONFIG_I2C_PCA_ISA is not set
+ 
+ #
+@@ -796,6 +810,11 @@ CONFIG_MXC_WATCHDOG=y
+ # CONFIG_WDT is not set
+ 
+ #
++# USB-based Watchdog Cards
++#
++# CONFIG_USBPCWATCHDOG is not set
++
++#
+ # Sonics Silicon Backplane
+ #
+ CONFIG_SSB_POSSIBLE=y
+@@ -823,9 +842,28 @@ CONFIG_VIDEO_MXC_OUTPUT=y
+ CONFIG_VIDEO_MXC_IPU_OUTPUT=y
+ # CONFIG_VIDEO_MXC_OPL is not set
+ # CONFIG_VIDEO_CPIA is not set
++# CONFIG_VIDEO_CPIA2 is not set
+ # CONFIG_VIDEO_SAA5246A is not set
+ # CONFIG_VIDEO_SAA5249 is not set
+ # CONFIG_TUNER_3036 is not set
++CONFIG_V4L_USB_DRIVERS=y
++# CONFIG_VIDEO_PVRUSB2 is not set
++# CONFIG_VIDEO_EM28XX is not set
++# CONFIG_VIDEO_USBVISION is not set
++# CONFIG_USB_VICAM is not set
++# CONFIG_USB_IBMCAM is not set
++# CONFIG_USB_KONICAWC is not set
++# CONFIG_USB_QUICKCAM_MESSENGER is not set
++# CONFIG_USB_ET61X251 is not set
++# CONFIG_VIDEO_OVCAMCHIP is not set
++# CONFIG_USB_W9968CF is not set
++# CONFIG_USB_OV511 is not set
++# CONFIG_USB_SE401 is not set
++# CONFIG_USB_SN9C102 is not set
++# CONFIG_USB_STV680 is not set
++# CONFIG_USB_ZC0301 is not set
++# CONFIG_USB_PWC is not set
++# CONFIG_USB_ZR364XX is not set
+ # CONFIG_RADIO_ADAPTERS is not set
+ # CONFIG_DVB_CORE is not set
+ # CONFIG_DAB is not set
+@@ -901,18 +939,131 @@ CONFIG_LOGO_LINUX_CLUT224=y
+ #
+ # CONFIG_SOUND is not set
+ CONFIG_HID_SUPPORT=y
+-# CONFIG_HID is not set
++CONFIG_HID=m
++# CONFIG_HID_DEBUG is not set
++# CONFIG_HIDRAW is not set
++
++#
++# USB Input Devices
++#
++CONFIG_USB_HID=m
++# CONFIG_USB_HIDINPUT_POWERBOOK is not set
++# CONFIG_HID_FF is not set
++# CONFIG_USB_HIDDEV is not set
++
++#
++# USB HID Boot Protocol drivers
++#
++# CONFIG_USB_KBD is not set
++# CONFIG_USB_MOUSE is not set
+ CONFIG_USB_SUPPORT=y
+ CONFIG_USB_ARCH_HAS_HCD=y
+ # CONFIG_USB_ARCH_HAS_OHCI is not set
+-# CONFIG_USB_ARCH_HAS_EHCI is not set
+-# CONFIG_USB is not set
++CONFIG_USB_ARCH_HAS_EHCI=y
++CONFIG_USB=m
++# CONFIG_USB_DEBUG is not set
++
++#
++# Miscellaneous USB options
++#
++# CONFIG_USB_DEVICEFS is not set
++CONFIG_USB_DEVICE_CLASS=y
++# CONFIG_USB_DYNAMIC_MINORS is not set
++# CONFIG_USB_OTG is not set
++
++#
++# USB Host Controller Drivers
++#
++CONFIG_USB_EHCI_HCD=m
++CONFIG_USB_EHCI_ARC=y
++CONFIG_USB_EHCI_ARC_H2=y
++CONFIG_USB_EHCI_ARC_OTG=y
++CONFIG_USB_EHCI_ARC_OTGHS=y
++# CONFIG_USB_EHCI_ARC_OTGFS is not set
++# CONFIG_USB_EHCI_SPLIT_ISO is not set
++CONFIG_USB_EHCI_ROOT_HUB_TT=y
++# CONFIG_USB_EHCI_TT_NEWSCHED is not set
++# CONFIG_USB_ISP116X_HCD is not set
++# CONFIG_USB_SL811_HCD is not set
++# CONFIG_USB_R8A66597_HCD is not set
++
++#
++# USB Device Class drivers
++#
++# CONFIG_USB_ACM is not set
++# CONFIG_USB_PRINTER is not set
+ 
+ #
+ # NOTE: USB_STORAGE enables SCSI, and 'SCSI disk support'
+ #
+ 
+ #
++# may also be needed; see USB_STORAGE Help for more information
++#
++CONFIG_USB_STORAGE=m
++# CONFIG_USB_STORAGE_DEBUG is not set
++# CONFIG_USB_STORAGE_DATAFAB is not set
++# CONFIG_USB_STORAGE_FREECOM is not set
++# CONFIG_USB_STORAGE_ISD200 is not set
++# CONFIG_USB_STORAGE_DPCM is not set
++# CONFIG_USB_STORAGE_USBAT is not set
++# CONFIG_USB_STORAGE_SDDR09 is not set
++# CONFIG_USB_STORAGE_SDDR55 is not set
++# CONFIG_USB_STORAGE_JUMPSHOT is not set
++# CONFIG_USB_STORAGE_ALAUDA is not set
++# CONFIG_USB_STORAGE_ONETOUCH is not set
++# CONFIG_USB_STORAGE_KARMA is not set
++# CONFIG_USB_LIBUSUAL is not set
++
++#
++# USB Imaging devices
++#
++# CONFIG_USB_MDC800 is not set
++# CONFIG_USB_MICROTEK is not set
++CONFIG_USB_MON=y
++
++#
++# Belcarra USBLAN Networking for USB
++#
++# CONFIG_USB_USBLAN is not set
++
++#
++# USB port drivers
++#
++
++#
++# USB Serial Converter support
++#
++# CONFIG_USB_SERIAL is not set
++
++#
++# USB Miscellaneous drivers
++#
++# CONFIG_USB_EMI62 is not set
++# CONFIG_USB_EMI26 is not set
++# CONFIG_USB_ADUTUX is not set
++# CONFIG_USB_AUERSWALD is not set
++# CONFIG_USB_RIO500 is not set
++# CONFIG_USB_LEGOTOWER is not set
++# CONFIG_USB_LCD is not set
++# CONFIG_USB_BERRY_CHARGE is not set
++# CONFIG_USB_LED is not set
++# CONFIG_USB_CYPRESS_CY7C63 is not set
++# CONFIG_USB_CYTHERM is not set
++# CONFIG_USB_PHIDGET is not set
++# CONFIG_USB_IDMOUSE is not set
++# CONFIG_USB_FTDI_ELAN is not set
++# CONFIG_USB_APPLEDISPLAY is not set
++# CONFIG_USB_SISUSBVGA is not set
++# CONFIG_USB_LD is not set
++# CONFIG_USB_TRANCEVIBRATOR is not set
++# CONFIG_USB_IOWARRIOR is not set
++
++#
++# USB DSL modem support
++#
++
++#
+ # USB Gadget Support
+ #
+ # CONFIG_USB_GADGET is not set
+diff --git a/arch/arm/mach-mx35/Makefile b/arch/arm/mach-mx35/Makefile
+index 7aaea5b..b30404d 100644
+--- a/arch/arm/mach-mx35/Makefile
++++ b/arch/arm/mach-mx35/Makefile
+@@ -4,7 +4,7 @@
+ 
+ # Object file lists.
+ 
+-obj-y		:= system.o iomux.o cpu.o mm.o clock.o devices.o serial.o
++obj-y		:= system.o iomux.o cpu.o mm.o clock.o devices.o serial.o usb.o
+ obj-$(CONFIG_MXC_SDMA_API) 	+= dma.o
+ obj-$(CONFIG_MACH_MX35_3DS)	+= mx35_3stack.o mx35_3stack_gpio.o mx35_3stack_cpld.o
+ obj-$(CONFIG_MACH_MX35EVB)	+= mx35evb.o mx35evb_cpld.o mx35evb_gpio.o
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 6b1d3f2..b65ce6a 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -476,3 +476,51 @@ void gpio_sdhc_inactive(int module)
+ }
+ 
+ EXPORT_SYMBOL(gpio_sdhc_inactive);
++
++/*
++ *  USB Host2
++ */
++int gpio_usbh2_active(void)
++{
++	mxc_request_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX35_PIN_I2C2_CLK, 0x0040);
++
++	mxc_request_iomux(MX35_PIN_I2C2_DAT, MUX_CONFIG_ALT2);
++	mxc_iomux_set_input(MUX_IN_USB_UH2_USB_OC, INPUT_CTL_PATH1);
++	mxc_iomux_set_pad(MX35_PIN_I2C2_DAT, 0x01c0);
++
++	return 0;
++}
++EXPORT_SYMBOL(gpio_usbh2_active);
++
++int gpio_usbh2_inactive(void)
++{
++	mxc_request_gpio(MX35_PIN_I2C2_DAT);
++	mxc_free_iomux(MX35_PIN_I2C2_DAT, MUX_CONFIG_GPIO);
++	mxc_request_gpio(MX35_PIN_I2C2_CLK);
++	mxc_free_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_GPIO);
++}
++EXPORT_SYMBOL(gpio_usbh2_inactive);
++
++/*
++ *  USB OTG UTMI
++ */
++int gpio_usbotg_utmi_active(void)
++{
++	mxc_request_iomux(MX35_PIN_USBOTG_PWR, MUX_CONFIG_FUNC);
++	mxc_iomux_set_pad(MX35_PIN_USBOTG_PWR, 0x0040);
++	mxc_request_iomux(MX35_PIN_USBOTG_OC, MUX_CONFIG_FUNC);
++	mxc_iomux_set_pad(MX35_PIN_USBOTG_OC, 0x01c0);
++
++	return 0;
++}
++EXPORT_SYMBOL(gpio_usbotg_utmi_active);
++
++void gpio_usbotg_utmi_inactive(void)
++{
++	mxc_request_gpio(MX35_PIN_USBOTG_PWR);
++	mxc_free_iomux(MX35_PIN_USBOTG_PWR, MUX_CONFIG_GPIO);
++	mxc_request_gpio(MX35_PIN_USBOTG_OC);
++	mxc_free_iomux(MX35_PIN_USBOTG_OC, MUX_CONFIG_GPIO);
++}
++EXPORT_SYMBOL(gpio_usbotg_utmi_inactive);
+diff --git a/arch/arm/mach-mx35/usb.c b/arch/arm/mach-mx35/usb.c
+new file mode 100755
+index 0000000..eadc96c
+--- /dev/null
++++ b/arch/arm/mach-mx35/usb.c
+@@ -0,0 +1,366 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @defgroup USB_MX31 ARC OTG USB Driver for i.MX31
++ * @ingroup USB
++ */
++
++/*!
++ * @file mach-mx3/usb.c
++ *
++ * @brief platform related part of usb driver.
++ * @ingroup USB_MX31
++ */
++
++/*!
++ *Include files
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/err.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/usb/fsl_xcvr.h>
++#include <linux/usb/otg.h>
++
++#include <asm/io.h>
++#include <asm/irq.h>
++#include <asm/system.h>
++#include <asm/hardware.h>
++#include <asm/mach-types.h>
++#include <asm/arch/arc_otg.h>
++
++extern struct platform_device *host_pdev_register(struct resource *res,
++						  int n_res,
++						  struct fsl_usb2_platform_data
++						  *config);
++extern int fsl_usb_host_init(struct platform_device *pdev);
++extern void fsl_usb_host_uninit(struct fsl_usb2_platform_data *pdata);
++extern int usbotg_init(struct platform_device *pdev);
++extern void usbotg_uninit(struct fsl_usb2_platform_data *pdata);
++extern int gpio_usbh1_active(void);
++extern void gpio_usbh1_inactive(void);
++extern int gpio_usbh2_active(void);
++extern void gpio_usbh2_inactive(void);
++extern int gpio_usbotg_fs_active(void);
++extern void gpio_usbotg_fs_inactive(void);
++extern int gpio_usbotg_hs_active(void);
++extern void gpio_usbotg_hs_inactive(void);
++
++extern int gpio_usbotg_utmi_active(void);
++extern void gpio_usbotg_utmi_inactive(void);
++
++#ifdef CONFIG_USB_EHCI_ARC_H1
++/*!
++ * HOST1 config
++ */
++/* *INDENT-OFF* */
++static struct fsl_usb2_platform_data usbh1_config = {
++	.name              = "Host 1",
++	.platform_init     = fsl_usb_host_init,
++	.platform_uninit   = fsl_usb_host_uninit,
++	.usbmode           = (u32) &UH1_USBMODE,
++	.power_budget      = 150,		/* 150 mA max power */
++	.gpio_usb_active   = gpio_usbh1_active,
++	.gpio_usb_inactive = gpio_usbh1_inactive,
++	.transceiver       = "serial",
++};
++
++static struct resource usbh1_resources[] = {
++	{
++		.start = (u32) (USB_H1REGS_BASE),
++		.end   = (u32) (USB_H1REGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	{
++		.start = INT_USB1,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++/* *INDENT-ON* */
++#endif
++
++#ifdef CONFIG_USB_EHCI_ARC_H2
++/*!
++ * HOST2 config
++ */
++/* *INDENT-OFF* */
++static struct fsl_usb2_platform_data usbh2_config = {
++	.name              = "Host 2",
++	.platform_init     = fsl_usb_host_init,
++	.platform_uninit   = fsl_usb_host_uninit,
++	.usbmode           = (u32) &UH2_USBMODE,
++	.power_budget      = 250,		/* 150 mA max power */
++	.gpio_usb_active   = gpio_usbh2_active,
++	.gpio_usb_inactive = gpio_usbh2_inactive,
++	.transceiver       = "serial",
++};
++
++static struct resource usbh2_resources[] = {
++	{
++		.start = (u32) (USB_H2REGS_BASE),
++		.end   = (u32) (USB_H2REGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	{
++		.start = MXC_INT_USB_HS,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++/* *INDENT-ON* */
++#endif
++
++/*!
++ * OTG config
++ */
++/* *INDENT-OFF* */
++#if defined(CONFIG_USB_EHCI_ARC_OTG) || defined(CONFIG_USB_GADGET_ARC) || defined(CONFIG_OTG_BTC_ARC)
++#if defined(CONFIG_MC13783_MXC)
++static struct fsl_usb2_platform_data mxc_serial_host_config = {
++	.name              = "OTG",
++	.platform_init     = usbotg_init,
++	.platform_uninit   = usbotg_uninit,
++	.usbmode           = (u32) &UOG_USBMODE,
++	.viewport          = (u32) &UOG_ULPIVIEW,
++	.does_otg          = 1,
++	.operating_mode    = FSL_USB2_DR_HOST,
++	.power_budget      = 150, /* 150 mA max power */
++	.gpio_usb_active   = gpio_usbotg_fs_active,
++	.gpio_usb_inactive = gpio_usbotg_fs_inactive,
++	.transceiver       = "mc13783",
++};
++#elif defined(CONFIG_ISP1301_MXC)
++static struct fsl_usb2_platform_data mxc_serial_host_config = {
++	.name              = "OTG",
++	.platform_init     = usbotg_init,
++	.platform_uninit   = usbotg_uninit,
++	.usbmode           = (u32) &UOG_USBMODE,
++	.viewport          = (u32) &UOG_ULPIVIEW,
++	.does_otg          = 0,
++	.operating_mode    = FSL_USB2_DR_HOST,
++	.power_budget      = 150, /* 150 mA max power */
++	.gpio_usb_active   = gpio_usbotg_fs_active,
++	.gpio_usb_inactive = gpio_usbotg_fs_inactive,
++	.transceiver       = "isp1301",
++};
++#endif
++#if defined(CONFIG_ISP1504_MXC)
++static struct fsl_usb2_platform_data mxc_isp1504_config = {
++	.name              = "OTG",
++	.platform_init     = usbotg_init,
++	.platform_uninit   = usbotg_uninit,
++	.usbmode           = (u32) &UOG_USBMODE,
++	.viewport          = (u32) &UOG_ULPIVIEW,
++	.does_otg          = 1,
++	.power_budget      = 150, /* 150 mA max power */
++	.gpio_usb_active   = gpio_usbotg_hs_active,
++	.gpio_usb_inactive = gpio_usbotg_hs_inactive,
++	.transceiver       = "isp1504",
++};
++#elif defined(CONFIG_INTERN_UTMI)
++static struct fsl_usb2_platform_data mxc_utmi_config = {
++       .name              = "OTG",
++       .platform_init     = usbotg_init,
++       .platform_uninit   = usbotg_uninit,
++       .usbmode           = (u32) &UOG_USBMODE,
++       .does_otg          = 1,
++       .power_budget      = 250, /* 250 mA max power */
++       .gpio_usb_active   = gpio_usbotg_utmi_active,
++       .gpio_usb_inactive = gpio_usbotg_utmi_inactive,
++       .transceiver       = "utmi",
++};
++#endif
++
++static struct resource otg_resources[] = {
++	{
++		.start = (u32) (USB_OTGREGS_BASE),
++		.end   = (u32) (USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	{
++		.start = MXC_INT_USB_OTG,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++#endif
++/* *INDENT-ON* */
++
++#if defined(CONFIG_USB_GADGET_ARC) || defined(CONFIG_OTG_BTC_ARC)
++/*!
++ * OTG Gadget device
++ */
++static void udc_release(struct device *dev)
++{
++	/* normally not freed */
++}
++
++static u64 udc_dmamask = ~(u32) 0;
++
++#if defined(CONFIG_MC13783_MXC)
++static struct fsl_usb2_platform_data mxc_serial_peripheral_config = {
++	.name = "OTG",
++	.platform_init = usbotg_init,
++	.platform_uninit = usbotg_uninit,
++	.usbmode = (u32) &UOG_USBMODE,
++	.does_otg = 1,
++	.operating_mode = FSL_USB2_DR_DEVICE,
++	.power_budget = 150,	/* 150 mA max power */
++	.gpio_usb_active = gpio_usbotg_fs_active,
++	.gpio_usb_inactive = gpio_usbotg_fs_inactive,
++	.transceiver = "mc13783",
++};
++#elif defined(CONFIG_ISP1301_MXC)
++static struct fsl_usb2_platform_data mxc_serial_peripheral_config = {
++	.name = "OTG",
++	.platform_init = usbotg_init,
++	.platform_uninit = usbotg_uninit,
++	.usbmode = (u32) &UOG_USBMODE,
++	.does_otg = 0,
++	.operating_mode = FSL_USB2_DR_DEVICE,
++	.power_budget = 150,	/* 150 mA max power */
++	.gpio_usb_active = gpio_usbotg_fs_active,
++	.gpio_usb_inactive = gpio_usbotg_fs_inactive,
++	.transceiver = "isp1301",
++};
++#endif
++
++/* *INDENT-OFF* */
++static struct platform_device otg_udc_device = {
++	.name = "arc_udc",
++	.id   = -1,
++	.dev  = {
++		.release           = udc_release,
++		.dma_mask          = &udc_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++#if defined(CONFIG_MC13783_MXC) || defined(CONFIG_ISP1301_MXC)
++		.platform_data     = &mxc_serial_peripheral_config,
++#elif defined(CONFIG_ISP1504_MXC)
++		.platform_data     = &mxc_isp1504_config,
++#elif defined(CONFIG_INTERN_UTMI)
++		.platform_data     = &mxc_utmi_config,
++#endif
++		},
++	.resource = otg_resources,
++	.num_resources = ARRAY_SIZE(otg_resources),
++};
++#endif
++/* *INDENT-ON* */
++
++#if defined(CONFIG_USB_OTG)
++static void pindetect_release(struct device *dev)
++{
++}
++
++/* *INDENT-OFF* */
++static struct resource pindetect_resources[] = {
++	{
++		.start = (u32) (USB_OTGREGS_BASE),
++		.end   = (u32) (USB_OTGREGS_BASE + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	{
++		.start = MXC_INT_USB3,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++/* *INDENT-ON* */
++
++static u64 pindetect_dmamask = ~(u32) 0;
++
++static struct fsl_usb2_platform_data fsl_otg_config = {
++	.name = "fsl_arc",
++	.platform_init = usbotg_init,
++	.platform_uninit = usbotg_uninit,
++	.usbmode = (u32) &UOG_USBMODE,
++	.power_budget = 150,	/* 150 mA max power */
++#if defined(CONFIG_MC13783_MXC)
++	.gpio_usb_active = gpio_usbotg_fs_active,
++	.gpio_usb_inactive = gpio_usbotg_fs_inactive,
++	.transceiver = "mc13783",
++#elif defined(CONFIG_ISP1504_MXC)
++	.gpio_usb_active = gpio_usbotg_hs_active,
++	.gpio_usb_inactive = gpio_usbotg_hs_inactive,
++	.transceiver = "isp1504",
++#elif defined(CONFIG_INTERN_UTMI)
++	.gpio_usb_active = gpio_usbotg_utmi_active,
++	.gpio_usb_inactive = gpio_usbotg_utmi_inactive,
++	.transceiver = "utmi",
++#endif
++};
++
++static struct platform_device fsl_device = {
++	.name = "fsl_arc",
++	.id = -1,
++	.dev = {
++		.release = pindetect_release,
++		.dma_mask = &pindetect_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++		.platform_data = &fsl_otg_config,
++		},
++	.resource = pindetect_resources,
++	.num_resources = ARRAY_SIZE(pindetect_resources),
++};
++#endif				/* CONFIG_USB_OTG */
++
++static int __init mx31_usb_init(void)
++{
++	pr_debug("%s: \n", __func__);
++
++#ifdef CONFIG_USB_EHCI_ARC_H1
++	host_pdev_register(usbh1_resources, ARRAY_SIZE(usbh1_resources),
++			   &usbh1_config);
++#endif
++
++#ifdef CONFIG_USB_EHCI_ARC_H2
++	host_pdev_register(usbh2_resources, ARRAY_SIZE(usbh2_resources),
++			   &usbh2_config);
++#endif
++
++#ifdef CONFIG_USB_EHCI_ARC_OTG
++#if defined(CONFIG_MC13783_MXC)	|| defined(CONFIG_ISP1301_MXC)
++	host_pdev_register(otg_resources, ARRAY_SIZE(otg_resources),
++			   &mxc_serial_host_config);
++#elif defined(CONFIG_ISP1504_MXC)
++	host_pdev_register(otg_resources, ARRAY_SIZE(otg_resources),
++			   &mxc_isp1504_config);
++#elif defined(CONFIG_INTERN_UTMI)
++       host_pdev_register(otg_resources, ARRAY_SIZE(otg_resources),
++				&mxc_utmi_config);
++#endif
++#endif
++
++#if defined(CONFIG_USB_GADGET_ARC) || defined(CONFIG_OTG_BTC_ARC)
++	if (platform_device_register(&otg_udc_device))
++		printk(KERN_ERR "can't register OTG Gadget\n");
++	else
++		pr_debug("usb: OTG Gadget registered\n");
++#endif
++
++#ifdef CONFIG_USB_OTG
++	if (platform_device_register(&fsl_device))
++		printk(KERN_ERR "can't register otg device\n");
++	else {
++		pr_debug("usb: otg registered device=0x%p resources=0x%p.",
++			 &fsl_device, fsl_device.resource);
++	}
++#endif
++
++	return 0;
++}
++
++module_init(mx31_usb_init);
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index 9c396bb..08ae46b 100644
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -27,7 +27,7 @@ config ARCH_MX35
+     bool "MX35-based"
+         select CPU_V6
+         select CACHE_L2X0
+-        #select USB_ARCH_HAS_EHCI
++        select USB_ARCH_HAS_EHCI
+         select ARCH_HAS_EVTMON
+     help
+       This enables support for systems based on Freescale i.MX35
+@@ -105,11 +105,22 @@ config DMA_ZONE_SIZE
+ 	  This is the size in MB for the DMA zone. The DMA zone is used for
+ 	  dedicated memory for large contiguous video buffers
+ 
++choice
++        prompt "Select USB OTG transceiver"
++        depends on USB_ARCH_HAS_EHCI
++        default INTERN_UTMI
++
++config INTERN_UTMI
++	bool "Internal UTMI transceiver"
++	help
++	  Support for the internal USB transceiver on MXC platforms
++
+ config ISP1504_MXC
+ 	bool "ISP1504 transceiver support"
+-	depends on USB_ARCH_HAS_EHCI
++	#depends on USB_ARCH_HAS_EHCI
+ 	help
+ 	  Support for the ISP1504 USB transceiver on MXC platforms.
++endchoice
+ 
+ choice
+ 	prompt "Select serial USB transceiver"
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index f66e806..873d25f 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -18,6 +18,7 @@ endif
+ obj-$(CONFIG_ARCH_MX21) += dma_mx2.o
+ obj-$(CONFIG_ARCH_MX27) += dma_mx2.o usb_common.o
+ obj-$(CONFIG_ARCH_MX3) += dptc.o usb_common.o
++obj-$(CONFIG_ARCH_MX35) += usb_common.o serialxc.o
+ obj-$(CONFIG_ARCH_MXC91321) += dptc.o
+ obj-$(CONFIG_ARCH_MX37)     += usb_common.o utmixc.o
+ obj-$(CONFIG_MXC_DSP_BRINGUP) += dsp_bringup.o
+@@ -30,6 +31,8 @@ obj-$(CONFIG_ISP1504_MXC) += isp1504xc.o
+ 
+ obj-$(CONFIG_ISP1301_MXC) += isp1301xc.o
+ 
++obj-$(CONFIG_INTERN_UTMI) += utmixc.o
++
+ obj-$(CONFIG_MC13783_MXC) += mc13783_xc.o
+ 
+ ifneq ($(CONFIG_USB_EHCI_ARC_H1),)
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 5f3a61f..2079864 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -331,6 +331,37 @@ static void usbh2_set_ulpi_xcvr(void)
+ 	clk_disable(usb_clk);
+ }
+ 
++static void usbh2_set_serial_xcvr(void)
++{
++	pr_debug("%s: \n", __func__);
++
++	/* Stop then Reset */
++	UH2_USBCMD &= ~UCMD_RUN_STOP;
++	while (UH2_USBCMD & UCMD_RUN_STOP);
++
++	UH2_USBCMD |= UCMD_RESET;
++	while (UH2_USBCMD & UCMD_RESET);
++
++	USBCTRL &= ~(UCTRL_H2SIC_MASK); /* Disable bypass mode */
++	USBCTRL &= ~(UCTRL_H2PM);	/* Power Mask */
++	USBCTRL |= UCTRL_H2WIE |        /* Wakeup intr enable */
++	UCTRL_IP_PUE_DOWN |		/* ipp_pue_pulldwn_dpdm */
++	UCTRL_USBTE |			/* USBT is enabled */
++	UCTRL_H2DT;			/* Disable H2 TLL */
++
++	USBCTRL &= ~(UCTRL_PP);
++	UH2_PORTSC1 = (UH2_PORTSC1&(~PORTSC_PTS_MASK)) | PORTSC_PTS_SERIAL;
++
++	if (UH2_HCSPARAMS & HCSPARAMS_PPC)
++		UH2_PORTSC1 |= PORTSC_PORT_POWER;
++
++	/* Reset controller before set host mode */
++	UH2_USBCMD |= UCMD_RESET;
++	while (UH2_USBCMD & UCMD_RESET);
++
++	msleep(100);
++}
++
+ extern void usbh2_get_xcvr_power(struct device *dev);
+ extern void usbh2_put_xcvr_power(struct device *dev);
+ 
+@@ -383,7 +414,10 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 		xops->init(xops);
+ 
+ 	if (xops->xcvr_type == PORTSC_PTS_SERIAL) {
+-		usbh1_set_serial_xcvr();
++		if (machine_is_mx35_3ds())
++			usbh2_set_serial_xcvr();
++		else
++			usbh1_set_serial_xcvr();
+ 	} else if (xops->xcvr_type == PORTSC_PTS_ULPI) {
+ 		usbh2_set_ulpi_xcvr();
+ 	}
+@@ -543,20 +577,35 @@ static void otg_set_utmi_xcvr(void)
+ {
+ 	u32 tmp;
+ 
+-	USBCTRL &= ~UCTRL_OSIC_MASK;
+-	USBCTRL |= UCTRL_OUIE |	/* ULPI intr enable */
+-	    UCTRL_OWIE |	/* OTG wakeup intr enable */
+-	    UCTRL_OPM;		/* power mask */
++	/* Stop then Reset */
++	UOG_USBCMD &= ~UCMD_RUN_STOP;
++	while (UOG_USBCMD & UCMD_RUN_STOP);
++
++	UOG_USBCMD |= UCMD_RESET;
++	while ((UOG_USBCMD)&(UCMD_RESET));
++
++	USBCTRL &= ~UCTRL_OCE;        /* Disable OverCurrent signal */
++	USBCTRL &= ~UCTRL_PP;         /* USBOTG_PWR low active */
++	USBCTRL &= ~UCTRL_OCPOL;      /* OverCurrent Polarity is Low Active */
++	USBCTRL &= ~UCTRL_OPM;        /* OTG Power Mask */
++	USBCTRL |= UCTRL_OWIE; 	      /* ULPI intr enable */
+ 
+ 	/* set UTMI xcvr */
+ 	tmp = UOG_PORTSC1 & ~PORTSC_PTS_MASK;
+ 	tmp |= PORTSC_PTS_UTMI;
+ 	UOG_PORTSC1 = tmp;
+ 
++	/* Enable UTMI interface in PHY control Reg */
++	USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
++
++	if (UOG_HCSPARAMS & HCSPARAMS_PPC)
++		UOG_PORTSC1 |= PORTSC_PORT_POWER;
++
+ 	/* need to reset the controller here so that the ID pin
+ 	 * is correctly detected.
+ 	 */
+ 	UOG_USBCMD |= UCMD_RESET;
++	while ((UOG_USBCMD)&(UCMD_RESET));
+ 
+ 	/* allow controller to reset, and leave time for
+ 	 * the ULPI transceiver to reset too.
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 6fd435f..5fafae5 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -933,7 +933,7 @@ static int hub_probe(struct usb_interface *intf, const struct usb_device_id *id)
+ 	 * working because gadget uses the same root hub. We disable
+ 	 * this feature when OTG is selected.
+ 	 */
+-#ifdef CONFIG_USB_EHCI_ARC_OTG
++#if defined(CONFIG_PM) && defined(CONFIG_USB_EHCI_ARC_OTG)
+ 	hdev->autosuspend_disabled = 1;
+ #endif
+ 
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 35b34bf..b070326 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -47,7 +47,7 @@ config USB_EHCI_ARC_H1
+ 
+ config USB_EHCI_ARC_H2
+ 	bool "Support for Host2 port on ARC controller"
+-	depends on USB_EHCI_ARC	&& (ARCH_MX27 || ARCH_MX3)
++	depends on USB_EHCI_ARC	&& (ARCH_MX27 || ARCH_MX3 || ARCH_MX35)
+ 	---help---
+ 	  Enable support for the USB Host2 port.
+ 
+diff --git a/include/asm-arm/arch-mxc/arc_otg.h b/include/asm-arm/arch-mxc/arc_otg.h
+index cade952..9c7a810 100644
+--- a/include/asm-arm/arch-mxc/arc_otg.h
++++ b/include/asm-arm/arch-mxc/arc_otg.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -37,6 +37,7 @@
+ #define UOG_HWHOST		USBOTG_REG32(0x08)	/* Host h/w params */
+ #define UOG_HWTXBUF		USBOTG_REG32(0x10)	/* TX buffer h/w params */
+ #define UOG_HWRXBUF		USBOTG_REG32(0x14)	/* RX buffer h/w params */
++#define UOG_SBUSCFG             USBOTG_REG32(0x90)      /* System bus interface */
+ #define UOG_CAPLENGTH		USBOTG_REG16(0x100)	/* Capability register length */
+ #define UOG_HCIVERSION		USBOTG_REG16(0x102)	/* Host Interface version */
+ #define UOG_HCSPARAMS		USBOTG_REG32(0x104)	/* Host control structural params */
+@@ -134,6 +135,7 @@
+  */
+ #define USBCTRL			USBOTHER_REG(0x00)	/* USB Control register */
+ #define USB_OTG_MIRROR		USBOTHER_REG(0x04)	/* USB OTG mirror register */
++#define USB_PHY_CTR_FUNC        USBOTHER_REG(0x08)      /* OTG UTMI PHY Function Control register */
+ 
+ /*
+  * register bits
+@@ -146,6 +148,7 @@
+ #define PORTSC_PTS_ULPI			(2 << 30)	/* ULPI */
+ #define PORTSC_PTS_SERIAL		(3 << 30)	/* serial */
+ #define PORTSC_STS			(1 << 29)	/* serial xcvr select */
++#define PORTSC_PTW                      (1 << 28)       /* UTMI width */
+ #define PORTSC_PORT_POWER		(1 << 12)	/* port power */
+ #define PORTSC_LS_MASK			(3 << 10)	/* Line State mask */
+ #define PORTSC_LS_SE0			(0 << 10)	/* SE0     */
+@@ -240,17 +243,29 @@
+ #define UCTRL_H1SIC_SU6		(2 << 13)	/* single-ended/unidirectional 6 wire */
+ #define UCTRL_H1SIC_SB3		(3 << 13)	/* single-ended/bidirectional  3 wire */
+ 
++#define UCTRL_PP                (1 << 11)       /* The power polarity bit controls the polarity of the pwr output signal*/
+ #define UCTRL_H1WIE		(1 << 11)	/* HOST1 wakeup intr enable */
+ #define UCTRL_H1BPVAL_RXDP	(1 << 10)	/* HOST1 RxDp status in bypass mode */
++#define UCTRL_XCSO              (1 << 10)       /* Xcvr Clock Select for OTG port */
+ #define UCTRL_H1BPVAL_RXDM	(1 <<  9)	/* HOST1 RxDm status in bypass mode */
++#define UCTRL_XCSH2             (1 <<  9)       /* Xcvr Clock Select for Host port */
+ #define UCTRL_H1PM		(1 <<  8)	/* HOST1 power mask */
++#define UCTRL_IP_PULIDP         (1 <<  8)       /* Ipp_Puimpel_Pullup_Dp */
+ 
++#define UCTRL_IP_PUE_UP         (1 <<  7)       /* ipp_pue_pullup_dp */
++#define UCTRL_IP_PUE_DOWN       (1 <<  6)       /* ipp_pue_pulldwn_dpdm */
+ #define UCTRL_H2DT		(1 <<  5)	/* HOST2 TLL disabled */
+ #define UCTRL_H1DT		(1 <<  4)	/* HOST1 TLL disabled */
++#define UCTRL_USBTE             (1 <<  4)       /* USBT Transceiver enable */
++#define UCTRL_OCPOL             (1 <<  3)       /* OverCurrent Polarity */
++#define UCTRL_OCE               (1 <<  2)       /* OverCurrent Enable */
++#define UCTRL_H2OCS             (1 <<  1)       /* Host OverCurrent State */
+ #define UCTRL_BPE		(1 <<  0)	/* bypass mode enable */
+-#define UCTRL_OTD		(1 << 0)	/* OTG TLL Disable */
++#define UCTRL_OTD		(1 <<  0)	/* OTG TLL Disable */
++#define UCTRL_OOCS              (1 <<  0)       /* OTG OverCurrent State */
+ 
+ /* USBCMD */
++#define UCMD_RUN_STOP           (1 << 0)        /* controller run/stop */
+ #define UCMD_RESET		(1 << 1)	/* controller reset */
+ 
+ /* OTG_MIRROR */
+@@ -262,6 +277,9 @@
+ 						/* 1=high: Operate as B-device */
+ 						/* 0=low : Operate as A-device */
+ 
++/* USB_PHY_CTRL_FUNC */
++#define USB_UTMI_PHYCTRL_UTMI_ENABLE   0x01000000
++
+ /* ULPIVIEW register bits */
+ #define ULPIVW_WU		(1 << 31)	/* Wakeup */
+ #define ULPIVW_RUN		(1 << 30)	/* read/write run */
+@@ -276,4 +294,5 @@
+ #define ULPIVW_WDATA_MASK	0xFF	/* write data field */
+ #define ULPIVW_WDATA_SHIFT	0
+ 
++#define HCSPARAMS_PPC           (0x1<<4)        /* Port Power Control */
+ #endif
+-- 
+1.5.4.4
+

@@ -1,0 +1,74 @@
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_programmer.c	2009-08-20 13:05:33.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c	2009-08-25 11:42:46.000000000 +0100
+@@ -25,6 +25,7 @@
+ #include "LowLevelFuncSBW.h"
+ #include "JTAGfuncSBW.h"
+ 
++#define MSP430_SETTLE_DELAY_MS (1000)
+ 
+ msp430_programmer_t *msp430_programmer_state = NULL;
+ 
+@@ -240,7 +241,7 @@
+         struct msp430_i2c_data *data = i2c_get_clientdata(client);
+ 	struct ti_txt *txt;
+  	unsigned long flags;
+-	int i, status, txt_version, mcu_version;
++	int i, status, txt_version, mcu_version, tries;
+ 	char val[3];
+ 
+ 	if (!fw || !fw->size) {
+@@ -256,14 +257,35 @@
+ 	}
+ 
+ 	/* check msp430 firmware */
+-	if ((i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val) <= 0)
+-	    || val[0] != I2C_ID_VALUE) {
+-		printk("Couldn't read msp ID register\n");
+-		mcu_version = -1;
+-	} else if (i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val) > 0) {
+-		mcu_version = (val[1] << 8) | val[0];
+-	} else {
+-		mcu_version = -1;
++	tries =  0;
++	while (tries++ < 2) {
++		if ((i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val) <= 0)
++		    || val[0] != I2C_ID_VALUE) {
++			printk("Couldn't read msp ID register, resetting mcu\n");
++			mcu_version = -1;
++
++			msp430_request_gpio();
++			local_irq_save(flags);
++
++			msp430_start_charge_pump();
++			mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 0);
++			udelay(1000);
++			mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 1);
++
++			local_irq_restore(flags);
++			msp430_release_gpio();
++
++			/* allow the microcontroller time to settle */
++			msleep(MSP430_SETTLE_DELAY_MS);
++
++			continue;
++
++		} else if (i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val) > 0) {
++			mcu_version = (val[1] << 8) | val[0];
++			break;
++		} else {
++			mcu_version = -1;
++		}
+ 	}
+ 
+ 	/* is an upgrade needed? */
+@@ -320,7 +342,7 @@
+ 	 * settle down since it doesn't know whether it was just programmed
+ 	 * or just booted up
+ 	 */
+-	msleep(300);
++	msleep(MSP430_SETTLE_DELAY_MS);
+ 
+ 	/* verify firmware is running */
+ 	if (!i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val)

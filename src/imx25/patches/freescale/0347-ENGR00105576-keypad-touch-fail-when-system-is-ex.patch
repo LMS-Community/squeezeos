@@ -1,0 +1,137 @@
+From 83498cdafd8dd037b8a37f5aeb9d8648f98f0ed6 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+Date: Mon, 19 Jan 2009 11:51:58 -0600
+Subject: [PATCH] ENGR00105576 : keypad & touch fail when system is exiting from suspend state.
+
+On MX37, keypad and touch screen interrupt handlers use the I2C driver before
+the I2C driver has resumed. Fix this by stopping the ISR handler in driver
+suspend code and restart it when the driver is resumed.
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan@freescale.com>
+---
+ drivers/input/keyboard/mpr084.c     |   38 +++++++++++++++++++++++++++++++++
+ drivers/input/touchscreen/tsc2007.c |   40 ++++++++++++++++++++++++++++++++++-
+ 2 files changed, 77 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/input/keyboard/mpr084.c b/drivers/input/keyboard/mpr084.c
+index 3e0973b..8cbc713 100644
+--- a/drivers/input/keyboard/mpr084.c
++++ b/drivers/input/keyboard/mpr084.c
+@@ -206,6 +206,42 @@ static int mpr084ts_thread(void *v)
+ 	return 0;
+ }
+ 
++/*!
++ * This function puts the Keypad controller in low-power mode/state.
++ *
++ * @param   pdev  the device structure used to give information on Keypad
++ *                to suspend
++ * @param   state the power state the device is entering
++ *
++ * @return  The function always returns 0.
++ */
++static int mpr084_suspend(struct i2c_client *client, pm_message_t state)
++{
++	struct mpr084_data *d = i2c_get_clientdata(client);
++
++	if (!IS_ERR(d->tstask))
++		kthread_stop(d->tstask);
++
++	return 0;
++}
++
++/*!
++ * This function brings the Keypad controller back from low-power state.
++ *
++ * @param   pdev  the device structure used to give information on Keypad
++ *                to resume
++ *
++ * @return  The function always returns 0.
++ */
++static int mpr084_resume(struct i2c_client *client)
++{
++	struct mpr084_data *d = i2c_get_clientdata(client);
++
++	d->tstask = kthread_run(mpr084ts_thread, d, DRIVER_NAME "kpd");
++
++	return 0;
++}
++
+ static int mpr084_idev_open(struct input_dev *idev)
+ {
+ 	struct mpr084_data *d = input_get_drvdata(idev);
+@@ -441,6 +477,8 @@ static struct i2c_driver mpr084_driver = {
+ 		   },
+ 	.probe = mpr084_i2c_probe,
+ 	.remove = mpr084_i2c_remove,
++	.suspend = mpr084_suspend,
++	.resume = mpr084_resume,
+ 	.command = NULL,
+ 	.id_table = mpr084_id,
+ };
+diff --git a/drivers/input/touchscreen/tsc2007.c b/drivers/input/touchscreen/tsc2007.c
+index d47b4ec..0896b7e 100644
+--- a/drivers/input/touchscreen/tsc2007.c
++++ b/drivers/input/touchscreen/tsc2007.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -218,6 +218,42 @@ static int tsc2007ts_thread(void *v)
+ 	return 0;
+ }
+ 
++/*!
++ * This function puts the touch screen controller in low-power mode/state.
++ *
++ * @param   pdev  the device structure used to give information on touch screen
++ *                to suspend
++ * @param   state the power state the device is entering
++ *
++ * @return  The function always returns 0.
++ */
++static int tsc2007_suspend(struct i2c_client *client, pm_message_t state)
++{
++	struct tsc2007_data *d = i2c_get_clientdata(client);
++
++	if (!IS_ERR(d->tstask))
++		kthread_stop(d->tstask);
++
++	return 0;
++}
++
++/*!
++ * This function brings the touch screen controller back from low-power state.
++ *
++ * @param   pdev  the device structure used to give information on touch screen
++ *                to resume
++ *
++ * @return  The function always returns 0.
++ */
++static int tsc2007_resume(struct i2c_client *client)
++{
++	struct tsc2007_data *d = i2c_get_clientdata(client);
++
++	d->tstask = kthread_run(tsc2007ts_thread, d, DRIVER_NAME "tsd");
++
++	return 0;
++}
++
+ static int tsc2007_idev_open(struct input_dev *idev)
+ {
+ 	struct tsc2007_data *d = input_get_drvdata(idev);
+@@ -375,6 +411,8 @@ static struct i2c_driver tsc2007_driver = {
+ 		   },
+ 	.probe = tsc2007_i2c_probe,
+ 	.remove = tsc2007_i2c_remove,
++	.suspend = tsc2007_suspend,
++	.resume = tsc2007_resume,
+ 	.command = NULL,
+ 	.id_table = tsc2007_id,
+ };
+-- 
+1.5.4.4
+

@@ -1,0 +1,294 @@
+From c2feae47696eb86e47672d70735ade03bf00465a Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 18 Jul 2008 13:53:39 +0300
+Subject: [PATCH] UBI: remove pre-sqnum images support
+
+Before UBI got into mainline, there was a slight flash format
+change - we did not have sequence number support, then added it.
+
+We have carried full support of those ancient images till this
+moment. Now the support is removed, well, not fully removed.
+
+Now UBI will support only _clean_ old images, which were cleanly
+detached last time (just before kernel upgrade). This is most
+likely the case.
+
+But we will not support unclean ancient images. Surprisingly,
+this allows us to remove a big chunk of legacy code.
+
+And the same should be true for downgrading: clean images should
+downgrade fine, but unclean ones will not.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/debug.c     |    2 -
+ drivers/mtd/ubi/scan.c      |   87 ++++++++++++-------------------------------
+ drivers/mtd/ubi/scan.h      |    2 -
+ drivers/mtd/ubi/ubi-media.h |   17 +++-----
+ drivers/mtd/ubi/vtbl.c      |    1 -
+ 5 files changed, 30 insertions(+), 79 deletions(-)
+
+diff --git a/drivers/mtd/ubi/debug.c b/drivers/mtd/ubi/debug.c
+index 21e0d7d..c0ed60e 100644
+--- a/drivers/mtd/ubi/debug.c
++++ b/drivers/mtd/ubi/debug.c
+@@ -65,7 +65,6 @@ void ubi_dbg_dump_vid_hdr(const struct ubi_vid_hdr *vid_hdr)
+ 	printk(KERN_DEBUG "\tcompat    %d\n",   (int)vid_hdr->compat);
+ 	printk(KERN_DEBUG "\tvol_id    %d\n",   be32_to_cpu(vid_hdr->vol_id));
+ 	printk(KERN_DEBUG "\tlnum      %d\n",   be32_to_cpu(vid_hdr->lnum));
+-	printk(KERN_DEBUG "\tleb_ver   %u\n",   be32_to_cpu(vid_hdr->leb_ver));
+ 	printk(KERN_DEBUG "\tdata_size %d\n",   be32_to_cpu(vid_hdr->data_size));
+ 	printk(KERN_DEBUG "\tused_ebs  %d\n",   be32_to_cpu(vid_hdr->used_ebs));
+ 	printk(KERN_DEBUG "\tdata_pad  %d\n",   be32_to_cpu(vid_hdr->data_pad));
+@@ -172,7 +171,6 @@ void ubi_dbg_dump_seb(const struct ubi_scan_leb *seb, int type)
+ 		printk(KERN_DEBUG "\tlnum     %d\n", seb->lnum);
+ 		printk(KERN_DEBUG "\tscrub    %d\n", seb->scrub);
+ 		printk(KERN_DEBUG "\tsqnum    %llu\n", seb->sqnum);
+-		printk(KERN_DEBUG "\tleb_ver  %u\n", seb->leb_ver);
+ 	}
+ }
+ 
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 4dfbf27..967bb44 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -246,46 +246,21 @@ static int compare_lebs(struct ubi_device *ubi, const struct ubi_scan_leb *seb,
+ 	struct ubi_vid_hdr *vh = NULL;
+ 	unsigned long long sqnum2 = be64_to_cpu(vid_hdr->sqnum);
+ 
+-	if (seb->sqnum == 0 && sqnum2 == 0) {
+-		long long abs;
+-		long long v1 = seb->leb_ver, v2 = be32_to_cpu(vid_hdr->leb_ver);
+-
++	if (sqnum2 == seb->sqnum) {
+ 		/*
+-		 * UBI constantly increases the logical eraseblock version
+-		 * number and it can overflow. Thus, we have to bear in mind
+-		 * that versions that are close to %0xFFFFFFFF are less then
+-		 * versions that are close to %0.
+-		 *
+-		 * The UBI WL sub-system guarantees that the number of pending
+-		 * tasks is not greater then %0x7FFFFFFF. So, if the difference
+-		 * between any two versions is greater or equivalent to
+-		 * %0x7FFFFFFF, there was an overflow and the logical
+-		 * eraseblock with lower version is actually newer then the one
+-		 * with higher version.
+-		 *
+-		 * FIXME: but this is anyway obsolete and will be removed at
+-		 * some point.
++		 * This must be a really ancient UBI image which has been
++		 * created before sequence numbers support has been added. At
++		 * that times we used 32-bit LEB versions stored in logical
++		 * eraseblocks. That was before UBI got into mainline. We do not
++		 * support these images anymore. Well, those images will work
++		 * still work, but only if no unclean reboots happened.
+ 		 */
+-		dbg_bld("using old crappy leb_ver stuff");
+-
+-		if (v1 == v2) {
+-			ubi_err("PEB %d and PEB %d have the same version %lld",
+-				seb->pnum, pnum, v1);
+-			return -EINVAL;
+-		}
++		ubi_err("unsupported on-flash UBI format\n");
++		return -EINVAL;
++	}
+ 
+-		abs = v1 - v2;
+-		if (abs < 0)
+-			abs = -abs;
+-
+-		if (abs < 0x7FFFFFFF)
+-			/* Non-overflow situation */
+-			second_is_newer = (v2 > v1);
+-		else
+-			second_is_newer = (v2 < v1);
+-	} else
+-		/* Obviously the LEB with lower sequence counter is older */
+-		second_is_newer = sqnum2 > seb->sqnum;
++	/* Obviously the LEB with lower sequence counter is older */
++	second_is_newer = !!(sqnum2 > seb->sqnum);
+ 
+ 	/*
+ 	 * Now we know which copy is newer. If the copy flag of the PEB with
+@@ -293,7 +268,7 @@ static int compare_lebs(struct ubi_device *ubi, const struct ubi_scan_leb *seb,
+ 	 * check data CRC. For the second PEB we already have the VID header,
+ 	 * for the first one - we'll need to re-read it from flash.
+ 	 *
+-	 * FIXME: this may be optimized so that we wouldn't read twice.
++	 * Note: this may be optimized so that we wouldn't read twice.
+ 	 */
+ 
+ 	if (second_is_newer) {
+@@ -399,7 +374,6 @@ int ubi_scan_add_used(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 		      int bitflips)
+ {
+ 	int err, vol_id, lnum;
+-	uint32_t leb_ver;
+ 	unsigned long long sqnum;
+ 	struct ubi_scan_volume *sv;
+ 	struct ubi_scan_leb *seb;
+@@ -408,10 +382,9 @@ int ubi_scan_add_used(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 	vol_id = be32_to_cpu(vid_hdr->vol_id);
+ 	lnum = be32_to_cpu(vid_hdr->lnum);
+ 	sqnum = be64_to_cpu(vid_hdr->sqnum);
+-	leb_ver = be32_to_cpu(vid_hdr->leb_ver);
+ 
+-	dbg_bld("PEB %d, LEB %d:%d, EC %d, sqnum %llu, ver %u, bitflips %d",
+-		pnum, vol_id, lnum, ec, sqnum, leb_ver, bitflips);
++	dbg_bld("PEB %d, LEB %d:%d, EC %d, sqnum %llu, bitflips %d",
++		pnum, vol_id, lnum, ec, sqnum, bitflips);
+ 
+ 	sv = add_volume(si, vol_id, pnum, vid_hdr);
+ 	if (IS_ERR(sv) < 0)
+@@ -444,25 +417,20 @@ int ubi_scan_add_used(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 		 */
+ 
+ 		dbg_bld("this LEB already exists: PEB %d, sqnum %llu, "
+-			"LEB ver %u, EC %d", seb->pnum, seb->sqnum,
+-			seb->leb_ver, seb->ec);
+-
+-		/*
+-		 * Make sure that the logical eraseblocks have different
+-		 * versions. Otherwise the image is bad.
+-		 */
+-		if (seb->leb_ver == leb_ver && leb_ver != 0) {
+-			ubi_err("two LEBs with same version %u", leb_ver);
+-			ubi_dbg_dump_seb(seb, 0);
+-			ubi_dbg_dump_vid_hdr(vid_hdr);
+-			return -EINVAL;
+-		}
++			"EC %d", seb->pnum, seb->sqnum, seb->ec);
+ 
+ 		/*
+ 		 * Make sure that the logical eraseblocks have different
+ 		 * sequence numbers. Otherwise the image is bad.
+ 		 *
+-		 * FIXME: remove 'sqnum != 0' check when leb_ver is removed.
++		 * However, if the sequence number is zero, we assume it must
++		 * be an ancient UBI image from the era when UBI did not have
++		 * sequence numbers. We still can attach these images, unless
++		 * there is a need to distinguish between old and new
++		 * eraseblocks, in which case we'll refuse the image in
++		 * 'compare_lebs()'. In other words, we attach old clean
++		 * images, but refuse attaching old images with duplicated
++		 * logical eraseblocks because there was an unclean reboot.
+ 		 */
+ 		if (seb->sqnum == sqnum && sqnum != 0) {
+ 			ubi_err("two LEBs with same sequence number %llu",
+@@ -502,7 +470,6 @@ int ubi_scan_add_used(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 			seb->pnum = pnum;
+ 			seb->scrub = ((cmp_res & 2) || bitflips);
+ 			seb->sqnum = sqnum;
+-			seb->leb_ver = leb_ver;
+ 
+ 			if (sv->highest_lnum == lnum)
+ 				sv->last_data_size =
+@@ -539,7 +506,6 @@ int ubi_scan_add_used(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 	seb->lnum = lnum;
+ 	seb->sqnum = sqnum;
+ 	seb->scrub = bitflips;
+-	seb->leb_ver = leb_ver;
+ 
+ 	if (sv->highest_lnum <= lnum) {
+ 		sv->highest_lnum = lnum;
+@@ -1263,11 +1229,6 @@ static int paranoid_check_si(struct ubi_device *ubi, struct ubi_scan_info *si)
+ 				ubi_err("bad data_pad %d", sv->data_pad);
+ 				goto bad_vid_hdr;
+ 			}
+-
+-			if (seb->leb_ver != be32_to_cpu(vidh->leb_ver)) {
+-				ubi_err("bad leb_ver %u", seb->leb_ver);
+-				goto bad_vid_hdr;
+-			}
+ 		}
+ 
+ 		if (!last_seb)
+diff --git a/drivers/mtd/ubi/scan.h b/drivers/mtd/ubi/scan.h
+index 4e2e3cc..61df208 100644
+--- a/drivers/mtd/ubi/scan.h
++++ b/drivers/mtd/ubi/scan.h
+@@ -34,7 +34,6 @@
+  * @u: unions RB-tree or @list links
+  * @u.rb: link in the per-volume RB-tree of &struct ubi_scan_leb objects
+  * @u.list: link in one of the eraseblock lists
+- * @leb_ver: logical eraseblock version (obsolete)
+  *
+  * One object of this type is allocated for each physical eraseblock during
+  * scanning.
+@@ -49,7 +48,6 @@ struct ubi_scan_leb {
+ 		struct rb_node rb;
+ 		struct list_head list;
+ 	} u;
+-	uint32_t leb_ver;
+ };
+ 
+ /**
+diff --git a/drivers/mtd/ubi/ubi-media.h b/drivers/mtd/ubi/ubi-media.h
+index 26bb7af..2ad9404 100644
+--- a/drivers/mtd/ubi/ubi-media.h
++++ b/drivers/mtd/ubi/ubi-media.h
+@@ -168,16 +168,15 @@ struct ubi_ec_hdr {
+  *          %UBI_COMPAT_IGNORE, %UBI_COMPAT_PRESERVE, or %UBI_COMPAT_REJECT)
+  * @vol_id: ID of this volume
+  * @lnum: logical eraseblock number
+- * @leb_ver: version of this logical eraseblock (IMPORTANT: obsolete, to be
+- *           removed, kept only for not breaking older UBI users)
++ * @padding1: reserved for future, zeroes
+  * @data_size: how many bytes of data this logical eraseblock contains
+  * @used_ebs: total number of used logical eraseblocks in this volume
+  * @data_pad: how many bytes at the end of this physical eraseblock are not
+  *            used
+  * @data_crc: CRC checksum of the data stored in this logical eraseblock
+- * @padding1: reserved for future, zeroes
+- * @sqnum: sequence number
+  * @padding2: reserved for future, zeroes
++ * @sqnum: sequence number
++ * @padding3: reserved for future, zeroes
+  * @hdr_crc: volume identifier header CRC checksum
+  *
+  * The @sqnum is the value of the global sequence counter at the time when this
+@@ -225,10 +224,6 @@ struct ubi_ec_hdr {
+  * checksum is correct, this physical eraseblock is selected (P1). Otherwise
+  * the older one (P) is selected.
+  *
+- * Note, there is an obsolete @leb_ver field which was used instead of @sqnum
+- * in the past. But it is not used anymore and we keep it in order to be able
+- * to deal with old UBI images. It will be removed at some point.
+- *
+  * There are 2 sorts of volumes in UBI: user volumes and internal volumes.
+  * Internal volumes are not seen from outside and are used for various internal
+  * UBI purposes. In this implementation there is only one internal volume - the
+@@ -278,14 +273,14 @@ struct ubi_vid_hdr {
+ 	__u8    compat;
+ 	__be32  vol_id;
+ 	__be32  lnum;
+-	__be32  leb_ver; /* obsolete, to be removed, don't use */
++	__u8    padding1[4];
+ 	__be32  data_size;
+ 	__be32  used_ebs;
+ 	__be32  data_pad;
+ 	__be32  data_crc;
+-	__u8    padding1[4];
++	__u8    padding2[4];
+ 	__be64  sqnum;
+-	__u8    padding2[12];
++	__u8    padding3[12];
+ 	__be32  hdr_crc;
+ } __attribute__ ((packed));
+ 
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index f99a625..6fae9ee 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -338,7 +338,6 @@ retry:
+ 			     vid_hdr->data_pad = cpu_to_be32(0);
+ 	vid_hdr->lnum = cpu_to_be32(copy);
+ 	vid_hdr->sqnum = cpu_to_be64(++si->max_sqnum);
+-	vid_hdr->leb_ver = cpu_to_be32(old_seb ? old_seb->leb_ver + 1: 0);
+ 
+ 	/* The EC header is already there, write the VID header */
+ 	err = ubi_io_write_vid_hdr(ubi, new_seb->pnum, vid_hdr);
+-- 
+1.5.6.3
+

@@ -1,0 +1,315 @@
+From da5c2f47d04f4d73c4606dbc7699e200f850c6d6 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Tue, 10 Feb 2009 18:22:36 +0800
+Subject: [PATCH] ENGR00107453 MC13892 backlight can not work after resume
+
+1. Remove the operation to close backlight and LED in light driver suspend.
+2. Remove unncessory suspend flag checking in light driver.
+3. In mc13892 backlight driver, close backlight in suspend and set backlight
+after resume.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ drivers/mxc/pmic/mc13892/pmic_light.c    |   66 +-----------------------------
+ drivers/video/backlight/mxc_mc13892_bl.c |   53 ++++++++++++++++++++----
+ 2 files changed, 46 insertions(+), 73 deletions(-)
+
+diff --git a/drivers/mxc/pmic/mc13892/pmic_light.c b/drivers/mxc/pmic/mc13892/pmic_light.c
+index 9874982..cd07b71 100644
+--- a/drivers/mxc/pmic/mc13892/pmic_light.c
++++ b/drivers/mxc/pmic/mc13892/pmic_light.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -86,21 +86,6 @@
+ #define BIT_BP_GREEN_WID	2
+ #define BIT_BP_BLUE_WID		2
+ 
+-/*!
+- * Number of users waiting in suspendq
+- */
+-static int swait;
+-
+-/*!
+- * To indicate whether any of the light devices are suspending
+- */
+-static int suspend_flag;
+-
+-/*!
+- * The suspendq is used to block application calls
+- */
+-static wait_queue_head_t suspendq;
+-
+ int pmic_light_init_reg(void)
+ {
+ 	CHECK_ERROR(pmic_write_reg(REG_LED_CTL0, 0, PMIC_ALL_BITS));
+@@ -113,21 +98,11 @@ int pmic_light_init_reg(void)
+ 
+ static int pmic_light_suspend(struct platform_device *dev, pm_message_t state)
+ {
+-	suspend_flag = 1;
+-	/* switch off all leds and backlights */
+-	CHECK_ERROR(pmic_light_init_reg());
+-
+ 	return 0;
+ };
+ 
+ static int pmic_light_resume(struct platform_device *pdev)
+ {
+-	suspend_flag = 0;
+-	while (swait > 0) {
+-		swait--;
+-		wake_up_interruptible(&suspendq);
+-	}
+-
+ 	return 0;
+ };
+ 
+@@ -137,9 +112,6 @@ PMIC_STATUS mc13892_bklit_set_hi_current(enum lit_channel channel, int mode)
+ 	unsigned int value;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_MAIN:
+ 		value = BITFVAL(BIT_HC_MAIN, mode);
+@@ -168,9 +140,6 @@ PMIC_STATUS mc13892_bklit_get_hi_current(enum lit_channel channel, int *mode)
+ 	unsigned int mask;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_MAIN:
+ 		mask = BITFMASK(BIT_HC_MAIN);
+@@ -199,9 +168,6 @@ PMIC_STATUS mc13892_bklit_set_current(enum lit_channel channel,
+ 	unsigned int value;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	if (level > LIT_CURR_HI_42)
+ 		return PMIC_PARAMETER_ERROR;
+ 	else if (level >= LIT_CURR_HI_0) {
+@@ -255,9 +221,6 @@ PMIC_STATUS mc13892_bklit_get_current(enum lit_channel channel,
+ 	unsigned int mask = 0;
+ 	int reg, mode;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	CHECK_ERROR(mc13892_bklit_get_hi_current(channel, &mode));
+ 
+ 	switch (channel) {
+@@ -327,9 +290,6 @@ PMIC_STATUS mc13892_bklit_set_dutycycle(enum lit_channel channel,
+ 	unsigned int value;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_MAIN:
+ 		value = BITFVAL(BIT_DC_MAIN, dc);
+@@ -375,9 +335,6 @@ PMIC_STATUS mc13892_bklit_get_dutycycle(enum lit_channel channel,
+ 	int reg;
+ 	unsigned int reg_value = 0;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_MAIN:
+ 		mask = BITFMASK(BIT_DC_MAIN);
+@@ -417,9 +374,6 @@ PMIC_STATUS mc13892_bklit_set_ramp(enum lit_channel channel, int flag)
+ 	unsigned int value;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_MAIN:
+ 		value = BITFVAL(BIT_RP_MAIN, flag);
+@@ -463,9 +417,6 @@ PMIC_STATUS mc13892_bklit_get_ramp(enum lit_channel channel, int *flag)
+ 	unsigned int mask;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_MAIN:
+ 		mask = BITFMASK(BIT_RP_MAIN);
+@@ -505,9 +456,6 @@ PMIC_STATUS mc13892_bklit_set_blink_p(enum lit_channel channel, int period)
+ 	unsigned int value;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_RED:
+ 		value = BITFVAL(BIT_BP_RED, period);
+@@ -536,9 +484,6 @@ PMIC_STATUS mc13892_bklit_get_blink_p(enum lit_channel channel, int *period)
+ 	unsigned int mask;
+ 	int reg;
+ 
+-	if (suspend_flag == 1)
+-		return -EBUSY;
+-
+ 	switch (channel) {
+ 	case LIT_RED:
+ 		mask = BITFMASK(BIT_BP_RED);
+@@ -697,15 +642,6 @@ static int pmic_light_probe(struct platform_device *pdev)
+ 		return -ENODEV;
+ 	}
+ 
+-	init_waitqueue_head(&suspendq);
+-
+-	while (suspend_flag == 1) {
+-		swait++;
+-		/* Block if the device is suspended */
+-		if (wait_event_interruptible(suspendq, (suspend_flag == 0)))
+-			return -ERESTARTSYS;
+-	}
+-
+ 	pmic_light_init_reg();
+ 
+ 	pr_debug("PMIC Light successfully loaded\n");
+diff --git a/drivers/video/backlight/mxc_mc13892_bl.c b/drivers/video/backlight/mxc_mc13892_bl.c
+index 6d5ff14..57e8813 100644
+--- a/drivers/video/backlight/mxc_mc13892_bl.c
++++ b/drivers/video/backlight/mxc_mc13892_bl.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -31,28 +31,34 @@
+ 
+ #define MXC_INTENSITY_OFF 	0
+ 
+-static int intensity;
++struct mxcbl_dev_data {
++	int intensity;
++	int suspend;
++};
+ 
+ static int mxcbl_set_intensity(struct backlight_device *bd)
+ {
+ 	int brightness = bd->props.brightness;
++	struct mxcbl_dev_data *devdata = dev_get_drvdata(&bd->dev);
+ 
+ 	if (bd->props.power != FB_BLANK_UNBLANK)
+ 		brightness = 0;
+ 	if (bd->props.fb_blank != FB_BLANK_UNBLANK)
+ 		brightness = 0;
++	if (devdata->suspend)
++		brightness = 0;
+ 
+ 	brightness = brightness / 4;
+ 	mc13892_bklit_set_dutycycle(LIT_MAIN, brightness);
+-
+-	intensity = brightness;
++	devdata->intensity = brightness;
+ 
+ 	return 0;
+ }
+ 
+ static int mxcbl_get_intensity(struct backlight_device *bd)
+ {
+-	return intensity;
++	struct mxcbl_dev_data *devdata = dev_get_drvdata(&bd->dev);
++	return devdata->intensity;
+ }
+ 
+ static int mxcbl_check_fb(struct fb_info *info)
+@@ -71,17 +77,22 @@ static int __init mxcbl_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+ 	struct backlight_device *bd;
++	struct mxcbl_dev_data *devdata;
+ 
+ 	pr_debug("mc13892 backlight start probe\n");
+ 
++	devdata = kzalloc(sizeof(struct mxcbl_dev_data), GFP_KERNEL);
++	if (!devdata)
++		return -ENOMEM;
++
+ 	bl_ops.check_fb = mxcbl_check_fb;
+ 	bl_ops.get_brightness = mxcbl_get_intensity;
+ 	bl_ops.update_status = mxcbl_set_intensity;
+-	bd = backlight_device_register(pdev->dev.bus_id, &pdev->dev, NULL,
++	bd = backlight_device_register(pdev->dev.bus_id, &pdev->dev, devdata,
+ 				       &bl_ops);
+ 	if (IS_ERR(bd)) {
+ 		ret = PTR_ERR(bd);
+-		return ret;
++		goto err0;
+ 	}
+ 
+ 	platform_set_drvdata(pdev, bd);
+@@ -95,22 +106,48 @@ static int __init mxcbl_probe(struct platform_device *pdev)
+ 	bd->props.fb_blank = FB_BLANK_UNBLANK;
+ 	backlight_update_status(bd);
+ 	pr_debug("mc13892 backlight probed successfully\n");
+-
+ 	return 0;
++
++      err0:
++	kfree(devdata);
++	return ret;
+ }
+ 
+ static int mxcbl_remove(struct platform_device *pdev)
+ {
+ 	struct backlight_device *bd = platform_get_drvdata(pdev);
++	struct mxcbl_dev_data *devdata = dev_get_drvdata(&bd->dev);
+ 
++	kfree(devdata);
+ 	backlight_device_unregister(bd);
++	return 0;
++}
+ 
++static int mxcbl_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	struct backlight_device *bd = platform_get_drvdata(pdev);
++	struct mxcbl_dev_data *devdata = dev_get_drvdata(&bd->dev);
++
++	devdata->suspend = 1;
++	backlight_update_status(bd);
++	return 0;
++}
++
++static int mxcbl_resume(struct platform_device *pdev)
++{
++	struct backlight_device *bd = platform_get_drvdata(pdev);
++	struct mxcbl_dev_data *devdata = dev_get_drvdata(&bd->dev);
++
++	devdata->suspend = 0;
++	backlight_update_status(bd);
+ 	return 0;
+ }
+ 
+ static struct platform_driver mxcbl_driver = {
+ 	.probe = mxcbl_probe,
+ 	.remove = mxcbl_remove,
++	.suspend = mxcbl_suspend,
++	.resume = mxcbl_resume,
+ 	.driver = {
+ 		   .name = "mxc_mc13892_bl",
+ 		   },
+-- 
+1.5.4.4
+

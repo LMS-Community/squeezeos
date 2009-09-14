@@ -1,0 +1,38 @@
+From 0635afeb0d6fefd99f2d2fe2a2e8122fefa93a5d Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 19 Aug 2008 12:24:12 +0800
+Subject: [PATCH] ENGR00087863 SD can't be recognized after resuming the system
+
+The root cause is the buffer enable signal is not effective,
+enable the data buffer if there is a card in the slot.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack_gpio.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index b82e50a..399f486 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -448,6 +448,17 @@ void gpio_sdhc_active(int module)
+ 				  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
+ 		mxc_iomux_set_pad(MX31_PIN_SD1_DATA3,
+ 				  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
++
++		/*
++		 * Active the Buffer Enable Pin only if there is
++		 * a card in slot.
++		 * To fix the card voltage issue caused by
++		 * bi-directional chip TXB0108 on 3Stack
++		 */
++		if (mxc_get_gpio_datain(MX31_PIN_GPIO3_1))
++			mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 0);
++		else
++			mxc_set_gpio_dataout(MX31_PIN_GPIO3_0, 1);
+ 		break;
+ 	case 1:
+ 		mxc_request_iomux(MX31_PIN_PC_CD2_B, OUTPUTCONFIG_ALT1,
+-- 
+1.5.4.4
+

@@ -13,7 +13,8 @@
 # ${SYSLINUX_OPTS} - additional options to add to the syslinux file ';' delimited 
 
 do_bootimg[depends] += "dosfstools-native:do_populate_staging \
-                       syslinux-native:do_populate_staging \
+                       syslinux:do_populate_staging \
+                       syslinux-installer-native:do_populate_staging \
 		       mtools-native:do_populate_staging \
 		       cdrtools-native:do_populate_staging"
 
@@ -23,7 +24,7 @@ HDDDIR = "${S}/hdd/boot"
 ISODIR = "${S}/cd/isolinux"
 
 BOOTIMG_VOLUME_ID   ?= "oe"
-BOOTIMG_EXTRA_SPACE ?= "64"
+BOOTIMG_EXTRA_SPACE ?= "512"
 
 # Get the build_syslinux_cfg() function from the syslinux class
 
@@ -41,7 +42,11 @@ build_boot_bin() {
     		install -m 0644 ${INITRD} ${HDDDIR}/initrd
 	fi
 
-	install -m 444 ${STAGING_DATADIR_NATIVE}/syslinux/ldlinux.sys \
+	if [ -n "${ROOTFS}" ] && [ -s "${ROOTFS}" ]; then 
+    		install -m 0644 ${ROOTFS} ${HDDDIR}/rootfs.img
+	fi
+
+	install -m 444 ${STAGING_DATADIR}/syslinux/ldlinux.sys \
 	${HDDDIR}/ldlinux.sys
 
 	# Do a little math, bash style
@@ -49,12 +54,16 @@ build_boot_bin() {
 	BLOCKS=`du -bks ${HDDDIR} | cut -f 1`
 	SIZE=`expr $BLOCKS + ${BOOTIMG_EXTRA_SPACE}`	
 
-	mkdosfs -F 12 -n ${BOOTIMG_VOLUME_ID} -d ${HDDDIR} \
+	mkdosfs -n ${BOOTIMG_VOLUME_ID} -d ${HDDDIR} \
 	-C ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.hddimg $SIZE 
 
 	syslinux ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.hddimg
 	chmod 644 ${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.hddimg
 
+	cd ${DEPLOY_DIR_IMAGE}
+	rm -f ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.hddimg
+	ln -s ${IMAGE_NAME}.hddimg ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.hddimg
+	
 	#Create an ISO if we have an INITRD
 	if [ -n "${INITRD}" ] && [ -s "${INITRD}" ] && [ "${NOISO}" != "1" ] ; then
 		install -d ${ISODIR}
@@ -74,8 +83,12 @@ build_boot_bin() {
 
 		install -m 0644 ${INITRD} ${ISODIR}/initrd
 
+		if [ -n "${ROOTFS}" ] && [ -s "${ROOTFS}" ]; then 
+			install -m 0644 ${ROOTFS} ${ISODIR}/rootfs.img
+		fi
+
 		# And install the syslinux stuff 
-		cp ${STAGING_DATADIR_NATIVE}/syslinux/isolinux.bin \
+		cp ${STAGING_DATADIR}/syslinux/isolinux.bin \
 		${ISODIR}
 
 		mkisofs -V ${BOOTIMG_VOLUME_ID} \
@@ -83,6 +96,11 @@ build_boot_bin() {
 		-b isolinux/isolinux.bin -c isolinux/boot.cat -r \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		${S}/cd/
+
+		cd ${DEPLOY_DIR_IMAGE}
+		rm -f ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.iso
+		ln -s ${IMAGE_NAME}.iso ${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.iso
+
 	fi
 } 
 
@@ -92,3 +110,4 @@ python do_bootimg() {
 }
 
 addtask bootimg before do_build
+do_bootimg[nostamp] = "1"

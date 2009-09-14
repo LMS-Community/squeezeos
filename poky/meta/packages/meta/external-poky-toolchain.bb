@@ -1,13 +1,10 @@
 PROVIDES = "\
     linux-libc-headers \
-    virtual/arm-poky-linux-gnueabi-gcc \
-    virtual/arm-poky-linux-gnueabi-gcc-initial \
-    virtual/arm-poky-linux-binutils \
-    virtual/arm-poky-linux-libc-for-gcc \
-    virtual/i586-poky-linux-gcc \
-    virtual/i586-poky-linux-gcc-initial \
-    virtual/i586-poky-linux-binutils \
-    virtual/i586-poky-linux-libc-for-gcc \
+    virtual/${TARGET_PREFIX}gcc \
+    virtual/${TARGET_PREFIX}gcc-intermediate \
+    virtual/${TARGET_PREFIX}gcc-initial \
+    virtual/${TARGET_PREFIX}binutils \
+    virtual/${TARGET_PREFIX}libc-for-gcc \
     virtual/libc \
     virtual/libintl \
     virtual/libiconv \
@@ -28,9 +25,15 @@ do_stage() {
 	install -d ${DEPLOY_DIR}/ipk/
 	install -d ${STAGING_DIR}/pkgdata/
 	install -d ${STAGING_DIR_TARGET}/shlibs/
+	install -d ${STAGING_DIR_TARGET}/${layout_base_libdir}/
+	install -d ${STAGING_DIR_TARGET}/${layout_libdir}/
+	install -d ${STAGING_DIR_TARGET}/${layout_includedir}/
 
 	cp -ar ${prefix}/ipk/* ${DEPLOY_DIR}/ipk/
 	cp -ar ${prefix}/pkgdata/* ${STAGING_DIR}/pkgdata/
 	cp -ar ${prefix}/${TARGET_SYS}/shlibs/* ${STAGING_DIR_TARGET}/shlibs/
+	cp -ar ${prefix}/${TARGET_SYS}/lib/* ${STAGING_DIR_TARGET}/${layout_base_libdir}/
+	cp -ar ${prefix}/${TARGET_SYS}/usr/include/* ${STAGING_DIR_TARGET}/${layout_includedir}/
+	cp -ar ${prefix}/${TARGET_SYS}/usr/lib/* ${STAGING_DIR_TARGET}/${layout_libdir}/
 }
 

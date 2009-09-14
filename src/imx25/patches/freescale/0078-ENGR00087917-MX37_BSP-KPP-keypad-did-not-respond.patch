@@ -1,0 +1,223 @@
+From b1687322c347968212365752027445a2224f57d2 Mon Sep 17 00:00:00 2001
+From: Raj Rajasekaran <b10872@freescale.com>
+Date: Mon, 1 Sep 2008 21:23:47 -0500
+Subject: [PATCH] ENGR00087917:[MX37_BSP]KPP: keypad did not respond. 100%
+
+Modified GPIO pad settings for Keypad INT pin & Wakeup pin. Also changed
+MPR084 Keypad chip Configuration register settings.
+
+Signed-off-by: Raj Rajasekaran <b10872@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack_gpio.c |   12 ++++-
+ drivers/input/keyboard/mpr084.c       |  105 +++++++++++++++++++++++----------
+ 2 files changed, 85 insertions(+), 32 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index d7e6264..5f53955 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -636,14 +636,24 @@ void gpio_keypad_active(void)
+ 	mxc_request_iomux(MX37_PIN_DISP1_DAT18, IOMUX_CONFIG_ALT4);
+ 
+ 	/* fast slew rate */
+-	pad_val = (PAD_CTL_SRE_FAST | PAD_CTL_PKE_NONE | PAD_CTL_100K_PU);
++	pad_val = (PAD_CTL_SRE_FAST | PAD_CTL_DRV_HIGH | PAD_CTL_22K_PU | \
++	  PAD_CTL_ODE_OPENDRAIN_ENABLE | PAD_CTL_HYS_NONE | \
++	  PAD_CTL_DDR_INPUT_CMOS | PAD_CTL_DRV_VOT_LOW);
+ 	/*KEY_INT */
+ 	mxc_iomux_set_pad(MX37_PIN_GPIO1_3, pad_val);
++
++	/* fast slew rate */
++	pad_val = (PAD_CTL_SRE_FAST | PAD_CTL_DRV_HIGH | \
++  PAD_CTL_ODE_OPENDRAIN_NONE | PAD_CTL_HYS_NONE | \
++  PAD_CTL_DDR_INPUT_CMOS | PAD_CTL_DRV_VOT_LOW);
+ 	/*KEY_WAKE */
+ 	mxc_iomux_set_pad(MX37_PIN_DISP1_DAT18, pad_val);
+ 
+ 	mxc_set_gpio_direction(MX37_PIN_DISP1_DAT18, 0);
+ 	mxc_set_gpio_direction(MX37_PIN_GPIO1_3, 1);
++
++	/* drive initial value */
++	mxc_set_gpio_dataout(MX37_PIN_DISP1_DAT18, 1);
+ }
+ 
+ EXPORT_SYMBOL(gpio_keypad_active);
+diff --git a/drivers/input/keyboard/mpr084.c b/drivers/input/keyboard/mpr084.c
+index bc417ff..4dd6beb 100644
+--- a/drivers/input/keyboard/mpr084.c
++++ b/drivers/input/keyboard/mpr084.c
+@@ -113,6 +113,25 @@ err:
+ 	return -ENODEV;
+ }
+ 
++static int mpr084_write_register(struct mpr084_data *data,
++				 u8 regaddr, u8 regvalue)
++{
++	int ret = 0;
++	unsigned char msgbuf[2];
++
++	msgbuf[0] = regaddr;
++	msgbuf[1] = regvalue;
++	ret = i2c_master_send(data->client, msgbuf, 2);
++	if (ret < 0) {
++		printk(KERN_ERR "%s - Error in writing to I2C Register %d \n",
++		       __func__, regaddr);
++		return ret;
++	}
++
++	return ret;
++}
++
++
+ static irqreturn_t mpr084_keypadirq(int irq, void *v)
+ {
+ 	struct mpr084_data *d = v;
+@@ -139,6 +158,7 @@ static int mpr084ts_thread(void *v)
+ 		if (wait_for_completion_interruptible_timeout
+ 		    (&d->kpirq_completion, HZ) <= 0)
+ 			continue;
++
+ 		ret = mpr084_read_register(d, MPR084_FIFO_ADDR, &fifo);
+ 		if (ret < 0) {
+ 			printk(KERN_ERR
+@@ -251,52 +271,35 @@ static int mpr084_i2c_remove(struct i2c_client *client)
+ 	return 0;
+ }
+ 
+-static int mpr084_write_register(struct mpr084_data *data,
+-				 u8 regaddr, u8 regvalue)
+-{
+-	int ret = 0;
+-	unsigned char msgbuf[2];
+-
+-	msgbuf[0] = regaddr;
+-	msgbuf[1] = regvalue;
+-	ret = i2c_master_send(data->client, msgbuf, 2);
+-	if (ret < 0) {
+-		printk(KERN_ERR "%s - Error in writing to I2C Register %d \n",
+-		       __func__, regaddr);
+-		return ret;
+-	}
+-
+-	return ret;
+-}
+ static int mpr084_configure(struct mpr084_data *data)
+ {
+-	int ret = 0;
++	int ret = 0, regValue = 0;
+ 
+-	ret = mpr084_write_register(data, MPR084_TPC_ADDR, 0xbd);
++	ret = mpr084_write_register(data, MPR084_TPC_ADDR, 0x1d);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR1_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR1_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR2_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR2_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR3_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR3_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR4_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR4_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR5_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR5_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR6_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR6_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR7_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR7_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+-	ret = mpr084_write_register(data, MPR084_STR8_ADDR, 0x00);
++	ret = mpr084_write_register(data, MPR084_STR8_ADDR, 0x10);
+ 	if (ret < 0)
+ 		goto err;
+ 	/* channel enable mask: enable all */
+@@ -304,15 +307,42 @@ static int mpr084_configure(struct mpr084_data *data)
+ 	if (ret < 0)
+ 		goto err;
+ 	/*two conccurrent touch position allowed */
+-	ret = mpr084_write_register(data, MPR084_MNTP_ADDR, 0x07);
++	ret = mpr084_write_register(data, MPR084_MNTP_ADDR, 0x02);
+ 	if (ret < 0)
+ 		goto err;
++
++	/* master tick period*/
++	ret = mpr084_write_register(data, MPR084_MTC_ADDR, 0x05);
++	if (ret < 0)
++		goto err;
++
++
+ 	/*Sample period */
+-	ret = mpr084_write_register(data, MPR084_TASP_ADDR, 0x10);
++	ret = mpr084_write_register(data, MPR084_TASP_ADDR, 0x02);
++	if (ret < 0)
++		goto err;
++
++
++	/* disable sournder*/
++	ret = mpr084_write_register(data, MPR084_SC_ADDR, 0x00);
++	if (ret < 0)
++		goto err;
++
++	/* stuck key timeout */
++	ret = mpr084_write_register(data, MPR084_SKT_ADDR, 0x01);
+ 	if (ret < 0)
+ 		goto err;
++
+ 	/*enabled IRQEN, RUNE, IRQR */
+-	ret = mpr084_write_register(data, MPR084_CONFIG_ADDR, 0x17);
++	ret = mpr084_read_register(data, MPR084_CONFIG_ADDR, &regValue);
++	if (ret < 0) {
++		printk(KERN_ERR
++		  "%s: Err in reading keypad CONFIGADDR register \n\n",
++		   __func__);
++		goto err;
++	}
++	regValue |= 0x03;
++	ret = mpr084_write_register(data, MPR084_CONFIG_ADDR, regValue);
+ 	if (ret < 0)
+ 		goto err;
+ 	return ret;
+@@ -323,7 +353,7 @@ err:
+ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	struct mpr084_data *data;
+-	int err = 0, i = 0;
++	int err = 0, i = 0, regValue = 0;
+ 
+ 	data = kzalloc(sizeof(struct mpr084_data), GFP_KERNEL);
+ 	if (data == NULL)
+@@ -351,6 +381,19 @@ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_i
+ 		input_unregister_device(data->idev);
+ 		goto exit_free;
+ 	}
++#if DEBUG
++	for (i = MPR084_ADDR_MINI; i <= MPR084_ADDR_MAX; i++) {
++		err = mpr084_read_register(data, i, &regValue);
++		if (err < 0) {
++		   printk(KERN_ERR
++		  "%s: Err in reading keypad CONFIGADDR register \n\n",
++		   __func__);
++		   goto exit_free;
++	    }
++	    printk("MPR084 Register id: %d, Value:%d \n", i, regValue);
++
++	}
++#endif
+ 	memset(kpstatus, 0, sizeof(kpstatus));
+ 	printk(KERN_INFO "%s: Device Attached\n", __func__);
+ 	return 0;
+-- 
+1.5.4.4
+

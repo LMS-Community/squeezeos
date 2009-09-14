@@ -1,0 +1,35 @@
+From f153e86b1d661e7024aa0d43caba7f05698120ec Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 5 Dec 2008 13:18:34 +0800
+Subject: [PATCH] ENGR00101491 IPU:fix BUGON for timer pending issue.
+
+Shoud not schedule work queue after v4l output goto
+PAUSE state
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index 754c590..05259b5 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -357,10 +357,12 @@ static void mxc_v4l2out_timer_handler(unsigned long arg)
+ 		goto exit0;
+ 	}
+ 
+-      exit0:
+ 	spin_unlock_irqrestore(&g_lock, lock_flags);
+-
+ 	schedule_work(&vout->timer_work);
++	return;
++
++      exit0:
++	spin_unlock_irqrestore(&g_lock, lock_flags);
+ }
+ 
+ static irqreturn_t mxc_v4l2out_pp_in_irq_handler(int irq, void *dev_id)
+-- 
+1.5.4.4
+

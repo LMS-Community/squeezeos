@@ -1,0 +1,580 @@
+From c54f862736e893d9e9686a7e8e43e28a796a14d9 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 23 Jul 2008 20:42:21 +0800
+Subject: [PATCH] ENGR00082480 i.MX31 Broadcom GPS ioctrl support
+
+Add Broadcom GPS GPIO driver for i.MX31
+
+Signed-off-by: Jun Li <r65092@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |    9 +-
+ arch/arm/mach-mx3/mx3_3stack.c          |   25 +++
+ arch/arm/mach-mx3/mx3_3stack_gpio.c     |   49 ++++++
+ drivers/mxc/Kconfig                     |    1 +
+ drivers/mxc/Makefile                    |    1 +
+ drivers/mxc/gps_ioctrl/Kconfig          |   14 ++
+ drivers/mxc/gps_ioctrl/Makefile         |    5 +
+ drivers/mxc/gps_ioctrl/agpsgpiodev.c    |  289 +++++++++++++++++++++++++++++++
+ drivers/mxc/gps_ioctrl/agpsgpiodev.h    |   46 +++++
+ include/asm-arm/arch-mxc/mxc.h          |    5 +
+ 10 files changed, 443 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index 3a9a4fa..cf5f731 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Wed Jul 16 09:49:45 2008
++# Tue Jul 22 17:35:54 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -926,6 +926,7 @@ CONFIG_MXC_IPU_PRP_VF_SDC=m
+ CONFIG_MXC_IPU_PRP_ENC=m
+ CONFIG_VIDEO_MXC_OUTPUT=y
+ CONFIG_VIDEO_MXC_IPU_OUTPUT=y
++# CONFIG_VIDEO_MXC_IPUV1_WVGA_OUTPUT is not set
+ # CONFIG_VIDEO_MXC_OPL is not set
+ # CONFIG_VIDEO_CPIA is not set
+ # CONFIG_VIDEO_CPIA2 is not set
+@@ -1369,6 +1370,7 @@ CONFIG_MXC_DAM=y
+ #
+ CONFIG_MXC_SPI_PMIC_CORE=y
+ # CONFIG_MXC_I2C_MCU_PMIC_CORE is not set
++# CONFIG_MXC_I2C_PMIC_CORE is not set
+ CONFIG_MXC_PMIC=y
+ CONFIG_MXC_PMIC_CHARDEV=y
+ 
+@@ -1428,6 +1430,11 @@ CONFIG_MXC_HWEVENT=y
+ CONFIG_MXC_BLUETOOTH=m
+ 
+ #
++# Broadcom GPS ioctrl support
++#
++CONFIG_GPS_IOCTRL=m
++
++#
+ # File systems
+ #
+ CONFIG_EXT2_FS=y
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 7650b26..3f08ec8 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -865,6 +865,30 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
++#if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
++static struct mxc_gps_platform_data gps_data = {
++	.core_reg = "GPO3",
++	.analog_reg = "GPO1",
++};
++
++static struct platform_device mxc_gps_device = {
++	.name = "gps_ioctrl",
++	.id = -1,
++	.dev = {
++		.platform_data = &gps_data,
++		},
++};
++
++static void __init mxc_init_gps(void)
++{
++	(void)platform_device_register(&mxc_gps_device);
++}
++#else
++static void __init mxc_init_gps(void)
++{
++}
++#endif
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -909,6 +933,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_ide();
+ 	mxc_init_pata();
+ 	mxc_init_bluetooth();
++	mxc_init_gps();
+ 
+ 	/* set power off hook to mc13783 power off */
+ 	pm_power_off = pmic_power_off;
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index eb7e318..b82e50a 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -1236,3 +1236,52 @@ void gpio_usbotg_fs_inactive(void)
+ 
+ EXPORT_SYMBOL(gpio_usbotg_fs_inactive);
+ 
++/*!
++ * GPS GPIO
++ */
++void gpio_gps_active(void)
++{
++	/* POWER_EN */
++	mxc_request_iomux(MX31_PIN_SCLK0,
++			OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++	mxc_set_gpio_direction(MX31_PIN_SCLK0, 0);
++	/* Reset Pin */
++	mxc_request_iomux(MX31_PIN_DCD_DTE1,
++			OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++	mxc_set_gpio_direction(MX31_PIN_DCD_DTE1, 0);
++
++	mxc_set_gpio_dataout(MX31_PIN_SCLK0, 0);
++	mxc_set_gpio_dataout(MX31_PIN_DCD_DTE1, 0);
++
++	msleep(5);
++	mxc_set_gpio_dataout(MX31_PIN_DCD_DTE1, 1);
++	msleep(5);
++}
++
++EXPORT_SYMBOL(gpio_gps_active);
++
++int gpio_gps_access(int para)
++{
++	iomux_pin_name_t pin;
++	pin = (para & 0x1) ? MX31_PIN_SCLK0 : MX31_PIN_DCD_DTE1;
++
++	if (para & 0x4) /* Read GPIO */
++		return mxc_get_gpio_datain(pin);
++	else if (para & 0x2) /* Write GPIO */
++		mxc_set_gpio_dataout(pin, 1);
++	else
++		mxc_set_gpio_dataout(pin, 0);
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_gps_access);
++
++void gpio_gps_inactive(void)
++{
++	mxc_free_iomux(MX31_PIN_DCD_DTE1,
++			OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++	mxc_free_iomux(MX31_PIN_SCLK0,
++			OUTPUTCONFIG_GPIO, INPUTCONFIG_GPIO);
++}
++
++EXPORT_SYMBOL(gpio_gps_inactive);
+diff --git a/drivers/mxc/Kconfig b/drivers/mxc/Kconfig
+index 5d959e4..812a95e 100644
+--- a/drivers/mxc/Kconfig
++++ b/drivers/mxc/Kconfig
+@@ -27,6 +27,7 @@ source "drivers/mxc/hw_event/Kconfig"
+ source "drivers/mxc/vpu/Kconfig"
+ source "drivers/mxc/asrc/Kconfig"
+ source "drivers/mxc/bt/Kconfig"
++source "drivers/mxc/gps_ioctrl/Kconfig"
+ 
+ endmenu
+ 
+diff --git a/drivers/mxc/Makefile b/drivers/mxc/Makefile
+index 32dd4ac..e73d685 100644
+--- a/drivers/mxc/Makefile
++++ b/drivers/mxc/Makefile
+@@ -13,3 +13,4 @@ obj-$(CONFIG_MXC_VPU)                   += vpu/
+ obj-$(CONFIG_MXC_HWEVENT)               += hw_event/
+ obj-$(CONFIG_MXC_ASRC)                 += asrc/
+ obj-$(CONFIG_MXC_BLUETOOTH)		+= bt/
++obj-$(CONFIG_GPS_IOCTRL)		+= gps_ioctrl/
+diff --git a/drivers/mxc/gps_ioctrl/Kconfig b/drivers/mxc/gps_ioctrl/Kconfig
+new file mode 100644
+index 0000000..92dcb6a
+--- /dev/null
++++ b/drivers/mxc/gps_ioctrl/Kconfig
+@@ -0,0 +1,14 @@
++#
++# BROADCOM GPS configuration
++#
++
++menu "Broadcom GPS ioctrl support"
++
++config GPS_IOCTRL
++	tristate "GPS ioctrl support"
++	depends on MACH_MX31_3DS
++	default m
++	---help---
++	  Say Y to enable Broadcom GPS ioctrl on MXC platform.
++
++endmenu
+diff --git a/drivers/mxc/gps_ioctrl/Makefile b/drivers/mxc/gps_ioctrl/Makefile
+new file mode 100644
+index 0000000..42a48fe
+--- /dev/null
++++ b/drivers/mxc/gps_ioctrl/Makefile
+@@ -0,0 +1,5 @@
++#
++# Makefile for the GPIO device driver module.
++#
++obj-$(CONFIG_GPS_IOCTRL) 	+= gps_gpiodrv.o
++gps_gpiodrv-objs := agpsgpiodev.o
+diff --git a/drivers/mxc/gps_ioctrl/agpsgpiodev.c b/drivers/mxc/gps_ioctrl/agpsgpiodev.c
+new file mode 100644
+index 0000000..bd5bbc3
+--- /dev/null
++++ b/drivers/mxc/gps_ioctrl/agpsgpiodev.c
+@@ -0,0 +1,289 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file agpsgpiodev.c
++ *
++ * @brief Main file for GPIO kernel module. Contains driver entry/exit
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/fs.h>		/* Async notification */
++#include <asm/uaccess.h>	/* for get_user, put_user, access_ok */
++#include <linux/sched.h>	/* jiffies */
++#include <linux/poll.h>
++#include <linux/regulator/regulator.h>
++#include <linux/delay.h>
++#include <linux/platform_device.h>
++#include "agpsgpiodev.h"
++
++extern void gpio_gps_active(void);
++extern void gpio_gps_inactive(void);
++extern int gpio_gps_access(int para);
++
++struct mxc_gps_platform_data *mxc_gps_ioctrl_data;
++static int Device_Open;		/* Only allow a single user of this device */
++
++/* Write GPIO from user space */
++static int ioctl_writegpio(int arg)
++{
++
++	/* Bit 0 of arg identifies the GPIO pin to write:
++	   0 = GPS_RESET_GPIO, 1 = GPS_POWER_GPIO.
++	   Bit 1 of arg identifies the value to write (0 or 1). */
++
++	/* Bit 2 should be 0 to show this access is write */
++	return gpio_gps_access(arg & (~0x4));
++}
++
++/* Read GPIO from user space */
++static int ioctl_readgpio(int arg)
++{
++	/* Bit 0 of arg identifies the GPIO pin to read:
++	   0 = GPS_RESET_GPIO. 1 = GPS_POWER_GPIO
++	   Bit 2 should be 1 to show this access is read */
++	return gpio_gps_access(arg | 0x4);
++}
++
++static int device_open(struct inode *inode, struct file *fp)
++{
++	/* We don't want to talk to two processes at the same time. */
++	if (Device_Open) {
++		printk(KERN_DEBUG "device_open() - Returning EBUSY. \
++			Device already open... \n");
++		return -EBUSY;
++	}
++	Device_Open++;		/* BUGBUG : Not protected! */
++	try_module_get(THIS_MODULE);
++
++	return 0;
++}
++
++static int device_release(struct inode *inode, struct file *fp)
++{
++	/* We're now ready for our next caller */
++	Device_Open--;
++	module_put(THIS_MODULE);
++
++	return 0;
++}
++
++static int device_ioctl(struct inode *inode, struct file *fp,
++			unsigned int cmd, unsigned long arg)
++{
++	int err = 0;
++
++	/* Extract the type and number bitfields, and don't decode wrong cmds.
++	   Return ENOTTY (inappropriate ioctl) before access_ok() */
++	if (_IOC_TYPE(cmd) != MAJOR_NUM) {
++		printk(KERN_ERR
++		       "device_ioctl() - Error! IOC_TYPE = %d. Expected %d\n",
++		       _IOC_TYPE(cmd), MAJOR_NUM);
++		return -ENOTTY;
++	}
++	if (_IOC_NR(cmd) > IOCTL_MAXNUMBER) {
++		printk(KERN_ERR
++		       "device_ioctl() - Error!"
++		       "IOC_NR = %d greater than max supported(%d)\n",
++		       _IOC_NR(cmd), IOCTL_MAXNUMBER);
++		return -ENOTTY;
++	}
++
++	/* The direction is a bitmask, and VERIFY_WRITE catches R/W transfers.
++	   `Type' is user-oriented, while access_ok is kernel-oriented, so the
++	   concept of "read" and "write" is reversed. I think this is primarily
++	   for good coding practice. You can easily do any kind of R/W access
++	   without these checks and IOCTL code can be implemented "randomly"! */
++	if (_IOC_DIR(cmd) & _IOC_READ)
++		err =
++		    !access_ok(VERIFY_WRITE, (void __user *)arg,
++			       _IOC_SIZE(cmd));
++
++	else if (_IOC_DIR(cmd) & _IOC_WRITE)
++		err =
++		    !access_ok(VERIFY_READ, (void __user *)arg, _IOC_SIZE(cmd));
++	if (err) {
++		printk(KERN_ERR
++		       "device_ioctl() - Error! User arg not valid"
++		       "for selected access (R/W/RW). Cmd %d\n",
++		       _IOC_TYPE(cmd));
++		return -EFAULT;
++	}
++
++	/* Note: Read and writing data to user buffer can be done using regular
++	   pointer stuff but we may also use get_user() or put_user() */
++
++	/* Cmd and arg has been verified... */
++	switch (cmd) {
++	case IOCTL_WRITEGPIO:
++		return ioctl_writegpio((int)arg);
++	case IOCTL_READGPIO:
++		return ioctl_readgpio((int)arg);
++	default:
++		printk(KERN_ERR "device_ioctl() - Invalid IOCTL (0x%x)\n", cmd);
++		return EINVAL;
++	}
++	return 0;
++}
++
++struct file_operations Fops = {
++	.ioctl = device_ioctl,
++	.open = device_open,
++	.release = device_release,
++};
++
++/* Initialize the module - Register the character device */
++int init_chrdev(void)
++{
++	/* NOTE : THIS IS THE OLD-SCHOOL WAY TO REGISTER A CHAR DEVICE.
++	   THE RECOMMENDED APPROACH IS TO USE cdev_alloc, cdev_init, cdev_add,
++	   cdev_del. REFER TO CHAPTER 3 IN THE DEVICE DRIVER BOOK! */
++
++	/* Register the character device (at least try) */
++	int ret_val =
++	    register_chrdev(MAJOR_NUM, AGPSGPIO_DEVICE_FILE_NAME, &Fops);
++
++	/* Negative values signify an error */
++	if (ret_val < 0) {
++		printk(KERN_ERR
++		       "init_chrdev() - Failed to register"
++		       "char device (error %d)\n", ret_val);
++		return ret_val;
++	}
++
++	return 0;
++}
++
++/* Cleanup - unregister the appropriate file from /proc. */
++void cleanup_chrdev(void)
++{
++	/* Unregister the device
++	   int ret = unregister_chrdev(MAJOR_NUM, AGPSGPIO_DEVICE_FILE_NAME);
++	   change for 2.6.24 since its declarationis as below:
++	   extern void unregister_chrdev(unsigned int, const char *); */
++	unregister_chrdev(MAJOR_NUM, AGPSGPIO_DEVICE_FILE_NAME);
++}
++
++/*!
++ * This function initializes the driver in terms of memory of the soundcard
++ * and some basic HW clock settings.
++ *
++ * @return              0 on success, -1 otherwise.
++ */
++static int __init gps_ioctrl_probe(struct platform_device *pdev)
++{
++	struct regulator *gps_regu;
++
++	mxc_gps_ioctrl_data =
++	    (struct mxc_gps_platform_data *)pdev->dev.platform_data;
++
++	/* open GPS GPO3 1v8 for GL gps support */
++	if (mxc_gps_ioctrl_data->core_reg != NULL) {
++		gps_regu =
++		    regulator_get(&(pdev->dev), mxc_gps_ioctrl_data->core_reg);
++		regulator_enable(gps_regu);
++		regulator_put(gps_regu, &(pdev->dev));
++	}
++	/* open GPS GPO1 2v8 for GL gps support */
++	if (mxc_gps_ioctrl_data->analog_reg != NULL) {
++		gps_regu =
++		    regulator_get(&(pdev->dev),
++				  mxc_gps_ioctrl_data->analog_reg);
++		regulator_enable(gps_regu);
++		regulator_put(gps_regu, &(pdev->dev));
++	}
++	gpio_gps_active();
++
++	/* Register character device */
++	init_chrdev();
++	return 0;
++}
++
++static int gps_ioctrl_remove(struct platform_device *pdev)
++{
++	struct regulator *gps_regu;
++
++	mxc_gps_ioctrl_data =
++	    (struct mxc_gps_platform_data *)pdev->dev.platform_data;
++
++	/* Character device cleanup.. */
++	cleanup_chrdev();
++	gpio_gps_inactive();
++
++	/* close GPS GPO3 1v8 for GL gps */
++	if (mxc_gps_ioctrl_data->core_reg != NULL) {
++		gps_regu =
++		    regulator_get(&(pdev->dev), mxc_gps_ioctrl_data->core_reg);
++		regulator_disable(gps_regu);
++		regulator_put(gps_regu, &(pdev->dev));
++	}
++	/* close GPS GPO1 2v8 for GL gps */
++	if (mxc_gps_ioctrl_data->analog_reg != NULL) {
++		gps_regu =
++		    regulator_get(&(pdev->dev),
++				  mxc_gps_ioctrl_data->analog_reg);
++		regulator_disable(gps_regu);
++		regulator_put(gps_regu, &(pdev->dev));
++	}
++
++	return 0;
++}
++
++static int gps_ioctrl_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	/* PowerEn toggle off */
++	ioctl_writegpio(0x1);
++	return 0;
++}
++
++static int gps_ioctrl_resume(struct platform_device *pdev)
++{
++	/* PowerEn pull up */
++	ioctl_writegpio(0x3);
++	return 0;
++}
++
++static struct platform_driver gps_ioctrl_driver = {
++	.probe = gps_ioctrl_probe,
++	.remove = gps_ioctrl_remove,
++	.suspend = gps_ioctrl_suspend,
++	.resume = gps_ioctrl_resume,
++	.driver = {
++		   .name = "gps_ioctrl",
++		   },
++};
++
++/*!
++ * Entry point for GPS ioctrl module.
++ *
++ */
++static int __init gps_ioctrl_init(void)
++{
++	return platform_driver_register(&gps_ioctrl_driver);
++}
++
++/*!
++ * unloading module.
++ *
++ */
++static void __exit gps_ioctrl_exit(void)
++{
++	platform_driver_unregister(&gps_ioctrl_driver);
++}
++
++module_init(gps_ioctrl_init);
++module_exit(gps_ioctrl_exit);
++MODULE_DESCRIPTION("GPIO DEVICE DRIVER");
++MODULE_AUTHOR("Freescale Semiconductor");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/mxc/gps_ioctrl/agpsgpiodev.h b/drivers/mxc/gps_ioctrl/agpsgpiodev.h
+new file mode 100644
+index 0000000..f0d0d01
+--- /dev/null
++++ b/drivers/mxc/gps_ioctrl/agpsgpiodev.h
+@@ -0,0 +1,46 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file agpsgpiodev.h
++ *
++ * @brief head file of Simple character device interface for AGPS kernel module.
++ *
++ * @ingroup
++ */
++
++#ifndef AGPSGPIODEV_H
++#define AGPSGPIODEV_H
++
++#include <linux/ioctl.h>
++
++#define USE_BLOCKING		/* Test driver with blocking calls */
++#undef USE_FASYNC		/* Test driver with async notification */
++
++/* The major device number. We can't rely on dynamic registration any more
++   because ioctls need to know it */
++#define MAJOR_NUM 100
++
++#define IOCTL_WRITEGPIO   _IOWR(MAJOR_NUM, 1, char *)
++#define IOCTL_READGPIO    _IOR(MAJOR_NUM, 2, char *)
++#define IOCTL_MAXNUMBER   2
++
++/* The name of the device file */
++#define AGPSGPIO_DEVICE_FILE_NAME "agpsgpio"
++
++/* Exported prototypes */
++int init_chrdev(void);
++void cleanup_chrdev(void);
++void wakeup(void);
++
++#endif
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 5b54dc5..c85869f 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -173,6 +173,11 @@ struct mxc_keyp_platform_data {
+ 	void (*inactive) (void);
+ };
+ 
++struct mxc_gps_platform_data {
++	char *core_reg;
++	char *analog_reg;
++};
++
+ extern void mxc_wd_reset(void);
+ extern void mxc_kick_wd(void);
+ unsigned long board_get_ckih_rate(void);
+-- 
+1.5.4.4
+

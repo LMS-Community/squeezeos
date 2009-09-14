@@ -1,0 +1,49 @@
+From 4bfaf52b773d3c3e619ff8df21a0a2b9e8daa9e6 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 15 Mar 2009 17:20:22 +0200
+Subject: [PATCH] UBIFS: fix bogus assertion
+
+Empty journal head LEBs are accounted as taken empty as well, so
+the GC LEB does not have to be the only taken empty LEB when
+nounting/remounting.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   12 ++++++++----
+ 1 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index ebd5199..60c9aed 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1316,11 +1316,15 @@ static int mount_ubifs(struct ubifs_info *c)
+ 		else {
+ 			c->need_recovery = 0;
+ 			ubifs_msg("recovery completed");
+-			/* GC LEB has to be empty and taken at this point */
+-			ubifs_assert(c->lst.taken_empty_lebs == 1);
++			/*
++			 * GC LEB has to be empty and taken at this point. But
++			 * the journal head LEBs may also be accounted as
++			 * "empty taken" if they are empty.
++			 */
++			ubifs_assert(c->lst.taken_empty_lebs > 0);
+ 		}
+ 	} else
+-		ubifs_assert(c->lst.taken_empty_lebs == 1);
++		ubifs_assert(c->lst.taken_empty_lebs > 0);
+ 
+ 	err = dbg_check_filesystem(c);
+ 	if (err)
+@@ -1773,7 +1777,7 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
+ 		c->bu.buf = NULL;
+ 	}
+ 
+-	ubifs_assert(c->lst.taken_empty_lebs == 1);
++	ubifs_assert(c->lst.taken_empty_lebs > 0);
+ 	return 0;
+ }
+ 
+-- 
+1.5.4.3
+

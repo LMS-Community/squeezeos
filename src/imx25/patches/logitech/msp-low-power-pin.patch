@@ -1,0 +1,86 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/board-mx25_baby.h
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/board-mx25_baby.h	2009-08-19 22:48:05.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/board-mx25_baby.h	2009-08-19 22:49:45.000000000 +0100
+@@ -93,6 +93,7 @@
+ #define BABY_LCD_SPI_CLK_PB2	MX25_PIN_CSPI1_SS1
+ #define BABY_LCD_RESET          MX25_PIN_POWER_FAIL
+ #define BABY_SLCDC_CS           MX25_PIN_CSPI1_SS0
++#define BABY_BACKLIGHT_LOW_POWER MX25_PIN_D11
+ 
+ /* WLAN PINS */
+ #define BABY_WLAN_POWER_DOWN_BAR	MX25_PIN_CSI_D9
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby.c	2009-08-19 22:48:05.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby.c	2009-08-19 22:49:54.000000000 +0100
+@@ -242,12 +242,22 @@
+ #endif
+ 
+ #if defined(CONFIG_BACKLIGHT_MXC)
++static struct resource mxcbl_resources[] = {
++	[0] = {
++		.start = BABY_BACKLIGHT_LOW_POWER,
++		.end = BABY_BACKLIGHT_LOW_POWER,
++		.flags = IORESOURCE_MEM,
++	},
++};
++
+ static struct platform_device mxcbl_devices[] = {
+ #if defined(CONFIG_BACKLIGHT_MXC_LCDC) || \
+     defined(CONFIG_BACKLIGHT_MXC_LCDC_MODULE)
+ 	{
+ 	 .name = "mxc_lcdc_bl",
+ 	 .id = 0,
++	 .num_resources = ARRAY_SIZE(mxcbl_resources),
++	 .resource = mxcbl_resources,
+ 	 },
+ #endif
+ };
+Index: linux-2.6.26/drivers/video/backlight/mxc_lcdc_bl.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/backlight/mxc_lcdc_bl.c	2009-08-19 22:47:45.000000000 +0100
++++ linux-2.6.26/drivers/video/backlight/mxc_lcdc_bl.c	2009-08-19 22:49:35.000000000 +0100
+@@ -35,6 +35,8 @@
+ #include <linux/backlight.h>
+ #include <linux/clk.h>
+ 
++#include <asm/arch/gpio.h>
++
+ #define MXC_MAX_INTENSITY 	255
+ #define MXC_DEFAULT_INTENSITY 	127
+ #define MXC_INTENSITY_OFF 	0
+@@ -44,6 +46,7 @@
+ struct mxcbl_dev_data {
+ 	struct clk *clk;
+ 	int intensity;
++	unsigned long low_power_gpio;
+ };
+ 
+ static int mxcbl_send_intensity(struct backlight_device *bd)
+@@ -51,7 +54,7 @@
+ 	int intensity = bd->props.brightness;
+ 	struct mxcbl_dev_data *devdata = dev_get_drvdata(&bd->dev);
+ 
+-	if (bd->props.power != FB_BLANK_UNBLANK)
++	if (bd->props.power == 4)
+ 		intensity = 0;
+ 	if (bd->props.fb_blank != FB_BLANK_UNBLANK)
+ 		intensity = 0;
+@@ -62,6 +65,8 @@
+ 	/* PWM contrast control register */
+ 	mx2fb_set_brightness(intensity);
+ 
++	mxc_set_gpio_dataout(devdata->low_power_gpio, bd->props.power != 0);
++
+ 	if ((devdata->intensity != 0) && (intensity == 0))
+ 		clk_disable(devdata->clk);
+ 
+@@ -100,6 +105,7 @@
+ 		return -ENOMEM;
+ 
+ 	devdata->clk = clk_get(NULL, "lcdc_clk");
++	devdata->low_power_gpio = platform_get_resource(pdev, IORESOURCE_MEM, 0)->start;
+ 
+ 	bd = backlight_device_register(pdev->dev.bus_id, &pdev->dev, devdata,
+ 				       &mxcbl_ops);

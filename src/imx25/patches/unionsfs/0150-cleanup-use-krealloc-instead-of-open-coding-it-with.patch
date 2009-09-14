@@ -1,0 +1,145 @@
+From f86b2027689750de8f230ab47fd87de7227add40 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 24 May 2007 00:08:03 -0400
+Subject: [PATCH] cleanup: use krealloc instead of open-coding it with kmalloc/kfree/memcpy
+
+---
+ fs/unionfs/lookup.c |   23 ++++++---------------
+ fs/unionfs/super.c  |   54 +++++++++++++-------------------------------------
+ 2 files changed, 21 insertions(+), 56 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index ffdc553..4dec675 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -461,9 +461,9 @@ void free_dentry_private_data(struct unionfs_dentry_info *udi)
+ /* allocate new dentry private data, free old one if necessary */
+ int new_dentry_private_data(struct dentry *dentry)
+ {
+-	int new_size;
+ 	int size;
+ 	struct unionfs_dentry_info *info = UNIONFS_D(dentry);
++	void *p;
+ 	int unlock_on_err = 0;
+ 
+ 	spin_lock(&dentry->d_lock);
+@@ -471,7 +471,6 @@ int new_dentry_private_data(struct dentry *dentry)
+ 		dentry->d_fsdata = kmem_cache_alloc(unionfs_dentry_cachep,
+ 						    GFP_ATOMIC);
+ 		info = UNIONFS_D(dentry);
+-
+ 		if (!info)
+ 			goto out;
+ 
+@@ -480,9 +479,7 @@ int new_dentry_private_data(struct dentry *dentry)
+ 		unlock_on_err = 1;
+ 
+ 		info->lower_paths = NULL;
+-		size = 0;
+-	} else
+-		size = sizeof(struct path) * info->bcount;
++	}
+ 
+ 	info->bstart = -1;
+ 	info->bend = -1;
+@@ -491,19 +488,13 @@ int new_dentry_private_data(struct dentry *dentry)
+ 	atomic_set(&info->generation,
+ 		   atomic_read(&UNIONFS_SB(dentry->d_sb)->generation));
+ 
+-	new_size = sizeof(struct path) * sbmax(dentry->d_sb);
+-
+-	/* Don't reallocate when we already have enough space. */
+-	if (new_size > size) {
+-		void *p;
++	size = sizeof(struct path) * sbmax(dentry->d_sb);
+ 
+-		p = krealloc(info->lower_paths, new_size, GFP_ATOMIC);
+-		if (!p)
+-			goto out_free;
++	p = krealloc(info->lower_paths, size, GFP_ATOMIC);
++	if (!p)
++		goto out_free;
+ 
+-		info->lower_paths = p;
+-		size = new_size;
+-	}
++	info->lower_paths = p;
+ 	memset(info->lower_paths, 0, size);
+ 
+ 	spin_unlock(&dentry->d_lock);
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 4b4233c..86d6327 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -432,6 +432,7 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ 	struct inode **new_lower_inodes = NULL;
+ 	int new_high_branch_id;	/* new high branch ID */
+ 	int old_ibstart, old_ibend;
++	int size;		/* memory allocation size, temp var */
+ 
+ 	unionfs_write_lock(sb);
+ 
+@@ -646,47 +647,20 @@ out_no_change:
+ 		goto out_release;
+ 	}
+ 
+-	/*
+-	 * Allocate space for actual pointers, if needed.  By the time we
+-	 * finish this block of code, new_branches and new_lower_paths will
+-	 * have the correct size.  None of this code below would be needed
+-	 * if the kernel had a realloc() function, at least one capable of
+-	 * shrinking/truncating an allocation's size (hint, hint).
+-	 */
+-	if (new_branches < max_branches) {
+-
+-		/* allocate space for new pointers to hidden dentry */
+-		new_data = kcalloc(new_branches,
+-				   sizeof(struct unionfs_data), GFP_KERNEL);
+-		if (!new_data) {
+-			err = -ENOMEM;
+-			goto out_release;
+-		}
+-		/* allocate space for new pointers to lower paths */
+-		new_lower_paths = kcalloc(new_branches,
+-					  sizeof(struct path), GFP_KERNEL);
+-		if (!new_lower_paths) {
+-			err = -ENOMEM;
+-			goto out_release;
+-		}
+-		/* copy current info into new placeholders */
+-		memcpy(new_data, tmp_data,
+-		       new_branches * sizeof(struct unionfs_data));
+-		memcpy(new_lower_paths, tmp_lower_paths,
+-		       new_branches * sizeof(struct path));
+-		/*
+-		 * Since we already hold various refcnts on the objects, we
+-		 * don't need to redo it here.  Just free the older memory
+-		 * and re-point the pointers.
+-		 */
+-		kfree(tmp_data);
+-		kfree(tmp_lower_paths);
+-		/* no need to nullify pointers here (they get reused below) */
+-	} else {
+-		/* number of branches didn't change, no need to re-alloc */
+-		new_data = tmp_data;
+-		new_lower_paths = tmp_lower_paths;
++	/* (re)allocate space for new pointers to hidden dentry */
++	size = new_branches * sizeof(struct unionfs_data);
++	new_data = krealloc(tmp_data, size, GFP_KERNEL);
++	if (!new_data) {
++		err = -ENOMEM;
++		goto out_release;
+ 	}
++	/* allocate space for new pointers to lower paths */
++	size = new_branches * sizeof(struct path);
++	new_lower_paths = krealloc(tmp_lower_paths, size, GFP_KERNEL);
++	if (!new_lower_paths) {
++		err = -ENOMEM;
++		goto out_release;
++ 	}
+ 	/* allocate space for new pointers to lower inodes */
+ 	new_lower_inodes = kcalloc(new_branches,
+ 				   sizeof(struct inode *), GFP_KERNEL);
+-- 
+1.5.4.3
+

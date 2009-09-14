@@ -1,0 +1,29 @@
+From 1a7182cf746942bf4b24bc8e5f37f2015f307e9e Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 18 Sep 2008 21:49:47 -0400
+Subject: [PATCH] Unionfs: return EINVAL in setattr on error
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index a33171d..36ceaaf 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -914,7 +914,10 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 		ia->ia_valid &= ~ATTR_MODE;
+ 
+ 	lower_dentry = unionfs_lower_dentry(dentry);
+-	BUG_ON(!lower_dentry);	/* should never happen after above revalidate */
++	if (!lower_dentry) { /* should never happen after above revalidate */
++		err = -EINVAL;
++		goto out;
++	}
+ 	lower_inode = unionfs_lower_inode(inode);
+ 
+ 	/* check if user has permission to change lower inode */
+-- 
+1.5.4.3
+

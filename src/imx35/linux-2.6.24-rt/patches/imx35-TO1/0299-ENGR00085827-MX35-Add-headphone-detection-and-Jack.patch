@@ -1,0 +1,336 @@
+From aa1a956e2346b9b6a4c61f8642ddb0a6eb73ea7d Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Wed, 30 Jul 2008 13:15:31 +0800
+Subject: [PATCH] ENGR00085827 MX35: Add headphone detection and Jack & speaker control
+
+1. Implement the headdphone detection by sysfs
+2. Add Jack and Speaker control in mixer
+3. Change the driver name as previous one is too long
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/devices.c      |    2 +-
+ sound/soc/imx/imx-3stack-ak4647.c |  189 +++++++++++++++++++++++++++++++------
+ 2 files changed, 162 insertions(+), 29 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index c0ff24e..a8f783a 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -498,7 +498,7 @@ static inline void mxc_init_spdif(void)
+ static struct mxc_audio_platform_data mxc_audio_data;
+ 
+ static struct platform_device mxc_alsa_device = {
+-	.name = "ak4647-imx-3stack-audio",
++	.name = "imx-3stack-ak4647",
+ 	.id = 0,
+ 	.dev = {
+ 		.release = mxc_nop_release,
+diff --git a/sound/soc/imx/imx-3stack-ak4647.c b/sound/soc/imx/imx-3stack-ak4647.c
+index bb93817..29543ce 100644
+--- a/sound/soc/imx/imx-3stack-ak4647.c
++++ b/sound/soc/imx/imx-3stack-ak4647.c
+@@ -36,6 +36,15 @@
+ 
+ #define AK4647_SSI_MASTER	1
+ 
++#define AK4647_DEFAULT	0
++#define AK4647_HP	1
++#define AK4647_MIC	2
++#define AK4647_LINE_IN	3
++#define AK4647_LINE_OUT	4
++#define AK4647_OFF	5
++#define AK4647_SPK_OFF	0
++#define AK4647_SPK_ON	1
++
+ extern void gpio_activate_audio_ports(void);
+ extern const char ak4647_codec[SND_SOC_CODEC_NAME_SIZE];
+ extern const char ak4647_hifi_dai[SND_SOC_CODEC_NAME_SIZE];
+@@ -43,6 +52,42 @@ extern const char ak4647_hifi_dai[SND_SOC_CODEC_NAME_SIZE];
+ static void headphone_detect_handler(struct work_struct *work);
+ static DECLARE_WORK(hp_event, headphone_detect_handler);
+ static struct snd_soc_machine *imx_3stack_mach;
++static int ak4647_jack_func;
++static int ak4647_spk_func;
++
++static void ak4647_ext_control(void)
++{
++	int spk = 0, mic = 0, hp = 0, line_in = 0, line_out = 0;
++
++	/* set up jack connection */
++	switch (ak4647_jack_func) {
++	case AK4647_DEFAULT:
++		hp = 1;
++		mic = 1;
++	case AK4647_HP:
++		hp = 1;
++		break;
++	case AK4647_MIC:
++		mic = 1;
++		break;
++	case AK4647_LINE_IN:
++		line_in = 1;
++		break;
++	case AK4647_LINE_OUT:
++		line_out = 1;
++		break;
++	}
++
++	if (ak4647_spk_func == AK4647_SPK_ON)
++		spk = 1;
++
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Mic1 Jack", mic);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Line In Jack", line_in);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Line Out Jack", line_out);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Headphone Jack", hp);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Ext Spk", spk);
++	snd_soc_dapm_sync_endpoints(imx_3stack_mach);
++}
+ 
+ static void imx_3stack_init_dam(int ssi_port, int dai_port)
+ {
+@@ -85,6 +130,13 @@ static void imx_3stack_init_dam(int ssi_port, int dai_port)
+ #endif
+ }
+ 
++static int imx_3stack_hifi_startup(struct snd_pcm_substream *substream)
++{
++	/* check the jack status at stream startup */
++	ak4647_ext_control();
++	return 0;
++}
++
+ static int imx_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
+ 				     struct snd_pcm_hw_params *params)
+ {
+@@ -134,6 +186,7 @@ static int imx_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
+  * imx_3stack ak4647 HiFi DAI opserations.
+  */
+ static struct snd_soc_ops imx_3stack_hifi_ops = {
++	.startup = imx_3stack_hifi_startup,
+ 	.hw_params = imx_3stack_hifi_hw_params,
+ };
+ 
+@@ -154,11 +207,57 @@ struct snd_soc_pcm_link_ops hifi_pcm = {
+ 	.new = hifi_pcm_new,
+ };
+ 
++static int ak4647_get_jack(struct snd_kcontrol *kcontrol,
++			   struct snd_ctl_elem_value *ucontrol)
++{
++	ucontrol->value.integer.value[0] = ak4647_jack_func;
++	return 0;
++}
++
++static int ak4647_set_jack(struct snd_kcontrol *kcontrol,
++			   struct snd_ctl_elem_value *ucontrol)
++{
++	if (ak4647_jack_func == ucontrol->value.integer.value[0])
++		return 0;
++
++	ak4647_jack_func = ucontrol->value.integer.value[0];
++	ak4647_ext_control();
++	return 1;
++}
++
++static int ak4647_get_spk(struct snd_kcontrol *kcontrol,
++			  struct snd_ctl_elem_value *ucontrol)
++{
++	ucontrol->value.integer.value[0] = ak4647_spk_func;
++	return 0;
++}
++
++static int ak4647_set_spk(struct snd_kcontrol *kcontrol,
++			  struct snd_ctl_elem_value *ucontrol)
++{
++	if (ak4647_spk_func == ucontrol->value.integer.value[0])
++		return 0;
++
++	ak4647_spk_func = ucontrol->value.integer.value[0];
++	ak4647_ext_control();
++	return 1;
++}
++
++static int spk_amp_event(struct snd_soc_dapm_widget *w, int event)
++{
++	if (SND_SOC_DAPM_EVENT_ON(event))
++		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 1);
++	else
++		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 0);
++	return 0;
++}
++
+ /* imx_3stack machine dapm widgets */
+ static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
+ 	SND_SOC_DAPM_MIC("Mic1 Jack", NULL),
+ 	SND_SOC_DAPM_LINE("Line In Jack", NULL),
+ 	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
++	SND_SOC_DAPM_SPK("Ext Spk", spk_amp_event),
+ 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+ };
+ 
+@@ -166,12 +265,11 @@ static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
+ static const char *audio_map[][3] = {
+ 
+ 	/* mic is connected to mic1 - with bias */
+-	{"LIN2", NULL, "Mic1 Jack"},
+-	{"Mic Bias", NULL, "Mic1 Jack"},
++	{"Left Input", NULL, "Mic1 Jack"},
+ 
+ 	/* Line in jack */
+-	{"LIN1", NULL, "Line In Jack"},
+-	{"RIN1", NULL, "Line In Jack"},
++	{"Left Input", NULL, "Line In Jack"},
++	{"Right Input", NULL, "Line In Jack"},
+ 
+ 	/* Headphone jack */
+ 	{"Headphone Jack", NULL, "HPL"},
+@@ -181,25 +279,36 @@ static const char *audio_map[][3] = {
+ 	{"Line Out Jack", NULL, "ROUT"},
+ 	{"Line Out Jack", NULL, "LOUT"},
+ 
++	/* Ext Spk */
++	{"Ext Spk", NULL, "ROUT"},
++	{"Ext Spk", NULL, "LOUT"},
++
+ 	{NULL, NULL, NULL},
+ 
+ };
+ 
+-static void headphone_detect_handler(struct work_struct *work)
+-{
++static const char *jack_function[] = { "Hp-Mic", "Headphone", "Mic", "Line In",
++	"Line Out", "Off"
++};
+ 
+-	unsigned int value;
++static const char *spk_function[] = { "Off", "On" };
+ 
+-	pmic_gpio_get_designation_bit_val(0, &value);
+-	if (value == 0) {
+-		snd_soc_dapm_set_endpoint(imx_3stack_mach, "Headphone Jack", 0);
+-		snd_soc_dapm_set_endpoint(imx_3stack_mach, "Line Out Jack", 1);
+-		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 1);
+-	} else {
+-		snd_soc_dapm_set_endpoint(imx_3stack_mach, "Line Out Jack", 0);
+-		snd_soc_dapm_set_endpoint(imx_3stack_mach, "Headphone Jack", 1);
+-		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 0, 0);
+-	}
++static const struct soc_enum ak4647_enum[] = {
++	SOC_ENUM_SINGLE_EXT(6, jack_function),
++	SOC_ENUM_SINGLE_EXT(2, spk_function),
++};
++
++static const struct snd_kcontrol_new ak4647_machine_controls[] = {
++	SOC_ENUM_EXT("Jack Function", ak4647_enum[0], ak4647_get_jack,
++		     ak4647_set_jack),
++	SOC_ENUM_EXT("Speaker Function", ak4647_enum[1], ak4647_get_spk,
++		     ak4647_set_spk),
++};
++
++static void headphone_detect_handler(struct work_struct *work)
++{
++	sysfs_notify(&imx_3stack_mach->pdev->dev.driver->kobj, NULL,
++		     "headphone");
+ 
+ }
+ 
+@@ -216,7 +325,6 @@ static int imx_3stack_mach_probe(struct snd_soc_machine
+ 	struct snd_soc_codec *codec;
+ 	struct snd_soc_pcm_link *pcm_link;
+ 	int i, ret;
+-	unsigned int value;
+ 
+ 	pcm_link = list_first_entry(&machine->active_list,
+ 				    struct snd_soc_pcm_link, active_list);
+@@ -231,6 +339,15 @@ static int imx_3stack_mach_probe(struct snd_soc_machine
+ 		snd_soc_dapm_new_control(machine, codec,
+ 					 &imx_3stack_dapm_widgets[i]);
+ 	}
++
++	for (i = 0; i < ARRAY_SIZE(ak4647_machine_controls); i++) {
++		ret = snd_ctl_add(machine->card,
++				  snd_soc_cnew(&ak4647_machine_controls[i],
++					       codec, NULL));
++		if (ret < 0)
++			return ret;
++	}
++
+ 	/* set up imx_3stack specific audio path audio_mapnects */
+ 	for (i = 0; audio_map[i][0] != NULL; i++) {
+ 		snd_soc_dapm_connect_input(machine,
+@@ -238,15 +355,6 @@ static int imx_3stack_mach_probe(struct snd_soc_machine
+ 					   audio_map[i][1], audio_map[i][2]);
+ 	}
+ 
+-	pmic_gpio_get_designation_bit_val(0, &value);
+-
+-	snd_soc_dapm_set_endpoint(machine, "Mic1 Jack", 1);
+-	snd_soc_dapm_set_endpoint(machine, "Line In Jack", 1);
+-	if (value == 0)
+-		snd_soc_dapm_set_endpoint(machine, "Line Out Jack", 1);
+-	else
+-		snd_soc_dapm_set_endpoint(machine, "Headphone Jack", 1);
+-
+ 	snd_soc_dapm_set_policy(machine, SND_SOC_DAPM_POLICY_STREAM);
+ 
+ 	/* register card with ALSA upper layers */
+@@ -263,6 +371,23 @@ struct snd_soc_machine_ops imx_3stack_mach_ops = {
+ 	.mach_probe = imx_3stack_mach_probe,
+ };
+ 
++static ssize_t show_headphone(struct device_driver *dev, char *buf)
++{
++
++	unsigned int value;
++
++	pmic_gpio_get_designation_bit_val(0, &value);
++
++	if (value == 0)
++		strcpy(buf, "speaker\n");
++	else
++		strcpy(buf, "headphone\n");
++
++	return strlen(buf);
++}
++
++DRIVER_ATTR(headphone, S_IRUGO | S_IWUSR, show_headphone, NULL);
++
+ /*
+  * This function will register the snd_soc_pcm_link drivers.
+  * It also registers devices for platform DMA, I2S, SSP and registers an
+@@ -328,7 +453,14 @@ static int __init imx_3stack_ak4647_probe(struct platform_device *pdev)
+ 	     "headphone", machine))
+ 		goto link_err;
+ 
++	ret = driver_create_file(pdev->dev.driver, &driver_attr_headphone);
++	if (ret < 0)
++		goto sysfs_err;
++
+ 	return ret;
++
++      sysfs_err:
++	driver_remove_file(pdev->dev.driver, &driver_attr_headphone);
+       link_err:
+ 	snd_soc_machine_free(machine);
+       err:
+@@ -341,6 +473,7 @@ static int __devexit imx_3stack_ak4647_remove(struct platform_device *pdev)
+ 	struct snd_soc_machine *machine = pdev->dev.driver_data;
+ 
+ 	imx_3stack_mach = NULL;
++	driver_remove_file(pdev->dev.driver, &driver_attr_headphone);
+ 	kfree(machine);
+ 	return 0;
+ }
+@@ -371,7 +504,7 @@ static struct platform_driver imx_3stack_ak4647_driver = {
+ 	.suspend = imx_3stack_ak4647_suspend,
+ 	.resume = imx_3stack_ak4647_resume,
+ 	.driver = {
+-		   .name = "ak4647-imx-3stack-audio",
++		   .name = "imx-3stack-ak4647",
+ 		   .owner = THIS_MODULE,
+ 		   },
+ };
+-- 
+1.5.4.4
+

@@ -1,0 +1,48 @@
+From 153ce08f69978522deb6a9350e961b828c5ecafb Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 4 Mar 2009 22:56:55 +0800
+Subject: [PATCH] ENGR00108939 fix usb gadget driver unregister hang up after usb gadget suspend.
+
+when rmmod usb gadget driver after usb gadget suspend, it hangs up.
+this patch remove PHY clock disable and enable when udc suspend and resume.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   14 --------------
+ 1 files changed, 0 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 7b00432..70be6c2 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1888,13 +1888,6 @@ static void suspend_irq(struct fsl_udc *udc)
+ 	/* report suspend to the driver, serial.c does not support this */
+ 	if (udc->driver->suspend)
+ 		udc->driver->suspend(&udc->gadget);
+-
+-	/* if PHCD is 0, then set 1 to disable phy clock */
+-	port_status = fsl_readl(&dr_regs->portsc1);
+-	if (!(port_status & PORTSCX_PHY_LOW_POWER_SPD)) {
+-		port_status |= PORTSCX_PHY_LOW_POWER_SPD;
+-		fsl_writel(port_status, &dr_regs->portsc1);
+-	}
+ }
+ 
+ #ifdef CONFIG_USB_GADGET_WAKE_UP
+@@ -1914,13 +1907,6 @@ static void wake_up_irq(struct fsl_udc *udc)
+ 
+ static void bus_resume(struct fsl_udc *udc)
+ {
+-	/* enable PHY clock if PHCD is still 1 */
+-	u32 port_status = fsl_readl(&dr_regs->portsc1);
+-	if (port_status & PORTSCX_PHY_LOW_POWER_SPD) {
+-		port_status &= ~PORTSCX_PHY_LOW_POWER_SPD;
+-		fsl_writel(port_status, &dr_regs->portsc1);
+-	}
+-
+ 	udc->usb_state = udc->resume_state;
+ 	udc->resume_state = 0;
+ 
+-- 
+1.5.4.4
+

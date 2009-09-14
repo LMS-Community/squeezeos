@@ -2,21 +2,24 @@
 
 /bin/mount -a
 
+# Check for corrupted /etc/udev.tar files
+UDEV_TAR_LEN=`ls -l /etc/dev.tar | /usr/bin/awk '{ print $5}'`
+if [ "x0" == "x$UDEV_TAR_LEN" ]; then
+	/bin/rm /etc/dev.tar
+fi
+
 # Create /dev using udev
 /etc/init.d/udev start
-/sbin/udevsettle
 
 echo "Mounting RAM Disk"
 /bin/mount -t ramfs ramfs /tmp
 /bin/mount -t ramfs ramfs /var
 mkdir /var/shm /var/log /var/run
 
-
 # Set hostname
 if [ -f /etc/hostname ]; then
 	/bin/hostname -F /etc/hostname
 fi
-
 
 # Start syslogd
 if [ -e /media/*/log ]; then
@@ -24,24 +27,29 @@ if [ -e /media/*/log ]; then
 	LOG_DIR=`echo /media/*/log`
 
 	echo "Starting syslogd (to $LOG_DIR)"
-	/sbin/syslogd -s1000 -O $LOG_DIR/messages
+	/sbin/syslogd -S -s1000 -O $LOG_DIR/messages
+
+	(cd /var/log; /bin/ln -sf $LOG_DIR/messages messages)
 
 	echo "Enabling core files (to $LOG_DIR)"
 	echo "$LOG_DIR/core-%e" > /proc/sys/kernel/core_pattern
 	ulimit -c unlimited
-
-	# Verify uboot by logging md5sum
-	/usr/bin/logger -t uboot `nanddump -q /dev/mtd/6  | md5sum` &
 else
 	# log to /var
 	echo "Starting syslogd"
-	/sbin/syslogd
+	/sbin/syslogd -S
 fi
-
 
 # Start kernel logger
 /sbin/klogd
 
+# Start watchdog
+/usr/sbin/watchdog
+
+# Check booloader version
+if [ -x /etc/init.d/blupdate ]; then
+	/etc/init.d/blupdate
+fi
 
 # Execute firstboot script?
 if ! [ -f /etc/firstboot ]; then
@@ -61,7 +69,6 @@ if ! [ -f /etc/firstboot ]; then
 	done
 fi
 
-
 # Create ssh keys
 if ! [ -f /etc/dropbear/dropbear_rsa_host_key ] ; then
 	echo "Creating dropbear rsa host key"
@@ -73,7 +80,6 @@ if ! [ -f /etc/dropbear/dropbear_dss_host_key ]; then
 	/usr/sbin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
 fi
 
-
 # Start network
 echo "Starting lo"
 /sbin/ifconfig lo up 127.0.0.1
@@ -81,23 +87,25 @@ echo "Starting lo"
 echo "Starting inetd"
 /usr/sbin/inetd
 
-
 # Start wlan
 /etc/init.d/wlan start
 
+# Start all 'auto' interfaces
+ifup -a &
 
+# Optional local rc script
 if [ -x /etc/init.d/rcS.local ]; then
 	echo "Running rcS.local"
 	/etc/init.d/rcS.local
 fi
 
+# Optional media scripts
 for script in /media/*/squeezeos-boot.sh; do
 	if [ -x $script ]; then
 		echo "Executing: $script"
 		$script
 	fi
 done
-
 
 # Start squeezeplay
 /etc/init.d/squeezeplay start

@@ -1,0 +1,47 @@
+From 786fed74c82d488022697ccf25f77796cb8aad4c Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Date: Wed, 12 Nov 2008 16:06:40 +0200
+Subject: [PATCH] MTD: nandsim: suppress unnecessary warning
+
+nand_base sometimes reads only 2 bytes of a 4 byte id.
+It is OK.  Do not print a warning in that case.
+
+Signed-off-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Signed-off-by: David Woodhouse <David.Woodhouse@intel.com>
+---
+ drivers/mtd/nand/nandsim.c |   18 +++++++++++-------
+ 1 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mtd/nand/nandsim.c b/drivers/mtd/nand/nandsim.c
+index b1729d5..7afaafe 100644
+--- a/drivers/mtd/nand/nandsim.c
++++ b/drivers/mtd/nand/nandsim.c
+@@ -1709,13 +1709,17 @@ static void ns_nand_write_byte(struct mtd_info *mtd, u_char byte)
+ 
+ 		/* Check if chip is expecting command */
+ 		if (NS_STATE(ns->nxstate) != STATE_UNKNOWN && !(ns->nxstate & STATE_CMD_MASK)) {
+-			/*
+-			 * We are in situation when something else (not command)
+-			 * was expected but command was input. In this case ignore
+-			 * previous command(s)/state(s) and accept the last one.
+-			 */
+-			NS_WARN("write_byte: command (%#x) wasn't expected, expected state is %s, "
+-				"ignore previous states\n", (uint)byte, get_state_name(ns->nxstate));
++			/* Do not warn if only 2 id bytes are read */
++			if (!(ns->regs.command == NAND_CMD_READID &&
++			    NS_STATE(ns->state) == STATE_DATAOUT_ID && ns->regs.count == 2)) {
++				/*
++				 * We are in situation when something else (not command)
++				 * was expected but command was input. In this case ignore
++				 * previous command(s)/state(s) and accept the last one.
++				 */
++				NS_WARN("write_byte: command (%#x) wasn't expected, expected state is %s, "
++					"ignore previous states\n", (uint)byte, get_state_name(ns->nxstate));
++			}
+ 			switch_to_ready_state(ns, NS_STATUS_FAILED(ns));
+ 		}
+ 
+-- 
+1.5.4.3
+

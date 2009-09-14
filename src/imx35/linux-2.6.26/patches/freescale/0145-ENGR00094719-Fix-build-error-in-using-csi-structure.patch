@@ -1,0 +1,97 @@
+From e2229b8aba79e4ab0d4b4cd95b0af6eeb998a7fe Mon Sep 17 00:00:00 2001
+From: r65388 <r65388@freescale.com>
+Date: Fri, 10 Oct 2008 17:13:02 +0800
+Subject: [PATCH] ENGR00094719 Fix build error in using csi structure
+
+Fix build error in using csi structure.
+
+Signed-off-by: r65388 <r65388@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov3640.c |   30 +++++++++++++++---------------
+ 1 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index ce1504d..4e243ff 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -35,10 +35,10 @@
+ 
+ enum ov3640_mode {
+ 	ov3640_mode_MIN = 0,
+-	ov3640_mode_QXGA_2048_1536 = 0,
+-	ov3640_mode_XGA_1024_768   = 1,
+-	ov3640_mode_VGA_640_480    = 2,
+-	ov3640_mode_QVGA_320_240   = 3,
++	ov3640_mode_VGA_640_480    = 0,
++	ov3640_mode_QVGA_320_240   = 1,
++	ov3640_mode_QXGA_2048_1536 = 2,
++	ov3640_mode_XGA_1024_768   = 3,
+ 	ov3640_mode_MAX = 3
+ };
+ 
+@@ -216,14 +216,14 @@ static struct reg_value ov3640_setting_QVGA_320_240[] = {
+ };
+ 
+ static struct ov3640_mode_info ov3640_mode_info_data[] = {
+-	{ov3640_mode_QXGA_2048_1536, 2048, 1536, ov3640_setting_QXGA_2048_1536,
+-	ARRAY_SIZE(ov3640_setting_QXGA_2048_1536), IPU_PIX_FMT_UYVY},
+-	{ov3640_mode_XGA_1024_768,   1024, 768,  ov3640_setting_XGA_1024_768,
+-	ARRAY_SIZE(ov3640_setting_XGA_1024_768), IPU_PIX_FMT_UYVY},
+ 	{ov3640_mode_VGA_640_480,    640,  480,  ov3640_setting_VGA_640_480,
+ 	ARRAY_SIZE(ov3640_setting_VGA_640_480), IPU_PIX_FMT_UYVY},
+ 	{ov3640_mode_QVGA_320_240,   320,  240,  ov3640_setting_QVGA_320_240,
+ 	ARRAY_SIZE(ov3640_setting_QVGA_320_240), IPU_PIX_FMT_UYVY},
++	{ov3640_mode_QXGA_2048_1536, 2048, 1536, ov3640_setting_QXGA_2048_1536,
++	ARRAY_SIZE(ov3640_setting_QXGA_2048_1536), IPU_PIX_FMT_UYVY},
++	{ov3640_mode_XGA_1024_768,   1024, 768,  ov3640_setting_XGA_1024_768,
++	ARRAY_SIZE(ov3640_setting_XGA_1024_768), IPU_PIX_FMT_UYVY},
+ };
+ 
+ static s32 s32csi_index;
+@@ -489,7 +489,7 @@ static void ov3640_get_std_mode(v4l2_std_id * std)
+ 
+ extern void gpio_sensor_active(unsigned int csi_index);
+ 
+-static sensor_interface *ov3640_config(int *frame_rate, int high_quality)
++static sensor_interface *ov3640_config(int *frame_rate, int mode)
+ {
+ 
+ 	u32 u32OutWidth  = 0;
+@@ -497,13 +497,13 @@ static sensor_interface *ov3640_config(int *frame_rate, int high_quality)
+ 
+ 	CAMERA_TRACE(("CAMERA_DBG Entry: ov3640_config\n"));
+ 
+-	if (high_quality > ov3640_mode_MAX || high_quality < ov3640_mode_MIN) {
++	if (mode > ov3640_mode_MAX || mode < ov3640_mode_MIN) {
+ 		dev_dbg(&ov3640_i2c_client->dev,
+ 				"Wrong ov3640 mode detected!\n");
+ 		return NULL;
+ 	}
+ 
+-	CAMERA_TRACE(("mode: %d\n", high_quality));
++	CAMERA_TRACE(("mode: %d\n", mode));
+ 
+ 	if (!IS_ERR_VALUE((u32)io_regulator)) {
+ 		regulator_set_voltage(io_regulator, OV3640_VOLTAGE_DIGITAL_IO);
+@@ -558,14 +558,14 @@ static sensor_interface *ov3640_config(int *frame_rate, int high_quality)
+ 
+ 	gpio_sensor_active(s32csi_index);
+ 
+-	u32OutWidth  = ov3640_mode_info_data[high_quality].width;
+-	u32OutHeight = ov3640_mode_info_data[high_quality].height;
++	u32OutWidth  = ov3640_mode_info_data[mode].width;
++	u32OutHeight = ov3640_mode_info_data[mode].height;
+ 
+ 	ov3640_interface(interface_param, u32OutWidth, u32OutHeight);
+-	interface_param->sig.pixel_fmt = ov3640_mode_info_data[high_quality].fmt;
++	interface_param->pixel_fmt = ov3640_mode_info_data[mode].fmt;
+ 	set_mclk_rate(&interface_param->mclk, s32csi_index);
+ 
+-	ov3640_init_mode(high_quality);
++	ov3640_init_mode(mode);
+ 
+ 	CAMERA_TRACE(("CAMERA_DBG Exit: ov3640_config\n"));
+ 
+-- 
+1.5.4.4
+

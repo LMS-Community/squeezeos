@@ -78,10 +78,10 @@ def check_sanity(e):
 		missing = missing + "GNU make,"
 
 	if not check_app_exists('${BUILD_PREFIX}gcc', e.data):
-		missing = missing + "C Compiler (${BUILD_PREFIX}gcc),"
+		missing = missing + "C Compiler (%sgcc)," % data.getVar("BUILD_PREFIX", e.data, True)
 
 	if not check_app_exists('${BUILD_PREFIX}g++', e.data):
-		missing = missing + "C++ Compiler (${BUILD_PREFIX}g++),"
+		missing = missing + "C++ Compiler (%sg++)," % data.getVar("BUILD_PREFIX", e.data, True)
 
 	required_utilities = "patch help2man diffstat texi2html makeinfo cvs svn bzip2 tar gzip gawk"
 
@@ -101,7 +101,7 @@ def check_sanity(e):
 		if os.path.exists("/proc/sys/vm/mmap_min_addr"):
 			f = file("/proc/sys/vm/mmap_min_addr", "r")
 			if (f.read().strip() != "0"):
-				messages = messages + "/proc/sys/vm/mmap_min_addr is not 0. This will cause problems with qemu so please fix the value (as root).\n"
+				messages = messages + "/proc/sys/vm/mmap_min_addr is not 0. This will cause problems with qemu so please fix the value (as root).\n\nTo fix this in later reboots, set vm.mmap_min_addr = 0 in /etc/sysctl.conf.\n"
 			f.close()
 
 	for util in required_utilities.split():
@@ -141,7 +141,7 @@ def check_sanity(e):
 	#
 	# Check the 'ABI' of TMPDIR
 	#
-	current_abi = data.getVar('SANITY_ABI', e.data, True)
+	current_abi = data.getVar('OELAYOUT_ABI', e.data, True)
 	abifile = data.getVar('SANITY_ABIFILE', e.data, True)
 	if os.path.exists(abifile):
 		f = file(abifile, "r")

@@ -1,0 +1,41 @@
+From b79d1f94af0d8e20a8ba62b8d677cc0ed92a59da Mon Sep 17 00:00:00 2001
+From: Lionel.Xu <r63889@freescale.com>
+Date: Wed, 29 Apr 2009 21:51:15 +0800
+Subject: [PATCH] ENGR00107200 MX25: The SW workaround for left/right channel random swap issue
+
+Left/right channel swapped when playing a stereo wav on mx25 platform. This
+issue is supposed to be a IC bug when using 1.8v WEIM pad. The SW workaround
+to increase codec driver strength can fix it.
+
+Signed-off-by: Lionel Xu <r63889@freescale.com>
+---
+ sound/soc/codecs/sgtl5000.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/codecs/sgtl5000.c b/sound/soc/codecs/sgtl5000.c
+index 085b148..2d71e27 100644
+--- a/sound/soc/codecs/sgtl5000.c
++++ b/sound/soc/codecs/sgtl5000.c
+@@ -15,6 +15,7 @@
+ #include <linux/pm.h>
+ #include <linux/i2c.h>
+ #include <linux/platform_device.h>
++#include <asm/arch/hardware.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -851,7 +852,10 @@ static int sgtl5000_codec_io_probe(struct snd_soc_codec *codec,
+ 	      SGTL5000_DAC_MUTE_LEFT;
+ 	sgtl5000_write(codec, SGTL5000_CHIP_ADCDAC_CTRL, reg);
+ 
+-	sgtl5000_write(codec, SGTL5000_CHIP_PAD_STRENGTH, 0x015f);
++	if (cpu_is_mx25())
++		sgtl5000_write(codec, SGTL5000_CHIP_PAD_STRENGTH, 0x01df);
++	else
++		sgtl5000_write(codec, SGTL5000_CHIP_PAD_STRENGTH, 0x015f);
+ 
+ 	reg = sgtl5000_read(codec, SGTL5000_CHIP_ANA_ADC_CTRL);
+ 	reg &= ~SGTL5000_ADC_VOL_M6DB;
+-- 
+1.5.4.4
+

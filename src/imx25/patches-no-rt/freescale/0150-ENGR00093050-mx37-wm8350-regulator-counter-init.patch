@@ -1,0 +1,54 @@
+From 345904a6737b2f9a25316eb9751a0b47b024b025 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 13 Oct 2008 10:07:16 +0800
+Subject: [PATCH] ENGR00093050 mx37: wm8350 regulator counter init
+
+Init system global regulator counter as 1.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c |   21 +++++++++++++++++++++
+ 1 files changed, 21 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+index 98fd462..6133147 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
++++ b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+@@ -23,6 +23,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/i2c.h>
+ #include <linux/err.h>
++#include <linux/regulator/regulator.h>
+ #include <linux/regulator/regulator-platform.h>
+ #include <linux/regulator/wm8350/wm8350.h>
+ #include <linux/regulator/wm8350/wm8350-pmic.h>
+@@ -39,6 +40,26 @@
+ #include <asm/arch/mxc.h>
+ #include "board-mx37_3stack.h"
+ 
++static void wm8350_regulator_init(void)
++{
++	int i = 0;
++	struct regulator *regulator;
++	char *wm8350_global_regulator[] = {
++		"DCDC1",
++		"DCDC3",
++		"DCDC4",
++		"DCDC6",
++		"LDO3",
++	};
++
++	while (!IS_ERR_VALUE((unsigned long)(regulator = regulator_get(NULL,
++		wm8350_global_regulator[i])))) {
++		regulator_enable(regulator);
++		i++;
++	}
++}
++late_initcall(wm8350_regulator_init);
++
+ /*
+  * Set to 1 when testing battery that is connected otherwise spuriuos debug
+  */
+-- 
+1.5.4.4
+

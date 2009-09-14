@@ -1,0 +1,206 @@
+From 9d2265e827df48a7b5229250bb368c339d58d32c Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Wed, 31 Dec 2008 11:02:44 +0800
+Subject: [PATCH] ENGR00103771 mc13892: modify vcam &work-around for i2c access failure
+
+modify voltage and mode control for vcam &work-around for i2c access failure
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/mxc/pmic/core/mc13892.c         |   22 +++++++++-
+ drivers/regulator/mc13892/reg-mc13892.c |   68 ++++++++++++++++++++++++++-----
+ 2 files changed, 77 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/mxc/pmic/core/mc13892.c b/drivers/mxc/pmic/core/mc13892.c
+index c41f0c2..7b95ec6 100644
+--- a/drivers/mxc/pmic/core/mc13892.c
++++ b/drivers/mxc/pmic/core/mc13892.c
+@@ -29,6 +29,7 @@
+ #include <linux/device.h>
+ #include <linux/spi/spi.h>
+ #include <linux/i2c.h>
++#include <linux/delay.h>
+ 
+ #include <asm/mach-types.h>
+ #include <asm/uaccess.h>
+@@ -41,15 +42,21 @@
+ /*
+  * Defines
+  */
+-
++#define MC13892_I2C_RETRY_TIMES 10
+ int pmic_i2c_24bit_read(struct i2c_client *client, unsigned int reg_num,
+ 			unsigned int *value)
+ {
+ 	unsigned char buf[3];
+ 	int ret;
++	int i;
+ 
+ 	memset(buf, 0, 3);
+-	ret = i2c_smbus_read_i2c_block_data(client, reg_num, 3, buf);
++	for (i = 0; i < MC13892_I2C_RETRY_TIMES; i++) {
++		ret = i2c_smbus_read_i2c_block_data(client, reg_num, 3, buf);
++		if (ret == 3)
++			break;
++		msleep(1);
++	}
+ 
+ 	if (ret == 3) {
+ 		*value = buf[0] << 16 | buf[1] << 8 | buf[2];
+@@ -64,12 +71,21 @@ int pmic_i2c_24bit_write(struct i2c_client *client,
+ 			 unsigned int reg_num, unsigned int reg_val)
+ {
+ 	char buf[3];
++	int ret;
++	int i;
+ 
+ 	buf[0] = (reg_val >> 16) & 0xff;
+ 	buf[1] = (reg_val >> 8) & 0xff;
+ 	buf[2] = (reg_val) & 0xff;
+ 
+-	return i2c_smbus_write_i2c_block_data(client, reg_num, 3, buf);
++	for (i = 0; i < MC13892_I2C_RETRY_TIMES; i++) {
++		ret = i2c_smbus_write_i2c_block_data(client, reg_num, 3, buf);
++		if (ret == 0)
++			break;
++		msleep(1);
++	}
++
++	return ret;
+ }
+ 
+ int pmic_read(int reg_num, unsigned int *reg_val)
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index 46dacc8..f4f2b3f 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -99,10 +99,10 @@ enum {
+ } regulator_voltage_vsd;
+ 
+ enum {
+-	VCAM_1_8V,
+ 	VCAM_2_5V,
+ 	VCAM_2_6V,
+ 	VCAM_2_75V,
++	VCAM_3_0V,
+ } regulator_voltage_vcam;
+ 
+ enum {
+@@ -205,6 +205,10 @@ enum {
+ #define VCAM_EN_WID	1
+ #define VCAM_EN_ENABLE	1
+ #define VCAM_EN_DISABLE	0
++#define VCAM_CONFIG_LSH	9
++#define VCAM_CONFIG_WID	1
++#define VCAM_CONFIG_EXT	1
++#define VCAM_CONFIG_INT	0
+ 
+ #define SW1_LSH		0
+ #define SW1_WID		5
+@@ -1062,14 +1066,14 @@ static int mc13892_vcam_set_voltage(struct regulator *reg, int uV)
+ 	unsigned int register1;
+ 	int voltage, mV = uV / 1000;
+ 
+-	if ((mV >= 1800) && (mV < 2500))
+-		voltage = VCAM_1_8V;
+-	else if ((mV >= 2500) && (mV < 2600))
++	if ((mV >= 2500) && (mV < 2600))
+ 		voltage = VCAM_2_5V;
+ 	else if ((mV >= 2600) && (mV < 2750))
+ 		voltage = VCAM_2_6V;
+-	else
++	else if ((mV >= 2750) && (mV < 3000))
+ 		voltage = VCAM_2_75V;
++	else
++		voltage = VCAM_3_0V;
+ 
+ 	register_val = BITFVAL(VCAM, voltage);
+ 	register_mask = BITFMASK(VCAM);
+@@ -1087,9 +1091,6 @@ static int mc13892_vcam_get_voltage(struct regulator *reg)
+ 	voltage = BITFEXT(register_val, VCAM);
+ 
+ 	switch (voltage) {
+-	case VCAM_1_8V:
+-		mV = 1800;
+-		break;
+ 	case VCAM_2_5V:
+ 		mV = 2500;
+ 		break;
+@@ -1099,6 +1100,9 @@ static int mc13892_vcam_get_voltage(struct regulator *reg)
+ 	case VCAM_2_75V:
+ 		mV = 2750;
+ 		break;
++	case VCAM_3_0V:
++		mV = 3000;
++		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1130,6 +1134,48 @@ static int mc13892_vcam_disable(struct regulator *reg)
+ 	return (pmic_write_reg(register1, register_val, register_mask));
+ }
+ 
++static int mc13892_vcam_set_mode(struct regulator *reg, unsigned int mode)
++{
++	unsigned int register_val = 0, register_mask = 0;
++	unsigned int register1;
++
++	switch (mode) {
++	case REGULATOR_MODE_FAST:
++		register_val = BITFVAL(VCAM_CONFIG, VCAM_CONFIG_EXT);
++		break;
++	case REGULATOR_MODE_NORMAL:
++		register_val = BITFVAL(VCAM_CONFIG, VCAM_CONFIG_INT);
++		break;
++	default:
++		return -EINVAL;
++	}
++	register_mask = BITFMASK(VCAM_EN);
++	register1 = REG_MODE_1;
++
++	return (pmic_write_reg(register1, register_val, register_mask));
++}
++
++unsigned int mc13892_vcam_get_mode(struct regulator *reg)
++{
++	unsigned int register_val = 0;
++	int config = 0, mode = VCAM_CONFIG_INT;
++
++	CHECK_ERROR(pmic_read_reg(REG_MODE_1, &register_val, PMIC_ALL_BITS));
++	config = BITFEXT(register_val, VCAM_CONFIG);
++
++	switch (config) {
++	case VCAM_CONFIG_EXT:
++		mode = REGULATOR_MODE_FAST;
++		break;
++	case VCAM_CONFIG_INT:
++		mode = REGULATOR_MODE_NORMAL;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return mode;
++}
++
+ static int mc13892_vgen1_set_voltage(struct regulator *reg, int uV)
+ {
+ 	unsigned int register_val = 0, register_mask = 0;
+@@ -1558,11 +1604,13 @@ static struct regulator_ops mc13892_vcam_ops = {
+ 	.get_voltage = mc13892_vcam_get_voltage,
+ 	.enable = mc13892_vcam_enable,
+ 	.disable = mc13892_vcam_disable,
++	.set_mode = mc13892_vcam_set_mode,
++	.get_mode = mc13892_vcam_get_mode,
+ };
+ 
+ struct regulation_constraints vcam_regulation_constraints = {
+-	.min_uV = mV_to_uV(1800),
+-	.max_uV = mV_to_uV(2750),
++	.min_uV = mV_to_uV(2500),
++	.max_uV = mV_to_uV(3000),
+ 	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+ };
+ 
+-- 
+1.5.4.4
+

@@ -1,0 +1,305 @@
+From f4ad09f1b6f9b409936edaebaca44aa8d749d3aa Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 17 Sep 2008 10:47:27 -0500
+Subject: [PATCH] ENGR00090522-1 MMC 8 bit bus width
+
+Eanble the MMC 8-bit bus-width feature.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c      |   12 ++++-
+ arch/arm/mach-mx35/mx35_3stack_gpio.c |   83 +++++++++++++++++++++++++++------
+ arch/arm/mach-mx37/mx37_3stack.c      |    1 +
+ drivers/mmc/core/mmc.c                |    8 +++
+ drivers/mmc/host/mx_sdhci.c           |   12 +++--
+ drivers/mmc/host/mx_sdhci.h           |    1 +
+ include/asm-arm/arch-mxc/mmc.h        |    1 +
+ include/linux/mmc/host.h              |    2 +
+ 8 files changed, 98 insertions(+), 22 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 12abd53..5f2dc44 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -476,6 +476,11 @@ EXPORT_SYMBOL(expio_intr_fec);
+ #if defined(CONFIG_MMC_IMX_ESDHCI) || defined(CONFIG_MMC_IMX_ESDHCI_MODULE)
+ static struct mxc_mmc_platform_data mmc0_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++	.caps = MMC_CAP_4_BIT_DATA,
++#else
++	.caps = MMC_CAP_8_BIT_DATA,
++#endif
+ 	.min_clk = 400000,
+ 	.max_clk = 52000000,
+ 	.card_inserted_state = 1,
+@@ -520,7 +525,8 @@ static struct platform_device mxcsdhc1_device = {
+ #if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+ static struct mxc_mmc_platform_data mmc1_data = {
+ 	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30 |
+-		    MMC_VDD_31_32,
++	    MMC_VDD_31_32,
++	.caps = MMC_CAP_4_BIT_DATA,
+ 	.min_clk = 150000,
+ 	.max_clk = 25000000,
+ 	.card_inserted_state = 1,
+@@ -539,12 +545,12 @@ static struct resource mxcsdhc2_resources[] = {
+ 	       .start = MXC_INT_MMC_SDHC2,
+ 	       .end = MXC_INT_MMC_SDHC2,
+ 	       .flags = IORESOURCE_IRQ,
+-	},
++	       },
+ 	[2] = {
+ 	       .start = 0,
+ 	       .end = 0,
+ 	       .flags = IORESOURCE_IRQ,
+-	},
++	       },
+ };
+ 
+ static struct platform_device mxcsdhc2_device = {
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 35b8955..5471434 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -535,19 +535,52 @@ void gpio_sdhc_active(int module)
+ 				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
+ 		mxc_request_iomux(MX35_PIN_SD1_CMD,
+ 				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
+-		mxc_request_iomux(MX35_PIN_SD1_DATA0, MUX_CONFIG_FUNC);
+-		mxc_request_iomux(MX35_PIN_SD1_DATA1, MUX_CONFIG_FUNC);
+-		mxc_request_iomux(MX35_PIN_SD1_DATA2, MUX_CONFIG_FUNC);
+-		mxc_request_iomux(MX35_PIN_SD1_DATA3, MUX_CONFIG_FUNC);
+-
+-		pad_val = PAD_CTL_DRV_MAX | PAD_CTL_22K_PU | PAD_CTL_SRE_FAST;
++		mxc_request_iomux(MX35_PIN_SD1_DATA0,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD1_DATA1,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD1_DATA2,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD1_DATA3,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++#else
++		mxc_request_iomux(MX35_PIN_SD2_CMD,
++				  MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_CLK,
++				  MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA0,
++				  MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA1,
++				  MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++#endif
+ 
+-		mxc_iomux_set_pad(MX35_PIN_SD1_CLK, pad_val);
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++		    PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++		    PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_CMD, pad_val);
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_DATA0, pad_val);
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_DATA1, pad_val);
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_DATA2, pad_val);
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++		    PAD_CTL_DRV_MAX | PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
++		mxc_iomux_set_pad(MX35_PIN_SD1_CLK, pad_val);
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++		    PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++		    PAD_CTL_100K_PU | PAD_CTL_SRE_FAST;
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_DATA3, pad_val);
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++#else
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++		    PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++		    PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
++		mxc_iomux_set_pad(MX35_PIN_SD2_CMD, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA0, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA1, pad_val);
++		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++		    PAD_CTL_DRV_MAX | PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
++		mxc_iomux_set_pad(MX35_PIN_SD2_CLK, pad_val);
++#endif
+ 		break;
+ 	case 1:
+ 		mxc_request_iomux(MX35_PIN_SD2_CLK,
+@@ -564,8 +597,8 @@ void gpio_sdhc_active(int module)
+ 				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
+ 
+ 		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
+-			PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
+-			PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
++		    PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++		    PAD_CTL_47K_PU | PAD_CTL_SRE_FAST;
+ 
+ 		mxc_iomux_set_pad(MX35_PIN_SD2_CLK, pad_val);
+ 		mxc_iomux_set_pad(MX35_PIN_SD2_CMD, pad_val);
+@@ -574,8 +607,8 @@ void gpio_sdhc_active(int module)
+ 		mxc_iomux_set_pad(MX35_PIN_SD2_DATA2, pad_val);
+ 
+ 		pad_val = PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
+-			PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
+-			PAD_CTL_100K_PU | PAD_CTL_SRE_FAST;
++		    PAD_CTL_HYS_SCHMITZ | PAD_CTL_DRV_MAX |
++		    PAD_CTL_100K_PU | PAD_CTL_SRE_FAST;
+ 
+ 		mxc_iomux_set_pad(MX35_PIN_SD2_DATA3, pad_val);
+ 		break;
+@@ -599,10 +632,22 @@ void gpio_sdhc_inactive(int module)
+ 			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
+ 		mxc_free_iomux(MX35_PIN_SD1_CMD,
+ 			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
+-		mxc_free_iomux(MX35_PIN_SD1_DATA0, MUX_CONFIG_FUNC);
+-		mxc_free_iomux(MX35_PIN_SD1_DATA1, MUX_CONFIG_FUNC);
+-		mxc_free_iomux(MX35_PIN_SD1_DATA2, MUX_CONFIG_FUNC);
+-		mxc_free_iomux(MX35_PIN_SD1_DATA3, MUX_CONFIG_FUNC);
++		mxc_free_iomux(MX35_PIN_SD1_DATA0,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA1,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA2,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA3,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_CMD,
++			       MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_CLK,
++			       MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA0,
++			       MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA1,
++			       MUX_CONFIG_ALT2 | MUX_CONFIG_SION);
+ 
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_CLK,
+ 				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
+@@ -616,6 +661,14 @@ void gpio_sdhc_inactive(int module)
+ 				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
+ 		mxc_iomux_set_pad(MX35_PIN_SD1_DATA3,
+ 				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_CMD,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_CLK,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA0,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA1,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
+ 		break;
+ 	case 1:
+ 		mxc_free_iomux(MX35_PIN_SD2_CLK,
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 503fc41..fdea09a 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -429,6 +429,7 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ #if defined(CONFIG_MMC_IMX_ESDHCI) || defined(CONFIG_MMC_IMX_ESDHCI_MODULE)
+ static struct mxc_mmc_platform_data mmc_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
++	.caps = MMC_CAP_4_BIT_DATA,
+ 	.min_clk = 400000,
+ 	.max_clk = 52000000,
+ 	.card_inserted_state = 1,
+diff --git a/drivers/mmc/core/mmc.c b/drivers/mmc/core/mmc.c
+index 3da29ee..01d0266 100644
+--- a/drivers/mmc/core/mmc.c
++++ b/drivers/mmc/core/mmc.c
+@@ -434,6 +434,14 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
+ 	 * Activate wide bus (if supported).
+ 	 */
+ 	if ((card->csd.mmca_vsn >= CSD_SPEC_VER_4) &&
++		(host->caps & MMC_CAP_8_BIT_DATA)) {
++		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
++			EXT_CSD_BUS_WIDTH, EXT_CSD_BUS_WIDTH_8);
++		if (err)
++			goto free_card;
++
++		mmc_set_bus_width(card->host, MMC_BUS_WIDTH_8);
++	} else if ((card->csd.mmca_vsn >= CSD_SPEC_VER_4) &&
+ 		(host->caps & MMC_CAP_4_BIT_DATA)) {
+ 		err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+ 			EXT_CSD_BUS_WIDTH, EXT_CSD_BUS_WIDTH_4);
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index f9892b2..25fbc68 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -953,10 +953,13 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 
+ 	ctrl = readl(host->ioaddr + SDHCI_HOST_CONTROL);
+ 
+-	if (ios->bus_width == MMC_BUS_WIDTH_4)
++	if (ios->bus_width == MMC_BUS_WIDTH_4) {
++		ctrl &= ~SDHCI_CTRL_8BITBUS;
+ 		ctrl |= SDHCI_CTRL_4BITBUS;
+-	else
++	} else if (ios->bus_width == MMC_BUS_WIDTH_8) {
+ 		ctrl &= ~SDHCI_CTRL_4BITBUS;
++		ctrl |= SDHCI_CTRL_8BITBUS;
++	}
+ 
+ 	if (host->flags & SDHCI_USE_DMA)
+ 		ctrl |= SDHCI_CTRL_ADMA;
+@@ -1434,7 +1437,7 @@ static irqreturn_t sdhci_irq(int irq, void *dev_id)
+ 
+ 	if (intmask & SDHCI_INT_CARD_INT)
+ 		cardint = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE) &
+-			SDHCI_INT_CARD_INT;
++		    SDHCI_INT_CARD_INT;
+ 
+ 	intmask &= ~SDHCI_INT_CARD_INT;
+ 
+@@ -1690,7 +1693,8 @@ no_detect_irq:
+ 	mmc->ops = &sdhci_ops;
+ 	mmc->f_min = host->min_clk;
+ 	mmc->f_max = host->max_clk;
+-	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_MULTIWRITE | MMC_CAP_SDIO_IRQ;
++	mmc->caps = MMC_CAP_MULTIWRITE | MMC_CAP_SDIO_IRQ;
++	mmc->caps |= mmc_plat->caps;
+ 
+ 	if (caps & SDHCI_CAN_DO_HISPD)
+ 		mmc->caps |= MMC_CAP_SD_HIGHSPEED;
+diff --git a/drivers/mmc/host/mx_sdhci.h b/drivers/mmc/host/mx_sdhci.h
+index 12e2b68..da265b4 100644
+--- a/drivers/mmc/host/mx_sdhci.h
++++ b/drivers/mmc/host/mx_sdhci.h
+@@ -65,6 +65,7 @@
+ #define SDHCI_HOST_CONTROL 	0x28
+ #define  SDHCI_CTRL_LED		0x00000001
+ #define  SDHCI_CTRL_4BITBUS	0x00000002
++#define  SDHCI_CTRL_8BITBUS	0x00000004
+ #define  SDHCI_CTRL_HISPD	0x00000004
+ #define  SDHCI_CTRL_DMA_MASK	0x18
+ #define   SDHCI_CTRL_SDMA	0x00
+diff --git a/include/asm-arm/arch-mxc/mmc.h b/include/asm-arm/arch-mxc/mmc.h
+index f3c0527..aef7b99 100644
+--- a/include/asm-arm/arch-mxc/mmc.h
++++ b/include/asm-arm/arch-mxc/mmc.h
+@@ -17,6 +17,7 @@
+ 
+ struct mxc_mmc_platform_data {
+ 	unsigned int ocr_mask;	/* available voltages */
++	unsigned int caps;
+ 	unsigned int min_clk;
+ 	unsigned int max_clk;
+ 	unsigned int reserved:16;
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+index 7ab962f..7ab2bde 100644
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -41,6 +41,7 @@ struct mmc_ios {
+ 
+ #define MMC_BUS_WIDTH_1		0
+ #define MMC_BUS_WIDTH_4		2
++#define MMC_BUS_WIDTH_8		3
+ 
+ 	unsigned char	timing;			/* timing specification used */
+ 
+@@ -94,6 +95,7 @@ struct mmc_host {
+ #define MMC_CAP_SD_HIGHSPEED	(1 << 3)	/* Can do SD high-speed timing */
+ #define MMC_CAP_SDIO_IRQ	(1 << 4)	/* Can signal pending SDIO IRQs */
+ #define MMC_CAP_SPI		(1 << 5)	/* Talks only SPI protocols */
++#define MMC_CAP_8_BIT_DATA	(1 << 6)	/* Can the host do 8 bit transfers */
+ 
+ 	/* host specific block data */
+ 	unsigned int		max_seg_size;	/* see blk_queue_max_segment_size */
+-- 
+1.5.4.4
+

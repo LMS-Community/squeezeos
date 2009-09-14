@@ -8,16 +8,22 @@
 ROOTFS_PKGMANAGE = "opkg opkg-collateral"
 ROOTFS_PKGMANAGE_BOOTSTRAP  = "run-postinsts"
 
-do_rootfs[depends] += "opkg-native:do_populate_staging ipkg-utils-native:do_populate_staging"
+do_rootfs[depends] += "opkg-native:do_populate_staging opkg-utils-native:do_populate_staging"
 do_rootfs[recrdeptask] += "do_package_write_ipk"
 
 IPKG_ARGS = "-f ${IPKGCONF_TARGET} -o ${IMAGE_ROOTFS}"
 
+OPKG_PREPROCESS_COMMANDS = "package_update_index_ipk; package_generate_ipkg_conf"
+
+OPKG_POSTPROCESS_COMMANDS = "ipk_insert_feed_uris"
+
 fakeroot rootfs_ipk_do_rootfs () {
 	set -x
 
-	package_update_index_ipk
-	package_generate_ipkg_conf
+	rm -f ${IPKGCONF_TARGET}
+	touch ${IPKGCONF_TARGET}
+
+	${OPKG_PREPROCESS_COMMANDS}
 
 	mkdir -p ${T}/
 	mkdir -p ${IMAGE_ROOTFS}/usr/lib/opkg/
@@ -36,6 +42,10 @@ fakeroot rootfs_ipk_do_rootfs () {
 		opkg-cl ${IPKG_ARGS} install ${PACKAGE_INSTALL}
 	fi
 
+	if [ ! -z "${PACKAGE_INSTALL_ATTEMPTONLY}" ]; then
+		opkg-cl ${IPKG_ARGS} install ${PACKAGE_INSTALL_ATTEMPTONLY} > "${WORKDIR}/temp/log.do_rootfs_attemptonly.${PID}" || true
+	fi
+
 	export D=${IMAGE_ROOTFS}
 	export OFFLINE_ROOT=${IMAGE_ROOTFS}
 	export IPKG_OFFLINE_ROOT=${IMAGE_ROOTFS}
@@ -44,6 +54,7 @@ fakeroot rootfs_ipk_do_rootfs () {
 	mkdir -p ${IMAGE_ROOTFS}/etc/opkg/
 	grep "^arch" ${IPKGCONF_TARGET} >${IMAGE_ROOTFS}/etc/opkg/arch.conf
 
+	${OPKG_POSTPROCESS_COMMANDS}
 	${ROOTFS_POSTINSTALL_COMMAND}
 	
 	for i in ${IMAGE_ROOTFS}${libdir}/opkg/info/*.preinst; do
@@ -87,6 +98,20 @@ rootfs_ipk_log_check() {
 	true
 }
 
+rootfs_ipk_write_manifest() {
+	manifest=${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}.rootfs.manifest
+	cp ${IMAGE_ROOTFS}/usr/lib/opkg/status $manifest
+
+	sed '/Depends/d' -i $manifest
+	sed '/Status/d' -i $manifest
+	sed '/Architecture/d' -i $manifest
+	sed '/Installed-Time/d' -i $manifest
+	sed '/Auto-Installed/d' -i $manifest
+	sed '/Recommends/d' -i $manifest
+	sed '/Provides/d' -i $manifest
+	sed '/Conflicts/d' -i $manifest
+}
+
 remove_packaging_data_files() {
 	rm -rf ${IMAGE_ROOTFS}/usr/lib/opkg/
 }
@@ -95,7 +120,7 @@ install_all_locales() {
 
     PACKAGES_TO_INSTALL=""
 
-	INSTALLED_PACKAGES=`grep ^Package: ${IMAGE_ROOTFS}${libdir}/opkg/status |sed "s/^Package: //"|egrep -v -- "(-locale-|-dev$|-doc$|^kernel|^glibc|^ttf|^task|^perl|^python)"`
+    INSTALLED_PACKAGES=`grep ^Package: ${IMAGE_ROOTFS}${libdir}/opkg/status |sed "s/^Package: //"|egrep -v -- "(-locale-|-dev$|-doc$|^kernel|^glibc|^ttf|^task|^perl|^python)"`
 
     for pkg in $INSTALLED_PACKAGES
     do
@@ -111,5 +136,35 @@ install_all_locales() {
     then
         opkg-cl ${IPKG_ARGS} install $PACKAGES_TO_INSTALL
     fi
+}
+
+ipk_insert_feed_uris () {
+
+	echo "Building from feeds activated!"
+
+	for line in ${IPK_FEED_URIS}
+	do
+		# strip leading and trailing spaces/tabs, then split into name and uri
+		line_clean="`echo "$line"|sed 's/^[ \t]*//;s/[ \t]*$//'`"
+		feed_name="`echo "$line_clean" | sed -n 's/\(.*\)##\(.*\)/\1/p'`"
+		feed_uri="`echo "$line_clean" | sed -n 's/\(.*\)##\(.*\)/\2/p'`"
+
+		echo "Added $feed_name feed with URL $feed_uri"
+
+		# insert new feed-sources
+		echo "src/gz $feed_name $feed_uri" >> ${IPKGCONF_TARGET}
+        done
+}
+
+python () {
+    import bb
+    if bb.data.getVar('BUILD_IMAGES_FROM_FEEDS', d, True):
+        flags = bb.data.getVarFlag('do_rootfs', 'recrdeptask', d)
+        flags = flags.replace("do_package_write_ipk", "")
+        flags = flags.replace("do_deploy", "")
+        flags = flags.replace("do_populate_staging", "")
+        bb.data.setVarFlag('do_rootfs', 'recrdeptask', flags, d)
+        bb.data.setVar('OPKG_PREPROCESS_COMMANDS', "package_generate_archlist\nipk_insert_feed_uris", d)
+        bb.data.setVar('OPKG_POSTPROCESS_COMMANDS', '', d)
 }
 

@@ -1,0 +1,58 @@
+From 146a286139c4fabf729f976a32620b60d62985ec Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Wed, 30 May 2007 23:34:23 -0400
+Subject: [PATCH] Revert "Unionfs: Cleanup locking in new_dentry_private_data"
+
+This reverts commit ad2d6a5f5e0501ecf704bf2c748e9818ee8e019b.
+
+Conflicts:
+
+	fs/unionfs/lookup.c
+---
+ fs/unionfs/lookup.c |   13 +++++++++----
+ 1 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 5c2334e..10339a4 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -482,13 +482,19 @@ int new_dentry_private_data(struct dentry *dentry)
+ 	int size;
+ 	struct unionfs_dentry_info *info = UNIONFS_D(dentry);
+ 	void *p;
++	int unlock_on_err = 0;
+ 
+ 	if (!info) {
+-		info = kmem_cache_alloc(unionfs_dentry_cachep, GFP_ATOMIC);
++		dentry->d_fsdata = kmem_cache_alloc(unionfs_dentry_cachep,
++						    GFP_ATOMIC);
++		info = UNIONFS_D(dentry);
+ 		if (!info)
+ 			goto out;
+ 
+ 		mutex_init(&info->lock);
++		unionfs_lock_dentry(dentry);
++		unlock_on_err = 1;
++
+ 		info->lower_paths = NULL;
+ 	}
+ 
+@@ -508,13 +514,12 @@ int new_dentry_private_data(struct dentry *dentry)
+ 	info->lower_paths = p;
+ 	memset(info->lower_paths, 0, size);
+ 
+-	/* ok, set the dentry private data pointer */
+-	dentry->d_fsdata = info;
+ 	return 0;
+ 
+ out_free:
+ 	kfree(info->lower_paths);
+-	mutex_unlock(&info->lock);
++	if (unlock_on_err)
++		unionfs_unlock_dentry(dentry);
+ 
+ out:
+ 	free_dentry_private_data(info);
+-- 
+1.5.4.3
+

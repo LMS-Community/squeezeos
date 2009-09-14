@@ -1,0 +1,47 @@
+From 965db0ece534fc68363b03ae2874a9e671eb0207 Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Mon, 1 Sep 2008 10:22:26 +0800
+Subject: [PATCH] ENGR00089826 mc13892: decrease backlight current
+
+cpu board hot issue cause by backlight,
+lower down backlight current and duty circal limitation
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ drivers/video/backlight/mxc_mc13892_bl.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/backlight/mxc_mc13892_bl.c b/drivers/video/backlight/mxc_mc13892_bl.c
+index d1286cc..6d5ff14 100644
+--- a/drivers/video/backlight/mxc_mc13892_bl.c
++++ b/drivers/video/backlight/mxc_mc13892_bl.c
+@@ -21,8 +21,14 @@
+ 
+ #include <asm/arch/pmic_light.h>
+ 
++/*
+ #define MXC_MAX_INTENSITY 	255
+ #define MXC_DEFAULT_INTENSITY 	127
++*/
++/* workaround for atlas hot issue */
++#define MXC_MAX_INTENSITY 	128
++#define MXC_DEFAULT_INTENSITY 	64
++
+ #define MXC_INTENSITY_OFF 	0
+ 
+ static int intensity;
+@@ -80,8 +86,9 @@ static int __init mxcbl_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, bd);
+ 
+-	/* according to LCD spec, set current to 18mA */
+-	mc13892_bklit_set_current(LIT_MAIN, LIT_CURR_18);
++	/* according to LCD spec, current should be 18mA */
++	/* workaround for atlas hot issue, set current 15mA */
++	mc13892_bklit_set_current(LIT_MAIN, LIT_CURR_15);
+ 	bd->props.brightness = MXC_DEFAULT_INTENSITY;
+ 	bd->props.max_brightness = MXC_MAX_INTENSITY;
+ 	bd->props.power = FB_BLANK_UNBLANK;
+-- 
+1.5.4.4
+

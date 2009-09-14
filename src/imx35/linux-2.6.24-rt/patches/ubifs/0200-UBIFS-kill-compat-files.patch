@@ -1,0 +1,219 @@
+From e8074a68b139e68b950cf2b8a94a5239bb8dced0 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 3 Dec 2008 17:04:14 +0200
+Subject: [PATCH] UBIFS: kill compat files
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/Makefile |    2 +-
+ fs/ubifs/compat.c |   59 -----------------------------------------------------
+ fs/ubifs/compat.h |   55 -------------------------------------------------
+ fs/ubifs/debug.h  |    4 +++
+ fs/ubifs/file.c   |    5 ----
+ fs/ubifs/super.c  |    5 ----
+ fs/ubifs/ubifs.h  |    1 -
+ 7 files changed, 5 insertions(+), 126 deletions(-)
+ delete mode 100644 fs/ubifs/compat.c
+ delete mode 100644 fs/ubifs/compat.h
+
+diff --git a/fs/ubifs/Makefile b/fs/ubifs/Makefile
+index f08c7f7..80e93c3 100644
+--- a/fs/ubifs/Makefile
++++ b/fs/ubifs/Makefile
+@@ -3,7 +3,7 @@ obj-$(CONFIG_UBIFS_FS) += ubifs.o
+ ubifs-y += shrinker.o journal.o file.o dir.o super.o sb.o io.o
+ ubifs-y += tnc.o master.o scan.o replay.o log.o commit.o gc.o orphan.o
+ ubifs-y += budget.o find.o tnc_commit.o compress.o lpt.o lprops.o
+-ubifs-y += recovery.o ioctl.o compat.o lpt_commit.o tnc_misc.o
++ubifs-y += recovery.o ioctl.o lpt_commit.o tnc_misc.o
+ 
+ ubifs-$(CONFIG_UBIFS_FS_DEBUG) += debug.o
+ ubifs-$(CONFIG_UBIFS_FS_XATTR) += xattr.o
+diff --git a/fs/ubifs/compat.c b/fs/ubifs/compat.c
+deleted file mode 100644
+index 061220d..0000000
+--- a/fs/ubifs/compat.c
++++ /dev/null
+@@ -1,59 +0,0 @@
+-/*
+- * This file is part of UBIFS.
+- *
+- * Copyright (C) 2006-2008 Nokia Corporation
+- *
+- * This program is free software; you can redistribute it and/or modify it
+- * under the terms of the GNU General Public License version 2 as published by
+- * the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful, but WITHOUT
+- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+- * more details.
+- *
+- * You should have received a copy of the GNU General Public License along with
+- * this program; if not, write to the Free Software Foundation, Inc., 51
+- * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+- *
+- * Authors: Artem Bityutskiy
+- *          Adrian Hunter
+- */
+-
+-#include "ubifs.h"
+-#include <linux/version.h>
+-
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23))
+-#define BYTES_PER_LINE 32
+-
+-/**
+- * ubifs_hexdump - dump a buffer.
+- * @ptr: the buffer to dump
+- * @size: buffer size which must be multiple of 4 bytes
+- */
+-void ubifs_hexdump(const void *ptr, int size)
+-{
+-	int i, k = 0, rows, columns;
+-	const uint8_t *p = ptr;
+-
+-	rows = size / BYTES_PER_LINE + size % BYTES_PER_LINE;
+-	for (i = 0; i < rows; i++) {
+-		int j;
+-
+-		cond_resched();
+-		columns = min(size - k, BYTES_PER_LINE) / 4;
+-		if (columns == 0)
+-			break;
+-		printk(KERN_DEBUG "%5d:  ", i * BYTES_PER_LINE);
+-		for (j = 0; j < columns; j++) {
+-			int n, N;
+-
+-			N = size - k > 4 ? 4 : size - k;
+-			for (n = 0; n < N; n++)
+-				printk("%02x", p[k++]);
+-			printk(" ");
+-		}
+-		printk("\n");
+-	}
+-}
+-#endif /* LINUX_VERSION_CODE < 2.6.23 */
+diff --git a/fs/ubifs/compat.h b/fs/ubifs/compat.h
+deleted file mode 100644
+index 2eb28ab..0000000
+--- a/fs/ubifs/compat.h
++++ /dev/null
+@@ -1,55 +0,0 @@
+-/*
+- * This file is part of UBIFS.
+- *
+- * Copyright (C) 2006-2008 Nokia Corporation.
+- *
+- * This program is free software; you can redistribute it and/or modify it
+- * under the terms of the GNU General Public License version 2 as published by
+- * the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful, but WITHOUT
+- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+- * more details.
+- *
+- * You should have received a copy of the GNU General Public License along with
+- * this program; if not, write to the Free Software Foundation, Inc., 51
+- * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+- *
+- * Author: Artem Bityutskiy
+- *         Adrian Hunter
+- */
+-
+-#ifndef __UBIFS_COMPAT_H__
+-#define __UBIFS_COMPAT_H__
+-
+-#include <linux/version.h>
+-
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
+-#define bdi_init(x) 0
+-#define bdi_destroy(x)
+-#endif
+-
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23))
+-#define UBIFS_COMPAT_NO_SHRINKER
+-#define register_shrinker(x)
+-#define unregister_shrinker(x)
+-#define dbg_mempressure_init()
+-#define dbg_mempressure_exit()
+-#define set_freezable()
+-#define is_owner_or_cap(inode)  \
+-	((current->fsuid == (inode)->i_uid) || capable(CAP_FOWNER))
+-/* This is to hide slab cache interface changes - destructor was dropped */
+-#define UBIFSCOMPATNULL ,NULL
+-#else
+-#define UBIFSCOMPATNULL
+-#endif
+-
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,22))
+-#define uninitialized_var(x) x = x
+-/* print_hex_dump() did not exist in kernel prior to 2.6.22 */
+-#define print_hex_dump(a, b, c, f, e, buf, len, g) ubifs_hexdump(buf, len)
+-void ubifs_hexdump(const void *ptr, int size);
+-#endif
+-
+-#endif /* !__UBIFS_COMPAT_H__ */
+diff --git a/fs/ubifs/debug.h b/fs/ubifs/debug.h
+index 9820d69..001bb95 100644
+--- a/fs/ubifs/debug.h
++++ b/fs/ubifs/debug.h
+@@ -462,4 +462,8 @@ void dbg_debugfs_exit_fs(struct ubifs_info *c);
+ #define dbg_debugfs_exit_fs(c)                     0
+ 
+ #endif /* !CONFIG_UBIFS_FS_DEBUG */
++
++/* Compatibility stuff */
++#define UBIFSCOMPATNULL
++
+ #endif /* !__UBIFS_DEBUG_H__ */
+diff --git a/fs/ubifs/file.c b/fs/ubifs/file.c
+index d38efeb..6ed371e 100644
+--- a/fs/ubifs/file.c
++++ b/fs/ubifs/file.c
+@@ -1523,12 +1523,7 @@ out_unlock:
+ }
+ 
+ static struct vm_operations_struct ubifs_file_vm_ops = {
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,23))
+-	.nopage       = filemap_nopage,
+-	.populate     = filemap_populate,
+-#else
+ 	.fault        = filemap_fault,
+-#endif
+ 	.page_mkwrite = ubifs_vm_page_mkwrite,
+ };
+ 
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index d9f8793..050f927 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -2007,12 +2007,7 @@ static struct file_system_type ubifs_fs_type = {
+ /*
+  * Inode slab cache constructor.
+  */
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
+-static void inode_slab_ctor(void *obj, struct kmem_cache *cachep,
+-                            unsigned long flags)
+-#else
+ static void inode_slab_ctor(struct kmem_cache *cachep, void *obj)
+-#endif
+ {
+ 	struct ubifs_inode *ui = obj;
+ 	inode_init_once(&ui->vfs_inode);
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 896c6f6..e658b06 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -36,7 +36,6 @@
+ #include <linux/pagemap.h>
+ #include <linux/backing-dev.h>
+ #include "ubifs-media.h"
+-#include "compat.h"
+ 
+ /* Version of this UBIFS implementation */
+ #define UBIFS_VERSION 1
+-- 
+1.5.6.3
+

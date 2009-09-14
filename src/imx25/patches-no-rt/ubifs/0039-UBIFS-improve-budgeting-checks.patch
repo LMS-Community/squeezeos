@@ -1,0 +1,77 @@
+From 2cddf18621b066a96c60c50fcfb0e138b2668422 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 24 Jul 2008 14:42:05 +0300
+Subject: [PATCH] UBIFS: improve budgeting checks
+
+Budgeting is a crucial UBIFS subsystem - add more assertions
+to improve requests checking. This is not compiled in when
+UBIFS debugging is disabled.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |   12 ++++++++++++
+ fs/ubifs/ubifs.h  |    8 +++++++-
+ 2 files changed, 19 insertions(+), 1 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index 12a1717..f5afce5 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -543,6 +543,12 @@ int ubifs_budget_space(struct ubifs_info *c, struct ubifs_budget_req *req)
+ 	int err, idx_growth, data_growth, dd_growth;
+ 	struct retries_info ri;
+ 
++	ubifs_assert(req->new_page <= 1);
++	ubifs_assert(req->dirtied_page <= 1);
++	ubifs_assert(req->new_dent <= 1);
++	ubifs_assert(req->mod_dent <= 1);
++	ubifs_assert(req->new_ino <= 1);
++	ubifs_assert(req->new_ino_d <= UBIFS_MAX_INO_DATA);
+ 	ubifs_assert(req->dirtied_ino <= 4);
+ 	ubifs_assert(req->dirtied_ino_d <= UBIFS_MAX_INO_DATA * 4);
+ 
+@@ -618,6 +624,12 @@ again:
+  */
+ void ubifs_release_budget(struct ubifs_info *c, struct ubifs_budget_req *req)
+ {
++	ubifs_assert(req->new_page <= 1);
++	ubifs_assert(req->dirtied_page <= 1);
++	ubifs_assert(req->new_dent <= 1);
++	ubifs_assert(req->mod_dent <= 1);
++	ubifs_assert(req->new_ino <= 1);
++	ubifs_assert(req->new_ino_d <= UBIFS_MAX_INO_DATA);
+ 	ubifs_assert(req->dirtied_ino <= 4);
+ 	ubifs_assert(req->dirtied_ino_d <= UBIFS_MAX_INO_DATA * 4);
+ 	if (!req->recalculate) {
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 6ddd1de..8ca921e 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -809,17 +809,23 @@ struct ubifs_compressor {
+ struct ubifs_budget_req {
+ 	unsigned int fast:1;
+ 	unsigned int recalculate:1;
++#ifndef UBIFS_DEBUG
+ 	unsigned int new_page:1;
+ 	unsigned int dirtied_page:1;
+ 	unsigned int new_dent:1;
+ 	unsigned int mod_dent:1;
+ 	unsigned int new_ino:1;
+ 	unsigned int new_ino_d:13;
+-#ifndef UBIFS_DEBUG
+ 	unsigned int dirtied_ino:4;
+ 	unsigned int dirtied_ino_d:15;
+ #else
+ 	/* Not bit-fields to check for overflows */
++	unsigned int new_page;
++	unsigned int dirtied_page;
++	unsigned int new_dent;
++	unsigned int mod_dent;
++	unsigned int new_ino;
++	unsigned int new_ino_d;
+ 	unsigned int dirtied_ino;
+ 	unsigned int dirtied_ino_d;
+ #endif
+-- 
+1.5.4.3
+

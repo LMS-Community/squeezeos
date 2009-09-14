@@ -1,0 +1,83 @@
+Index: linux-2.6.26/sound/soc/soc-core.c
+===================================================================
+--- linux-2.6.26.orig/sound/soc/soc-core.c	2009-07-20 14:04:51.000000000 +0100
++++ linux-2.6.26/sound/soc/soc-core.c	2009-07-20 14:04:51.000000000 +0100
+@@ -39,6 +39,10 @@
+ #include <sound/soc-dapm.h>
+ #include <sound/initval.h>
+ 
++
++#define IMX_MUTE_HACK
++
++
+ /* debug */
+ #define SOC_DEBUG 0
+ #if SOC_DEBUG
+@@ -436,8 +440,10 @@
+ 		else {
+ 			codec_dai->pop_wait = 0;
+ 			cancel_delayed_work(&pcm_link->delayed_work);
++#ifndef IMX_MUTE_HACK
+ 			if (codec_dai->ops && codec_dai->ops->digital_mute)
+ 				codec_dai->ops->digital_mute(codec_dai, 0);
++#endif
+ 		}
+ 	} else {
+ 		/* no delayed work - do we need to power up codec */
+@@ -455,8 +461,10 @@
+ 					SND_SOC_DAPM_STREAM_START);
+ 
+ 			snd_soc_dapm_device_event(pcm_link, SNDRV_CTL_POWER_D0);
++#ifndef IMX_MUTE_HACK
+ 			if (codec_dai->ops && codec_dai->ops->digital_mute)
+ 				codec_dai->ops->digital_mute(codec_dai, 0);
++#endif
+ 
+ 		} else {
+ 			/* codec already powered - power on widgets */
+@@ -468,8 +476,10 @@
+ 				snd_soc_dapm_stream_event(machine,
+ 					codec_dai->capture->stream_name,
+ 					SND_SOC_DAPM_STREAM_START);
++#ifndef IMX_MUTE_HACK
+ 			if (codec_dai->ops && codec_dai->ops->digital_mute)
+ 				codec_dai->ops->digital_mute(codec_dai, 0);
++#endif
+ 		}
+ 	}
+ 
+@@ -592,6 +602,16 @@
+ 	struct snd_soc_dai *codec_dai = pcm_link->codec_dai;
+ 	int ret;
+ 
++#ifdef IMX_MUTE_HACK
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		if (codec_dai->ops && codec_dai->ops->digital_mute)
++			codec_dai->ops->digital_mute(codec_dai, 1);
++	}
++#endif
++
+ 	if (codec_dai->audio_ops && codec_dai->audio_ops->trigger) {
+ 		ret = codec_dai->audio_ops->trigger(substream, cmd);
+ 		if (ret < 0)
+@@ -609,6 +629,17 @@
+ 		if (ret < 0)
+ 			return ret;
+ 	}
++
++#ifdef IMX_MUTE_HACK
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (codec_dai->ops && codec_dai->ops->digital_mute)
++			codec_dai->ops->digital_mute(codec_dai, 0);
++	}
++#endif
++
+ 	return 0;
+ }
+ 

@@ -1,0 +1,677 @@
+From 0becd148b46f76d07332315a30723f7118b8ccd6 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 5 Mar 2008 13:07:34 +0800
+Subject: [PATCH] ENGR00064728 MX31 3DS USB Patch
+
+The patch for USB changes on mx31 3stack board: USBOTG, USBHOST,ISP1504
+
+Signed-off-by: Jun Li <r65092@freescale.com>
+---
+ arch/arm/configs/imx31_3stack_defconfig |    2 +-
+ arch/arm/mach-mx3/mx3_3stack_gpio.c     |   23 ++++++-
+ arch/arm/mach-mx3/usb.c                 |   40 ++++++++++-
+ arch/arm/plat-mxc/isp1504xc.c           |   28 +++++++-
+ arch/arm/plat-mxc/usb_common.c          |   62 ++++++++++++++++-
+ drivers/usb/gadget/arcotg_udc.c         |   15 ++++
+ drivers/usb/gadget/inode.c              |  115 +++++++++++++++++++++++++++++-
+ include/linux/fsl_devices.h             |    1 +
+ include/linux/usb/fsl_xcvr.h            |    8 ++
+ 9 files changed, 279 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm/configs/imx31_3stack_defconfig b/arch/arm/configs/imx31_3stack_defconfig
+index b530e6c..3fae2b6 100644
+--- a/arch/arm/configs/imx31_3stack_defconfig
++++ b/arch/arm/configs/imx31_3stack_defconfig
+@@ -1085,7 +1085,7 @@ CONFIG_USB_SUSPEND=y
+ #
+ CONFIG_USB_EHCI_HCD=m
+ CONFIG_USB_EHCI_ARC=y
+-CONFIG_USB_EHCI_ARC_H1=y
++CONFIG_USB_EHCI_ARC_H1= is not set
+ CONFIG_USB_EHCI_ARC_H2=y
+ CONFIG_USB_EHCI_ARC_OTG=y
+ CONFIG_USB_EHCI_ARC_OTGHS=y
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index 74be840..b3a390e 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -1003,6 +1003,13 @@ int gpio_usbh2_active(void)
+ 			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
+ 	mxc_iomux_set_pad(MX31_PIN_PC_RW_B,
+ 			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
++
++	mxc_request_iomux(MX31_PIN_USB_BYP, OUTPUTCONFIG_GPIO,
++			INPUTCONFIG_NONE);
++	mxc_set_gpio_direction(MX31_PIN_USB_BYP, 0);
++	mxc_set_gpio_dataout(MX31_PIN_USB_BYP, 0);
++	mdelay(1);
++	mxc_set_gpio_dataout(MX31_PIN_USB_BYP, 1);
+ 	return 0;
+ }
+ 
+@@ -1060,6 +1067,9 @@ void gpio_usbh2_inactive(void)
+ 		       OUTPUTCONFIG_GPIO, INPUTCONFIG_NONE);
+ 	mxc_free_iomux(MX31_PIN_PC_RW_B,		/* USBH2_DATA7 */
+ 		       OUTPUTCONFIG_GPIO, INPUTCONFIG_NONE);
++
++	mxc_free_iomux(MX31_PIN_USB_BYP,		/* USBH2 PHY reset */
++			OUTPUTCONFIG_GPIO, INPUTCONFIG_NONE);
+ }
+ 
+ EXPORT_SYMBOL(gpio_usbh2_inactive);
+@@ -1120,6 +1130,15 @@ int gpio_usbotg_hs_active(void)
+ 			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
+ 	mxc_iomux_set_pad(MX31_PIN_USBOTG_STP,
+ 			  (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST));
++
++	/* reset transceiver */
++	mxc_request_iomux(MX31_PIN_USB_PWR, OUTPUTCONFIG_GPIO,
++		INPUTCONFIG_GPIO);
++	mxc_set_gpio_direction(MX31_PIN_USB_PWR, 0);
++	mxc_set_gpio_dataout(MX31_PIN_USB_PWR, 0);
++	mdelay(1);
++	mxc_set_gpio_dataout(MX31_PIN_USB_PWR, 1);
++
+ 	return 0;
+ }
+ 
+@@ -1127,8 +1146,8 @@ EXPORT_SYMBOL(gpio_usbotg_hs_active);
+ 
+ void gpio_usbotg_hs_inactive(void)
+ {
+-	/* Do nothing as  pins doesn't have/support GPIO mode */
+-
++	mxc_free_iomux(MX31_PIN_USB_PWR, OUTPUTCONFIG_GPIO,
++		INPUTCONFIG_GPIO);
+ }
+ 
+ EXPORT_SYMBOL(gpio_usbotg_hs_inactive);
+diff --git a/arch/arm/mach-mx3/usb.c b/arch/arm/mach-mx3/usb.c
+index 412d988..d718350 100644
+--- a/arch/arm/mach-mx3/usb.c
++++ b/arch/arm/mach-mx3/usb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -37,6 +37,8 @@
+ #include <linux/fsl_devices.h>
+ #include <linux/usb/fsl_xcvr.h>
+ #include <linux/usb/otg.h>
++#include <linux/regulator/regulator.h>
++#include <linux/delay.h>
+ 
+ #include <asm/io.h>
+ #include <asm/irq.h>
+@@ -103,7 +105,7 @@ static struct fsl_usb2_platform_data usbh2_config = {
+ 	.platform_uninit   = fsl_usb_host_uninit,
+ 	.usbmode           = (u32) &UH2_USBMODE,
+ 	.viewport          = (u32) &UH2_ULPIVIEW,
+-	.power_budget      = 150,		/* 150 mA max power */
++	.power_budget      = 250,		/* 250 mA max power */
+ 	.gpio_usb_active   = gpio_usbh2_active,
+ 	.gpio_usb_inactive = gpio_usbh2_inactive,
+ 	.transceiver       = "isp1504",
+@@ -120,6 +122,38 @@ static struct resource usbh2_resources[] = {
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };
++
++void usbh2_get_xcvr_power(struct device *dev)
++{
++	struct regulator *usbh2_regux;
++
++	usbh2_regux = regulator_get(dev, "GPO1");
++	regulator_enable(usbh2_regux);
++	((struct fsl_usb2_platform_data *)dev->platform_data)->
++		xcvr_pwr->regu1 = usbh2_regux;
++
++	usbh2_regux = regulator_get(dev, "GPO3");
++	regulator_enable(usbh2_regux);
++	((struct fsl_usb2_platform_data *)dev->platform_data)->
++		xcvr_pwr->regu2 = usbh2_regux;
++}
++EXPORT_SYMBOL(usbh2_get_xcvr_power);
++
++void usbh2_put_xcvr_power(struct device *dev)
++{
++	struct regulator *usbh2_regux;
++
++	usbh2_regux = ((struct fsl_usb2_platform_data *)dev->
++			platform_data)->xcvr_pwr->regu2;
++	regulator_disable(usbh2_regux);
++	regulator_put(usbh2_regux, dev);
++
++	usbh2_regux = ((struct fsl_usb2_platform_data *)dev->
++			platform_data)->xcvr_pwr->regu1;
++	regulator_disable(usbh2_regux);
++	regulator_put(usbh2_regux, dev);
++}
++EXPORT_SYMBOL(usbh2_put_xcvr_power);
+ /* *INDENT-ON* */
+ #endif
+ 
+@@ -165,7 +199,7 @@ static struct fsl_usb2_platform_data mxc_isp1504_config = {
+ 	.usbmode           = (u32) &UOG_USBMODE,
+ 	.viewport          = (u32) &UOG_ULPIVIEW,
+ 	.does_otg          = 1,
+-	.power_budget      = 150, /* 150 mA max power */
++	.power_budget      = 250, /* 250 mA max power */
+ 	.gpio_usb_active   = gpio_usbotg_hs_active,
+ 	.gpio_usb_inactive = gpio_usbotg_hs_inactive,
+ 	.transceiver       = "isp1504",
+diff --git a/arch/arm/plat-mxc/isp1504xc.c b/arch/arm/plat-mxc/isp1504xc.c
+index bd97582..c0f4317 100644
+--- a/arch/arm/plat-mxc/isp1504xc.c
++++ b/arch/arm/plat-mxc/isp1504xc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -21,12 +21,14 @@
+ 
+ #include <asm/hardware.h>
+ #include <asm/arch/arc_otg.h>
++#include <asm/mach-types.h>
+ 
+ /* ISP 1504 register addresses */
+ #define ISP1504_VID_LOW		0x00	/* Vendor ID low */
+ #define ISP1504_VID_HIGH	0x01	/* Vendor ID high */
+ #define ISP1504_PID_LOW		0x02	/* Product ID low */
+ #define ISP1504_PID_HIGH	0x03	/* Product ID high */
++#define ISP1504_FUNC		0x04	/* Function Control */
+ #define ISP1504_ITFCTL		0x07	/* Interface Control */
+ #define ISP1504_OTGCTL		0x0A	/* OTG Control */
+ 
+@@ -44,6 +46,12 @@
+ #define DP_PULL_DOWN		(1 << 1)	/* enable DP Pull Down */
+ #define ID_PULL_UP		(1 << 0)	/* enable ID Pull Up */
+ 
++/* 1504 OTG Function Control Register bits */
++#define SUSPENDM		(1 << 6)	/* places the PHY into
++						   low-power mode      */
++#define DRV_RESET		(1 << 5)	/* Active HIGH transceiver
++						   reset                  */
++
+ /*!
+  * read ULPI register 'reg' thru VIEWPORT register 'view'
+  *
+@@ -123,7 +131,8 @@ extern int gpio_usbotg_hs_active(void);
+ 
+ static void isp1508_fix(u32 * view)
+ {
+-	gpio_usbotg_hs_active();
++	if (!machine_is_mx31_3ds())
++		gpio_usbotg_hs_active();
+ 
+ 	/* Set bits IND_PASS_THRU and IND_COMPL */
+ 	isp1504_set(0x60, ISP1504_ITFCTL, view);
+@@ -199,11 +208,21 @@ static void isp1504_uninit(struct fsl_xcvr_ops *this)
+ 	pr_debug("%s:\n", __FUNCTION__);
+ }
+ 
++static void isp1504_suspend(struct fsl_xcvr_ops *this)
++{
++	pr_debug("%s\n", __func__);
++
++	/* send suspend command */
++	isp1504_clear(SUSPENDM, ISP1504_FUNC, &UOG_ULPIVIEW);
++	pr_debug("%s.\n", __func__);
++}
++
+ static struct fsl_xcvr_ops isp1504_ops = {
+ 	.name = "isp1504",
+ 	.xcvr_type = PORTSC_PTS_ULPI,
+ 	.init = isp1504_init,
+ 	.uninit = isp1504_uninit,
++	.suspend = isp1504_suspend,
+ 	.set_host = NULL,
+ 	.set_device = NULL,
+ 	.set_vbus_power = isp1504_set_vbus_power,
+@@ -211,6 +230,7 @@ static struct fsl_xcvr_ops isp1504_ops = {
+ };
+ 
+ extern void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops);
++extern int fsl_usb_xcvr_suspend(struct fsl_xcvr_ops *xcvr_ops);
+ 
+ static int __init isp1504xc_init(void)
+ {
+@@ -218,6 +238,10 @@ static int __init isp1504xc_init(void)
+ 
+ 	fsl_usb_xcvr_register(&isp1504_ops);
+ 
++	/* suspend isp1504 */
++	if (fsl_usb_xcvr_suspend(&isp1504_ops))
++		pr_debug("%s: failed to suspend isp1504\n", __func__);
++
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 578a3dc..7abbc86 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  *	otg_{get,set}_transceiver() are from arm/plat-omap/usb.c.
+  *	which is Copyright (C) 2004 Texas Instruments, Inc.
+@@ -40,7 +40,9 @@
+ #include <linux/fsl_devices.h>
+ #include <linux/usb/otg.h>
+ #include <linux/usb/fsl_xcvr.h>
++#include <linux/regulator/regulator.h>
+ #include <asm/arch/arc_otg.h>
++#include <asm/mach-types.h>
+ 
+ #define MXC_NUMBER_USB_TRANSCEIVER 6
+ struct fsl_xcvr_ops *g_xc_ops[MXC_NUMBER_USB_TRANSCEIVER] = { NULL };
+@@ -320,13 +322,16 @@ static void usbh2_set_ulpi_xcvr(void)
+ 	    UCTRL_H2DT |	/* disable H2 TLL */
+ 	    UCTRL_H2PM;		/* power mask */
+ 
+-	UH2_PORTSC1 &= ~PORTSC_PTS_MASK;	/* set ULPI xcvr */
+-	UH2_PORTSC1 |= PORTSC_PTS_ULPI;
++	/* set ULPI xcvr */
++	UH2_PORTSC1 = (UH2_PORTSC1 & (~PORTSC_PTS_MASK)) | PORTSC_PTS_ULPI;
+ 
+ 	/* Turn off the usbpll for ulpi tranceivers */
+ 	clk_disable(usb_clk);
+ }
+ 
++extern void usbh2_get_xcvr_power(struct device *dev);
++extern void usbh2_put_xcvr_power(struct device *dev);
++
+ int fsl_usb_host_init(struct platform_device *pdev)
+ {
+ 	struct fsl_usb2_platform_data *pdata;
+@@ -349,6 +354,17 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 	if (fsl_check_usbclk() != 0)
+ 		return -EINVAL;
+ 
++	/* set host2 usb phy usb3317 power supply for imx31 3 stack */
++	if ((pdata->xcvr_type == PORTSC_PTS_ULPI) && (machine_is_mx31_3ds())) {
++		pdata->xcvr_pwr =
++		    kmalloc(sizeof(struct fsl_xcvr_power), GFP_KERNEL);
++		if (!(pdata->xcvr_pwr))
++			return -ENOMEM;
++
++		pdata->xcvr_pwr->usb_pdev = pdev;
++		usbh2_get_xcvr_power(&(pdev->dev));
++	}
++
+ 	pr_debug("%s: grab pins\n", __FUNCTION__);
+ 	if (pdata->gpio_usb_active())
+ 		return -EINVAL;
+@@ -392,6 +408,11 @@ void fsl_usb_host_uninit(struct fsl_usb2_platform_data *pdata)
+ 	pdata->gpio_usb_inactive();
+ 	if (pdata->xcvr_type == PORTSC_PTS_SERIAL)
+ 		clk_disable(usb_clk);
++	else if ((pdata->xcvr_type == PORTSC_PTS_ULPI)
++		 && (machine_is_mx31_3ds())) {
++		usbh2_put_xcvr_power(&(pdata->xcvr_pwr->usb_pdev->dev));
++		kfree(pdata->xcvr_pwr);
++	}
+ }
+ 
+ EXPORT_SYMBOL(fsl_usb_host_uninit);
+@@ -490,6 +511,35 @@ static void otg_set_ulpi_xcvr(void)
+ 	clk_disable(usb_clk);
+ }
+ 
++extern int gpio_usbotg_hs_active(void);
++extern int gpio_usbotg_hs_inactive(void);
++
++int fsl_usb_xcvr_suspend(struct fsl_xcvr_ops *xcvr_ops)
++{
++	if (!machine_is_mx31_3ds())
++		return -ECANCELED;
++
++	if (xcvr_ops->xcvr_type == PORTSC_PTS_ULPI) {
++		if (fsl_check_usbclk() != 0)
++			return -EINVAL;
++		if (gpio_usbotg_hs_active())
++			return -EINVAL;
++		clk_enable(usb_clk);
++
++		otg_set_ulpi_xcvr();
++
++		if (xcvr_ops->suspend)
++			/* suspend transceiver */
++			xcvr_ops->suspend(xcvr_ops);
++
++		gpio_usbotg_hs_inactive();
++		clk_disable(usb_clk);
++	}
++	return 0;
++}
++
++EXPORT_SYMBOL(fsl_usb_xcvr_suspend);
++
+ static int otg_used = 0;
+ 
+ int usbotg_init(struct platform_device *pdev)
+@@ -566,6 +616,12 @@ void usbotg_uninit(struct fsl_usb2_platform_data *pdata)
+ 		pdata->regs = NULL;
+ 		pdata->r_start = pdata->r_len = 0;
+ 
++		if (machine_is_mx31_3ds()) {
++			if (pdata->xcvr_ops && pdata->xcvr_ops->suspend)
++				pdata->xcvr_ops->suspend(pdata->xcvr_ops);
++			clk_disable(usb_clk);
++		}
++
+ 		pdata->gpio_usb_inactive();
+ 		if (pdata->xcvr_type == PORTSC_PTS_SERIAL)
+ 			clk_disable(usb_clk);
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 82415d2..47bad59 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1743,6 +1743,21 @@ static void setup_received_irq(struct arcotg_udc *udc,
+ 	}
+ 
+ 	if (!handled) {
++		/*!
++		 *  0x66 - Device_Reset_Request of Still Image Capture Device,
++		 *  0x22 - SET_CONTROL_LINE_STATE of Communication Device
++		 */
++		if (setup->bRequest == 0x66 || setup->bRequest == 0x22) {
++			udc->ep0_dir = USB_DIR_IN;
++			udc->driver->setup(&udc->gadget,
++					   &udc->local_setup_buff);
++			udc->ep0_state = WAIT_FOR_OUT_STATUS;
++			return;
++		}
++		/* 0x65 - Get_Extended_Event_Data of Still Image Capture Device */
++		if (setup->bRequest == 0x65)
++			return;
++
+ 		if (udc->driver->setup(&udc->gadget, &udc->local_setup_buff)
+ 		    != 0) {
+ 			Ep0Stall(udc);
+diff --git a/drivers/usb/gadget/inode.c b/drivers/usb/gadget/inode.c
+index 47ef8bd..7b79792 100644
+--- a/drivers/usb/gadget/inode.c
++++ b/drivers/usb/gadget/inode.c
+@@ -39,6 +39,8 @@
+ #include <linux/usb/gadgetfs.h>
+ #include <linux/usb/gadget.h>
+ 
++#include <linux/delay.h>
++#include <linux/time.h>
+ 
+ /*
+  * The gadgetfs API maps each endpoint to a file descriptor so that you
+@@ -80,6 +82,9 @@ MODULE_DESCRIPTION (DRIVER_DESC);
+ MODULE_AUTHOR ("David Brownell");
+ MODULE_LICENSE ("GPL");
+ 
++/* Cancel IO, To store the bulkin and bulkout ep data. */
++static struct ep_data *gp_ep_bulkin_data;
++static struct ep_data *gp_ep_bulkout_data;
+ 
+ /*----------------------------------------------------------------------*/
+ 
+@@ -266,6 +271,10 @@ static const char *CHIP;
+ #define INFO(dev,fmt,args...) \
+ 	xprintk(dev , KERN_INFO , fmt , ## args)
+ 
++/* Cancel IO */
++static int mtp_ctrl_cmd;
++static int gbCancelFlag;
++static unsigned long mtptimestamp;
+ 
+ /*----------------------------------------------------------------------*/
+ 
+@@ -276,6 +285,17 @@ static const char *CHIP;
+  * precise FIFO status when recovering from cancellation.
+  */
+ 
++/* Cancel IO */
++static void cancel_io_process(void *data)
++{
++	if (gp_ep_bulkout_data->req->status == -EINPROGRESS)
++		usb_ep_dequeue(gp_ep_bulkout_data->ep, gp_ep_bulkout_data->req);
++
++	if (gp_ep_bulkin_data->req->status == -EINPROGRESS)
++		usb_ep_dequeue(gp_ep_bulkin_data->ep, gp_ep_bulkin_data->req);
++}
++static DECLARE_DELAYED_WORK(cancel_work, cancel_io_process);
++
+ static void epio_complete (struct usb_ep *ep, struct usb_request *req)
+ {
+ 	struct ep_data	*epdata = ep->driver_data;
+@@ -872,10 +892,13 @@ ep_open (struct inode *inode, struct file *fd)
+ {
+ 	struct ep_data		*data = inode->i_private;
+ 	int			value = -EBUSY;
++	char *epin = "ep1in";
++	char *epout = "ep1out";
+ 
+ 	if (down_interruptible (&data->lock) != 0)
+ 		return -EINTR;
+ 	spin_lock_irq (&data->dev->lock);
++
+ 	if (data->dev->state == STATE_DEV_UNBOUND)
+ 		value = -ENOENT;
+ 	else if (data->state == STATE_EP_DISABLED) {
+@@ -884,9 +907,16 @@ ep_open (struct inode *inode, struct file *fd)
+ 		get_ep (data);
+ 		fd->private_data = data;
+ 		VDEBUG (data->dev, "%s ready\n", data->name);
++		/* Cancel IO */
++		if (0 == strcmp(data->name, epin))
++			gp_ep_bulkin_data = fd->private_data;
++
++		if (0 == strcmp(data->name, epout))
++			gp_ep_bulkout_data = fd->private_data;
+ 	} else
+ 		DBG (data->dev, "%s state %d\n",
+ 			data->name, data->state);
++
+ 	spin_unlock_irq (&data->dev->lock);
+ 	up (&data->lock);
+ 	return value;
+@@ -998,7 +1028,7 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
+ 			retval = -EL2HLT;
+ 			dev->state = STATE_DEV_CONNECTED;
+ 
+-		} else if (len == 0) {		/* ack SET_CONFIGURATION etc */
++		} else if (len == 0) { /* ack SET_CONFIGURATION etc */
+ 			struct usb_ep		*ep = dev->gadget->ep0;
+ 			struct usb_request	*req = dev->req;
+ 
+@@ -1019,7 +1049,7 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
+ 				usb_gadget_vbus_draw(dev->gadget, 2 * power);
+ 			}
+ 
+-		} else {			/* collect OUT data */
++		} else { /* collect OUT data */
+ 			if ((fd->f_flags & O_NONBLOCK) != 0
+ 					&& !dev->setup_out_ready) {
+ 				retval = -EAGAIN;
+@@ -1044,11 +1074,15 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
+ 				retval = -EIO;
+ 			else {
+ 				len = min (len, (size_t)dev->req->actual);
+-// FIXME don't call this with the spinlock held ...
++/* FIXME don't call this with the spinlock held ... */
+ 				if (copy_to_user (buf, dev->req->buf, len))
+ 					retval = -EFAULT;
++				else
++					/* Bug of Cancel IO 6 bytes read. */
++					retval = len;
+ 				clean_req (dev->gadget->ep0, dev->req);
+ 				/* NOTE userspace can't yet choose to stall */
++				dev->state = STATE_DEV_CONNECTED;	/* Cancel IO */
+ 			}
+ 		}
+ 		goto done;
+@@ -1062,6 +1096,12 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
+ 	len -= len % sizeof (struct usb_gadgetfs_event);
+ 	dev->usermode_setup = 1;
+ 
++    /* Cancel IO, signal abort blocked IO. */
++	if (mtp_ctrl_cmd == 1) {
++		mtp_ctrl_cmd = 0;
++		schedule_delayed_work(&cancel_work, HZ / 100);
++	}
++
+ scan:
+ 	/* return queued events right away */
+ 	if (dev->ev_next != 0) {
+@@ -1386,6 +1426,16 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 	struct usb_gadgetfs_event	*event;
+ 	u16				w_value = le16_to_cpu(ctrl->wValue);
+ 	u16				w_length = le16_to_cpu(ctrl->wLength);
++	struct timeval tv;
++
++    /* Cancel IO */
++	if (0x67 == ctrl->bRequest && 1 == gbCancelFlag
++	    && dev->state == STATE_DEV_SETUP)
++		dev->state = STATE_DEV_CONNECTED;
++
++	if (0x67 == ctrl->bRequest && 2 == mtp_ctrl_cmd
++	    && dev->state == STATE_DEV_SETUP)
++		dev->state = STATE_DEV_CONNECTED;
+ 
+ 	spin_lock (&dev->lock);
+ 	dev->setup_abort = 0;
+@@ -1413,6 +1463,11 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 	 */
+ 	} else if (dev->state == STATE_DEV_SETUP)
+ 		dev->setup_abort = 1;
++	/*Cancel IO */
++	if (mtp_ctrl_cmd == 1 && gbCancelFlag == 1 && dev->setup_abort == 1) {
++		INFO(dev, "0x64->setup\n");
++		dev->setup_abort = 0;
++	}
+ 
+ 	req->buf = dev->rbuf;
+ 	req->dma = DMA_ADDR_INVALID;
+@@ -1438,7 +1493,7 @@ gadgetfs_setup (struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
+ 			make_qualifier (dev);
+ 			break;
+ 		case USB_DT_OTHER_SPEED_CONFIG:
+-			// FALLTHROUGH
++			/* FALLTHROUGH */
+ #endif
+ 		case USB_DT_CONFIG:
+ 			value = config_buf (dev,
+@@ -1545,11 +1600,63 @@ delegate:
+ 				/* we can't currently stall these */
+ 				dev->setup_can_stall = 0;
+ 			}
++			/* Cancel IO */
++			if (0x67 == ctrl->bRequest && 1 == gbCancelFlag) {
++				gbCancelFlag = 0;
++
++				setup_req(gadget->ep0, dev->req, 4);
++				*(unsigned long *)dev->req->buf = 0x20190004;
++				usb_ep_queue(gadget->ep0, dev->req, GFP_ATOMIC);
++
++				spin_unlock(&dev->lock);
++				return 0;
++			}
++			if (ctrl->bRequest == 0x67 && mtp_ctrl_cmd == 2) {
++				/* get status */
++				mtp_ctrl_cmd = 0;
++			}
+ 
+ 			/* state changes when reader collects event */
+ 			event = next_event (dev, GADGETFS_SETUP);
+ 			event->u.setup = *ctrl;
++			/*  Cancel IO */
++			if (0x64 == ctrl->bRequest) {
++				mtp_ctrl_cmd = 1;
++				gbCancelFlag = 1;
++
++				/* get the timestamp */
++				do_gettimeofday(&tv);
++				mtptimestamp = tv.tv_usec;
++				event->u.setup.wValue =
++				    (unsigned short)tv.tv_usec;
++			}
++			if (0x66 == ctrl->bRequest) {
++				/* get the timestamp */
++				do_gettimeofday(&tv);
++				mtptimestamp = tv.tv_usec;
++				event->u.setup.wValue =
++				    (unsigned short)tv.tv_usec;
++			}
++
+ 			ep0_readable (dev);
++			/* Reset request. */
++			if (ctrl->bRequest == 0x66) {	/* reset ,send ZLP */
++				mtp_ctrl_cmd = 2;
++
++				if (gp_ep_bulkout_data->req->status ==
++				    -EINPROGRESS) {
++					usb_ep_dequeue(gp_ep_bulkout_data->ep,
++						       gp_ep_bulkout_data->req);
++				}
++				if (gp_ep_bulkin_data->req->status ==
++				    -EINPROGRESS) {
++					usb_ep_dequeue(gp_ep_bulkin_data->ep,
++						       gp_ep_bulkin_data->req);
++				}
++			}
++			if (ctrl->bRequest == 0x65)
++				pr_debug("i:0x65,not supported\n");
++
+ 			spin_unlock (&dev->lock);
+ 			return 0;
+ 		}
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index f1195d7..031d885 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -123,6 +123,7 @@ struct fsl_usb2_platform_data {
+ 	int does_otg;
+ 	unsigned power_budget;	/* for hcd->power_budget */
+ 	struct fsl_xcvr_ops *xcvr_ops;
++	struct fsl_xcvr_power *xcvr_pwr;
+ 	int (*gpio_usb_active) (void);
+ 	void (*gpio_usb_inactive) (void);
+ };
+diff --git a/include/linux/usb/fsl_xcvr.h b/include/linux/usb/fsl_xcvr.h
+index ea4a11d..b15990a 100644
+--- a/include/linux/usb/fsl_xcvr.h
++++ b/include/linux/usb/fsl_xcvr.h
+@@ -1,5 +1,7 @@
+ #ifndef __LINUX_USB_FSL_XCVR_H
+ #define __LINUX_USB_FSL_XCVR_H
++#include <linux/platform_device.h>
++#include <linux/regulator/regulator.h>
+ /**
+  * @name: transceiver name
+  * @xcvr_type: one of PORTSC_PTS_{UTMI,SERIAL,ULPI}
+@@ -15,10 +17,16 @@ struct fsl_xcvr_ops {
+ 
+ 	void (*init) (struct fsl_xcvr_ops * ops);
+ 	void (*uninit) (struct fsl_xcvr_ops * ops);
++   void (*suspend) (struct fsl_xcvr_ops *ops);
+ 	void (*set_host) (void);
+ 	void (*set_device) (void);
+ 	void (*set_vbus_power) (u32 * view, int on);
+ 	void (*set_remote_wakeup) (u32 * view);
+ };
+ 
++struct fsl_xcvr_power {
++	struct platform_device *usb_pdev;
++	struct regulator *regu1;
++	struct regulator *regu2;
++};
+ #endif
+-- 
+1.5.4.4
+

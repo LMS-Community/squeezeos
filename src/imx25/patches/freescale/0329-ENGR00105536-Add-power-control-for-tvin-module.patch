@@ -1,0 +1,228 @@
+From ada05a9ff3c13deab2d4df55bd289a26c9239e92 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Mon, 19 Jan 2009 23:13:47 +0800
+Subject: [PATCH] ENGR00105536 Add power control for tvin module
+
+1. Add power control for tvin module
+2. Move the reset and power enable control to platform data
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c          |   28 +++++++++
+ drivers/media/video/mxc/capture/adv7180.c |   88 ++++++++++++++++++++++++++---
+ include/asm-arm/arch-mxc/mxc.h            |    9 +++
+ 3 files changed, 116 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 0091087..45a4f24 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -389,6 +389,28 @@ static struct mxc_fm_platform_data si4702_data = {
+ 	.clock_ctl = si4702_clock_ctl,
+ };
+ 
++static void adv7180_pwdn(int pwdn)
++{
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 1, pwdn);
++}
++
++static void adv7180_reset(void)
++{
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 6, 0);
++	msleep(5);
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 6, 1);
++	msleep(5);
++}
++
++static struct mxc_tvin_platform_data adv7180_data = {
++	.dvddio_reg = NULL,
++	.dvdd_reg = "SW3",
++	.avdd_reg = "PWGT2",
++	.pvdd_reg = NULL,
++	.pwdn = adv7180_pwdn,
++	.reset = adv7180_reset,
++};
++
+ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	{
+ 	 .type = "mc9sdz60",
+@@ -431,6 +453,7 @@ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	{
+ 	 .type = "adv7180",
+ 	 .addr = 0x21,
++	 .platform_data = (void *)&adv7180_data,
+ 	 },
+ 	{
+ 	 .type = "mc13892",
+@@ -956,6 +979,11 @@ static void mx35_3stack_fixup_for_board_v1(void)
+ 	camera_data.gpo_regulator = NULL;
+ 	camera_data.mclk = 20000000;
+ 
++	adv7180_data.dvddio_reg = NULL;
++	adv7180_data.dvdd_reg = NULL;
++	adv7180_data.avdd_reg = NULL;
++	adv7180_data.pvdd_reg = NULL;
++
+ #if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
+ 	gps_data.core_reg = "SW1";
+ 	gps_data.analog_reg = "SW2";
+diff --git a/drivers/media/video/mxc/capture/adv7180.c b/drivers/media/video/mxc/capture/adv7180.c
+index 29e723f..7e3b89a 100644
+--- a/drivers/media/video/mxc/capture/adv7180.c
++++ b/drivers/media/video/mxc/capture/adv7180.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -30,10 +30,16 @@
+ #include <linux/wait.h>
+ #include <linux/videodev2.h>
+ #include <linux/workqueue.h>
++#include <linux/regulator/regulator.h>
+ #include <media/v4l2-int-device.h>
+ #include <linux/regulator/mcu_max8660-bus.h>
+ #include "mxc_v4l2_capture.h"
+ 
++static struct regulator *dvddio_regulator;
++static struct regulator *dvdd_regulator;
++static struct regulator *avdd_regulator;
++static struct regulator *pvdd_regulator;
++
+ extern void gpio_sensor_active(void);
+ extern void gpio_sensor_inactive(void);
+ 
+@@ -791,9 +797,58 @@ static int adv7180_probe(struct i2c_client *client,
+ {
+ 	int rev_id;
+ 	int ret = 0;
++	struct mxc_tvin_platform_data *plat_data = client->dev.platform_data;
+ 
+ 	dev_dbg(&adv7180_data.i2c_client->dev, "In adv7180_probe\n");
+ 
++	if (plat_data->dvddio_reg) {
++		dvddio_regulator =
++		    regulator_get(&client->dev, plat_data->dvddio_reg);
++		if (!IS_ERR_VALUE((unsigned long)dvddio_regulator)) {
++			regulator_set_voltage(dvddio_regulator, 3300000);
++			if (regulator_enable(dvddio_regulator) != 0)
++				return -ENODEV;
++		}
++	}
++
++	if (plat_data->dvdd_reg) {
++		dvdd_regulator =
++		    regulator_get(&client->dev, plat_data->dvdd_reg);
++		if (!IS_ERR_VALUE((unsigned long)dvdd_regulator)) {
++			regulator_set_voltage(dvdd_regulator, 1800000);
++			if (regulator_enable(dvdd_regulator) != 0)
++				return -ENODEV;
++		}
++	}
++
++	if (plat_data->avdd_reg) {
++		avdd_regulator =
++		    regulator_get(&client->dev, plat_data->avdd_reg);
++		if (!IS_ERR_VALUE((unsigned long)avdd_regulator)) {
++			regulator_set_voltage(avdd_regulator, 1800000);
++			if (regulator_enable(avdd_regulator) != 0)
++				return -ENODEV;
++		}
++	}
++
++	if (plat_data->pvdd_reg) {
++		pvdd_regulator =
++		    regulator_get(&client->dev, plat_data->pvdd_reg);
++		if (!IS_ERR_VALUE((unsigned long)pvdd_regulator)) {
++			regulator_set_voltage(pvdd_regulator, 1800000);
++			if (regulator_enable(pvdd_regulator) != 0)
++				return -ENODEV;
++		}
++	}
++
++	if (plat_data->reset)
++		plat_data->reset();
++
++	if (plat_data->pwdn)
++		plat_data->pwdn(1);
++
++	msleep(1);
++
+ 	/* Set initial values for the sensor struct. */
+ 	memset(&adv7180_data, 0, sizeof(adv7180_data));
+ 	adv7180_data.i2c_client = client;
+@@ -808,10 +863,6 @@ static int adv7180_probe(struct i2c_client *client,
+ 
+ 	gpio_sensor_active();
+ 
+-	/*! Put device into normal operational mode. */
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 1, 1);
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 4, 1);
+-
+ 	dev_dbg(&adv7180_data.i2c_client->dev,
+ 		"%s:adv7180 probe i2c address is 0x%02X \n",
+ 		__func__, adv7180_data.i2c_client->addr);
+@@ -848,15 +899,34 @@ static int adv7180_probe(struct i2c_client *client,
+  */
+ static int adv7180_detach(struct i2c_client *client)
+ {
++	struct mxc_tvin_platform_data *plat_data = client->dev.platform_data;
++
+ 	dev_dbg(&adv7180_data.i2c_client->dev,
+ 		"%s:Removing %s video decoder @ 0x%02X from adapter %s \n",
+ 		__func__, IF_NAME, client->addr << 1, client->adapter->name);
+ 
+-	/*! Put device into power down mode. */
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 4, 0);
++	if (plat_data->pwdn)
++		plat_data->pwdn(0);
++
++	if (dvddio_regulator) {
++		regulator_disable(dvddio_regulator);
++		regulator_put(dvddio_regulator, &client->dev);
++	}
++
++	if (dvdd_regulator) {
++		regulator_disable(dvdd_regulator);
++		regulator_put(dvdd_regulator, &client->dev);
++	}
+ 
+-	/*! Disable TVIN module. */
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 1, 0);
++	if (avdd_regulator) {
++		regulator_disable(avdd_regulator);
++		regulator_put(avdd_regulator, &client->dev);
++	}
++
++	if (pvdd_regulator) {
++		regulator_disable(pvdd_regulator);
++		regulator_put(pvdd_regulator, &client->dev);
++	}
+ 
+ 	v4l2_int_device_unregister(&adv7180_int_device);
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index ae7b262..b2e120f 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -187,6 +187,15 @@ struct mxc_tvout_platform_data {
+ 	u32 detect_line;
+ };
+ 
++struct mxc_tvin_platform_data {
++	char *dvddio_reg;
++	char *dvdd_reg;
++	char *avdd_reg;
++	char *pvdd_reg;
++	void (*pwdn) (int pwdn);
++	void (*reset) (void);
++};
++
+ /*! Platform data for the IDE drive structure. */
+ struct mxc_ide_platform_data {
+ 	char *power_drive;	/*!< The power pointer */
+-- 
+1.5.4.4
+

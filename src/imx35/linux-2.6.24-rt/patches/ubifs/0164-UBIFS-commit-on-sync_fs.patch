@@ -1,0 +1,48 @@
+From 538db6c2f8316008606ea55a6b31e3a75e5ad15f Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 9 Sep 2008 12:31:37 +0300
+Subject: [PATCH] UBIFS: commit on sync_fs
+
+Commit the journal when the FS is sync'ed. This will make
+statfs provide better free space report. And we anyway
+advice our users to sync the FS if they want better statfs
+report.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 359597f..9c566e0 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -430,6 +430,7 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
+ {
+ 	struct ubifs_info *c = sb->s_fs_info;
+ 	int i, ret = 0, err;
++	long long bud_bytes;
+ 
+ 	if (c->jheads)
+ 		for (i = 0; i < c->jhead_cnt; i++) {
+@@ -437,6 +438,17 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
+ 			if (err && !ret)
+ 				ret = err;
+ 		}
++
++	/* Commit the journal unless it has too few data */
++	spin_lock(&c->buds_lock);
++	bud_bytes = c->bud_bytes;
++	spin_unlock(&c->buds_lock);
++	if (bud_bytes > c->leb_size) {
++		err = ubifs_run_commit(c);
++		if (err)
++			return err;
++	}
++
+ 	/*
+ 	 * We ought to call sync for c->ubi but it does not have one. If it had
+ 	 * it would in turn call mtd->sync, however mtd operations are
+-- 
+1.5.6.3
+

@@ -1,0 +1,308 @@
+From 10be1ee763141e801e25e423d07602eb55c867a6 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Wed, 12 Mar 2008 09:20:12 -0500
+Subject: [PATCH] ENGR00068335 Support SDMA Events Greater Than 32
+
+Support SDMA events greater than 32 by passing the right events mask value
+to the scripts.
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/plat-mxc/sdma/iapi/include/epm.h        |   29 +++----------
+ arch/arm/plat-mxc/sdma/iapi/include/sdmaStruct.h |   12 ++++-
+ arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c       |   14 ++++---
+ arch/arm/plat-mxc/sdma/iapi/src/iapiLowMcu.c     |    6 +-
+ arch/arm/plat-mxc/sdma/sdma.c                    |   50 +++++++++++++++++----
+ include/asm-arm/arch-mxc/mx37.h                  |    5 ++
+ 6 files changed, 73 insertions(+), 43 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/sdma/iapi/include/epm.h b/arch/arm/plat-mxc/sdma/iapi/include/epm.h
+index 8356e44..d957ac7 100644
+--- a/arch/arm/plat-mxc/sdma/iapi/include/epm.h
++++ b/arch/arm/plat-mxc/sdma/iapi/include/epm.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -11,12 +11,12 @@
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+ 
+-#ifndef _mcuEpm_h
+-#define _mcuEpm_h
++#ifndef __ASM_ARCH_MXC_SDMA_REGS_H__
++#define __ASM_ARCH_MXC_SDMA_REGS_H__
+ 
+ #include <asm/arch/hardware.h>
+ 
+-/*MCU_sdma (sdma.0.) regs definition */
++/* SDMA Reg definition */
+ #define SDMA_BASE_IO_ADDR IO_ADDRESS(SDMA_BASE_ADDR)
+ 
+ #define SDMA_H_C0PTR            *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x000))
+@@ -46,7 +46,7 @@
+ #define SDMA_XTRIG_CONF1        *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x070))
+ #define SDMA_XTRIG_CONF2        *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x074))
+ 
+-#if defined(CONFIG_ARCH_MXC91221) || defined(CONFIG_ARCH_MXC92323) || defined(CONFIG_ARCH_MX37)
++#ifdef MXC_SDMA_V2
+ #define SDMA_CHNENBL_0          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x200))
+ #define SDMA_CHNENBL_1          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x204))
+ #define SDMA_CHNENBL_2          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x208))
+@@ -106,6 +106,7 @@
+ #define SDMA_ONCE_PCMATCH       *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x31C))
+ 
+ #else
++
+ #define SDMA_CHNENBL_0          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x080))
+ #define SDMA_CHNENBL_1          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x084))
+ #define SDMA_CHNENBL_2          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x088))
+@@ -148,7 +149,7 @@
+ #define SDMA_ONCE_EDM           *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x218))
+ #define SDMA_ONCE_PCMATCH       *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x21C))
+ 
+-#endif
++#endif /* MXC_SDMA_V2 */
+ 
+ #define SDMA_CHNPRI_0           *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x100))
+ #define SDMA_CHNPRI_1           *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x104))
+@@ -182,21 +183,5 @@
+ #define SDMA_CHNPRI_29          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x174))
+ #define SDMA_CHNPRI_30          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x178))
+ #define SDMA_CHNPRI_31          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x17C))
+-#define SDMA_CHNPRI_32          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x180))
+-#define SDMA_CHNPRI_33          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x184))
+-#define SDMA_CHNPRI_34          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x188))
+-#define SDMA_CHNPRI_35          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x18C))
+-#define SDMA_CHNPRI_36          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x190))
+-#define SDMA_CHNPRI_37          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x194))
+-#define SDMA_CHNPRI_38          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x198))
+-#define SDMA_CHNPRI_39          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x19C))
+-#define SDMA_CHNPRI_40          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1A0))
+-#define SDMA_CHNPRI_41          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1A4))
+-#define SDMA_CHNPRI_42          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1A8))
+-#define SDMA_CHNPRI_43          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1AC))
+-#define SDMA_CHNPRI_44          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1B0))
+-#define SDMA_CHNPRI_45          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1B4))
+-#define SDMA_CHNPRI_46          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1B8))
+-#define SDMA_CHNPRI_47          *((volatile unsigned long *)(SDMA_BASE_IO_ADDR + 0x1BC))
+ 
+ #endif /* _mcuEpm_h */
+diff --git a/arch/arm/plat-mxc/sdma/iapi/include/sdmaStruct.h b/arch/arm/plat-mxc/sdma/iapi/include/sdmaStruct.h
+index 72e92d9..995d215 100644
+--- a/arch/arm/plat-mxc/sdma/iapi/include/sdmaStruct.h
++++ b/arch/arm/plat-mxc/sdma/iapi/include/sdmaStruct.h
+@@ -1,6 +1,6 @@
+ /******************************************************************************
+  *
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  *
+  * The code contained herein is licensed under the GNU General Public
+@@ -51,10 +51,18 @@
+ #endif
+ 
+ /**
+- * Number of channel
++ * Number of channels
+  */
+ #define CH_NUM  32
+ /**
++ * Number of events
++ */
++#ifdef MXC_SDMA_V2
++#define EVENTS_NUM   48
++#else
++#define EVENTS_NUM   32
++#endif
++/**
+  * Channel configuration
+  */
+ #define DONT_OWN_CHANNEL   0
+diff --git a/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c b/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c
+index 9fa7d4a..abdd2d8 100644
+--- a/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c
++++ b/arch/arm/plat-mxc/sdma/iapi/src/iapiHigh.c
+@@ -1,6 +1,6 @@
+ /******************************************************************************
+  *
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  *
+  * The code contained herein is licensed under the GNU General Public
+@@ -2610,13 +2610,15 @@ IRQ_Handler(void)
+     */
+    if(SDMA_DI != 0)
+    {
+-     chNum = (CH_NUM - 1 - quartz_FF1(SDMA_DI));
++     chNum = (unsigned char)(CH_NUM - 1 - quartz_FF1(SDMA_DI));
++     intrReg = (unsigned int)(1 << chNum);
+    }
+    else
+    {
+      chNum = 32;
++     intrReg = 0;
+    }
+-   intrReg = 1 << chNum;
++
+    while (intrReg != 0)
+    {
+       SDMA_DI &= intrReg;
+@@ -2630,8 +2632,8 @@ IRQ_Handler(void)
+                                  userArgTable[chNum]);
+       }
+ 
+-      chNum = (CH_NUM - 1 - quartz_FF1(SDMA_DI));
+-      intrReg = 1 << chNum;
++      chNum = (unsigned char)(CH_NUM - 1 - quartz_FF1(SDMA_DI));
++      intrReg = (unsigned int)(1 << chNum);
+    }
+ 
+    /* Enable interrupts */
+@@ -2764,7 +2766,7 @@ unsigned long iapi_GetError(channelDescriptor * cd_p)
+  */
+ int iapi_GetCount(channelDescriptor * cd_p)
+ {
+-   return (cd_p->ccb_ptr->currentBDptr->mode.count);
++   return (int)(cd_p->ccb_ptr->currentBDptr->mode.count);
+ }
+ 
+ /* ***************************************************************************/
+diff --git a/arch/arm/plat-mxc/sdma/iapi/src/iapiLowMcu.c b/arch/arm/plat-mxc/sdma/iapi/src/iapiLowMcu.c
+index ea8d007..1d79511 100644
+--- a/arch/arm/plat-mxc/sdma/iapi/src/iapiLowMcu.c
++++ b/arch/arm/plat-mxc/sdma/iapi/src/iapiLowMcu.c
+@@ -1,6 +1,6 @@
+ /******************************************************************************
+  *
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  *
+  * The code contained herein is licensed under the GNU General Public
+@@ -167,7 +167,7 @@ iapi_InitChannelTables(void)
+ {
+ 
+   /* No channel is enabled*/
+-  iapi_memset((void *)&SDMA_CHNENBL_0, 0x00, sizeof(unsigned long)*CH_NUM);
++  iapi_memset((void *)&SDMA_CHNENBL_0, 0x00, sizeof(unsigned long)*EVENTS_NUM);
+   /* All channels have priority 0*/
+   iapi_memset((void *)&SDMA_CHNPRI_0, 0x00, sizeof(unsigned long)*CH_NUM);
+ }
+@@ -499,7 +499,7 @@ iapi_lowSetChannelEventMapping(unsigned char event, unsigned long channel_map)
+   int result = IAPI_SUCCESS;
+ 
+   /* Check validity of event*/
+-  if(event < CH_NUM)
++  if (event < EVENTS_NUM)
+   {
+       channelEnableMatx = &SDMA_CHNENBL_0;
+       channelEnableMatx[event] |= channel_map;
+diff --git a/arch/arm/plat-mxc/sdma/sdma.c b/arch/arm/plat-mxc/sdma/sdma.c
+index c9d52ba..40a47a7 100644
+--- a/arch/arm/plat-mxc/sdma/sdma.c
++++ b/arch/arm/plat-mxc/sdma/sdma.c
+@@ -89,7 +89,7 @@ typedef struct {
+ 	__u32 watermark_level;
+ 	/*! Peripheral event id */
+ 	int event_id;
+-	/*! Peripheral event id2 (for ATA only) */
++	/*! Peripheral event id2 (for channels that use 2 events) */
+ 	int event_id2;
+ 	/*! Running status (boolean)  */
+ 	int running;
+@@ -381,6 +381,8 @@ static int sdma_load_context(int channel, dma_channel_params * p)
+ {
+ 	script_data context;
+ 	int res;
++	int event1_greater_than_32;
++	int event2_greater_than_32;
+ 
+ 	res = 0;
+ 
+@@ -391,16 +393,44 @@ static int sdma_load_context(int channel, dma_channel_params * p)
+ 	if (context.load_address > 0) {
+ 		if ((p->peripheral_type != MEMORY)
+ 		    && (p->peripheral_type != DSP)) {
+-			/* Watermark Level */
+-			context.wml = p->watermark_level;
+-			/* Event mask */
+-			if (p->event_id) {
+-				context.event_mask1 = 0x1 << p->event_id;
+-			}
+-			/* Event mask2 (ATA) */
++			/* Handle multiple event channels differently */
+ 			if (p->event_id2) {
+-				context.event_mask2 = 0x1 << p->event_id2;
++				if (p->event_id2 < 32) {
++					context.event_mask2 =
++					    0x1 << p->event_id2;
++					event2_greater_than_32 = 0;
++				} else {
++					context.event_mask2 =
++					    0x1 << (p->event_id2 - 32);
++					event2_greater_than_32 = 1 << 31;
++				}
++				if (p->event_id < 32) {
++					context.event_mask1 =
++					    0x1 << p->event_id;
++					event1_greater_than_32 = 0;
++				} else {
++					context.event_mask1 =
++					    0x1 << (p->event_id - 32);
++					event1_greater_than_32 = 1 << 30;
++				}
++			} else {
++				event1_greater_than_32 = 0;
++				event2_greater_than_32 = 0;
++				if (p->event_id < 32) {
++					context.event_mask1 =
++					    0x1 << p->event_id;
++					context.event_mask2 = 0;
++				} else {
++					context.event_mask1 = 0;
++					context.event_mask2 =
++					    0x1 << (p->event_id - 32);
++				}
+ 			}
++			/* Watermark Level */
++			context.wml =
++			    event2_greater_than_32 | event1_greater_than_32 |
++			    p->watermark_level;
++
+ 			/* Address */
+ 			context.shp_addr = (unsigned long)(p->per_address);
+ 			iapi_IoCtl(sdma_data[channel].cd,
+@@ -482,7 +512,7 @@ descriptors (0x%x)\n", err);
+ 								  0x1 <<
+ 								  channel);
+ 			}
+-			if (!err && p->peripheral_type == ATA && p->event_id2) {
++			if (!err && p->event_id2) {
+ 				err = iapi_SetChannelEventMapping(p->event_id2,
+ 								  0x1 <<
+ 								  channel);
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index 86988c6..77081b0 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -60,6 +60,11 @@
+  */
+ #define MXC_SDMA_DSPDMA         0
+ 
++/*!
++ * Define this option to specify we are using the newer SDMA module.
++ */
++#define MXC_SDMA_V2
++
+ /*
+  * IRAM
+  */
+-- 
+1.5.4.4
+

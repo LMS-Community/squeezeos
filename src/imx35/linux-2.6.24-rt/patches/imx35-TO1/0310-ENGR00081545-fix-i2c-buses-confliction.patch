@@ -1,0 +1,100 @@
+From ff3145fd178bc83b9f0c5681a7947069bbc13385 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Fri, 1 Aug 2008 12:53:08 +0800
+Subject: [PATCH] ENGR00081545 fix i2c buses confliction
+
+mxc_i2c.c:
+Move global varible transfer_done and tx_success to mxc_i2c_device, because
+they indicate  device local state.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ drivers/i2c/busses/mxc_i2c.c |   36 ++++++++++++++++++------------------
+ 1 files changed, 18 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/i2c/busses/mxc_i2c.c b/drivers/i2c/busses/mxc_i2c.c
+index 4331cce..1ce269e 100644
+--- a/drivers/i2c/busses/mxc_i2c.c
++++ b/drivers/i2c/busses/mxc_i2c.c
+@@ -75,17 +75,17 @@ typedef struct {
+ 	 * The current power state of the device
+ 	 */
+ 	bool low_power;
+-} mxc_i2c_device;
+ 
+-/*!
+- * Boolean to indicate if data was transferred
+- */
+-static bool transfer_done = false;
++	/*!
++	 * Boolean to indicate if data was transferred
++	 */
++	bool transfer_done;
+ 
+-/*!
+- * Boolean to indicate if we received an ACK for the data transmitted
+- */
+-static bool tx_success = false;
++	/*!
++	 * Boolean to indicate if we received an ACK for the data transmitted
++	 */
++	bool tx_success;
++} mxc_i2c_device;
+ 
+ struct clk_div_table {
+ 	int reg_value;
+@@ -159,12 +159,12 @@ static int mxc_i2c_wait_for_tc(mxc_i2c_device * dev, int trans_flag)
+ {
+ 	int retry = 16;
+ 
+-	while (retry-- && !transfer_done) {
++	while (retry-- && !dev->transfer_done) {
+ 		wait_event_interruptible_timeout(dev->wq,
+-						 transfer_done,
++						 dev->transfer_done,
+ 						 dev->adap.timeout);
+ 	}
+-	transfer_done = false;
++	dev->transfer_done = false;
+ 
+ 	if (retry <= 0) {
+ 		/* Unable to send data */
+@@ -172,7 +172,7 @@ static int mxc_i2c_wait_for_tc(mxc_i2c_device * dev, int trans_flag)
+ 		return -1;
+ 	}
+ 
+-	if (!tx_success) {
++	if (!dev->tx_success) {
+ 		/* An ACK was not received for transmitted byte */
+ 		printk(KERN_DEBUG "ACK not received \n");
+ 		return -1;
+@@ -436,8 +436,8 @@ static int mxc_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+ 		return -EREMOTEIO;
+ 	}
+ 	//gpio_i2c_active(dev->adap.id);
+-	transfer_done = false;
+-	tx_success = false;
++	dev->transfer_done = false;
++	dev->tx_success = false;
+ 	for (i = 0; i < num && ret >= 0; i++) {
+ 		addr_comp = 0;
+ 		/*
+@@ -552,12 +552,12 @@ static irqreturn_t mxc_i2c_handler(int irq, void *dev_id)
+ 		printk(KERN_DEBUG "Bus Arbitration lost\n");
+ 	} else {
+ 		/* Interrupt due byte transfer completion */
+-		tx_success = true;
++		dev->tx_success = true;
+ 		/* Check if RXAK is received in Transmit mode */
+ 		if ((cr & MXC_I2CR_MTX) && (sr & MXC_I2SR_RXAK)) {
+-			tx_success = false;
++			dev->tx_success = false;
+ 		}
+-		transfer_done = true;
++		dev->transfer_done = true;
+ 		wake_up_interruptible(&dev->wq);
+ 	}
+ 
+-- 
+1.5.4.4
+

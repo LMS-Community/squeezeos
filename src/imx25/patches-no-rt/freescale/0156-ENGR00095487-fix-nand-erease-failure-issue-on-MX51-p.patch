@@ -1,0 +1,33 @@
+From c4370a4311b8262c3e693e43c7a6499dcde00d51 Mon Sep 17 00:00:00 2001
+From: Jason <r64343@freescale.com>
+Date: Thu, 16 Oct 2008 15:51:37 +0800
+Subject: [PATCH] ENGR00095487 fix nand erease failure issue on MX51 platform
+
+Nand flash was not erased correctly, which will cause the
+following warning message when mount nand flash:
+Newly-erased block contained word xx at offset xx
+
+Signed-off-by:Jason Liu <r64343@freescale.com>
+---
+ drivers/mtd/nand/mxc_nd2.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/nand/mxc_nd2.c b/drivers/mtd/nand/mxc_nd2.c
+index 82c0a1b..5a8e82c 100644
+--- a/drivers/mtd/nand/mxc_nd2.c
++++ b/drivers/mtd/nand/mxc_nd2.c
+@@ -283,9 +283,9 @@ static void auto_cmd_interleave(struct mtd_info *mtd, u16 cmd)
+ 			dbuf += dlen;
+ 			obuf += olen;
+ 		} else if (cmd == NAND_CMD_ERASE2) {
+-			if (!i && j > 1) {
++			if (!i) {
+ 				page_addr = addr_low;
+-				page_addr *= j;
++				page_addr *= (j > 1 ? j : this->numchips);
+ 			}
+ 			mxc_do_addr_cycle(mtd, -1, page_addr++);
+ 			raw_write(NFC_AUTO_ERASE, REG_NFC_OPS);
+-- 
+1.5.4.4
+

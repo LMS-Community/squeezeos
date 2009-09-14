@@ -1,0 +1,44 @@
+From 6054aa2ccd1f5754d17b1359fcf3a7633129a49a Mon Sep 17 00:00:00 2001
+From: Stefan Roese <sr@denx.de>
+Date: Wed, 10 Dec 2008 10:42:54 +0100
+Subject: [PATCH] UBI: return -ENOMEM upon failing vmalloc
+
+Return with correct error code (-ENOMEM) from ubi_attach_mtd_dev() upon
+failing vmalloc().
+
+Signed-off-by: Stefan Roese <sr@denx.de>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index c7630a2..ba0bd3d 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -815,19 +815,20 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 	if (err)
+ 		goto out_free;
+ 
++	err = -ENOMEM;
+ 	ubi->peb_buf1 = vmalloc(ubi->peb_size);
+ 	if (!ubi->peb_buf1)
+ 		goto out_free;
+ 
+ 	ubi->peb_buf2 = vmalloc(ubi->peb_size);
+ 	if (!ubi->peb_buf2)
+-		 goto out_free;
++		goto out_free;
+ 
+ #ifdef CONFIG_MTD_UBI_DEBUG
+ 	mutex_init(&ubi->dbg_buf_mutex);
+ 	ubi->dbg_peb_buf = vmalloc(ubi->peb_size);
+ 	if (!ubi->dbg_peb_buf)
+-		 goto out_free;
++		goto out_free;
+ #endif
+ 
+ 	err = attach_by_scanning(ubi);
+-- 
+1.5.6.3
+

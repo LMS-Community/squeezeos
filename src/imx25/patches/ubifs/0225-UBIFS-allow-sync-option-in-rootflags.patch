@@ -1,0 +1,93 @@
+From 51da971074e5559d73bd3a01ca53a73bc1a43004 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 29 May 2009 12:34:52 +0300
+Subject: [PATCH] UBIFS: allow sync option in rootflags
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+When passing UBIFS parameters via kernel command line, the
+sync option will be passed to UBIFS as a string, not as an
+MS_SYNCHRONOUS flag. Teach UBIFS interpreting this flag.
+
+Reported-by: Aurélien GÉRÔME <ag@debian.org>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   40 +++++++++++++++++++++++++++++++++++-----
+ 1 files changed, 35 insertions(+), 5 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 432e064..8ef66b7 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -938,6 +938,27 @@ static match_table_t tokens = {
+ };
+ 
+ /**
++ * parse_standard_option - parse a standard mount option.
++ * @option: the option to parse
++ *
++ * Normally, standard mount options like "sync" are passed to file-systems as
++ * flags. However, when a "rootflags=" kernel boot parameter is used, they may
++ * be present in the options string. This function tries to deal with this
++ * situation and parse standard options. Returns 0 if the option was not
++ * recognized, and the corresponding integer flag if it was.
++ *
++ * UBIFS is only interested in the "sync" option, so do not check for anything
++ * else.
++ */
++static int parse_standard_option(const char *option)
++{
++	ubifs_msg("parse %s", option);
++	if (!strcmp(option, "sync"))
++		return MS_SYNCHRONOUS;
++	return 0;
++}
++
++/**
+  * ubifs_parse_options - parse mount parameters.
+  * @c: UBIFS file-system description object
+  * @options: parameters to parse
+@@ -1013,9 +1034,19 @@ static int ubifs_parse_options(struct ubifs_info *c, char *options,
+ 			break;
+ 		}
+ 		default:
+-			ubifs_err("unrecognized mount option \"%s\" "
+-				  "or missing value", p);
+-			return -EINVAL;
++		{
++			unsigned long flag;
++			struct super_block *sb = c->vfs_sb;
++
++			flag = parse_standard_option(p);
++			if (!flag) {
++				ubifs_err("unrecognized mount option \"%s\" "
++					  "or missing value", p);
++				return -EINVAL;
++			}
++			sb->s_flags |= flag;
++			break;
++		}
+ 		}
+ 	}
+ 
+@@ -1906,6 +1937,7 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	INIT_LIST_HEAD(&c->orph_list);
+ 	INIT_LIST_HEAD(&c->orph_new);
+ 
++	c->vfs_sb = sb;
+ 	c->highest_inum = UBIFS_FIRST_INO;
+ 	c->lhead_lnum = c->ltail_lnum = UBIFS_LOG_LNUM;
+ 
+@@ -1937,8 +1969,6 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	if (err)
+ 		goto out_bdi;
+ 
+-	c->vfs_sb = sb;
+-
+ 	sb->s_fs_info = c;
+ 	sb->s_magic = UBIFS_SUPER_MAGIC;
+ 	sb->s_blocksize = UBIFS_BLOCK_SIZE;
+-- 
+1.5.4.3
+

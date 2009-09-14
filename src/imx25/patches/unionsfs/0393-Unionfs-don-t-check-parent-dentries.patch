@@ -1,0 +1,108 @@
+From c46d49e4a8e7766bb9bf6b7fc90b8a5b65a4a32b Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 28 Dec 2007 10:53:44 -0500
+Subject: [PATCH] Unionfs: don't check parent dentries
+
+Parent dentries may not be locked and may change, so don't check them.  But
+do check parent inodes if they are passed to the method.  Also, ensure the
+checks are done only if no error occurred.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    1 -
+ fs/unionfs/file.c       |    1 -
+ fs/unionfs/inode.c      |   23 +++++++++++------------
+ 3 files changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index b8357a7..2c32ada 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -588,7 +588,6 @@ out_nofree:
+ 		unionfs_copy_attr_times(dentry->d_parent->d_inode);
+ 		unionfs_copy_attr_times(inode);
+ 		unionfs_check_file(file);
+-		unionfs_check_dentry(dentry->d_parent);
+ 		unionfs_check_inode(inode);
+ 	}
+ 	unionfs_read_unlock(inode->i_sb);
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index b632042..0c424f6 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -66,7 +66,6 @@ out:
+ 		/* copyup could cause parent dir times to change */
+ 		unionfs_copy_attr_times(file->f_path.dentry->d_parent->d_inode);
+ 		unionfs_check_file(file);
+-		unionfs_check_dentry(file->f_path.dentry->d_parent);
+ 	}
+ 	unionfs_read_unlock(file->f_path.dentry->d_sb);
+ 	return err;
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 740d364..6095c4f 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -157,7 +157,6 @@ out:
+ 
+ 	unionfs_check_inode(parent);
+ 	if (!err) {
+-		unionfs_check_dentry(dentry->d_parent);
+ 		unionfs_check_dentry(dentry);
+ 		unionfs_check_nd(nd);
+ 	}
+@@ -207,14 +206,16 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 	}
+ 
+ 	unionfs_check_inode(parent);
+-	unionfs_check_dentry(dentry);
+-	unionfs_check_dentry(dentry->d_parent);
+-	unionfs_check_nd(nd);
+-	if (!IS_ERR(ret))
++	if (!IS_ERR(ret)) {
++		unionfs_check_dentry(dentry);
++		unionfs_check_nd(nd);
+ 		unionfs_unlock_dentry(dentry);
++	}
+ 
+-	if (dentry != dentry->d_parent)
++	if (dentry != dentry->d_parent) {
++		unionfs_check_dentry(dentry->d_parent);
+ 		unionfs_unlock_dentry(dentry->d_parent);
++	}
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return ret;
+@@ -520,8 +521,7 @@ out:
+ 
+ 	unionfs_check_inode(parent);
+ 	if (!err)
+-		unionfs_check_dentry(dentry->d_parent);
+-	unionfs_check_dentry(dentry);
++		unionfs_check_dentry(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+@@ -815,8 +815,7 @@ out:
+ 
+ 	unionfs_check_inode(parent);
+ 	if (!err)
+-		unionfs_check_dentry(dentry->d_parent);
+-	unionfs_check_dentry(dentry);
++		unionfs_check_dentry(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+@@ -1110,8 +1109,8 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	/* if setattr succeeded, then parent dir may have changed */
+ 	unionfs_copy_attr_times(dentry->d_parent->d_inode);
+ out:
+-	unionfs_check_dentry(dentry);
+-	unionfs_check_dentry(dentry->d_parent);
++	if (!err)
++		unionfs_check_dentry(dentry);
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+-- 
+1.5.4.3
+

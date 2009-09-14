@@ -1,0 +1,56 @@
+From ba0e7140cb97698a9b6a8484d48e518ecb8cefa7 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 2 Feb 2009 14:50:56 +0800
+Subject: [PATCH] ENGR00106783 MX37: fix v2.0 board crash caused by keypad regulator
+
+add APLite regulator for v2.0 board and fix the regulator check
+method in keypad driver.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack.c |    5 ++++-
+ drivers/input/keyboard/mpr084.c  |    4 +++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 16f324a..80587d5 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -291,7 +291,7 @@ static struct mxc_keyp_platform_data keypad_data = {
+ 	.matrix = keymap,
+ 	.active = gpio_keypad_active,
+ 	.inactive = gpio_keypad_inactive,
+-	.vdd_reg = "DCDC3",
++	.vdd_reg = "VGEN2",
+ };
+ #else
+ 
+@@ -837,6 +837,9 @@ static void mx37_3stack_fixup_for_board_v1(void)
+ 	unifi_data.reg_vdd_vpa = NULL;
+ 	unifi_data.reg_1v5_dd = NULL;
+ #endif
++#if defined(CONFIG_KEYBOARD_MPR084) || defined(CONFIG_KEYBOARD_MPR084_MODULE)
++	keypad_data.vdd_reg = "DCDC3";
++#endif
+ }
+ 
+ #if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
+diff --git a/drivers/input/keyboard/mpr084.c b/drivers/input/keyboard/mpr084.c
+index 8cbc713..4b56b0d 100644
+--- a/drivers/input/keyboard/mpr084.c
++++ b/drivers/input/keyboard/mpr084.c
+@@ -418,8 +418,10 @@ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_i
+ 	/*Enable the Regulator*/
+ 	if (keypad && keypad->vdd_reg) {
+ 		vdd_reg = regulator_get(&client->dev, keypad->vdd_reg);
+-		if (vdd_reg)
++		if (!IS_ERR(vdd_reg))
+ 			regulator_enable(vdd_reg);
++		else
++			vdd_reg = NULL;
+ 	} else
+ 		vdd_reg = NULL;
+ 
+-- 
+1.5.4.4
+

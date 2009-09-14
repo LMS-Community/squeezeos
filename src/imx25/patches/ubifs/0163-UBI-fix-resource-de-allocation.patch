@@ -1,0 +1,60 @@
+From ce1503cc01dcaad2aa812560580bcbd561b10d0c Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 20 Jan 2009 18:04:09 +0200
+Subject: [PATCH] UBI: fix resource de-allocation
+
+GregKH asked to fix UBI which has fake device release method. Indeed,
+we have to free UBI device description object from the release method,
+because otherwise we'll oops is someone opens a UBI device sysfs file,
+then the device is removed, and he reads the file. With this fix, he
+will get -ENODEV instead of an oops.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |   16 +++++++++++++---
+ 1 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 0dd795e..117cdc0 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -263,8 +263,12 @@ static ssize_t dev_attribute_show(struct device *dev,
+ 	return ret;
+ }
+ 
+-/* Fake "release" method for UBI devices */
+-static void dev_release(struct device *dev) { }
++static void dev_release(struct device *dev)
++{
++	struct ubi_device *ubi = container_of(dev, struct ubi_device, dev);
++
++	kfree(ubi);
++}
+ 
+ /**
+  * ubi_sysfs_init - initialize sysfs for an UBI device.
+@@ -944,6 +948,12 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
+ 	if (ubi->bgt_thread)
+ 		kthread_stop(ubi->bgt_thread);
+ 
++	/*
++	 * Get a reference to the device in order to prevent 'dev_release()'
++	 * from freeing @ubi object.
++	 */
++	get_device(&ubi->dev);
++
+ 	uif_close(ubi);
+ 	ubi_wl_close(ubi);
+ 	free_internal_volumes(ubi);
+@@ -955,7 +965,7 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
+ 	vfree(ubi->dbg_peb_buf);
+ #endif
+ 	ubi_msg("mtd%d is detached from ubi%d", ubi->mtd->index, ubi->ubi_num);
+-	kfree(ubi);
++	put_device(&ubi->dev);
+ 	return 0;
+ }
+ 
+-- 
+1.5.4.3
+

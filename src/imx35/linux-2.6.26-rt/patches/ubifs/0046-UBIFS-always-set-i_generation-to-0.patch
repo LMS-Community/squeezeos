@@ -1,0 +1,75 @@
+From 5660cd6f028b558ff0fb68653ee2b638ff85316e Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Date: Fri, 1 Aug 2008 15:35:08 +0300
+Subject: [PATCH] UBIFS: always set i_generation to 0
+
+UBIFS does not presently re-use inode numbers, so leaving
+i_generation zero is most appropriate for now.
+
+Signed-off-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/dir.c   |    1 -
+ fs/ubifs/super.c |    2 --
+ fs/ubifs/ubifs.h |    4 +---
+ 3 files changed, 1 insertions(+), 6 deletions(-)
+
+diff --git a/fs/ubifs/dir.c b/fs/ubifs/dir.c
+index eba3a8a..0d1ab89 100644
+--- a/fs/ubifs/dir.c
++++ b/fs/ubifs/dir.c
+@@ -165,7 +165,6 @@ struct inode *ubifs_new_inode(struct ubifs_info *c, const struct inode *dir,
+ 	}
+ 
+ 	inode->i_ino = ++c->highest_inum;
+-	inode->i_generation = ++c->vfs_gen;
+ 	/*
+ 	 * The creation sequence number remains with this inode for its
+ 	 * lifetime. All nodes for this inode have a greater sequence number,
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 2a182ff..e7afbfa 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -30,7 +30,6 @@
+ #include <linux/slab.h>
+ #include <linux/module.h>
+ #include <linux/ctype.h>
+-#include <linux/random.h>
+ #include <linux/kthread.h>
+ #include <linux/parser.h>
+ #include <linux/seq_file.h>
+@@ -1669,7 +1668,6 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	INIT_LIST_HEAD(&c->orph_new);
+ 
+ 	c->highest_inum = UBIFS_FIRST_INO;
+-	get_random_bytes(&c->vfs_gen, sizeof(int));
+ 	c->lhead_lnum = c->ltail_lnum = UBIFS_LOG_LNUM;
+ 
+ 	ubi_get_volume_info(ubi, &c->vi);
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index ce4a8f4..abe30a3 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -873,10 +873,9 @@ struct ubifs_mount_opts {
+  * @bdi: backing device info object to make VFS happy and disable readahead
+  *
+  * @highest_inum: highest used inode number
+- * @vfs_gen: VFS inode generation counter
+  * @max_sqnum: current global sequence number
+  * @cmt_no: commit number (last successfully completed commit)
+- * @cnt_lock: protects @highest_inum, @vfs_gen, and @max_sqnum counters
++ * @cnt_lock: protects @highest_inum and @max_sqnum counters
+  * @fmt_version: UBIFS on-flash format version
+  * @uuid: UUID from super block
+  *
+@@ -1113,7 +1112,6 @@ struct ubifs_info {
+ 	struct backing_dev_info bdi;
+ 
+ 	ino_t highest_inum;
+-	unsigned int vfs_gen;
+ 	unsigned long long max_sqnum;
+ 	unsigned long long cmt_no;
+ 	spinlock_t cnt_lock;
+-- 
+1.5.4.3
+

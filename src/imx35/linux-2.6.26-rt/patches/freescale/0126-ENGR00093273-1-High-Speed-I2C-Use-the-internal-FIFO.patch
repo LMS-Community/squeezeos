@@ -1,0 +1,514 @@
+From 3301c66c4cd1342c476dd2b5afafb52e3c3e525a Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b02248@freescale.com>
+Date: Tue, 7 Oct 2008 10:45:06 +0800
+Subject: [PATCH] ENGR00093273-1 High Speed I2C: Use the internal FIFO in high speed i2c driver
+
+Use the internal FIFO in high speed i2c driver
+
+Signed-off-by: Guoxing Wu <b02248@freescale.com>
+---
+ drivers/i2c/busses/mxc_i2c_hs.c     |  302 ++++++++++++++++++-----------------
+ drivers/i2c/busses/mxc_i2c_hs_reg.h |    6 +-
+ 2 files changed, 163 insertions(+), 145 deletions(-)
+
+diff --git a/drivers/i2c/busses/mxc_i2c_hs.c b/drivers/i2c/busses/mxc_i2c_hs.c
+index c01dcf2..c745e29 100644
+--- a/drivers/i2c/busses/mxc_i2c_hs.c
++++ b/drivers/i2c/busses/mxc_i2c_hs.c
+@@ -23,20 +23,18 @@
+ #include <asm/io.h>
+ #include "mxc_i2c_hs_reg.h"
+ 
+-#define HSI2C_TRANSMIT_TIMEOUT_BYTE (HZ/20)
+-
+ typedef struct {
+-	unsigned long membase;
++	struct device *dev;
++
++	unsigned long reg_base_virt;
++	unsigned long reg_base_phy;
+ 	int irq;
+ 	unsigned int speed;
+ 	struct clk *ipg_clk;
+ 	struct clk *serial_clk;
+ 	bool low_power;
+ 
+-	struct completion completion;
+-	int success;
+ 	struct i2c_msg *msg;
+-	int addr_cycle;
+ 	int index;
+ } mxc_i2c_hs;
+ 
+@@ -72,12 +70,29 @@ extern void gpio_i2c_hs_active(void);
+ 
+ static u16 reg_read(mxc_i2c_hs *i2c_hs, u32 reg_offset)
+ {
+-	return __raw_readw(i2c_hs->membase + reg_offset);
++	return __raw_readw(i2c_hs->reg_base_virt + reg_offset);
+ }
+ 
+ static void reg_write(mxc_i2c_hs *i2c_hs, u32 reg_offset, u16 data)
+ {
+-	__raw_writew(data, i2c_hs->membase + reg_offset);
++	__raw_writew(data, i2c_hs->reg_base_virt + reg_offset);
++}
++
++static void reg_set_mask(mxc_i2c_hs *i2c_hs, u32 reg_offset, u16 mask)
++{
++	u16 value;
++
++	value = reg_read(i2c_hs, reg_offset);
++	value |= mask;
++	reg_write(i2c_hs, reg_offset, value);
++}
++static void reg_clear_mask(mxc_i2c_hs *i2c_hs, u32 reg_offset, u16 mask)
++{
++	u16 value;
++
++	value = reg_read(i2c_hs, reg_offset);
++	value &= ~mask;
++	reg_write(i2c_hs, reg_offset, value);
+ }
+ 
+ static void mxci2c_hs_set_div(mxc_i2c_hs *i2c_hs)
+@@ -104,14 +119,14 @@ static int mxci2c_hs_enable(mxc_i2c_hs *i2c_hs)
+ 	clk_enable(i2c_hs->ipg_clk);
+ 	clk_enable(i2c_hs->serial_clk);
+ 	mxci2c_hs_set_div(i2c_hs);
+-	reg_write(i2c_hs, HICR, HICR_HIEN);
++	reg_write(i2c_hs, HICR, reg_read(i2c_hs, HICR) | HICR_HIEN);
+ 
+ 	return 0;
+ }
+ 
+ static int mxci2c_hs_disable(mxc_i2c_hs *i2c_hs)
+ {
+-	reg_write(i2c_hs, HICR, 0);
++	reg_write(i2c_hs, HICR, reg_read(i2c_hs, HICR) & (~HICR_HIEN));
+ 	clk_disable(i2c_hs->ipg_clk);
+ 	clk_disable(i2c_hs->serial_clk);
+ 
+@@ -140,100 +155,140 @@ static int mxci2c_hs_bus_busy(mxc_i2c_hs *i2c_hs)
+ 	}
+ }
+ 
+-#define WORK_AROUND_I2C printk(KERN_ERR "%s\n", __func__)
+-
+ static int mxci2c_hs_start(mxc_i2c_hs *i2c_hs, int repeat_start, u16 address)
+ {
+-	u16 value;
++	u16 mask;
+ 	int ret = 0;
+ 
+-	WORK_AROUND_I2C;
+-
+ 	mxci2c_hs_bus_busy(i2c_hs);
+ 
+-	/*set address */
+-	reg_write(i2c_hs, HIMADR, HIMADR_LSB_ADR(address));
++	/*7 bit address */
++	reg_clear_mask(i2c_hs, HICR, HICR_ADDR_MODE);
+ 
+ 	/*send start */
+-	value = reg_read(i2c_hs, HICR);
+ 	if (repeat_start)
+-		value |= HICR_RSTA;
++		mask = HICR_RSTA;
+ 	else
+-		value |= HICR_MSTA;
+-	reg_write(i2c_hs, HICR, value);
+-
+-	WORK_AROUND_I2C;
++		mask = HICR_MSTA;
++	reg_set_mask(i2c_hs, HICR, mask);
+ 
+ 	return ret;
+ }
+ 
+ static int mxci2c_hs_stop(mxc_i2c_hs *i2c_hs)
+ {
+-	u16 value;
++	reg_clear_mask(i2c_hs, HICR, HICR_MSTA);
++	reg_clear_mask(i2c_hs, HICR, HICR_HIIEN);
+ 
+-	WORK_AROUND_I2C;
++	return 0;
++}
+ 
+-	value = reg_read(i2c_hs, HICR);
+-	value &= ~HICR_MSTA;
+-	reg_write(i2c_hs, HICR, value);
++static int mxci2c_wait_writefifo(mxc_i2c_hs *i2c_hs)
++{
++	int i, num, left;
++	int retry, ret = 0;
+ 
+-	/*Disable interupt */
+-	value = reg_read(i2c_hs, HICR);
+-	value &= ~HICR_HIIEN;
+-	reg_write(i2c_hs, HICR, value);
++	retry = 10000;
++	while (retry--) {
++		udelay(10);
++		if (reg_read(i2c_hs, HISR) & (HISR_TDE | HISR_TDC_ZERO)) {
++			if (i2c_hs->index < i2c_hs->msg->len) {
++				left = i2c_hs->msg->len - i2c_hs->index;
++				num =
++				    (left >
++				     HITFR_MAX_COUNT) ? HITFR_MAX_COUNT : left;
++				for (i = 0; i < num; i++) {
++					reg_write(i2c_hs, HITDR,
++						  i2c_hs->msg->buf[i2c_hs->
++								   index + i]);
++				}
++				i2c_hs->index += num;
++			} else {
++				if (reg_read(i2c_hs, HISR) & HISR_TDC_ZERO) {
++					msleep(1);
++					break;
++				}
++			}
++		}
++	}
+ 
+-	WORK_AROUND_I2C;
++	if (retry <= 0) {
++		printk(KERN_ERR "%s:wait error\n", __func__);
++		ret = -1;
++	}
+ 
+-	return 0;
++	return ret;
++}
++
++static int mxci2c_wait_readfifo(mxc_i2c_hs *i2c_hs)
++{
++	int i, num, left;
++	int retry, ret = 0;
++	u16 value;
++
++	retry = 10000;
++	while (retry--) {
++		udelay(10);
++		value = reg_read(i2c_hs, HISR);
++		if (value & (HISR_RDF | HISR_RDC_ZERO)) {
++			if (i2c_hs->index < i2c_hs->msg->len) {
++				left = i2c_hs->msg->len - i2c_hs->index;
++				num =
++				    (left >
++				     HITFR_MAX_COUNT) ? HITFR_MAX_COUNT : left;
++				for (i = 0; i < num; i++) {
++					i2c_hs->msg->buf[i2c_hs->index + i] =
++					    reg_read(i2c_hs, HIRDR);
++				}
++				i2c_hs->index += num;
++			} else {
++				if (value & HISR_RDC_ZERO) {
++					break;
++				}
++			}
++		}
++	}
++
++	if (retry <= 0) {
++		printk(KERN_ERR "%s:wait error\n", __func__);
++		ret = -1;
++	}
++
++	return ret;
+ }
+ 
+ static int mxci2c_hs_read(mxc_i2c_hs *i2c_hs, int repeat_start,
+ 			  struct i2c_msg *msg)
+ {
+-	u16 value;
+ 	int ret;
+ 
+-	ret = 0;
++	if (msg->len > HIRDCR_MAX_COUNT) {
++		printk(KERN_ERR "%s: error: msg too long, max longth 256\n",
++		       __func__);
++		return -1;
++	}
+ 
+-	i2c_hs->success = 0;
++	ret = 0;
+ 	i2c_hs->msg = msg;
+ 	i2c_hs->index = 0;
+ 
++	/*set address */
++	reg_write(i2c_hs, HIMADR, HIMADR_LSB_ADR(msg->addr));
++
+ 	/*receive mode */
+-	value = reg_read(i2c_hs, HICR);
+-	value &= ~HICR_MTX;
+-	reg_write(i2c_hs, HICR, value);
+-
+-	/*ack */
+-	value = reg_read(i2c_hs, HICR);
+-	if (msg->len < 2) {
+-		value |= HICR_TXAK;
+-	} else {
+-		value &= ~HICR_TXAK;
+-	}
+-	reg_write(i2c_hs, HICR, value);
++	reg_clear_mask(i2c_hs, HICR, HICR_MTX);
++
++	reg_clear_mask(i2c_hs, HICR, HICR_HIIEN);
+ 
+-	/*interupt mask */
+-	reg_write(i2c_hs, HIIMR, ~HIIMR_BTD);
++	 /*FIFO*/ reg_set_mask(i2c_hs, HIRFR, HIRFR_RFEN | HIRFR_RFWM(7));
++	reg_set_mask(i2c_hs, HIRFR, HIRFR_RFLSH);
+ 
+-	value = reg_read(i2c_hs, HICR);
+-	value |= HICR_HIIEN;
+-	reg_write(i2c_hs, HICR, value);
++	 /*TDCR*/
++	    reg_write(i2c_hs, HIRDCR, HIRDCR_RDC_EN | HIRDCR_RDC(msg->len));
+ 
+-	/*start */
+ 	mxci2c_hs_start(i2c_hs, repeat_start, msg->addr);
+ 
+-	if (wait_for_completion_timeout(&i2c_hs->completion,
+-					HSI2C_TRANSMIT_TIMEOUT_BYTE *
+-					msg->len)) {
+-		if (!i2c_hs->success) {
+-			printk(KERN_ERR "%s: Transmit Fail\n", __func__);
+-			ret = -1;
+-		}
+-	} else {
+-		printk(KERN_ERR "%s: Transmit Timeout\n", __func__);
+-		ret = -1;
+-	}
++	ret = mxci2c_wait_readfifo(i2c_hs);
+ 
+ 	if (ret < 0)
+ 		return ret;
+@@ -244,43 +299,46 @@ static int mxci2c_hs_read(mxc_i2c_hs *i2c_hs, int repeat_start,
+ static int mxci2c_hs_write(mxc_i2c_hs *i2c_hs, int repeat_start,
+ 			   struct i2c_msg *msg)
+ {
+-	int ret;
+-	u16 value;
++	int ret, i;
+ 
+-	ret = 0;
++	if (msg->len > HITDCR_MAX_COUNT) {
++		printk(KERN_ERR "%s: error: msg too long, max longth 256\n",
++		       __func__);
++		return -1;
++	}
+ 
+-	i2c_hs->success = 0;
++	ret = 0;
+ 	i2c_hs->msg = msg;
+ 	i2c_hs->index = 0;
+-	i2c_hs->addr_cycle = 1;
++
++	/*set address */
++	reg_write(i2c_hs, HIMADR, HIMADR_LSB_ADR(msg->addr));
+ 
+ 	/*transmit mode */
+-	value = reg_read(i2c_hs, HICR);
+-	value |= HICR_MTX;
+-	reg_write(i2c_hs, HICR, value);
++	reg_set_mask(i2c_hs, HICR, HICR_MTX);
+ 
+-	/*interupt mask */
+-	reg_write(i2c_hs, HIIMR, ~HIIMR_BTD);
++	reg_clear_mask(i2c_hs, HICR, HICR_HIIEN);
+ 
+-	value = reg_read(i2c_hs, HICR);
+-	value |= HICR_HIIEN;
+-	reg_write(i2c_hs, HICR, value);
++	 /*TDCR*/
++	    reg_write(i2c_hs, HITDCR, HITDCR_TDC_EN | HITDCR_TDC(msg->len));
+ 
+-	mxci2c_hs_start(i2c_hs, repeat_start, msg->addr);
++	 /*FIFO*/ reg_set_mask(i2c_hs, HITFR, HITFR_TFEN);
++	reg_set_mask(i2c_hs, HITFR, HITFR_TFLSH);
+ 
+-	/*wait for transmit complete */
+-	if (wait_for_completion_timeout(&i2c_hs->completion,
+-					HSI2C_TRANSMIT_TIMEOUT_BYTE *
+-					msg->len)) {
+-		if (!i2c_hs->success) {
+-			printk(KERN_ERR "%s: Transmit Fail\n", __func__);
+-			ret = -1;
+-		}
+-	} else {
+-		printk(KERN_ERR "%s: Transmit Timeout\n", __func__);
+-		ret = -1;
++	if (msg->len > HITFR_MAX_COUNT)
++		i2c_hs->index = HITFR_MAX_COUNT;
++	else {
++		i2c_hs->index = msg->len;
+ 	}
+ 
++	for (i = 0; i < i2c_hs->index; i++) {
++		reg_write(i2c_hs, HITDR, msg->buf[i]);
++	}
++
++	mxci2c_hs_start(i2c_hs, repeat_start, msg->addr);
++
++	ret = mxci2c_wait_writefifo(i2c_hs);
++
+ 	if (ret < 0)
+ 		return ret;
+ 	else
+@@ -345,48 +403,6 @@ static struct i2c_algorithm mxci2c_hs_algorithm = {
+ 	.functionality = mxci2c_hs_func
+ };
+ 
+-static irqreturn_t mxci2c_hs_handler(int irq, void *dev_id)
+-{
+-	u16 value;
+-	mxc_i2c_hs *i2c_hs = dev_id;
+-
+-	value = reg_read(i2c_hs, HISR);
+-
+-	if (value & HISR_BTD) {
+-		reg_write(i2c_hs, HISR, HISR_BTD);
+-
+-		if (i2c_hs->msg->flags & I2C_M_RD) {	/*read */
+-			i2c_hs->msg->buf[i2c_hs->index++] =
+-			    reg_read(i2c_hs, HIRDR);
+-			if ((i2c_hs->msg->len - i2c_hs->index) == 1) {
+-				value = reg_read(i2c_hs, HICR);
+-				value |= HICR_TXAK;
+-				reg_write(i2c_hs, HICR, value);
+-			}
+-			if (i2c_hs->msg->len == i2c_hs->index) {
+-				i2c_hs->success = 1;
+-				complete(&i2c_hs->completion);
+-			}
+-		} else {	/*write */
+-			if (i2c_hs->addr_cycle) {
+-				i2c_hs->addr_cycle = 0;
+-			} else {
+-				i2c_hs->index++;
+-			}
+-
+-			if (i2c_hs->index == i2c_hs->msg->len) {
+-				i2c_hs->success = 1;
+-				complete(&i2c_hs->completion);
+-			} else {
+-				reg_write(i2c_hs, HITDR,
+-					  i2c_hs->msg->buf[i2c_hs->index]);
+-			}
+-		}
+-	}
+-
+-	return IRQ_HANDLED;
+-}
+-
+ static int mxci2c_hs_probe(struct platform_device *pdev)
+ {
+ 	mxc_i2c_hs *i2c_hs;
+@@ -400,6 +416,8 @@ static int mxci2c_hs_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 	}
+ 
++	i2c_hs->dev = &pdev->dev;
++
+ 	i2c_hs->speed = i2c_plat_data->i2c_clk;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+@@ -407,7 +425,8 @@ static int mxci2c_hs_probe(struct platform_device *pdev)
+ 		ret = -ENODEV;
+ 		goto err1;
+ 	}
+-	i2c_hs->membase = IO_ADDRESS(res->start);
++	i2c_hs->reg_base_virt = IO_ADDRESS(res->start);
++	i2c_hs->reg_base_phy = res->start;
+ 
+ 	i2c_hs->ipg_clk = clk_get(&pdev->dev, "hsi2c_clk");
+ 	i2c_hs->serial_clk = clk_get(&pdev->dev, "hsi2c_serial_clk");
+@@ -420,11 +439,6 @@ static int mxci2c_hs_probe(struct platform_device *pdev)
+ 		ret = i2c_hs->irq;
+ 		goto err1;
+ 	}
+-	ret = request_irq(i2c_hs->irq, mxci2c_hs_handler,
+-			  0, pdev->name, i2c_hs);
+-	if (ret < 0) {
+-		goto err1;
+-	}
+ 
+ 	i2c_hs->low_power = false;
+ 
+@@ -444,18 +458,19 @@ static int mxci2c_hs_probe(struct platform_device *pdev)
+ 	adap->timeout = 1;
+ 	platform_set_drvdata(pdev, i2c_hs);
+ 	i2c_set_adapdata(adap, i2c_hs);
+-    ret = i2c_add_numbered_adapter(adap);
++	ret = i2c_add_numbered_adapter(adap);
+ 	if (ret < 0) {
+-		goto err2;
++		goto err3;
+ 	}
+ 
+-	init_completion(&i2c_hs->completion);
++	mxci2c_hs_enable(i2c_hs);
+ 
+ 	printk(KERN_INFO "MXC HS I2C driver\n");
+ 	return 0;
+ 
++      err3:
++	kfree(adap);
+       err2:
+-	free_irq(i2c_hs->irq, i2c_hs);
+ 	gpio_i2c_hs_inactive();
+       err1:
+ 	dev_err(&pdev->dev, "failed to probe high speed i2c adapter\n");
+@@ -496,7 +511,6 @@ static int mxci2c_hs_remove(struct platform_device *pdev)
+ {
+ 	mxc_i2c_hs *i2c_hs = platform_get_drvdata(pdev);
+ 
+-	free_irq(i2c_hs->irq, i2c_hs);
+ 	i2c_del_adapter(adap);
+ 	gpio_i2c_hs_inactive();
+ 	platform_set_drvdata(pdev, NULL);
+diff --git a/drivers/i2c/busses/mxc_i2c_hs_reg.h b/drivers/i2c/busses/mxc_i2c_hs_reg.h
+index 9d33dc9..fe6bb9a 100644
+--- a/drivers/i2c/busses/mxc_i2c_hs_reg.h
++++ b/drivers/i2c/busses/mxc_i2c_hs_reg.h
+@@ -38,7 +38,7 @@
+ 
+ #define  HISR          0x0c
+ #define 	HISR_RDF		0x1
+-#define 	HISR_TED		0x2
++#define 	HISR_TDE		0x2
+ #define 	HISR_HIAAS	0x4
+ #define 	HISR_HIAL	0x8
+ #define 	HISR_BTD		0x10
+@@ -73,21 +73,25 @@
+ #define	HITFR_TFLSH	0x2
+ #define	HITFR_TFWM(x) (((x) & 0x7) << 2)
+ #define	HITFR_TFC(x)	(((x) >> 8) & 0xF)
++#define	HITFR_MAX_COUNT 8
+ 
+ #define  HIRFR         0x28
+ #define  	HIRFR_RFEN			0x1
+ #define  	HIRFR_RFLSH		0x2
+ #define  	HIRFR_RFWM(x)	 	(((x) & 0x7) << 2)
+ #define  	HIRFR_RFC(x) 		(((x) >> 8) & 0xF)
++#define	HIRFR_MAX_COUNT 8
+ 
+ #define  HITDCR        0x2c
+ #define	HITDCR_TDC(x)		((x) & 0xFF)
+ #define	HITDCR_TDC_EN	0x100
+ #define	HITDCR_TDC_RSTA	0x200
++#define	HITDCR_MAX_COUNT 0xFF
+ 
+ #define  HIRDCR        0x30
+ #define	HIRDCR_RDC(x)		((x) & 0xFF)
+ #define	HIRDCR_RDC_EN	0x100
+ #define	HIRDCR_RDC_RSTA	0x200
++#define	HIRDCR_MAX_COUNT 0xFF
+ 
+ #endif
+-- 
+1.5.4.4
+

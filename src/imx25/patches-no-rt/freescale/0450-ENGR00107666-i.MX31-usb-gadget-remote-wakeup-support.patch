@@ -1,0 +1,340 @@
+From e4b295e7492d34dad624b67331b687879e8be272 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Tue, 3 Mar 2009 13:28:02 +0800
+Subject: [PATCH] ENGR00107666 i.MX31 usb gadget remote wakeup support.
+
+when i.MX31 enters SR or STOP mode and usbotg acts as gadget, it can
+be waked up by USB bus activity from connectted host(PC).
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx3/mxc_pm.c      |    4 ++
+ arch/arm/mach-mx3/usb_dr.c      |    5 ++-
+ arch/arm/plat-mxc/usb_common.c  |   38 ++++++++++++++
+ drivers/usb/gadget/Kconfig      |    6 ++
+ drivers/usb/gadget/arcotg_udc.c |  109 ++++++++++++++++++++++++++++++++++++--
+ drivers/usb/gadget/arcotg_udc.h |    4 ++
+ 6 files changed, 159 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mxc_pm.c b/arch/arm/mach-mx3/mxc_pm.c
+index 88df72e..c8f1f9e 100644
+--- a/arch/arm/mach-mx3/mxc_pm.c
++++ b/arch/arm/mach-mx3/mxc_pm.c
+@@ -332,8 +332,12 @@ void mxc_pm_lowpower(int mode)
+ 				   MXC_CCM_CCMR_SBYCS |
+ 				   (lpm << MXC_CCM_CCMR_LPM_OFFSET));
+ 
++		/* wake up by keypad and usbotg */
+ 		reg = __raw_readl(MXC_CCM_WIMR);
+ 		reg &= ~(1 << 18);
++#ifdef CONFIG_USB_GADGET_WAKE_UP
++		reg &= ~(1 << 5);
++#endif
+ 		__raw_writel(reg, MXC_CCM_WIMR);
+ 
+ 		flush_cache_all();
+diff --git a/arch/arm/mach-mx3/usb_dr.c b/arch/arm/mach-mx3/usb_dr.c
+index 75d6e20..97659fa 100644
+--- a/arch/arm/mach-mx3/usb_dr.c
++++ b/arch/arm/mach-mx3/usb_dr.c
+@@ -118,7 +118,10 @@ static int __init usb_dr_init(void)
+ 	dr_register_otg();
+ 	dr_register_host(otg_resources, ARRAY_SIZE(otg_resources));
+ 	dr_register_udc();
+-
++#ifdef CONFIG_USB_GADGET_WAKE_UP
++	/* set udc may and should wakeup */
++	device_init_wakeup(&(dr_udc_device.dev), 1);
++#endif
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 794cd07..2bf3a92 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -41,6 +41,7 @@
+ #include <linux/usb/otg.h>
+ #include <linux/usb/fsl_xcvr.h>
+ #include <linux/regulator/regulator.h>
++#include <linux/interrupt.h>
+ #include <asm/arch/arc_otg.h>
+ #include <asm/mach-types.h>
+ 
+@@ -385,6 +386,37 @@ static void usbh2_set_serial_xcvr(void)
+ 	msleep(100);
+ }
+ 
++/*!
++ * Register remote wakeup by this usb controller
++ *
++ * @param pdev: platform_device for this usb controller
++ *
++ * @return 0 or negative error code in case not supportted.
++ */
++static int usb_register_remote_wakeup(struct platform_device *pdev)
++{
++	pr_debug("%s: pdev=0x%p \n", __func__, pdev);
++
++	if (device_may_wakeup(&pdev->dev)) {
++		struct resource *res;
++		int irq;
++
++		res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
++		if (!res) {
++			dev_err(&pdev->dev,
++			"Found HC with no IRQ. Check %s setup!\n",
++			pdev->dev.bus_id);
++			return -ENODEV;
++		}
++		irq = res->start;
++		enable_irq_wake(irq);
++
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
+ extern void gpio_usbh1_setback_stp(void);
+ extern void gpio_usbh2_setback_stp(void);
+ 
+@@ -736,6 +768,9 @@ int usbotg_init(struct platform_device *pdev)
+ 		if (xops->init)
+ 			xops->init(xops);
+ 
++		if (usb_register_remote_wakeup(pdev))
++			pr_debug("DR is not a wakeup source.\n");
++
+ 		if (xops->xcvr_type == PORTSC_PTS_SERIAL) {
+ 			if (pdata->operating_mode == FSL_USB2_DR_HOST) {
+ 				otg_set_serial_host();
+@@ -750,6 +785,9 @@ int usbotg_init(struct platform_device *pdev)
+ 		} else if (xops->xcvr_type == PORTSC_PTS_UTMI) {
+ 			otg_set_utmi_xcvr();
+ 		}
++
++		/* disable remote wakeup irq */
++		USBCTRL &= ~UCTRL_OWIE;
+ 	}
+ 
+ 	otg_used++;
+diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
+index 2ef862e..f643710 100644
+--- a/drivers/usb/gadget/Kconfig
++++ b/drivers/usb/gadget/Kconfig
+@@ -430,6 +430,12 @@ config USB_GADGET_ARC_OTG
+ 	help
+ 	  Enable support for the Freescale Dual Role port in peripheral mode.
+ 
++config USB_GADGET_WAKE_UP
++	bool "Support gadget wake up by DR port"
++	depends on USB_GADGET_ARC_OTG
++	default n
++	help
++	  Enable system wake up from SR or DSM mode by connected host.
+ choice
+ 	prompt "Select transceiver for DR port"
+ 	depends on USB_GADGET_ARC_OTG
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 27eb1fb..89a9cd2 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -365,9 +365,11 @@ static void dr_controller_run(struct fsl_udc *udc)
+ 	udc->stopped = 0;
+ 
+ 	/* Set controller to Run */
+-	temp = fsl_readl(&dr_regs->usbcmd);
+-	temp |= USB_CMD_RUN_STOP;
+-	fsl_writel(temp, &dr_regs->usbcmd);
++	if (udc->driver) {
++		temp = fsl_readl(&dr_regs->usbcmd);
++		temp |= USB_CMD_RUN_STOP;
++		fsl_writel(temp, &dr_regs->usbcmd);
++	}
+ 
+ 	return;
+ }
+@@ -1824,6 +1826,8 @@ static void port_change_irq(struct fsl_udc *udc)
+ /* Process suspend interrupt */
+ static void suspend_irq(struct fsl_udc *udc)
+ {
++	u32 port_status;
++
+ 	pr_debug("%s\n", __func__);
+ 
+ 	udc->resume_state = udc->usb_state;
+@@ -1832,10 +1836,39 @@ static void suspend_irq(struct fsl_udc *udc)
+ 	/* report suspend to the driver, serial.c does not support this */
+ 	if (udc->driver->suspend)
+ 		udc->driver->suspend(&udc->gadget);
++
++	/* if PHCD is 0, then set 1 to disable phy clock */
++	port_status = fsl_readl(&dr_regs->portsc1);
++	if (!(port_status & PORTSCX_PHY_LOW_POWER_SPD)) {
++		port_status |= PORTSCX_PHY_LOW_POWER_SPD;
++		fsl_writel(port_status, &dr_regs->portsc1);
++	}
++}
++
++#ifdef CONFIG_USB_GADGET_WAKE_UP
++/* Process Wake up interrupt */
++static void wake_up_irq(struct fsl_udc *udc)
++{
++	u32 irq_src;
++
++	pr_debug("%s\n", __func__);
++
++	/* disable wake up irq */
++	irq_src = fsl_readl(&dr_regs->usbctrl);
++	irq_src &= ~USB_CTRL_OTG_WUIE;
++	fsl_writel(irq_src, &dr_regs->usbctrl);
+ }
++#endif
+ 
+ static void bus_resume(struct fsl_udc *udc)
+ {
++	/* enable PHY clock if PHCD is still 1 */
++	u32 port_status = fsl_readl(&dr_regs->portsc1);
++	if (port_status & PORTSCX_PHY_LOW_POWER_SPD) {
++		port_status &= ~PORTSCX_PHY_LOW_POWER_SPD;
++		fsl_writel(port_status, &dr_regs->portsc1);
++	}
++
+ 	udc->usb_state = udc->resume_state;
+ 	udc->resume_state = 0;
+ 
+@@ -1862,7 +1895,6 @@ static int reset_queues(struct fsl_udc *udc)
+ static void reset_irq(struct fsl_udc *udc)
+ {
+ 	u32 temp;
+-	unsigned long timeout;
+ 
+ 	/* Clear the device address */
+ 	temp = fsl_readl(&dr_regs->deviceaddr);
+@@ -1924,6 +1956,25 @@ static irqreturn_t fsl_udc_irq(int irq, void *_udc)
+ 	irqreturn_t status = IRQ_NONE;
+ 	unsigned long flags;
+ 
++#ifdef CONFIG_USB_GADGET_WAKE_UP
++	spin_lock_irqsave(&udc->lock, flags);
++	/* check USBCTRL register to see if wake up irq */
++	irq_src =  fsl_readl(&dr_regs->usbctrl);
++	if (irq_src & USB_CTRL_OTG_WUIR) {
++		wake_up_irq(udc);
++		irq_src = fsl_readl(&dr_regs->usbsts) &
++			fsl_readl(&dr_regs->usbintr);
++		if (irq_src)
++			udc->stopped = 0;
++		else
++			status = IRQ_HANDLED;
++	}
++	spin_unlock_irqrestore(&udc->lock, flags);
++
++	if (status == IRQ_HANDLED)
++		return IRQ_HANDLED;
++#endif
++
+ 	/* Disable ISR for OTG host mode */
+ 	if (udc->stopped)
+ 		return IRQ_NONE;
+@@ -2751,12 +2802,12 @@ static int udc_suspend(struct fsl_udc *udc)
+ 		return 0;
+ 	}
+ 
+-	printk(KERN_INFO "USB Gadget suspended\n");
+-
+ 	/* stop the controller */
+ 	usbcmd = fsl_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
+ 	fsl_writel(usbcmd, &dr_regs->usbcmd);
+ 
++	printk(KERN_INFO "USB Gadget suspended\n");
++
+ 	udc->stopped = 1;
+ 	return 0;
+ }
+@@ -2767,6 +2818,35 @@ static int udc_suspend(struct fsl_udc *udc)
+  -----------------------------------------------------------------*/
+ static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state)
+ {
++	unsigned int port_status, temp;
++
++	if ((udc_controller->usb_state > USB_STATE_POWERED) &&
++			(udc_controller->usb_state < USB_STATE_SUSPENDED))
++		return -EBUSY;
++
++#ifdef CONFIG_USB_GADGET_WAKE_UP
++	temp = fsl_readl(&dr_regs->usbctrl);
++	/* if usb wake up irq is disabled, enable it */
++	if (!(temp & USB_CTRL_OTG_WUIE)) {
++		temp |= USB_CTRL_OTG_WUIE;
++		fsl_writel(temp, &dr_regs->usbctrl);
++	}
++#else
++	temp = fsl_readl(&dr_regs->usbctrl);
++	/* if usb wake up irq is enabled, disable it */
++	if (temp & USB_CTRL_OTG_WUIE) {
++		temp &= ~USB_CTRL_OTG_WUIE;
++		fsl_writel(temp, &dr_regs->usbctrl);
++	}
++#endif
++
++	/* close UBS PHY clock if PHCD is 0 */
++	port_status = fsl_readl(&dr_regs->portsc1);
++	if (!(port_status & PORTSCX_PHY_LOW_POWER_SPD)) {
++		port_status |= PORTSCX_PHY_LOW_POWER_SPD;
++		fsl_writel(port_status, &dr_regs->portsc1);
++	}
++
+ 	return udc_suspend(udc_controller);
+ }
+ 
+@@ -2791,6 +2871,23 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 
+ 	/* Enable DR irq reg and set controller Run */
+ 	if (udc_controller->stopped) {
++		u32 temp;
++
++#ifdef CONFIG_USB_GADGET_WAKE_UP
++		/* disable wake up irq */
++		temp = fsl_readl(&dr_regs->usbctrl);
++		temp &= ~UCTRL_OWIE;
++		fsl_writel(temp, &dr_regs->usbctrl);
++#endif
++
++		/* Enable PHY clock if it's disabled */
++		temp = fsl_readl(&dr_regs->portsc1);
++		if (temp & PORTSCX_PHY_LOW_POWER_SPD) {
++			temp &= ~PORTSCX_PHY_LOW_POWER_SPD;
++			fsl_writel(temp, &dr_regs->portsc1);
++			mdelay(1);
++		}
++
+ 		dr_controller_setup(udc_controller);
+ 		dr_controller_run(udc_controller);
+ 	}
+diff --git a/drivers/usb/gadget/arcotg_udc.h b/drivers/usb/gadget/arcotg_udc.h
+index d5eabba..b7ed50e 100644
+--- a/drivers/usb/gadget/arcotg_udc.h
++++ b/drivers/usb/gadget/arcotg_udc.h
+@@ -90,6 +90,8 @@ struct usb_dr_device {
+ 	u32 endptstatus;	/* Endpoint Status Register */
+ 	u32 endptcomplete;	/* Endpoint Complete Register */
+ 	u32 endptctrl[8 * 2];	/* Endpoint Control Registers */
++	u32 res8[256];
++	u32 usbctrl;
+ };
+ 
+  /* non-EHCI USB system interface registers (Big Endian) */
+@@ -330,6 +332,8 @@ struct usb_sys_interface {
+ /* control Register Bit Masks */
+ #define  USB_CTRL_IOENB                       (0x00000004)
+ #define  USB_CTRL_ULPI_INT0EN                 (0x00000001)
++#define  USB_CTRL_OTG_WUIR                   (0x80000000)
++#define  USB_CTRL_OTG_WUIE                   (0x08000000)
+ 
+ /*!
+  * Endpoint Queue Head data struct
+-- 
+1.5.4.4
+

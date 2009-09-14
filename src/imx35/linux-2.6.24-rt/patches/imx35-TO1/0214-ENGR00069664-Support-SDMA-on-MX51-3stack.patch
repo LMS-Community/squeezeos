@@ -1,0 +1,104 @@
+From 22637d69b93bac3510a49d6297ad56fcb94b9dae Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Wed, 11 Jun 2008 15:49:59 +0800
+Subject: [PATCH] ENGR00069664 Support SDMA on MX51 3stack
+
+Complete the initial verion of SDMA support
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ arch/arm/mach-mx51/devices.c |   68 +++++++++++++++++++++++++++++------------
+ 1 files changed, 48 insertions(+), 20 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index f029a3e..ac9e459 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -28,36 +28,64 @@
+ 
+ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+ {
+-	sdma_script_addr->mxc_sdma_app_2_mcu_addr = app_2_mcu_ADDR;
++	/* AP<->BP */
+ 	sdma_script_addr->mxc_sdma_ap_2_ap_addr = ap_2_ap_ADDR;
+ 	sdma_script_addr->mxc_sdma_ap_2_bp_addr = -1;
+ 	sdma_script_addr->mxc_sdma_bp_2_ap_addr = -1;
++	sdma_script_addr->mxc_sdma_ap_2_ap_fixed_addr = -1;
++
++	/*misc */
+ 	sdma_script_addr->mxc_sdma_loopback_on_dsp_side_addr = -1;
+-	sdma_script_addr->mxc_sdma_mcu_2_app_addr = mcu_2_app_ADDR;
+-	sdma_script_addr->mxc_sdma_mcu_2_shp_addr = mcu_2_shp_ADDR;
+ 	sdma_script_addr->mxc_sdma_mcu_interrupt_only_addr = -1;
+-	sdma_script_addr->mxc_sdma_shp_2_mcu_addr = shp_2_mcu_ADDR;
+-	sdma_script_addr->mxc_sdma_start_addr = (unsigned short *)sdma_code;
+-	sdma_script_addr->mxc_sdma_uartsh_2_mcu_addr = uartsh_2_mcu_ADDR;
+-	sdma_script_addr->mxc_sdma_uart_2_mcu_addr = uart_2_mcu_ADDR;
+-	sdma_script_addr->mxc_sdma_ram_code_size = RAM_CODE_SIZE;
+-	sdma_script_addr->mxc_sdma_ram_code_start_addr = RAM_CODE_START_ADDR;
+-	sdma_script_addr->mxc_sdma_dptc_dvfs_addr = -1;
+-	sdma_script_addr->mxc_sdma_firi_2_mcu_addr = -1;
++
++	/* firi */
+ 	sdma_script_addr->mxc_sdma_firi_2_per_addr = -1;
+-	sdma_script_addr->mxc_sdma_mshc_2_mcu_addr = -1;
+-	sdma_script_addr->mxc_sdma_per_2_app_addr = -1;
++	sdma_script_addr->mxc_sdma_firi_2_mcu_addr = -1;
+ 	sdma_script_addr->mxc_sdma_per_2_firi_addr = -1;
+-	sdma_script_addr->mxc_sdma_per_2_shp_addr = -1;
+-	sdma_script_addr->mxc_sdma_mcu_2_ata_addr = mcu_2_ata_ADDR;
+ 	sdma_script_addr->mxc_sdma_mcu_2_firi_addr = -1;
+-	sdma_script_addr->mxc_sdma_mcu_2_mshc_addr = -1;
++
++	/* uart */
++	sdma_script_addr->mxc_sdma_uart_2_per_addr = uart_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_uart_2_mcu_addr = uart_2_mcu_ADDR;
++
++	/* UART SH */
++	sdma_script_addr->mxc_sdma_uartsh_2_per_addr = uartsh_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_uartsh_2_mcu_addr = uartsh_2_mcu_ADDR;
++
++	/* SHP */
++	sdma_script_addr->mxc_sdma_per_2_shp_addr = per_2_shp_ADDR;
++	sdma_script_addr->mxc_sdma_shp_2_per_addr = shp_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_mcu_2_shp_addr = mcu_2_shp_ADDR;
++	sdma_script_addr->mxc_sdma_shp_2_mcu_addr = shp_2_mcu_ADDR;
++
++	/* ATA */
++	sdma_script_addr->mxc_sdma_mcu_2_ata_addr = mcu_2_ata_ADDR;
+ 	sdma_script_addr->mxc_sdma_ata_2_mcu_addr = ata_2_mcu_ADDR;
+-	sdma_script_addr->mxc_sdma_uartsh_2_per_addr = -1;
+-	sdma_script_addr->mxc_sdma_shp_2_per_addr = -1;
+-	sdma_script_addr->mxc_sdma_uart_2_per_addr = -1;
+-	sdma_script_addr->mxc_sdma_app_2_per_addr = -1;
++
++	/* app */
++	sdma_script_addr->mxc_sdma_app_2_per_addr = app_2_per_ADDR;
++	sdma_script_addr->mxc_sdma_app_2_mcu_addr = app_2_mcu_ADDR;
++	sdma_script_addr->mxc_sdma_per_2_app_addr = per_2_app_ADDR;
++	sdma_script_addr->mxc_sdma_mcu_2_app_addr = mcu_2_app_ADDR;
++
++	/* MSHC */
++	sdma_script_addr->mxc_sdma_mshc_2_mcu_addr = -1;
++	sdma_script_addr->mxc_sdma_mcu_2_mshc_addr = -1;
++
++	/* spdif */
++	sdma_script_addr->mxc_sdma_spdif_2_mcu_addr = -1;
+ 	sdma_script_addr->mxc_sdma_mcu_2_spdif_addr = mcu_2_spdif_ADDR;
++
++	/* IPU */
++	sdma_script_addr->mxc_sdma_ext_mem_2_ipu_addr = ext_mem__ipu_ram_ADDR;
++
++	/* DVFS */
++	sdma_script_addr->mxc_sdma_dptc_dvfs_addr = -1;
++
++	/* core */
++	sdma_script_addr->mxc_sdma_start_addr = (unsigned short *)sdma_code;
++	sdma_script_addr->mxc_sdma_ram_code_start_addr = RAM_CODE_START_ADDR;
++	sdma_script_addr->mxc_sdma_ram_code_size = RAM_CODE_SIZE;
+ }
+ 
+ static void mxc_nop_release(struct device *dev)
+-- 
+1.5.4.4
+

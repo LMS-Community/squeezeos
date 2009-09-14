@@ -1,0 +1,95 @@
+From d8bef058dc64f81cda9f29e89d75309748a2bb74 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Thu, 8 Jan 2009 18:39:28 +0800
+Subject: [PATCH] ENGR00096876 i.MX35: Broadcom GPS Change for 2.0 3stack board.
+
+1.Enable UART3 for GPS.
+2.Use GPIO GPIO1_5 to select UART3, instead of FEC.
+3.Add GPS driver voltage setting for 1V8.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack_gpio.c |   25 +++++++++++++++++++++++++
+ drivers/mxc/gps_ioctrl/agpsgpiodev.c  |    4 +++-
+ 2 files changed, 28 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 00cd6b5..f58b521 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -98,6 +98,17 @@ void gpio_uart_active(int port, int no_irda)
+ 		mxc_request_iomux(MX35_PIN_FEC_COL, MUX_CONFIG_ALT2);
+ 		mxc_request_iomux(MX35_PIN_FEC_RX_DV, MUX_CONFIG_ALT2);
+ 
++		mxc_iomux_set_pad(MX35_PIN_FEC_TX_CLK,
++				PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++				PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++		mxc_iomux_set_pad(MX35_PIN_FEC_RX_CLK,
++				PAD_CTL_PUE_PUD | PAD_CTL_100K_PD);
++		mxc_iomux_set_pad(MX35_PIN_FEC_RX_DV,
++				PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++				PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++		mxc_iomux_set_pad(MX35_PIN_FEC_COL,
++				PAD_CTL_PUE_PUD | PAD_CTL_100K_PD);
++
+ 		mxc_iomux_set_input(MUX_IN_UART3_UART_RTS_B, INPUT_CTL_PATH2);
+ 		mxc_iomux_set_input(MUX_IN_UART3_UART_RXD_MUX, INPUT_CTL_PATH3);
+ 		break;
+@@ -1188,6 +1199,17 @@ EXPORT_SYMBOL(gpio_deactivate_esai_ports);
+  */
+ void gpio_gps_active(void)
+ {
++	/* Pull GPIO1_5 to be low for routing signal to UART3/GPS */
++	if (board_is_mx35(BOARD_REV_2)) {
++		mxc_request_iomux(MX35_PIN_COMPARE, MUX_CONFIG_GPIO);
++		mxc_iomux_set_pad(MX35_PIN_COMPARE, PAD_CTL_DRV_NORMAL |
++				PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PU |
++				PAD_CTL_DRV_3_3V | PAD_CTL_PUE_PUD |
++				PAD_CTL_SRE_SLOW);
++		mxc_set_gpio_direction(MX35_PIN_COMPARE, 0);
++		mxc_set_gpio_dataout(MX35_PIN_COMPARE, 0);
++	}
++
+ 	/* PWR_EN_GPS is set to be 0, will be toggled on in app by ioctl */
+ 	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 0, 0);
+ 
+@@ -1238,6 +1260,9 @@ void gpio_gps_inactive(void)
+ {
+ 	/* GPS disable */
+ 	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 0, 0);
++	/* Free GPIO1_5 */
++	if (board_is_mx35(BOARD_REV_2))
++		mxc_free_iomux(MX35_PIN_COMPARE, MUX_CONFIG_GPIO);
+ }
+ 
+ EXPORT_SYMBOL(gpio_gps_inactive);
+diff --git a/drivers/mxc/gps_ioctrl/agpsgpiodev.c b/drivers/mxc/gps_ioctrl/agpsgpiodev.c
+index 62388f9..84d1fc6 100644
+--- a/drivers/mxc/gps_ioctrl/agpsgpiodev.c
++++ b/drivers/mxc/gps_ioctrl/agpsgpiodev.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -193,6 +193,7 @@ static int __init gps_ioctrl_probe(struct platform_device *pdev)
+ 		gps_regu =
+ 		    regulator_get(&(pdev->dev), mxc_gps_ioctrl_data->core_reg);
+ 		if (!IS_ERR_VALUE((u32)gps_regu)) {
++			regulator_set_voltage(gps_regu, 1800000);
+ 			regulator_enable(gps_regu);
+ 			regulator_put(gps_regu, &(pdev->dev));
+ 		} else {
+@@ -205,6 +206,7 @@ static int __init gps_ioctrl_probe(struct platform_device *pdev)
+ 		    regulator_get(&(pdev->dev),
+ 				  mxc_gps_ioctrl_data->analog_reg);
+ 		if (!IS_ERR_VALUE((u32)gps_regu)) {
++			regulator_set_voltage(gps_regu, 2800000);
+ 			regulator_enable(gps_regu);
+ 			regulator_put(gps_regu, &(pdev->dev));
+ 		} else {
+-- 
+1.5.4.4
+

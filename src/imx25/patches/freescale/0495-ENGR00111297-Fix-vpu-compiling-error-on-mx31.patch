@@ -1,0 +1,135 @@
+From 72731a73ff4f4f3fa7a496af5a4bd154798bdac3 Mon Sep 17 00:00:00 2001
+From: Robby Cai <r63905@freescale.com>
+Date: Mon, 13 Apr 2009 13:57:46 +0800
+Subject: [PATCH] ENGR00111297 Fix vpu compiling error on mx31
+
+Fix vpu compiling error on mx31 & restruct the codes
+
+Signed-off-by: Robby Cai <r63905@freescale.com>
+---
+ arch/arm/mach-mx37/devices.c |   15 ++++++++++-----
+ arch/arm/mach-mx51/devices.c |   15 ++++++++++-----
+ drivers/mxc/vpu/mxc_vpu.c    |   31 ++++++++++++++++++++-----------
+ 3 files changed, 40 insertions(+), 21 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index 8644cfb..a7c80e6 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -792,11 +792,16 @@ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ 
+ #if defined(CONFIG_MXC_VPU) || defined(CONFIG_MXC_VPU_MODULE)
+ static struct resource vpu_resources[] = {
+-	{
+-	 .start = VPU_IRAM_BASE_ADDR,
+-	 .end = VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE,
+-	 .flags = IORESOURCE_MEM,
+-	 },
++	[0] = {
++	       .start = VPU_IRAM_BASE_ADDR,
++	       .end = VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = IO_ADDRESS(SRC_BASE_ADDR),
++	       .end = IO_ADDRESS(SRC_BASE_ADDR),
++	       .flags = IORESOURCE_MEM,
++	       },
+ };
+ 
+ /*! Platform Data for MXC VPU */
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index a99a9ce..918b11c 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -275,11 +275,16 @@ static inline void mxc_init_ipu(void)
+ 
+ #if defined(CONFIG_MXC_VPU) || defined(CONFIG_MXC_VPU_MODULE)
+ static struct resource vpu_resources[] = {
+-	{
+-	 .start = VPU_IRAM_BASE_ADDR,
+-	 .end = VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE,
+-	 .flags = IORESOURCE_MEM,
+-	 },
++	[0] = {
++	       .start = VPU_IRAM_BASE_ADDR,
++	       .end = VPU_IRAM_BASE_ADDR + VPU_IRAM_SIZE,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = IO_ADDRESS(SRC_BASE_ADDR),
++	       .end = IO_ADDRESS(SRC_BASE_ADDR),
++	       .flags = IORESOURCE_MEM,
++	       },
+ };
+ 
+ /*! Platform Data for MXC VPU */
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 7bf3021..925d4b3 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -69,6 +69,8 @@ static struct vpu_mem_desc user_data_mem = { 0 };
+ 
+ /* IRAM setting */
+ static struct iram_setting iram;
++/* store SRC base addr */
++static u32 src_base_addr;
+ 
+ /* implement the blocking ioctl */
+ static int codec_done = 0;
+@@ -423,15 +425,15 @@ static int vpu_ioctl(struct inode *inode, struct file *filp, u_int cmd,
+ 		}
+ 	case VPU_IOC_SYS_SW_RESET:
+ 		{
+-			u32 reg;
+-
+-#define SW_VPU_RST_BIT	0x02
+-			reg = __raw_readl(IO_ADDRESS(SRC_BASE_ADDR));
+-			reg |= SW_VPU_RST_BIT;
+-			__raw_writel(reg, IO_ADDRESS(SRC_BASE_ADDR));
+-			while (__raw_readl(IO_ADDRESS(SRC_BASE_ADDR)) &
+-			       SW_VPU_RST_BIT)
+-				;
++			if (cpu_is_mx37() || cpu_is_mx51()) {
++				u32 reg;
++
++				reg = __raw_readl(src_base_addr);
++				reg |= 0x02;	/* SW_VPU_RST_BIT */
++				__raw_writel(reg, src_base_addr);
++				while (__raw_readl(src_base_addr) & 0x02)
++					;
++			}
+ 			break;
+ 		}
+ 	case VPU_IOC_REG_DUMP:
+@@ -551,7 +553,7 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 		if (!res) {
+ 			printk(KERN_ERR "vpu: unable to get VL2CC base\n");
+-			return -ENOENT;
++			return -ENODEV;
+ 		}
+ 
+ 		err = vl2cc_init(res->start);
+@@ -563,10 +565,17 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 		if (!res) {
+ 			printk(KERN_ERR "vpu: unable to get VPU IRAM base\n");
+-			return -ENOENT;
++			return -ENODEV;
+ 		}
+ 		iram.start = res->start;
+ 		iram.end = res->end;
++
++		res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++		if (!res) {
++			printk(KERN_ERR "vpu: unable to get src base addr\n");
++			return -ENODEV;
++		}
++		src_base_addr = res->start;
+ 	}
+ 
+ 	vpu_major = register_chrdev(vpu_major, "mxc_vpu", &vpu_fops);
+-- 
+1.5.4.4
+

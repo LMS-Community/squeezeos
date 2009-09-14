@@ -1,0 +1,75 @@
+From 100aa74c3c4b852f5c1820c286a0452e07253791 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 13 May 2009 14:05:24 +0300
+Subject: [PATCH] UBI: do not panic if volume check fails
+
+If a volume paranoid check fails, do not return an error
+code to the caller, but just print error messages and go
+forward. The primary reason for this is that it is difficult
+to recover and cancel the operation at that stage.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/vmt.c |   18 +++++++++++-------
+ 1 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 7fac21e..1628e1f 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -358,7 +358,8 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ 	ubi->vol_count += 1;
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+-	err = paranoid_check_volumes(ubi);
++	if (paranoid_check_volumes(ubi))
++		dbg_err("check failed while creating volume %d", vol_id);
+ 	return err;
+ 
+ out_sysfs:
+@@ -465,8 +466,9 @@ int ubi_remove_volume(struct ubi_volume_desc *desc, int no_vtbl)
+ 	ubi->vol_count -= 1;
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+-	if (!no_vtbl)
+-		err = paranoid_check_volumes(ubi);
++	if (!no_vtbl && paranoid_check_volumes(ubi))
++		dbg_err("check failed while removing volume %d", vol_id);
++
+ 	return err;
+ 
+ out_err:
+@@ -587,7 +589,8 @@ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
+ 			(long long)vol->used_ebs * vol->usable_leb_size;
+ 	}
+ 
+-	err = paranoid_check_volumes(ubi);
++	if (paranoid_check_volumes(ubi))
++		dbg_err("check failed while re-sizing volume %d", vol_id);
+ 	return err;
+ 
+ out_acc:
+@@ -635,8 +638,8 @@ int ubi_rename_volumes(struct ubi_device *ubi, struct list_head *rename_list)
+ 		}
+ 	}
+ 
+-	if (!err)
+-		err = paranoid_check_volumes(ubi);
++	if (!err && paranoid_check_volumes(ubi))
++		;
+ 	return err;
+ }
+ 
+@@ -688,7 +691,8 @@ int ubi_add_volume(struct ubi_device *ubi, struct ubi_volume *vol)
+ 		return err;
+ 	}
+ 
+-	err = paranoid_check_volumes(ubi);
++	if (paranoid_check_volumes(ubi))
++		dbg_err("check failed while adding volume %d", vol_id);
+ 	return err;
+ 
+ out_gluebi:
+-- 
+1.5.4.3
+

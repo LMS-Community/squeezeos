@@ -1,0 +1,204 @@
+From 38e87486363f65d97d2160f619444a8f6e3279ac Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 23 Jan 2009 14:17:36 +0200
+Subject: [PATCH] UBIFS: fix LEB list freeing
+
+When freeing the c->idx_lebs list, we have to release the LEBs as well,
+because we might be called from mount to read-only mode code. Otherwise
+the LEBs stay taken forever, which may cause problems when we re-mount
+back ro RW mode.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/gc.c     |   16 ++++++++++++----
+ fs/ubifs/lprops.c |    8 ++++++++
+ fs/ubifs/super.c  |   42 +++++++++++++++++++++++++++---------------
+ fs/ubifs/ubifs.h  |    2 +-
+ 4 files changed, 48 insertions(+), 20 deletions(-)
+
+diff --git a/fs/ubifs/gc.c b/fs/ubifs/gc.c
+index ada1be7..27f15cb 100644
+--- a/fs/ubifs/gc.c
++++ b/fs/ubifs/gc.c
+@@ -830,21 +830,29 @@ out:
+  * ubifs_destroy_idx_gc - destroy idx_gc list.
+  * @c: UBIFS file-system description object
+  *
+- * This function destroys the idx_gc list. It is called when unmounting or
+- * remounting read-only so locks are not needed.
++ * This function destroys the @c->idx_gc list. It is called when unmounting or
++ * remounting read-only so locks are not needed. Returns zero in case of
++ * success and a negative error code in case of failure.
+  */
+-void ubifs_destroy_idx_gc(struct ubifs_info *c)
++int ubifs_destroy_idx_gc(struct ubifs_info *c)
+ {
++	int ret = 0;
++
+ 	while (!list_empty(&c->idx_gc)) {
++		int err;
+ 		struct ubifs_gced_idx_leb *idx_gc;
+ 
+ 		idx_gc = list_entry(c->idx_gc.next, struct ubifs_gced_idx_leb,
+ 				    list);
+-		c->idx_gc_cnt -= 1;
++		err = ubifs_change_one_lp(c, idx_gc->lnum, LPROPS_NC,
++					  LPROPS_NC, 0, LPROPS_TAKEN, -1);
++		if (err && !ret)
++			ret = err;
+ 		list_del(&idx_gc->list);
+ 		kfree(idx_gc);
+ 	}
+ 
++	return ret;
+ }
+ 
+ /**
+diff --git a/fs/ubifs/lprops.c b/fs/ubifs/lprops.c
+index dfd2bce..68328c5 100644
+--- a/fs/ubifs/lprops.c
++++ b/fs/ubifs/lprops.c
+@@ -678,6 +678,9 @@ int ubifs_change_one_lp(struct ubifs_info *c, int lnum, int free, int dirty,
+ 
+ out:
+ 	ubifs_release_lprops(c);
++	if (err)
++		ubifs_err("cannot change properties of LEB %d, error %d",
++			  lnum, err);
+ 	return err;
+ }
+ 
+@@ -714,6 +717,9 @@ int ubifs_update_one_lp(struct ubifs_info *c, int lnum, int free, int dirty,
+ 
+ out:
+ 	ubifs_release_lprops(c);
++	if (err)
++		ubifs_err("cannot update properties of LEB %d, error %d",
++			  lnum, err);
+ 	return err;
+ }
+ 
+@@ -737,6 +743,8 @@ int ubifs_read_one_lp(struct ubifs_info *c, int lnum, struct ubifs_lprops *lp)
+ 	lpp = ubifs_lpt_lookup(c, lnum);
+ 	if (IS_ERR(lpp)) {
+ 		err = PTR_ERR(lpp);
++		ubifs_err("cannot read properties of LEB %d, error %d",
++			  lnum, err);
+ 		goto out;
+ 	}
+ 
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 89445c4..ad147f9 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1467,9 +1467,6 @@ static int ubifs_remount_rw(struct ubifs_info *c)
+ {
+ 	int err, lnum;
+ 
+-	if (c->ro_media)
+-		return -EINVAL;
+-
+ 	mutex_lock(&c->umount_mutex);
+ 	c->remounting_rw = 1;
+ 	c->always_chk_crc = 1;
+@@ -1603,9 +1600,13 @@ out:
+  */
+ static void commit_on_unmount(struct ubifs_info *c)
+ {
+-	struct super_block *sb = c->vfs_sb;
+ 	long long bud_bytes;
+ 
++	if (!c->fast_unmount) {
++		dbg_gen("skip committing - fast unmount enabled");
++		return;
++	}
++
+ 	/*
+ 	 * This function is called before the background thread is stopped, so
+ 	 * we may race with ongoing commit, which means we have to take
+@@ -1615,8 +1616,11 @@ static void commit_on_unmount(struct ubifs_info *c)
+ 	bud_bytes = c->bud_bytes;
+ 	spin_unlock(&c->buds_lock);
+ 
+-	if (!c->fast_unmount && !(sb->s_flags & MS_RDONLY) && bud_bytes)
++	if (bud_bytes) {
++		dbg_gen("run commit");
+ 		ubifs_run_commit(c);
++	} else
++		dbg_gen("journal is empty, do not run commit");
+ }
+ 
+ /**
+@@ -1631,6 +1635,8 @@ static void ubifs_remount_ro(struct ubifs_info *c)
+ 	int i, err;
+ 
+ 	ubifs_assert(!c->need_recovery);
++	ubifs_assert(!c->ro_media);
++
+ 	commit_on_unmount(c);
+ 
+ 	mutex_lock(&c->umount_mutex);
+@@ -1644,16 +1650,17 @@ static void ubifs_remount_ro(struct ubifs_info *c)
+ 		del_timer_sync(&c->jheads[i].wbuf.timer);
+ 	}
+ 
+-	if (!c->ro_media) {
+-		c->mst_node->flags &= ~cpu_to_le32(UBIFS_MST_DIRTY);
+-		c->mst_node->flags |= cpu_to_le32(UBIFS_MST_NO_ORPHS);
+-		c->mst_node->gc_lnum = cpu_to_le32(c->gc_lnum);
+-		err = ubifs_write_master(c);
+-		if (err)
+-			ubifs_ro_mode(c, err);
+-	}
++	c->mst_node->flags &= ~cpu_to_le32(UBIFS_MST_DIRTY);
++	c->mst_node->flags |= cpu_to_le32(UBIFS_MST_NO_ORPHS);
++	c->mst_node->gc_lnum = cpu_to_le32(c->gc_lnum);
++	err = ubifs_write_master(c);
++	if (err)
++		ubifs_ro_mode(c, err);
++
++	err = ubifs_destroy_idx_gc(c);
++	if (err)
++		ubifs_ro_mode(c, err);
+ 
+-	ubifs_destroy_idx_gc(c);
+ 	free_wbufs(c);
+ 	vfree(c->orph_buf);
+ 	c->orph_buf = NULL;
+@@ -1752,6 +1759,11 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
+ 	}
+ 
+ 	if ((sb->s_flags & MS_RDONLY) && !(*flags & MS_RDONLY)) {
++		if (c->ro_media) {
++			ubifs_msg("cannot re-mount R/W, UBIFS is working in "
++				  "R/O mode");
++			return -EINVAL;
++		}
+ 		err = ubifs_remount_rw(c);
+ 		if (err)
+ 			return err;
+@@ -2042,7 +2054,7 @@ static void ubifs_kill_sb(struct super_block *sb)
+ 	 * We do 'commit_on_unmount()' here instead of 'ubifs_put_super()'
+ 	 * in order to be outside BKL.
+ 	 */
+-	if (sb->s_root)
++	if (sb->s_root && !(sb->s_flags & MS_RDONLY))
+ 		commit_on_unmount(c);
+ 	/* The un-mount routine is actually done in put_super() */
+ 	generic_shutdown_super(sb);
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 62e99f1..fd98793 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1588,7 +1588,7 @@ int ubifs_replay_journal(struct ubifs_info *c);
+ int ubifs_garbage_collect(struct ubifs_info *c, int anyway);
+ int ubifs_gc_start_commit(struct ubifs_info *c);
+ int ubifs_gc_end_commit(struct ubifs_info *c);
+-void ubifs_destroy_idx_gc(struct ubifs_info *c);
++int ubifs_destroy_idx_gc(struct ubifs_info *c);
+ int ubifs_get_idx_gc_leb(struct ubifs_info *c);
+ int ubifs_garbage_collect_leb(struct ubifs_info *c, struct ubifs_lprops *lp);
+ 
+-- 
+1.5.4.3
+

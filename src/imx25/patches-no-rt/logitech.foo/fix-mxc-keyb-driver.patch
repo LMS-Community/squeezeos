@@ -1,0 +1,71 @@
+Index: linux-2.6.26/drivers/input/keyboard/mxc_keyb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/input/keyboard/mxc_keyb.c	2009-04-07 16:33:40.000000000 +0100
++++ linux-2.6.26/drivers/input/keyboard/mxc_keyb.c	2009-04-07 16:34:40.000000000 +0100
+@@ -855,13 +855,6 @@
+ 	mxckbd_dev->open = mxc_kpp_open;
+ 	mxckbd_dev->close = mxc_kpp_close;
+ 
+-	retval = input_register_device(mxckbd_dev);
+-	if (retval < 0) {
+-		printk(KERN_ERR
+-		       "mxckbd_dev: failed to register input device\n");
+-		goto err2;
+-	}
+-
+ 	/* allocate required memory */
+ 	press_scancode = kmalloc(kpp_dev.kpp_rows * sizeof(press_scancode[0]),
+ 				 GFP_KERNEL);
+@@ -870,7 +863,7 @@
+ 
+ 	if (!press_scancode || !release_scancode) {
+ 		retval = -ENOMEM;
+-		goto err3;
++		goto err2;
+ 	}
+ 
+ 	for (i = 0; i < kpp_dev.kpp_rows; i++) {
+@@ -883,7 +876,7 @@
+ 
+ 		if (!press_scancode[i] || !release_scancode[i]) {
+ 			retval = -ENOMEM;
+-			goto err3;
++			goto err2;
+ 		}
+ 	}
+ 
+@@ -894,7 +887,7 @@
+ 
+ 	if (!cur_rcmap || !prev_rcmap) {
+ 		retval = -ENOMEM;
+-		goto err3;
++		goto err2;
+ 	}
+ 
+ 	__set_bit(EV_KEY, mxckbd_dev->evbit);
+@@ -911,6 +904,13 @@
+ 	memset(cur_rcmap, 0, kpp_dev.kpp_rows * sizeof(cur_rcmap[0]));
+ 	memset(prev_rcmap, 0, kpp_dev.kpp_rows * sizeof(prev_rcmap[0]));
+ 
++	retval = input_register_device(mxckbd_dev);
++	if (retval < 0) {
++		printk(KERN_ERR
++		       "mxckbd_dev: failed to register input device\n");
++		goto err3;
++	}
++
+ 	key_pad_enabled = 1;
+ 	/* Initialize the polling timer */
+ 	init_timer(&kpp_dev.poll_timer);
+@@ -922,9 +922,9 @@
+ 	return 0;
+ 
+       err3:
+-	mxc_kpp_free_allocated();
+-      err2:
+ 	input_free_device(mxckbd_dev);
++      err2:
++	mxc_kpp_free_allocated();
+       err1:
+ 	free_irq(irq, MOD_NAME);
+ 	clk_disable(kpp_clk);

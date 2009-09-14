@@ -1,31 +1,25 @@
 DESCRIPTION = "Evolution database backend server"
 HOMEPAGE = "http://projects.o-hand.com/eds"
 LICENSE = "LGPL"
-DEPENDS = "intltool-native glib-2.0 gtk+ gconf dbus db gnome-common virtual/libiconv zlib libsoup"
+DEPENDS = "intltool-native glib-2.0 gtk+ gconf dbus db gnome-common virtual/libiconv zlib libsoup libglade"
 
 PV = "1.4.0+svnr${SRCREV}"
-PR = "r3"
+PR = "r6"
 
 SRC_URI = "svn://svn.o-hand.com/repos/${PN};module=trunk;proto=http \
            file://oh-contact.patch;patch=1;pnum=0 \
-           file://no_libdb.patch;patch=1 \
            file://no_iconv_test.patch;patch=1 \
-           file://no_libedataserverui.patch;patch=1 \
            file://iconv-detect.h"
 
 S = "${WORKDIR}/trunk"
 
-inherit autotools pkgconfig
+inherit autotools_stage pkgconfig
 
 # -ldb needs this on some platforms
 LDFLAGS += "-lpthread"
 
 do_configure_append () {
         cp ${WORKDIR}/iconv-detect.h ${S}
-}
-
-do_stage () {
-        autotools_stage_all
 }
 
 EXTRA_OECONF = "--without-openldap --with-dbus --without-bug-buddy \
@@ -35,7 +29,8 @@ EXTRA_OECONF = "--without-openldap --with-dbus --without-bug-buddy \
 
 PACKAGES =+ "libcamel libcamel-dev libebook libebook-dev libecal libecal-dev \
              libedata-book libedata-book-dev libedata-cal libedata-cal-dev \
-             libedataserver libedataserver-dev"
+             libedataserver libedataserver-dev \
+             libedataserverui libedataserverui-dev"
 
 FILES_${PN}-dev =+ "${libdir}/pkgconfig/evolution-data-server-*.pc"
 FILES_${PN}-dbg =+ "${libdir}/evolution-data-server-*/camel-providers/.debug \
@@ -83,4 +78,9 @@ FILES_libedataserver = "${libdir}/libedataserver-*.so.*"
 FILES_libedataserver-dev = "${libdir}/libedataserver-*.so \
                             ${libdir}/pkgconfig/libedataserver-*.pc \
                             ${includedir}/evolution-data-server-*/libedataserver/*.h"
+
+FILES_libedataserverui = "${libdir}/libedataserverui-*.so.* ${datadir}/evolution-data-server-1.4/glade/*.glade"
+FILES_libedataserverui-dev = "${libdir}/libedataserverui-*.so \
+                              ${libdir}/pkgconfig/libedataserverui-*.pc \
+                              ${includedir}/evolution-data-server-*/libedataserverui/*.h"
 

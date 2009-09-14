@@ -1,0 +1,40 @@
+---
+ drivers/net/fec.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+Index: linux-2.6.26/drivers/net/fec.c
+===================================================================
+--- linux-2.6.26.orig/drivers/net/fec.c	2009-07-02 03:32:07.000000000 +0800
++++ linux-2.6.26/drivers/net/fec.c	2009-07-02 04:55:07.000000000 +0800
+@@ -2227,7 +2227,7 @@
+ 	clk_put(clk);
+ 
+ 	fep->phy_speed =
+-		((((rate / 2 + 4999999) / 2500000) / 2) & 0x3F) << 1;
++		(((((rate / 2) + (4999999 / 2)) / 2500000)) & 0x3F) << 1;
+ 	fecp->fec_mii_speed = fep->phy_speed;
+ 
+ 	/* fec_restart will be called from the phy timer when the link
+@@ -2722,6 +2722,7 @@
+ 	struct fec_enet_private *fep = container_of(work, struct fec_enet_private, phy_task);
+ 	struct net_device *dev = fep->netdev;
+ 	int duplex;
++	volatile fec_t *fecp = fep->hwp;
+ 
+ 	/*
+ 	** When we get here, phy_task is already removed from
+@@ -2740,6 +2741,14 @@
+ 			    & (PHY_STAT_100FDX | PHY_STAT_10FDX))
+ 				duplex = 1;
+ 			fec_restart(dev, duplex);
++			// For RMII, the FRCONT bit needs to track
++			// the 10/100 status.
++			if (fep->phy_status
++			    & (PHY_STAT_10FDX | PHY_STAT_10HDX)) {
++				fecp->fec_miigsk_cfgr |= (1<<6);
++			} else {
++				fecp->fec_miigsk_cfgr &= ~(1<<6);
++			}
+ 		} else
+ 			fec_stop(dev);
+ 	}

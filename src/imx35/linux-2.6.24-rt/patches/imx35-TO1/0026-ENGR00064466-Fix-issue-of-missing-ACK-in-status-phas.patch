@@ -1,0 +1,55 @@
+From dd8adb72b64f604bd38d29ce6a755e76def7c721 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Tue, 12 Feb 2008 09:22:06 -0600
+Subject: [PATCH] ENGR00064466 Fix issue of missing ACK in status phase
+
+Added a fix for USB Specification 8.5.3.3 Error Handling
+on the Last Data Transaction
+
+Signed-off-by: Dinh L. Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   14 ++++++++++----
+ 1 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 3fff7ce..82415d2 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1604,9 +1604,11 @@ static void setup_received_irq(struct arcotg_udc *udc,
+ 	udc_reset_ep_queue(udc, 0);
+ 
+ 	/* We asume setup only occurs on EP0 */
+-	if (setup->bRequestType & USB_DIR_IN)
++	if (setup->bRequestType & USB_DIR_IN) {
++		if (ep0_prime_status(udc, EP_DIR_OUT))
++			Ep0Stall(udc);
+ 		udc->ep0_dir = USB_DIR_IN;
+-	else
++	} else
+ 		udc->ep0_dir = USB_DIR_OUT;
+ 
+ 	if ((setup->bRequestType & USB_TYPE_MASK) == USB_TYPE_CLASS) {
+@@ -1959,8 +1961,12 @@ static void dtd_complete_irq(struct arcotg_udc *udc)
+ 	/* Clear the bits in the register */
+ 	bit_pos = usb_slave_regs->endptcomplete;
+ 	usb_slave_regs->endptcomplete = bit_pos;
+-	bit_pos = le32_to_cpu(bit_pos);
+ 
++	/* Clear the buffer if the ACK was missing from the IN ep */
++	if (usb_slave_regs->endptstatus & 0x10000)
++		usb_slave_regs->endptflush |= 0x10000;
++
++	bit_pos = le32_to_cpu(bit_pos);
+ 	if (!bit_pos)
+ 		return;
+ 
+-- 
+1.5.4.4
+

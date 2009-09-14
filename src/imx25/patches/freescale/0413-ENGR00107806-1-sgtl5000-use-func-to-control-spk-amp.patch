@@ -1,0 +1,163 @@
+From 9e23917997354017f20b305d73d4c883be04e137 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Tue, 17 Feb 2009 19:32:06 +0800
+Subject: [PATCH] ENGR00107806-1 sgtl5000: use func to control spk amp shutdown
+
+Becuase spk amp shutdown pin can be connected to PM gpo or cpu GPIO, I use a
+function amp_enable in arch/arm/mach-xxx/mxxxx-3stack.c to controll shutdown.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ include/asm-arm/arch-mxc/mxc.h      |    7 ++++-
+ sound/soc/imx/imx-3stack-sgtl5000.c |   47 +++++++++++++++++++++-------------
+ 2 files changed, 35 insertions(+), 19 deletions(-)
+
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 8e24073..787de3e 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -293,11 +293,16 @@ struct mxc_sgtl5000_platform_data {
+ 
+ 	char *vddio_reg;
+ 	char *vdda_reg;
+-	char *amp_gpo;
++	char *vddd_reg;
+ 	int vddio;	/* voltage of VDDIO (uv) */
+ 	int vdda;	/* voltage of vdda (uv) */
+ 	int vddd;	/* voldtage of vddd (uv), zero if not connected */
+ 	int sysclk;
++
++	int (*init)(void); /* board specific init */
++	int (*amp_enable)(int enable);
++	int (*finit)(void); /* board specific finit */
++	void *priv; /* used by board specific functions */
+ };
+ 
+ extern void mxc_wd_reset(void);
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index 0d5d245..d531162 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -55,7 +55,7 @@ struct imx_3stack_pcm_state {
+ struct imx_3stack_priv {
+ 	struct regulator *reg_vddio;
+ 	struct regulator *reg_vdda;
+-	struct regulator *reg_amp_gpo;
++	struct regulator *reg_vddd;
+ };
+ 
+ #if SGTL5000_SSI_MASTER
+@@ -385,21 +385,21 @@ static int spk_amp_event(struct snd_soc_dapm_widget *w,
+ 	priv = sgtl5000_3stack_pcm_link->machine->platform_data;
+ 	plat = sgtl5000_3stack_pcm_link->machine->pdev->dev.platform_data;
+ 
+-	if ((priv->reg_amp_gpo == NULL) || (priv->reg_vdda == NULL))
++	if ((plat->amp_enable == NULL) || (priv->reg_vdda == NULL))
+ 		return 0;
+ 
+ 	hp_status = plat->hp_status();
+ 	if (SND_SOC_DAPM_EVENT_ON(event)) {
+ 		if (hp_status) {
+-			regulator_disable(priv->reg_amp_gpo);
++			plat->amp_enable(0);
+ 			regulator_set_mode(priv->reg_vdda,
+ 					REGULATOR_MODE_NORMAL);
+ 		} else {
+-			regulator_enable(priv->reg_amp_gpo);
++			plat->amp_enable(1);
+ 			regulator_set_mode(priv->reg_vdda, REGULATOR_MODE_FAST);
+ 		}
+ 	} else {
+-		regulator_disable(priv->reg_amp_gpo);
++		plat->amp_enable(0);
+ 		regulator_set_mode(priv->reg_vdda, REGULATOR_MODE_NORMAL);
+ 	}
+ 	return 0;
+@@ -453,6 +453,8 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 	}
+ 
+ 	ret = -EINVAL;
++	if (plat->init && plat->init())
++		goto err_plat_init;
+ 	if (plat->vddio_reg) {
+ 		reg = regulator_get(&pdev->dev, plat->vddio_reg);
+ 		if (IS_ERR(reg))
+@@ -465,11 +467,11 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 			goto err_reg_vdda;
+ 		priv->reg_vdda = reg;
+ 	}
+-	if (plat->amp_gpo) {
+-		reg = regulator_get(&pdev->dev, plat->amp_gpo);
++	if (plat->vddd_reg) {
++		reg = regulator_get(&pdev->dev, plat->vddd_reg);
+ 		if (IS_ERR(reg))
+-			goto err_reg_gpo;
+-		priv->reg_amp_gpo = reg;
++			goto err_reg_vddd;
++		priv->reg_vddd = reg;
+ 	}
+ 	machine->platform_data = priv;
+ 
+@@ -481,8 +483,10 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 		regulator_set_voltage(priv->reg_vddio, plat->vddio);
+ 		regulator_enable(priv->reg_vddio);
+ 	}
+-	if (priv->reg_amp_gpo)
+-		regulator_enable(priv->reg_amp_gpo);
++	if (priv->reg_vddd) {
++		regulator_set_voltage(priv->reg_vddd, plat->vddd);
++		regulator_enable(priv->reg_vddd);
++	}
+ 
+ 	codec_data->vddio = plat->vddio / 1000; /* uV to mV */
+ 	codec_data->vdda = plat->vdda / 1000;
+@@ -551,15 +555,18 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 	return 0;
+ 
+ err_card_reg:
+-	if (priv->reg_amp_gpo)
+-		regulator_put(priv->reg_amp_gpo, &pdev->dev);
+-err_reg_gpo:
++	if (priv->reg_vddd)
++		regulator_put(priv->reg_vddd, &pdev->dev);
++err_reg_vddd:
+ 	if (priv->reg_vdda)
+ 		regulator_put(priv->reg_vdda, &pdev->dev);
+ err_reg_vdda:
+ 	if (priv->reg_vddio)
+ 		regulator_put(priv->reg_vddio, &pdev->dev);
+ err_reg_vddio:
++	if (plat->finit)
++		plat->finit();
++err_plat_init:
+ 	kfree(codec_data);
+ 	codec->platform_data = NULL;
+ err_codec_data:
+@@ -593,16 +600,20 @@ static int mach_remove(struct snd_soc_machine *machine)
+ 		priv = machine->platform_data;
+ 		if (priv->reg_vddio)
+ 			regulator_disable(priv->reg_vddio);
++		if (priv->reg_vddd)
++			regulator_disable(priv->reg_vddd);
+ 		if (priv->reg_vdda)
+ 			regulator_disable(priv->reg_vdda);
+-		if (priv->reg_amp_gpo) {
+-			regulator_disable(priv->reg_amp_gpo);
+-			regulator_put(priv->reg_amp_gpo, &pdev->dev);
+-		}
++		if (plat->amp_enable)
++			plat->amp_enable(0);
++		if (plat->finit)
++			plat->finit();
+ 		if (priv->reg_vdda)
+ 			regulator_put(priv->reg_vdda, &pdev->dev);
+ 		if (priv->reg_vddio)
+ 			regulator_put(priv->reg_vddio, &pdev->dev);
++		if (priv->reg_vddd)
++			regulator_put(priv->reg_vddd, &pdev->dev);
+ 		kfree(machine->platform_data);
+ 		machine->platform_data = NULL;
+ 	}
+-- 
+1.5.4.4
+

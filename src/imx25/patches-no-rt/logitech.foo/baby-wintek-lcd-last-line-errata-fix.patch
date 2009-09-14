@@ -1,0 +1,39 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-05-09 05:32:09.000000000 +0800
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-05-09 06:21:34.000000000 +0800
+@@ -830,7 +830,7 @@
+ 
+ 	/* GAMSET              	   */   BABY_LCD_START    | 0x26, 0x10,
+ 
+-	//    /* Set Display       */   BABY_LCD_START    | 0xb0, 0x00, //TODO  This will need to change to flip polarit of pclk tofix novatech eratta.
++	/* Set Display             */   BABY_LCD_START    | 0xb0, (1<<3) /* PCLK falling edge */, //TODO  This will need to change to flip polarit of pclk tofix novatech eratta.
+ 	/* Interface Mode      	   */
+ 
+ 	/* Set division ratio
+Index: linux-2.6.26/drivers/video/mxc/mxcfb_modedb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/mxc/mxcfb_modedb.c	2009-05-09 05:31:40.000000000 +0800
++++ linux-2.6.26/drivers/video/mxc/mxcfb_modedb.c	2009-05-09 07:39:12.000000000 +0800
+@@ -75,7 +75,20 @@
+ 	  3,        /* lower_margin */
+ 	  50,       /* hsync_len */
+ 	  3,        /* vsync_len */
+-	  FB_SYNC_INVERT_HSYNC | FB_SYNC_INVERT_VSYNC | FB_SYNC_OE_ACT_HIGH,
++	  FB_SYNC_INVERT_HSYNC |
++	  FB_SYNC_INVERT_VSYNC |
++	  FB_SYNC_OE_ACT_HIGH  |
++//#define BABY_LCD_BITCLK_FALLING_EDGE_SIMULTANEOUS_TO_DATA_TRANSITION
++#ifdef BABY_LCD_BITCLK_FALLING_EDGE_SIMULTANEOUS_TO_DATA_TRANSITION
++	  FB_SYNC_CLK_INVERT, /* Falling edge of clock & data transition are simultaneous.
++			       * we don't want this because of novatech errata. */
++#else
++	  0,                  /* Rising edge of data is simultaneous to data transition
++			       * This means that setup and hold are good for the LCD to
++			       * latch on falling edge, which is what they want in the errata
++			       * see "Novatech Errata NT39116 Abnormal Display Issue RGB
++			       * Interface_090117.pdf. */
++#endif
+ 	  FB_VMODE_NONINTERLACED,
+ 	  0,
+ 	},

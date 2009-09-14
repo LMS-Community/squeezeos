@@ -1,0 +1,34 @@
+From e62308acd2eb890f4b5a0ad1e53046eef64b86e8 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 14 Jul 2007 03:25:02 -0400
+Subject: [PATCH] Unionfs: bugfix -- set copied up open file mode to read and write
+
+When we copyup a file, we used to set the new file's open mode to write
+only.  But we need read permission too.  We need write permission because
+we're creating a new file; and we need read permission because the original
+file had to have been readable.  If we don't set the new files permission to
+BOTH read and write, we get -EBADF when trying calling vfs_read/vfs_write on
+a copied up file.  (This fix is somewhat related to unionfs_readpage fixes
+that use vfs_read instead of calling the lower readpage.)
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 09d3bd4..eb5d5a0 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -230,7 +230,7 @@ static int __copyup_reg_data(struct dentry *dentry,
+ 	output_mnt = unionfs_mntget(sb->s_root, new_bindex);
+ 	branchget(sb, new_bindex);
+ 	output_file = dentry_open(new_lower_dentry, output_mnt,
+-				  O_WRONLY | O_LARGEFILE);
++				  O_RDWR | O_LARGEFILE);
+ 	if (IS_ERR(output_file)) {
+ 		err = PTR_ERR(output_file);
+ 		goto out_close_in2;
+-- 
+1.5.4.3
+

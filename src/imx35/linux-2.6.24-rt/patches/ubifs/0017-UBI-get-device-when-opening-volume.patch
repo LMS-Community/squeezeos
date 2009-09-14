@@ -1,0 +1,82 @@
+From 2383552940a63ff1cffcb2b35451ee4f4a3047db Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 17 Dec 2007 13:09:09 +0200
+Subject: [PATCH] UBI: get device when opening volume
+
+When a volume is opened, get its kref via get_device() call.
+And put the reference when closing the volume. With this, we
+may have a bit saner volume delete.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/cdev.c |    9 ++++++---
+ drivers/mtd/ubi/kapi.c |    2 ++
+ drivers/mtd/ubi/vmt.c  |    5 -----
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 24344ba..35d34b6 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -635,9 +635,12 @@ static int ubi_cdev_ioctl(struct inode *inode, struct file *file,
+ 		}
+ 
+ 		err = ubi_remove_volume(desc);
+-		if (err)
+-			ubi_close_volume(desc);
+-
++		/*
++		 * The volume is deleted, and the 'struct ubi_volume' object
++		 * will be freed when 'ubi_close_volume()' will call
++		 * 'put_device()'.
++		 */
++		ubi_close_volume(desc);
+ 		break;
+ 	}
+ 
+diff --git a/drivers/mtd/ubi/kapi.c b/drivers/mtd/ubi/kapi.c
+index 8e15002..96f5fef 100644
+--- a/drivers/mtd/ubi/kapi.c
++++ b/drivers/mtd/ubi/kapi.c
+@@ -156,6 +156,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
+ 		vol->exclusive = 1;
+ 		break;
+ 	}
++	get_device(&vol->dev);
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+ 	desc->vol = vol;
+@@ -274,6 +275,7 @@ void ubi_close_volume(struct ubi_volume_desc *desc)
+ 	spin_unlock(&vol->ubi->volumes_lock);
+ 
+ 	kfree(desc);
++	put_device(&vol->dev);
+ 	module_put(THIS_MODULE);
+ }
+ EXPORT_SYMBOL_GPL(ubi_close_volume);
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index ec2dd3c..9dd3689 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -435,7 +435,6 @@ int ubi_remove_volume(struct ubi_volume_desc *desc)
+ 	vol->eba_tbl = NULL;
+ 	cdev_del(&vol->cdev);
+ 	volume_sysfs_close(vol);
+-	kfree(desc);
+ 
+ 	spin_lock(&ubi->volumes_lock);
+ 	ubi->rsvd_pebs -= reserved_pebs;
+@@ -453,10 +452,6 @@ int ubi_remove_volume(struct ubi_volume_desc *desc)
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+ 	paranoid_check_volumes(ubi);
+-	mutex_unlock(&ubi->volumes_mutex);
+-	module_put(THIS_MODULE);
+-	return 0;
+-
+ out:
+ 	mutex_unlock(&ubi->volumes_mutex);
+ 	return err;
+-- 
+1.5.6.3
+

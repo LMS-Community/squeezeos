@@ -1,0 +1,821 @@
+From 28fd2de46e85c4816d6b7096bf3bd90994dd088e Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 21 Apr 2009 09:59:39 +0800
+Subject: [PATCH] ENGR00108634-1 V4L2 capture:MXC V4l capture enhancement
+
+1) Support for the second CSI interface.
+2) Support for OV3640 QXGA 7.5fps feature.
+3) Use double buffer to avoid screen tearing issue
+   when capturing 3Mega-Pixel still image.
+4) Move ov3640 regulator enable/disable logic to camera
+   device init/exit ioctrl.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/Kconfig            |   16 +
+ .../media/video/mxc/capture/emma_v4l2_capture.c    |   17 +-
+ drivers/media/video/mxc/capture/ipu_still.c        |   22 +-
+ drivers/media/video/mxc/capture/mx27_prpsw.c       |    4 +-
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   57 +++--
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    6 +-
+ drivers/media/video/mxc/capture/ov3640.c           |  291 +++++++++++++-------
+ include/asm-arm/arch-mxc/mxc.h                     |    4 +
+ 8 files changed, 280 insertions(+), 137 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index 6c07bfd..56e5838 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -74,6 +74,22 @@ config MXC_TVIN_ADV7180
+ 
+ endchoice
+ 
++choice
++	prompt "Select CSI0 or CSI1 to connect OV3640 camera"
++	default CAMERA_USE_MXC_CSI0
++	depends on VIDEO_MXC_CAMERA && MXC_CAMERA_OV3640 && MXC_IPU_V3 && !MXC_IPU_V3D
++
++config MXC_CAMERA_USE_CSI0
++	bool "Choose CSI0 to connect OV3640 camera"
++	---help---
++	  If you plan to use CSI0 to connect OV3640 camera, say Y here.
++
++config MXC_CAMERA_USE_CSI1
++	bool "Choose CSI1 to connect OV3640 camera"
++	---help---
++	  If you plan to use CSI1 to connect OV3640 camera, say Y here.
++endchoice
++
+ config MXC_IPU_PRP_VF_SDC
+ 	tristate "Pre-Processor VF SDC library"
+ 	depends on VIDEO_MXC_IPU_CAMERA && FB_MXC_SYNC_PANEL
+diff --git a/drivers/media/video/mxc/capture/emma_v4l2_capture.c b/drivers/media/video/mxc/capture/emma_v4l2_capture.c
+index 4d7bc5c..67f9534 100644
+--- a/drivers/media/video/mxc/capture/emma_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/emma_v4l2_capture.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -857,7 +857,7 @@ static void mxc_csi_dma_chaining(void *data)
+ 
+ 		/* Config DMA */
+ 		memset(&dma_request, 0, sizeof(mxc_dma_requestbuf_t));
+-		dma_request.dst_addr = cam->still_buf
++		dma_request.dst_addr = cam->still_buf[0]
+ 		    + (chained % max_dma) * CSI_DMA_LENGTH;
+ 		dma_request.src_addr = (dma_addr_t) CSI_CSIRXFIFO_PHYADDR;
+ 		dma_request.num_of_bytes = count;
+@@ -1039,7 +1039,7 @@ mxc_v4l_read(struct file *file, char *buf, size_t count, loff_t *ppos)
+ 
+ 	cam->still_buf_vaddr = dma_alloc_coherent(0,
+ 						  PAGE_ALIGN(CSI_MEM_SIZE),
+-						  &cam->still_buf,
++						  &cam->still_buf[0],
+ 						  GFP_DMA | GFP_KERNEL);
+ 
+ 	if (!cam->still_buf_vaddr) {
+@@ -1119,8 +1119,8 @@ mxc_v4l_read(struct file *file, char *buf, size_t count, loff_t *ppos)
+ 
+       exit1:
+ 	dma_free_coherent(0, PAGE_ALIGN(CSI_MEM_SIZE),
+-			  cam->still_buf_vaddr, cam->still_buf);
+-	cam->still_buf = 0;
++			  cam->still_buf_vaddr, cam->still_buf[0]);
++	cam->still_buf[0] = 0;
+ 
+       exit0:
+ 	up(&cam->busy_lock);
+@@ -1159,7 +1159,8 @@ mxc_v4l_read(struct file *file, char *buf, size_t count, loff_t *ppos)
+ 
+ 	v_address = dma_alloc_coherent(0,
+ 				       PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage),
+-				       &cam->still_buf, GFP_DMA | GFP_KERNEL);
++				       &cam->still_buf[0],
++				       GFP_DMA | GFP_KERNEL);
+ 
+ 	if (!v_address) {
+ 		pr_info("mxc_v4l_read failed at allocate still_buf\n");
+@@ -1193,8 +1194,8 @@ mxc_v4l_read(struct file *file, char *buf, size_t count, loff_t *ppos)
+ 
+       exit1:
+ 	dma_free_coherent(0, cam->v2f.fmt.pix.sizeimage, v_address,
+-			  cam->still_buf);
+-	cam->still_buf = 0;
++			  cam->still_buf[0]);
++	cam->still_buf[0] = 0;
+ 
+       exit0:
+ 	up(&cam->busy_lock);
+diff --git a/drivers/media/video/mxc/capture/ipu_still.c b/drivers/media/video/mxc/capture/ipu_still.c
+index af6bb59..d6a44dc 100644
+--- a/drivers/media/video/mxc/capture/ipu_still.c
++++ b/drivers/media/video/mxc/capture/ipu_still.c
+@@ -25,6 +25,7 @@
+ #include "ipu_prp_sw.h"
+ 
+ static int callback_eof_flag;
++static int buffer_num;
+ 
+ #ifdef CONFIG_MXC_IPU_V1
+ static int callback_flag;
+@@ -64,9 +65,10 @@ static irqreturn_t prp_still_callback(int irq, void *dev_id)
+ 	cam_data *cam = (cam_data *) dev_id;
+ 
+ 	callback_eof_flag++;
+-	if (callback_eof_flag < 5)
+-		ipu_select_buffer(CSI_MEM, IPU_OUTPUT_BUFFER, 0);
+-	else {
++	if (callback_eof_flag < 5) {
++		buffer_num = (buffer_num == 0) ? 1 : 0;
++		ipu_select_buffer(CSI_MEM, IPU_OUTPUT_BUFFER, buffer_num);
++	} else {
+ 		cam->still_counter++;
+ 		wake_up_interruptible(&cam->still_queue);
+ 	}
+@@ -111,6 +113,7 @@ static int prp_still_start(void *private)
+ 	ipu_csi_enable_mclk_if(CSI_MCLK_RAW, cam->csi, true, true);
+ 
+ 	memset(&params, 0, sizeof(params));
++	params.csi_mem.csi = cam->csi;
+ 	err = ipu_init_channel(CSI_MEM, &params);
+ 	if (err != 0)
+ 		return err;
+@@ -119,7 +122,8 @@ static int prp_still_start(void *private)
+ 				      pixel_fmt, cam->v2f.fmt.pix.width,
+ 				      cam->v2f.fmt.pix.height,
+ 				      cam->v2f.fmt.pix.width, IPU_ROTATE_NONE,
+-				      cam->still_buf, 0, 0, 0);
++				      cam->still_buf[0], cam->still_buf[1],
++				      0, 0);
+ 	if (err != 0)
+ 		return err;
+ 
+@@ -132,6 +136,7 @@ static int prp_still_start(void *private)
+ 	}
+ 	callback_flag = 0;
+ 	callback_eof_flag = 0;
++	buffer_num = 0;
+ 	err = ipu_request_irq(IPU_IRQ_SENSOR_EOF, prp_csi_eof_callback,
+ 			      0, "Mxc Camera", NULL);
+ 	if (err != 0) {
+@@ -147,6 +152,7 @@ static int prp_still_start(void *private)
+ 	}
+ 
+ 	callback_eof_flag = 0;
++	buffer_num = 0;
+ 
+ 	ipu_select_buffer(CSI_MEM, IPU_OUTPUT_BUFFER, 0);
+ 	ipu_enable_channel(CSI_MEM);
+@@ -166,6 +172,10 @@ static int prp_still_stop(void *private)
+ 	cam_data *cam = (cam_data *) private;
+ 	int err = 0;
+ 
++	ipu_disable_channel(CSI_MEM, true);
++	ipu_uninit_channel(CSI_MEM);
++	ipu_csi_enable_mclk_if(CSI_MCLK_RAW, cam->csi, false, false);
++
+ #ifdef CONFIG_MXC_IPU_V1
+ 	ipu_free_irq(IPU_IRQ_SENSOR_EOF, NULL);
+ 	ipu_free_irq(IPU_IRQ_SENSOR_OUT_EOF, cam);
+@@ -173,10 +183,6 @@ static int prp_still_stop(void *private)
+ 	ipu_free_irq(IPU_IRQ_CSI0_OUT_EOF, cam);
+ #endif
+ 
+-	ipu_disable_channel(CSI_MEM, true);
+-	ipu_uninit_channel(CSI_MEM);
+-	ipu_csi_enable_mclk_if(CSI_MCLK_RAW, cam->csi, false, false);
+-
+ 	return err;
+ }
+ 
+diff --git a/drivers/media/video/mxc/capture/mx27_prpsw.c b/drivers/media/video/mxc/capture/mx27_prpsw.c
+index ce7db16..f82dbfb 100644
+--- a/drivers/media/video/mxc/capture/mx27_prpsw.c
++++ b/drivers/media/video/mxc/capture/mx27_prpsw.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -702,7 +702,7 @@ static int prp_still_start(void *private)
+ 	cam_data *cam = (cam_data *) private;
+ 
+ 	g_still_on = 1;
+-	g_prp_cfg.ch2_ptr = (unsigned int)cam->still_buf;
++	g_prp_cfg.ch2_ptr = (unsigned int)cam->still_buf[0];
+ 	g_prp_cfg.ch2_ptr2 = 0;
+ 
+ 	if (prp_v4l2_cfg(&g_prp_cfg, cam))
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 4a0d236..4edab84 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1043,7 +1043,7 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
+ 	csi_param.force_eof = 0;
+ 	csi_param.data_en_pol = 0;
+ 	csi_param.data_fmt = 0;
+-	csi_param.csi = 0;
++	csi_param.csi = cam->csi;
+ 	csi_param.mclk = 0;
+ 
+ 	/* This may not work on other platforms. Check when adding a new one.*/
+@@ -1305,8 +1305,7 @@ static int mxc_v4l_open(struct inode *inode, struct file *file)
+ 
+ 		csi_param.pixclk_pol = ifparm.u.bt656.latch_clk_inv;
+ 
+-		/* Once we handle multiple inputs this will need to change. */
+-		csi_param.csi = 0;
++		csi_param.csi = cam->csi;
+ 
+ 		if (ifparm.u.bt656.mode
+ 				== V4L2_IF_TYPE_BT656_MODE_NOBT_8BIT)
+@@ -1321,8 +1320,6 @@ static int mxc_v4l_open(struct inode *inode, struct file *file)
+ 		csi_param.Vsync_pol = ifparm.u.bt656.nobt_vs_inv;
+ 		csi_param.Hsync_pol = ifparm.u.bt656.nobt_hs_inv;
+ 
+-		csi_param.csi = cam->csi;
+-
+ 		cam_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 		vidioc_int_g_fmt_cap(cam->sensor, &cam_fmt);
+ 
+@@ -1451,7 +1448,7 @@ static ssize_t mxc_v4l_read(struct file *file, char *buf, size_t count,
+ 			    loff_t *ppos)
+ {
+ 	int err = 0;
+-	u8 *v_address;
++	u8 *v_address[2];
+ 	struct video_device *dev = video_devdata(file);
+ 	cam_data *cam = dev->priv;
+ 
+@@ -1462,11 +1459,15 @@ static ssize_t mxc_v4l_read(struct file *file, char *buf, size_t count,
+ 	if (cam->overlay_on == true)
+ 		stop_preview(cam);
+ 
+-	v_address = dma_alloc_coherent(0,
++	v_address[0] = dma_alloc_coherent(0,
+ 				       PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage),
+-				       &cam->still_buf, GFP_DMA | GFP_KERNEL);
+-
+-	if (!v_address) {
++				       &cam->still_buf[0],
++				       GFP_DMA | GFP_KERNEL);
++	v_address[1] = dma_alloc_coherent(0,
++				       PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage),
++				       &cam->still_buf[1],
++				       GFP_DMA | GFP_KERNEL);
++	if (!v_address[0] || !v_address[1]) {
+ 		err = -ENOBUFS;
+ 		goto exit0;
+ 	}
+@@ -1474,14 +1475,14 @@ static ssize_t mxc_v4l_read(struct file *file, char *buf, size_t count,
+ 	err = prp_still_select(cam);
+ 	if (err != 0) {
+ 		err = -EIO;
+-		goto exit1;
++		goto exit0;
+ 	}
+ 
+ 	cam->still_counter = 0;
+ 	err = cam->csi_start(cam);
+ 	if (err != 0) {
+ 		err = -EIO;
+-		goto exit2;
++		goto exit1;
+ 	}
+ 
+ 	if (!wait_event_interruptible_timeout(cam->still_queue,
+@@ -1490,19 +1491,23 @@ static ssize_t mxc_v4l_read(struct file *file, char *buf, size_t count,
+ 		pr_err("ERROR: v4l2 capture: mxc_v4l_read timeout counter %x\n",
+ 		       cam->still_counter);
+ 		err = -ETIME;
+-		goto exit2;
++		goto exit1;
+ 	}
+-	err = copy_to_user(buf, v_address, cam->v2f.fmt.pix.sizeimage);
+-
+-      exit2:
+-	prp_still_deselect(cam);
++	err = copy_to_user(buf, v_address[1], cam->v2f.fmt.pix.sizeimage);
+ 
+       exit1:
+-	dma_free_coherent(0, cam->v2f.fmt.pix.sizeimage, v_address,
+-			  cam->still_buf);
+-	cam->still_buf = 0;
++	prp_still_deselect(cam);
+ 
+       exit0:
++	if (v_address[0] != 0)
++		dma_free_coherent(0, cam->v2f.fmt.pix.sizeimage, v_address[0],
++				  cam->still_buf[0]);
++	if (v_address[1] != 0)
++		dma_free_coherent(0, cam->v2f.fmt.pix.sizeimage, v_address[1],
++				  cam->still_buf[1]);
++
++	cam->still_buf[0] = cam->still_buf[0] = 0;
++
+ 	if (cam->overlay_on == true) {
+ 		start_preview(cam);
+ 	}
+@@ -2181,8 +2186,7 @@ static void init_camera_struct(cam_data *cam)
+ 	cam->win.w.left = 0;
+ 	cam->win.w.top = 0;
+ 
+-	cam->csi = 0;  /* Need to determine how to set this correctly with
+-			* multiple video input devices. */
++	cam->csi = 0; /* Default use csi0 */
+ 
+ 	cam->enc_callback = camera_callback;
+ 	init_waitqueue_head(&cam->power_queue);
+@@ -2297,6 +2301,7 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
+ {
+ 	cam_data *cam = slave->u.slave->master->priv;
+ 	struct v4l2_format cam_fmt;
++	int csi;
+ 
+ 	pr_debug("In MVC: mxc_v4l2_master_attach\n");
+ 	pr_debug("   slave.name = %s\n", slave->name);
+@@ -2308,6 +2313,11 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
+ 		return -1;
+ 	}
+ 
++	if (IS_ERR_VALUE(vidioc_int_g_csi(cam->sensor, &csi)))
++		cam->csi = 0;	/* No vidioc_int_g_csi ioctrl defined */
++	else
++		cam->csi = csi;
++
+ 	ipu_csi_enable_mclk_if(CSI_MCLK_I2C, cam->csi, true, true);
+ 	vidioc_int_dev_init(slave);
+ 	ipu_csi_enable_mclk_if(CSI_MCLK_I2C, cam->csi, false, false);
+@@ -2354,7 +2364,8 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
+ static void mxc_v4l2_master_detach(struct v4l2_int_device *slave)
+ {
+ 	pr_debug("In MVC:mxc_v4l2_master_detach\n");
+-	/* vidioc_int_dev_exit(slave); */
++
++	vidioc_int_dev_exit(slave);
+ }
+ 
+ /*!
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 02a0a12..5ba2d0b 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -32,11 +32,15 @@
+ #include <linux/smp_lock.h>
+ 
+ #include <media/v4l2-dev.h>
++#include <media/v4l2-int-device.h>
+ #include <linux/ipu.h>
+ #include <linux/mxc_v4l2.h>
+ 
+ #define FRAME_NUM 3
+ 
++#define vidioc_int_g_csi_num	vidioc_int_priv_start_num
++V4L2_INT_WRAPPER_1(g_csi, int, *);
++
+ /*!
+  * v4l2 frame structure.
+  */
+@@ -121,7 +125,7 @@ typedef struct _cam_data {
+ 	/* still image capture */
+ 	wait_queue_head_t still_queue;
+ 	int still_counter;
+-	dma_addr_t still_buf;
++	dma_addr_t still_buf[2];
+ 	void *still_buf_vaddr;
+ 
+ 	/* overlay */
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index c9b2f45..8f0b245 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -30,18 +30,13 @@
+ 	#define CAMERA_TRACE(x)
+ #endif
+ 
+-#define OV3640_VOLTAGE_ANALOG               2800000
+-#define OV3640_VOLTAGE_DIGITAL_CORE         1500000
+-#define OV3640_VOLTAGE_DIGITAL_IO           1800000
+-
+-
+ /* Check these values! */
+ #define MIN_FPS 15
+ #define MAX_FPS 30
+ #define DEFAULT_FPS 30
+ 
+ #define OV3640_XCLK_MIN 6000000
+-#define OV3640_XCLK_MAX 24000000
++#define OV3640_XCLK_MAX 54000000
+ 
+ enum ov3640_mode {
+ 	ov3640_mode_MIN = 0,
+@@ -98,8 +93,46 @@ struct sensor {
+ } ov3640_data;
+ 
+ static struct reg_value ov3640_setting_15fps_QXGA_2048_1536[] = {
++#if 0
++	/* The true 15fps QXGA setting. */
++	{0x3012, 0x80, 0, 0}, {0x304d, 0x41, 0, 0}, {0x3087, 0x16, 0, 0},
++	{0x30aa, 0x45, 0, 0}, {0x30b0, 0xff, 0, 0}, {0x30b1, 0xff, 0, 0},
++	{0x30b2, 0x13, 0, 0}, {0x30d7, 0x10, 0, 0}, {0x309e, 0x00, 0, 0},
++	{0x3602, 0x26, 0, 0}, {0x3603, 0x4D, 0, 0}, {0x364c, 0x04, 0, 0},
++	{0x360c, 0x12, 0, 0}, {0x361e, 0x00, 0, 0}, {0x361f, 0x11, 0, 0},
++	{0x3633, 0x03, 0, 0}, {0x3629, 0x3c, 0, 0}, {0x300e, 0x33, 0, 0},
++	{0x300f, 0x21, 0, 0}, {0x3010, 0x20, 0, 0}, {0x3011, 0x00, 0, 0},
++	{0x304c, 0x81, 0, 0}, {0x3029, 0x47, 0, 0}, {0x3070, 0x00, 0, 0},
++	{0x3071, 0xEC, 0, 0}, {0x301C, 0x06, 0, 0}, {0x3072, 0x00, 0, 0},
++	{0x3073, 0xC5, 0, 0}, {0x301D, 0x07, 0, 0}, {0x3018, 0x38, 0, 0},
++	{0x3019, 0x30, 0, 0}, {0x301a, 0x61, 0, 0}, {0x307d, 0x00, 0, 0},
++	{0x3087, 0x02, 0, 0}, {0x3082, 0x20, 0, 0}, {0x303c, 0x08, 0, 0},
++	{0x303d, 0x18, 0, 0}, {0x303e, 0x06, 0, 0}, {0x303F, 0x0c, 0, 0},
++	{0x3030, 0x62, 0, 0}, {0x3031, 0x26, 0, 0}, {0x3032, 0xe6, 0, 0},
++	{0x3033, 0x6e, 0, 0}, {0x3034, 0xea, 0, 0}, {0x3035, 0xae, 0, 0},
++	{0x3036, 0xa6, 0, 0}, {0x3037, 0x6a, 0, 0}, {0x3015, 0x12, 0, 0},
++	{0x3014, 0x04, 0, 0}, {0x3013, 0xf7, 0, 0}, {0x3104, 0x02, 0, 0},
++	{0x3105, 0xfd, 0, 0}, {0x3106, 0x00, 0, 0}, {0x3107, 0xff, 0, 0},
++	{0x3308, 0xa5, 0, 0}, {0x3316, 0xff, 0, 0}, {0x3317, 0x00, 0, 0},
++	{0x3087, 0x02, 0, 0}, {0x3082, 0x20, 0, 0}, {0x3300, 0x13, 0, 0},
++	{0x3301, 0xd6, 0, 0}, {0x3302, 0xef, 0, 0}, {0x30b8, 0x20, 0, 0},
++	{0x30b9, 0x17, 0, 0}, {0x30ba, 0x04, 0, 0}, {0x30bb, 0x08, 0, 0},
++	{0x3100, 0x02, 0, 0}, {0x3304, 0x00, 0, 0}, {0x3400, 0x00, 0, 0},
++	{0x3404, 0x02, 0, 0}, {0x3020, 0x01, 0, 0}, {0x3021, 0x1d, 0, 0},
++	{0x3022, 0x00, 0, 0}, {0x3023, 0x0a, 0, 0}, {0x3024, 0x08, 0, 0},
++	{0x3025, 0x18, 0, 0}, {0x3026, 0x06, 0, 0}, {0x3027, 0x0c, 0, 0},
++	{0x335f, 0x68, 0, 0}, {0x3360, 0x18, 0, 0}, {0x3361, 0x0c, 0, 0},
++	{0x3362, 0x68, 0, 0}, {0x3363, 0x08, 0, 0}, {0x3364, 0x04, 0, 0},
++	{0x3403, 0x42, 0, 0}, {0x3088, 0x08, 0, 0}, {0x3089, 0x00, 0, 0},
++	{0x308a, 0x06, 0, 0}, {0x308b, 0x00, 0, 0}, {0x3507, 0x06, 0, 0},
++	{0x350a, 0x4f, 0, 0}, {0x3600, 0xc4, 0, 0},
++#endif
++	/*
++	 * Only support 7.5fps for QXGA to workaround screen tearing issue
++	 * for 15fps when capturing still image.
++	 */
+ 	{0x3012, 0x80, 0, 0}, {0x304d, 0x45, 0, 0}, {0x30a7, 0x5e, 0, 0},
+-	{0x3087, 0x16, 0, 0}, {0x309c, 0x1a, 0, 0}, {0x30a2, 0xe4, 0, 0},
++	{0x3087, 0x16, 0, 0}, {0x309C, 0x1a, 0, 0}, {0x30a2, 0xe4, 0, 0},
+ 	{0x30aa, 0x42, 0, 0}, {0x30b0, 0xff, 0, 0}, {0x30b1, 0xff, 0, 0},
+ 	{0x30b2, 0x10, 0, 0}, {0x300e, 0x32, 0, 0}, {0x300f, 0x21, 0, 0},
+ 	{0x3010, 0x20, 0, 0}, {0x3011, 0x00, 0, 0}, {0x304c, 0x81, 0, 0},
+@@ -123,25 +156,9 @@ static struct reg_value ov3640_setting_15fps_QXGA_2048_1536[] = {
+ 	{0x30bb, 0x08, 0, 0}, {0x3507, 0x06, 0, 0}, {0x350a, 0x4f, 0, 0},
+ 	{0x3100, 0x02, 0, 0}, {0x3301, 0xde, 0, 0}, {0x3304, 0x00, 0, 0},
+ 	{0x3400, 0x00, 0, 0}, {0x3404, 0x02, 0, 0}, {0x3600, 0xc4, 0, 0},
+-	{0x3302, 0xef, 0, 0}, {0x3020, 0x01, 0, 0}, {0x3021, 0x1d, 0, 0},
+-	{0x3022, 0x00, 0, 0}, {0x3023, 0x0a, 0, 0}, {0x3024, 0x08, 0, 0},
+-	{0x3025, 0x00, 0, 0}, {0x3026, 0x06, 0, 0}, {0x3027, 0x00, 0, 0},
+-	{0x335f, 0x68, 0, 0}, {0x3360, 0x00, 0, 0}, {0x3361, 0x00, 0, 0},
+-	{0x3362, 0x68, 0, 0}, {0x3363, 0x00, 0, 0}, {0x3364, 0x00, 0, 0},
+-	{0x3403, 0x00, 0, 0}, {0x3088, 0x08, 0, 0}, {0x3089, 0x00, 0, 0},
+-	{0x308a, 0x06, 0, 0}, {0x308b, 0x00, 0, 0}, {0x307c, 0x10, 0, 0},
+-	{0x3090, 0xc0, 0, 0}, {0x304c, 0x84, 0, 0}, {0x308d, 0x04, 0, 0},
+-	{0x3086, 0x03, 0, 0}, {0x3086, 0x00, 0, 0}, {0x3012, 0x00, 0, 0},
+-	{0x3020, 0x01, 0, 0}, {0x3021, 0x1d, 0, 0}, {0x3022, 0x00, 0, 0},
+-	{0x3023, 0x0a, 0, 0}, {0x3024, 0x08, 0, 0}, {0x3025, 0x18, 0, 0},
+-	{0x3026, 0x06, 0, 0}, {0x3027, 0x0c, 0, 0}, {0x302a, 0x06, 0, 0},
+-	{0x302b, 0x20, 0, 0}, {0x3075, 0x44, 0, 0}, {0x300d, 0x00, 0, 0},
+-	{0x30d7, 0x00, 0, 0}, {0x3069, 0x40, 0, 0}, {0x303e, 0x01, 0, 0},
+-	{0x303f, 0x80, 0, 0}, {0x3302, 0x20, 0, 0}, {0x335f, 0x68, 0, 0},
+-	{0x3360, 0x18, 0, 0}, {0x3361, 0x0c, 0, 0}, {0x3362, 0x68, 0, 0},
+-	{0x3363, 0x08, 0, 0}, {0x3364, 0x04, 0, 0}, {0x3403, 0x42, 0, 0},
+ 	{0x3088, 0x08, 0, 0}, {0x3089, 0x00, 0, 0}, {0x308a, 0x06, 0, 0},
+-	{0x308b, 0x00, 0, 0},
++	{0x308b, 0x00, 0, 0}, {0x308d, 0x04, 0, 0}, {0x3086, 0x03, 0, 0},
++	{0x3086, 0x00, 0, 0}, {0x3011, 0x01, 0, 0},
+ };
+ 
+ static struct reg_value ov3640_setting_15fps_XGA_1024_768[] = {
+@@ -376,8 +393,15 @@ static struct regulator *core_regulator;
+ static struct regulator *analog_regulator;
+ static struct regulator *gpo_regulator;
+ 
+-static int ov3640_probe(struct i2c_client *adapter,
+-				const struct i2c_device_id *device_id);
++static int io_voltage;
++static int core_voltage;
++static int analog_voltage;
++static int gpo_voltage;
++
++static int ov3640_enable_regulator(struct sensor *sensor);
++
++static int ov3640_probe(struct i2c_client *client,
++			const struct i2c_device_id *device_id);
+ static int ov3640_remove(struct i2c_client *client);
+ 
+ static s32 ov3640_read_reg(u16 reg, u8 *val);
+@@ -503,6 +527,17 @@ err:
+ 
+ /* --------------- IOCTL functions from v4l2_int_ioctl_desc --------------- */
+ 
++static int ioctl_g_csi(struct v4l2_int_device *s, int *csi)
++{
++	struct sensor *sensor = s->priv;
++
++	CAMERA_TRACE(("In ov3640:ioctl_g_csi\n"));
++
++	*csi = sensor->csi;
++
++	return 0;
++}
++
+ static int ioctl_g_ifparm(struct v4l2_int_device *s, struct v4l2_ifparm *p)
+ {
+ 	CAMERA_TRACE(("In ov3640:ioctl_g_ifparm\n"));
+@@ -856,6 +891,9 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 
+ 	CAMERA_TRACE(("In ov3640:ioctl_dev_init\n"));
+ 
++	if (ov3640_enable_regulator(sensor) < 0)
++		return -1;
++
+ 	gpio_sensor_active(ov3640_data.csi);
+ 	ov3640_data.on = true;
+ 
+@@ -884,12 +922,54 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ }
+ 
+ /*!
++ * ioctl_dev_exit - V4L2 sensor interface handler for vidioc_int_dev_exit_num
++ * @s: pointer to standard V4L2 device structure
++ *
++ * Initialise the device when slave detaches to the master.
++ */
++static int ioctl_dev_exit(struct v4l2_int_device *s)
++{
++	struct sensor *sensor = s->priv;
++	struct device dev;
++
++	dev = sensor->i2c_client->dev;
++
++	CAMERA_TRACE(("In ov3640:ioctl_dev_exit\n"));
++
++	if (!IS_ERR_VALUE((unsigned long)gpo_regulator) &&
++	    gpo_regulator != NULL) {
++		regulator_disable(gpo_regulator);
++		regulator_put(gpo_regulator, &dev);
++	}
++
++	if (!IS_ERR_VALUE((unsigned long)analog_regulator) &&
++	    analog_regulator != NULL) {
++		regulator_disable(analog_regulator);
++		regulator_put(analog_regulator, &dev);
++	}
++
++	if (!IS_ERR_VALUE((unsigned long)core_regulator) &&
++	    core_regulator != NULL) {
++		regulator_disable(core_regulator);
++		regulator_put(core_regulator, &dev);
++	}
++
++	if (!IS_ERR_VALUE((unsigned long)io_regulator) &&
++	    io_regulator != NULL) {
++		regulator_disable(io_regulator);
++		regulator_put(io_regulator, &dev);
++	}
++
++	return 0;
++}
++
++/*!
+  * This structure defines all the ioctls for this module and links them to the
+  * enumeration.
+  */
+ static struct v4l2_int_ioctl_desc ov3640_ioctl_desc[] = {
+ 	{vidioc_int_dev_init_num, (v4l2_int_ioctl_func *)ioctl_dev_init},
+-/*	{vidioc_int_dev_exit_num, (v4l2_int_ioctl_func *)ioctl_dev_exit}, */
++	{vidioc_int_dev_exit_num, ioctl_dev_exit},
+ 	{vidioc_int_s_power_num, (v4l2_int_ioctl_func *)ioctl_s_power},
+ 	{vidioc_int_g_ifparm_num, (v4l2_int_ioctl_func *)ioctl_g_ifparm},
+ /*	{vidioc_int_g_needs_reset_num,
+@@ -907,6 +987,7 @@ static struct v4l2_int_ioctl_desc ov3640_ioctl_desc[] = {
+ /*	{vidioc_int_queryctrl_num, (v4l2_int_ioctl_func *)ioctl_queryctrl}, */
+ 	{vidioc_int_g_ctrl_num, (v4l2_int_ioctl_func *)ioctl_g_ctrl},
+ 	{vidioc_int_s_ctrl_num, (v4l2_int_ioctl_func *)ioctl_s_ctrl},
++	{vidioc_int_g_csi_num, ioctl_g_csi},
+ };
+ 
+ static struct v4l2_int_slave ov3640_slave = {
+@@ -923,10 +1004,73 @@ static struct v4l2_int_device ov3640_int_device = {
+ 	},
+ };
+ 
++static int ov3640_enable_regulator(struct sensor *sensor)
++{
++	struct device dev = sensor->i2c_client->dev;
++
++	if (!IS_ERR_VALUE((u32)io_regulator) && io_regulator != NULL) {
++		regulator_set_voltage(io_regulator, io_voltage);
++		if (regulator_enable(io_regulator) != 0) {
++			pr_err("%s:io set voltage error\n", __func__);
++			goto err1;
++		} else {
++			dev_dbg(&dev, "%s:io set voltage ok\n", __func__);
++		}
++	}
++	if (!IS_ERR_VALUE((u32)core_regulator) && core_regulator != NULL) {
++		regulator_set_voltage(core_regulator, core_voltage);
++		if (regulator_enable(core_regulator) != 0) {
++			pr_err("%s:core set voltage error\n",
++			       __func__);
++			goto err2;
++		} else {
++			dev_dbg(&dev, "%s:core set voltage ok\n", __func__);
++		}
++	}
++	if (!IS_ERR_VALUE((u32)analog_regulator) && analog_regulator != NULL) {
++		regulator_set_voltage(analog_regulator, analog_voltage);
++		if (regulator_enable(analog_regulator) != 0) {
++			pr_err("%s:analog set voltage error\n", __func__);
++			goto err3;
++		} else {
++			dev_dbg(&dev, "%s:analog set voltage ok\n", __func__);
++		}
++	}
++	if (!IS_ERR_VALUE((u32)gpo_regulator) && gpo_regulator != NULL) {
++		regulator_set_voltage(gpo_regulator, gpo_voltage);
++		if (regulator_enable(gpo_regulator) != 0) {
++			pr_err("%s:gpo3 enable error\n", __func__);
++			goto err4;
++		} else {
++			dev_dbg(&dev, "%s:gpo3 enable ok\n", __func__);
++		}
++	}
++
++	return 0;
++err4:
++	if (!IS_ERR_VALUE((u32)analog_regulator) && analog_regulator != NULL) {
++		regulator_disable(analog_regulator);
++		regulator_put(analog_regulator, &dev);
++	}
++err3:
++	if (!IS_ERR_VALUE((u32)core_regulator) && core_regulator != NULL) {
++		regulator_disable(core_regulator);
++		regulator_put(core_regulator, &dev);
++	}
++err2:
++	if (!IS_ERR_VALUE((u32)io_regulator) && io_regulator != NULL) {
++		regulator_disable(io_regulator);
++		regulator_put(io_regulator, &dev);
++	}
++err1:
++	return -1;
++}
++
+ /*!
+  * ov3640 I2C probe function
+  *
+- * @param adapter            struct i2c_adapter *
++ * @param client            struct i2c_client *
++ * @param id		    struct i2c_device_id *
+  * @return  Error code indicating success or failure
+  */
+ static int ov3640_probe(struct i2c_client *client,
+@@ -953,53 +1097,36 @@ static int ov3640_probe(struct i2c_client *client,
+ 	ov3640_data.streamcap.timeperframe.denominator = DEFAULT_FPS;
+ 	ov3640_data.streamcap.timeperframe.numerator = 1;
+ 
+-	io_regulator = regulator_get(&client->dev, plat_data->io_regulator);
+-	if (!IS_ERR_VALUE((u32)io_regulator)) {
+-		regulator_set_voltage(io_regulator, OV3640_VOLTAGE_DIGITAL_IO);
+-		if (regulator_enable(io_regulator) != 0) {
+-			pr_err("%s:io set voltage error\n", __func__);
++	if (plat_data->io_regulator != NULL) {
++		io_voltage = plat_data->io_voltage;
++		io_regulator = regulator_get(&client->dev,
++					     plat_data->io_regulator);
++		if (IS_ERR_VALUE((unsigned long)io_regulator))
+ 			goto err1;
+-		} else {
+-			dev_dbg(&client->dev,
+-				"%s:io set voltage ok\n", __func__);
+-		}
+ 	}
+ 
+-	core_regulator = regulator_get(&client->dev, plat_data->core_regulator);
+-	if (!IS_ERR_VALUE((u32)core_regulator)) {
+-		regulator_set_voltage(core_regulator,
+-				      OV3640_VOLTAGE_DIGITAL_CORE);
+-		if (regulator_enable(core_regulator) != 0) {
+-			pr_err("%s:core set voltage error\n", __func__);
++	if (plat_data->core_regulator != NULL) {
++		core_voltage = plat_data->core_voltage;
++		core_regulator = regulator_get(&client->dev,
++					       plat_data->core_regulator);
++		if (IS_ERR_VALUE((unsigned long)core_regulator))
+ 			goto err2;
+-		} else {
+-			dev_dbg(&client->dev,
+-				"%s:core set voltage ok\n", __func__);
+-		}
+ 	}
+ 
+-	analog_regulator =
+-		regulator_get(&client->dev, plat_data->analog_regulator);
+-	if (!IS_ERR_VALUE((u32)analog_regulator)) {
+-		regulator_set_voltage(analog_regulator, OV3640_VOLTAGE_ANALOG);
+-		if (regulator_enable(analog_regulator) != 0) {
+-			pr_err("%s:analog set voltage error\n", __func__);
++	if (plat_data->analog_regulator != NULL) {
++		analog_voltage = plat_data->analog_voltage;
++		analog_regulator = regulator_get(&client->dev,
++				      plat_data->analog_regulator);
++		if (IS_ERR_VALUE((unsigned long)analog_regulator))
+ 			goto err3;
+-		} else {
+-			dev_dbg(&client->dev,
+-				"%s:analog set voltage ok\n", __func__);
+-		}
+ 	}
+ 
+-	gpo_regulator = regulator_get(&client->dev, plat_data->gpo_regulator);
+-	if (!IS_ERR_VALUE((u32)gpo_regulator)) {
+-		if (regulator_enable(gpo_regulator) != 0) {
+-			pr_err("%s:gpo3 enable error\n", __func__);
++	if (plat_data->gpo_regulator != NULL) {
++		gpo_voltage = plat_data->gpo_voltage;
++		gpo_regulator = regulator_get(&client->dev,
++					      plat_data->gpo_regulator);
++		if (IS_ERR_VALUE((unsigned long)gpo_regulator))
+ 			goto err4;
+-		} else {
+-			dev_dbg(&client->dev,
+-				"%s:gpo3 enable ok\n", __func__);
+-		}
+ 	}
+ 
+ 	ov3640_int_device.priv = &ov3640_data;
+@@ -1008,20 +1135,14 @@ static int ov3640_probe(struct i2c_client *client,
+ 	return retval;
+ 
+ err4:
+-	if (!IS_ERR_VALUE((u32)analog_regulator)) {
+-		regulator_disable(analog_regulator);
++	if (!IS_ERR_VALUE((u32)analog_regulator) && analog_regulator != NULL)
+ 		regulator_put(analog_regulator, &client->dev);
+-	}
+ err3:
+-	if (!IS_ERR_VALUE((u32)core_regulator)) {
+-		regulator_disable(core_regulator);
++	if (!IS_ERR_VALUE((u32)core_regulator) && core_regulator != NULL)
+ 		regulator_put(core_regulator, &client->dev);
+-	}
+ err2:
+-	if (!IS_ERR_VALUE((u32)io_regulator)) {
+-		regulator_disable(io_regulator);
++	if (!IS_ERR_VALUE((u32)io_regulator) && io_regulator != NULL)
+ 		regulator_put(io_regulator, &client->dev);
+-	}
+ err1:
+ 	return -1;
+ }
+@@ -1038,26 +1159,6 @@ static int ov3640_remove(struct i2c_client *client)
+ 
+ 	v4l2_int_device_unregister(&ov3640_int_device);
+ 
+-	if (!IS_ERR_VALUE((unsigned long)gpo_regulator)) {
+-		regulator_disable(gpo_regulator);
+-		regulator_put(gpo_regulator, &client->dev);
+-	}
+-
+-	if (!IS_ERR_VALUE((unsigned long)analog_regulator)) {
+-		regulator_disable(analog_regulator);
+-		regulator_put(analog_regulator, &client->dev);
+-	}
+-
+-	if (!IS_ERR_VALUE((unsigned long)core_regulator)) {
+-		regulator_disable(core_regulator);
+-		regulator_put(core_regulator, &client->dev);
+-	}
+-
+-	if (!IS_ERR_VALUE((unsigned long)io_regulator)) {
+-		regulator_disable(io_regulator);
+-		regulator_put(io_regulator, &client->dev);
+-	}
+-
+ 	return 0;
+ }
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 55672e7..b018b5b 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -213,6 +213,10 @@ struct mxc_camera_platform_data {
+ 	char *io_regulator;
+ 	char *analog_regulator;
+ 	char *gpo_regulator;
++	int core_voltage;
++	int io_voltage;
++	int analog_voltage;
++	int gpo_voltage;
+ 	u32 mclk;
+ 	u32 csi;
+ };
+-- 
+1.5.4.4
+

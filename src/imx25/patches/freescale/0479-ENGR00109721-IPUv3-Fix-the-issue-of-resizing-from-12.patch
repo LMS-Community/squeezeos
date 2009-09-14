@@ -1,0 +1,44 @@
+From 5ab7ac8690ae1f5527cd805e0b67f17bb161bcbd Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Wed, 18 Mar 2009 17:43:51 +0800
+Subject: [PATCH] ENGR00109721 IPUv3:Fix the issue of resizing from 1280*720 to 800*480
+
+1) Fix the wrong condition to do downsizing in IC channels.
+2) Add downsize/resize capability checking of IC channels.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_ic.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_ic.c b/drivers/mxc/ipu3/ipu_ic.c
+index 1d658cd..c7708a3 100644
+--- a/drivers/mxc/ipu3/ipu_ic.c
++++ b/drivers/mxc/ipu3/ipu_ic.c
+@@ -601,14 +601,21 @@ static bool _calc_resize_coeffs(uint32_t inSize, uint32_t outSize,
+ 	uint32_t tempSize;
+ 	uint32_t tempDownsize;
+ 
++	/* Input size cannot be more than 4096 */
++	/* Output size cannot be more than 1024 */
++	if ((inSize > 4096) || (outSize > 1024))
++		return false;
++
+ 	/* Cannot downsize more than 8:1 */
+ 	if ((outSize << 3) < inSize)
+ 		return false;
+ 
+-	/* compute downsizing coefficient */
++	/* Compute downsizing coefficient */
++	/* Output of downsizing unit cannot be more than 1024 */
+ 	tempDownsize = 0;
+ 	tempSize = inSize;
+-	while ((tempSize >= outSize * 2) && (tempDownsize < 2)) {
++	while (((tempSize > 1024) || (tempSize >= outSize * 2)) &&
++	       (tempDownsize < 2)) {
+ 		tempSize >>= 1;
+ 		tempDownsize++;
+ 	}
+-- 
+1.5.4.4
+

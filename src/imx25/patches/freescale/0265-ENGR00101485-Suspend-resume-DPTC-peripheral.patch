@@ -1,0 +1,185 @@
+From df1af0d6b158e1c756126c77cab638bcb22f1e7e Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Thu, 4 Dec 2008 15:45:19 -0600
+Subject: [PATCH] ENGR00101485 Suspend/resume DPTC peripheral
+
+If DPTC peripheral is active, suspend DPTC peripheral
+when LP freq is not the DPTC table freq,
+resume DPTC peripheral when LP freq is the DPTC table freq.
+MX31's DPTC has been changed as well due to the API change.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx3/clock.c           |    6 +--
+ arch/arm/plat-mxc/dptc.c            |   53 +++++++++++++++++++++++++++++-----
+ include/asm-arm/arch-mxc/mxc.h      |    6 ++++
+ include/asm-arm/arch-mxc/mxc_dptc.h |   10 +++++-
+ 4 files changed, 61 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/clock.c b/arch/arm/mach-mx3/clock.c
+index c7ffa00..1192418 100644
+--- a/arch/arm/mach-mx3/clock.c
++++ b/arch/arm/mach-mx3/clock.c
+@@ -1240,8 +1240,6 @@ static DEFINE_SPINLOCK(mxc_dfs_lock);
+ static void dptcen_after_timeout(unsigned long ptr)
+ {
+ 	u32 flags = 0;
+-	u32 pmcr0;
+-	u32 dptc_active;
+ 
+ 	spin_lock_irqsave(&mxc_dfs_lock, flags);
+ 
+@@ -1249,7 +1247,7 @@ static void dptcen_after_timeout(unsigned long ptr)
+ 	 * If DPTC is still active and core is running in Turbo mode
+ 	 */
+ 	if (dptcen_timer.data == cpu_wp_nr - 1) {
+-		dptc_resume();
++		dptc_resume(DPTC_GP_ID);
+ 	}
+ 	spin_unlock_irqrestore(&mxc_dfs_lock, flags);
+ }
+@@ -1375,7 +1373,7 @@ static int cpu_clk_set_wp(int wp)
+ 		dptcen_timer.data = wp;
+ 		add_timer(&dptcen_timer);
+ 	} else {
+-		dptc_suspend();
++		dptc_suspend(DPTC_GP_ID);
+ 	}
+ 
+ 	return 0;
+diff --git a/arch/arm/plat-mxc/dptc.c b/arch/arm/plat-mxc/dptc.c
+index 7ac1f86..0c41b22 100644
+--- a/arch/arm/plat-mxc/dptc.c
++++ b/arch/arm/plat-mxc/dptc.c
+@@ -55,7 +55,8 @@ enum {
+ 	DPTC_PTVAI_EMERG,
+ };
+ 
+-struct device *dev_data;
++struct device *dev_data0;
++struct device *dev_data1;
+ 
+ /*!
+  * In case the MXC device has multiple DPTC modules, this structure is used to
+@@ -266,12 +267,29 @@ static void stop_dptc(struct device *dev)
+   This function does not change the working point. It can be
+  called from an interrupt context.
+ */
+-void dptc_suspend()
++void dptc_suspend(int id)
+ {
+-	struct mxc_dptc_data *dptc_data = dev_data->platform_data;
+-	struct dptc_device *drv_data = dev_data->driver_data;
++	struct mxc_dptc_data *dptc_data;
++	struct dptc_device *drv_data;
+ 	u32 dptccr;
+ 
++	switch (id) {
++	case DPTC_GP_ID:
++		dptc_data = dev_data0->platform_data;
++		drv_data = dev_data0->driver_data;
++		break;
++	case DPTC_LP_ID:
++		if (dev_data1 == NULL)
++			return;
++
++		dptc_data = dev_data1->platform_data;
++		drv_data = dev_data1->driver_data;
++		break;
++		/* Unknown DPTC ID */
++	default:
++		return;
++	}
++
+ 	if (!drv_data->dptc_is_active)
+ 		return;
+ 
+@@ -288,12 +306,29 @@ EXPORT_SYMBOL(dptc_suspend);
+   This function does not change the working point. It can be
+  called from an interrupt context.
+ */
+-void dptc_resume()
++void dptc_resume(int id)
+ {
+-	struct mxc_dptc_data *dptc_data = dev_data->platform_data;
+-	struct dptc_device *drv_data = dev_data->driver_data;
++	struct mxc_dptc_data *dptc_data;
++	struct dptc_device *drv_data;
+ 	u32 dptccr;
+ 
++	switch (id) {
++	case DPTC_GP_ID:
++		dptc_data = dev_data0->platform_data;
++		drv_data = dev_data0->driver_data;
++		break;
++	case DPTC_LP_ID:
++		if (dev_data1 == NULL)
++			return;
++
++		dptc_data = dev_data1->platform_data;
++		drv_data = dev_data1->driver_data;
++		break;
++		/* Unknown DPTC ID */
++	default:
++		return;
++	}
++
+ 	if (!drv_data->dptc_is_active)
+ 		return;
+ 
+@@ -463,7 +498,9 @@ static int __devinit mxc_dptc_probe(struct platform_device *pdev)
+ 	dptc_device_data->dptc_clk = clk_get(NULL, dptc_data->clk_id);
+ 
+ 	if (pdev->id == 0)
+-		dev_data = &pdev->dev;
++		dev_data0 = &pdev->dev;
++	else
++		dev_data1 = &pdev->dev;
+ 
+ 	dptc_device_data->dptc_platform_data = pdev->dev.platform_data;
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 69fdda2..932b192 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -320,6 +320,12 @@ struct mxc_unifi_platform_data *get_unifi_plat_data(void);
+ #define IS_MEM_DEVICE_NONSHARED(x)  ((x) < 0x80000000 && (x) != L2CC_BASE_ADDR)
+ #endif
+ 
++/*!
++ * DPTC GP and LP ID
++ */
++#define DPTC_GP_ID 0
++#define DPTC_LP_ID 1
++
+ #ifndef __ASSEMBLY__
+ #include <linux/types.h>
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc_dptc.h b/include/asm-arm/arch-mxc/mxc_dptc.h
+index 7f396fe..b42fc36 100644
+--- a/include/asm-arm/arch-mxc/mxc_dptc.h
++++ b/include/asm-arm/arch-mxc/mxc_dptc.h
+@@ -93,12 +93,18 @@ struct mxc_dptc_data {
+ 
+ /*!
+  * This function is called to put the DPTC in a low power state.
++ *
++ * @param   id   The DPTC device id. DPTC_GP_ID is for DPTC GP;
++ *               DPTC_LP_ID is for DPTC LP
+  */
+-void dptc_suspend(void);
++void dptc_suspend(int id);
+ /*!
+  * This function is called to resume the DPTC from a low power state.
++ *
++ * @param   id   The DPTC device id. DPTC_GP_ID is for DPTC GP;
++ *               DPTC_LP_ID is for DPTC LP
+  */
+-void dptc_resume(void);
++void dptc_resume(int id);
+ 
+ #endif				/* __KERNEL__ */
+ 
+-- 
+1.5.4.4
+

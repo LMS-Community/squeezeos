@@ -3,6 +3,8 @@ require icu-3.6.inc
 DEPENDS += "icu-native"
 PR = "r3"
 
+FULL_OPTIMIZATION_arm = "-Os"
+
 SRC_URI += "file://use-g++-for-linking.patch;patch=1"
 
 do_configure_append() {
@@ -31,9 +33,5 @@ FILES_libicule = "${libdir}/libicule.so.*"
 FILES_libiculx = "${libdir}/libiculx.so.*"
 FILES_libicutu = "${libdir}/libicutu.so.*"
 FILES_libicuio = "${libdir}/libicuio.so.*"
-
-do_stage() {
-        autotools_stage_all
-}	
 
 

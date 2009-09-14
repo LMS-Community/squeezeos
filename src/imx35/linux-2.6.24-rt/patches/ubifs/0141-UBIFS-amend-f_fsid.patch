@@ -1,0 +1,39 @@
+From 1174788d445bcac072418dad59847a219b25c12b Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 3 Sep 2008 14:16:42 +0300
+Subject: [PATCH] UBIFS: amend f_fsid
+
+David Woodhouse suggested to be consistent with other FSes
+and xor the beginning and the end of the UUID.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 8fa847f..4b73097 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -382,6 +382,7 @@ static int ubifs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ {
+ 	struct ubifs_info *c = dentry->d_sb->s_fs_info;
+ 	unsigned long long free;
++	__le32 *uuid = (__le32 *)c->uuid;
+ 
+ 	free = ubifs_get_free_space(c);
+ 	dbg_gen("free space %lld bytes (%lld blocks)",
+@@ -398,8 +399,8 @@ static int ubifs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	buf->f_files = 0;
+ 	buf->f_ffree = 0;
+ 	buf->f_namelen = UBIFS_MAX_NLEN;
+-	memcpy(&buf->f_fsid, c->uuid, sizeof(__kernel_fsid_t));
+-
++	buf->f_fsid.val[0] = le32_to_cpu(uuid[0]) ^ le32_to_cpu(uuid[2]);
++	buf->f_fsid.val[1] = le32_to_cpu(uuid[1]) ^ le32_to_cpu(uuid[3]);
+ 	return 0;
+ }
+ 
+-- 
+1.5.6.3
+

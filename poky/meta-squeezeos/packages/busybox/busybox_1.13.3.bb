@@ -1,5 +1,5 @@
 require busybox.inc
-PR = "r1"
+PR = "r4"
 
 SRC_URI = "http://www.busybox.net/downloads/busybox-${PV}.tar.gz \
 	   file://busybox_udhcpd_syslog.patch;patch=1 \

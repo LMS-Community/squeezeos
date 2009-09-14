@@ -1,0 +1,33 @@
+From e0dea12da77b764d6f02b91ab5dfd820325806e0 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Sun, 4 Jan 2009 18:00:58 +0800
+Subject: [PATCH] ENGR00103964 ASOC: wm8350: fix record failure
+
+MIC is connected to right channel, so Invert frame to switch MIC from
+right channel to left. SSI only get mono data from left channel.
+The issue occured after ae541d48ea7ef1ec63c5182c33c45155b6504f19
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ sound/soc/imx/imx-3stack-wm8350.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-3stack-wm8350.c b/sound/soc/imx/imx-3stack-wm8350.c
+index bca4529..6bfe854 100644
+--- a/sound/soc/imx/imx-3stack-wm8350.c
++++ b/sound/soc/imx/imx-3stack-wm8350.c
+@@ -199,6 +199,11 @@ static int imx_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
+ 	codec_dai->ops->set_fmt(codec_dai, dai_format);
+ 
+ 	/* set cpu DAI configuration */
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
++		dai_format &= ~SND_SOC_DAIFMT_INV_MASK;
++		/* Invert frame to switch mic from right channel to left */
++		dai_format |= SND_SOC_DAIFMT_NB_IF;
++	}
+ 	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
+ 
+ 	/* set 32KHZ as the codec system clock for DAC and ADC */
+-- 
+1.5.4.4
+

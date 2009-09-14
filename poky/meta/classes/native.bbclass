@@ -5,6 +5,10 @@ EXCLUDE_FROM_WORLD = "1"
 PACKAGES = ""
 PACKAGE_ARCH = "${BUILD_ARCH}"
 
+BASE_PACKAGE_ARCH = "${BUILD_ARCH}"
+BASEPKG_HOST_SYS = "${BUILD_ARCH}${BUILD_VENDOR}-${BUILD_OS}"
+BASEPKG_TARGET_SYS = "${BUILD_ARCH}${BUILD_VENDOR}-${BUILD_OS}"
+
 # When this class has packaging enabled, setting 
 # RPROVIDES becomes unnecessary.
 RPROVIDES = "${PN}"
@@ -76,6 +80,8 @@ export oldincludedir = "${STAGING_DIR_NATIVE}${layout_includedir}"
 do_stage () {
 	if [ "${INHIBIT_NATIVE_STAGE_INSTALL}" != "1" ]
 	then
+		# If autotools is active, use the autotools staging function, else 
+		# use our "make install" equivalent
 		if [ "${AUTOTOOLS_NATIVE_STAGE_INSTALL}" != "1" ]
 		then
 			oe_runmake install
@@ -91,3 +97,38 @@ do_install () {
 
 PKG_CONFIG_PATH .= "${EXTRA_NATIVE_PKGCONFIG_PATH}"
 PKG_CONFIG_SYSROOT_DIR = ""
+
+python __anonymous () {
+    pn = bb.data.getVar("PN", d, True)
+    depends = bb.data.getVar("DEPENDS", d, True)
+    deps = bb.utils.explode_deps(depends)
+    if "native" in (bb.data.getVar('BBCLASSEXTEND', d, True) or ""):
+        autoextend = True
+    else:
+        autoextend = False
+    for dep in deps:
+        if dep.endswith("-cross"):
+            if autoextend:
+                depends = depends.replace(dep, dep.replace("-cross", "-native"))
+            else:
+                bb.note("%s has depends %s which ends in -cross?" % (pn, dep))
+
+        if not dep.endswith("-native"):
+            if autoextend:
+                depends = depends.replace(dep, dep + "-native")
+            else:
+                bb.note("%s has depends %s which doesn't end in -native?" % (pn, dep))
+    bb.data.setVar("DEPENDS", depends, d)
+    provides = bb.data.getVar("PROVIDES", d, True)
+    for prov in provides.split():
+        if prov.find(pn) != -1:
+            continue
+        if not prov.endswith("-native"):
+            if autoextend:
+                provides = provides.replace(prov, prov + "-native")
+            #else:
+            #    bb.note("%s has rouge PROVIDES of %s which doesn't end in -sdk?" % (pn, prov))
+    bb.data.setVar("PROVIDES", provides, d)
+    bb.data.setVar("OVERRIDES", bb.data.getVar("OVERRIDES", d, False) + ":virtclass-native", d)
+}
+

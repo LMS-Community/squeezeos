@@ -1,0 +1,43 @@
+From b3c629061519276012be9a53c59e128be5256f65 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Fri, 14 Nov 2008 15:17:38 -0600
+Subject: [PATCH] ENGR00098579 Kernel can not boot first time after power on
+
+Kernel can not boot first time after power on if supply voltage is changed
+from wp=0 to other wp before starting DPTC
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/plat-mxc/dptc.c |    9 ++++++++-
+ 1 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/dptc.c b/arch/arm/plat-mxc/dptc.c
+index 9394e04..2b6d30b 100644
+--- a/arch/arm/plat-mxc/dptc.c
++++ b/arch/arm/plat-mxc/dptc.c
+@@ -191,6 +191,14 @@ static int start_dptc(struct device *dev)
+ 	struct dptc_device *drv_data = dev->driver_data;
+ 	u32 dptccr, flags;
+ 	unsigned long clk_rate;
++	int voltage_mV;
++
++	/* Get the voltage */
++	voltage_mV = uV_to_mV(regulator_get_voltage(drv_data->dptc_reg));
++	drv_data->curr_wp =
++	    (dptc_data->dptc_wp_allfreq[0].voltage - voltage_mV) / 25;
++
++	update_dptc_wp(drv_data, drv_data->curr_wp);
+ 
+ 	/* Set the voltage */
+ 	spin_lock_irqsave(&drv_data->lock, flags);
+@@ -439,7 +447,6 @@ static int __devinit mxc_dptc_probe(struct platform_device *pdev)
+ 
+ 	/* Set driver data */
+ 	platform_set_drvdata(pdev, dptc_device_data);
+-	update_dptc_wp(dptc_device_data, dptc_device_data->curr_wp);
+ 
+ 	return 0;
+ 
+-- 
+1.5.4.4
+

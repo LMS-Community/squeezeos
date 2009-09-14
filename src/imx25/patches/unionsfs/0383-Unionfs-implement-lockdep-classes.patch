@@ -1,0 +1,760 @@
+From b6e1c7a195ff0f1075d0f3846f7a564b463d58b7 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 28 Dec 2007 13:38:09 -0500
+Subject: [PATCH] Unionfs: implement lockdep classes
+
+Lockdep fixes.  Support locking order/classes (e.g., parent -> child ->
+whiteout).  Remove locking from create_parents: it's enough to just dget the
+dentries in question.  Move parent locking to from lookup_backend to caller,
+unionfs_lookup.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   16 ++++++++--------
+ fs/unionfs/copyup.c     |    6 +++---
+ fs/unionfs/dentry.c     |    8 ++++----
+ fs/unionfs/dirfops.c    |    4 ++--
+ fs/unionfs/fanout.h     |   14 ++++++++++++--
+ fs/unionfs/file.c       |    6 +++---
+ fs/unionfs/inode.c      |   47 ++++++++++++++++++++++++++---------------------
+ fs/unionfs/lookup.c     |   15 +++++----------
+ fs/unionfs/main.c       |    2 +-
+ fs/unionfs/mmap.c       |    4 ++--
+ fs/unionfs/rename.c     |    8 ++++----
+ fs/unionfs/subr.c       |    4 ++--
+ fs/unionfs/super.c      |   10 +++++-----
+ fs/unionfs/union.h      |   38 ++++++++++++++++++++++++--------------
+ fs/unionfs/unlink.c     |    8 ++++----
+ fs/unionfs/xattr.c      |   16 ++++++++--------
+ 16 files changed, 113 insertions(+), 93 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index f714e2f..4077907 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -311,7 +311,7 @@ int unionfs_file_revalidate(struct file *file, bool willwrite)
+ 	int err = 0;
+ 
+ 	dentry = file->f_path.dentry;
+-	unionfs_lock_dentry(dentry);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 	sb = dentry->d_sb;
+ 
+ 	/*
+@@ -519,7 +519,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 	int bindex = 0, bstart = 0, bend = 0;
+ 	int size;
+ 
+-	unionfs_read_lock(inode->i_sb);
++	unionfs_read_lock(inode->i_sb, UNIONFS_SMUTEX_PARENT);
+ 
+ 	file->private_data =
+ 		kzalloc(sizeof(struct unionfs_file_info), GFP_KERNEL);
+@@ -546,7 +546,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 	}
+ 
+ 	dentry = file->f_path.dentry;
+-	unionfs_lock_dentry(dentry);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	bstart = fbstart(file) = dbstart(dentry);
+ 	bend = fbend(file) = dbend(dentry);
+@@ -607,7 +607,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	int bindex, bstart, bend;
+ 	int fgen, err = 0;
+ 
+-	unionfs_read_lock(sb);
++	unionfs_read_lock(sb, UNIONFS_SMUTEX_PARENT);
+ 	/*
+ 	 * Yes, we have to revalidate this file even if it's being released.
+ 	 * This is important for open-but-unlinked files, as well as mmap
+@@ -626,7 +626,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	bstart = fbstart(file);
+ 	bend = fbend(file);
+ 
+-	unionfs_lock_dentry(dentry);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		lower_file = unionfs_lower_file_idx(file, bindex);
+ 
+@@ -705,7 +705,7 @@ static int unionfs_ioctl_queryfile(struct file *file, unsigned int cmd,
+ 	struct vfsmount *mnt;
+ 
+ 	dentry = file->f_path.dentry;
+-	unionfs_lock_dentry(dentry);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 	orig_bstart = dbstart(dentry);
+ 	orig_bend = dbend(dentry);
+ 	err = unionfs_partial_lookup(dentry);
+@@ -755,7 +755,7 @@ long unionfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ {
+ 	long err;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 
+ 	err = unionfs_file_revalidate(file, true);
+ 	if (unlikely(err))
+@@ -794,7 +794,7 @@ int unionfs_flush(struct file *file, fl_owner_t id)
+ 	struct dentry *dentry = file->f_path.dentry;
+ 	int bindex, bstart, bend;
+ 
+-	unionfs_read_lock(dentry->d_sb);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 
+ 	err = unionfs_file_revalidate(file, true);
+ 	if (unlikely(err))
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 0012caf..16b2c7c 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -717,7 +717,7 @@ struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
+ 
+ 		/* find the parent directory dentry in unionfs */
+ 		parent_dentry = child_dentry->d_parent;
+-		unionfs_lock_dentry(parent_dentry);
++		dget(parent_dentry);
+ 
+ 		/* find out the lower_parent_dentry in the given branch */
+ 		lower_parent_dentry =
+@@ -752,7 +752,7 @@ struct dentry *create_parents(struct inode *dir, struct dentry *dentry,
+ begin:
+ 	/* get lower parent dir in the current branch */
+ 	lower_parent_dentry = unionfs_lower_dentry_idx(parent_dentry, bindex);
+-	unionfs_unlock_dentry(parent_dentry);
++	dput(parent_dentry);
+ 
+ 	/* init the values to lookup */
+ 	childname = child_dentry->d_name.name;
+@@ -843,7 +843,7 @@ out:
+ 	/* cleanup any leftover locks from the do/while loop above */
+ 	if (IS_ERR(lower_dentry))
+ 		while (count)
+-			unionfs_unlock_dentry(path[count--]);
++			dput(path[count--]);
+ 	kfree(path);
+ 	return lower_dentry;
+ }
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index dc1aa39..b207a6f 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -347,7 +347,7 @@ bool __unionfs_d_revalidate_chain(struct dentry *dentry, struct nameidata *nd,
+ 	 * to child order.
+ 	 */
+ 	for (i = 0; i < chain_len; i++) {
+-		unionfs_lock_dentry(chain[i]);
++		unionfs_lock_dentry(chain[i], UNIONFS_DMUTEX_REVAL+i);
+ 		saved_bstart = dbstart(chain[i]);
+ 		saved_bend = dbend(chain[i]);
+ 		sbgen = atomic_read(&UNIONFS_SB(dentry->d_sb)->generation);
+@@ -421,9 +421,9 @@ static int unionfs_d_revalidate(struct dentry *dentry, struct nameidata *nd)
+ {
+ 	int err;
+ 
+-	unionfs_read_lock(dentry->d_sb);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+ 
+-	unionfs_lock_dentry(dentry);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 	err = __unionfs_d_revalidate_chain(dentry, nd, false);
+ 	if (likely(err > 0)) { /* true==1: dentry is valid */
+ 		unionfs_check_dentry(dentry);
+@@ -444,7 +444,7 @@ static void unionfs_d_release(struct dentry *dentry)
+ {
+ 	int bindex, bstart, bend;
+ 
+-	unionfs_read_lock(dentry->d_sb);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+ 
+ 	unionfs_check_dentry(dentry);
+ 	/* this could be a negative dentry, so check first */
+diff --git a/fs/unionfs/dirfops.c b/fs/unionfs/dirfops.c
+index 88df635..a613862 100644
+--- a/fs/unionfs/dirfops.c
++++ b/fs/unionfs/dirfops.c
+@@ -103,7 +103,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 	int bend;
+ 	loff_t offset;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 
+ 	err = unionfs_file_revalidate(file, false);
+ 	if (unlikely(err))
+@@ -208,7 +208,7 @@ static loff_t unionfs_dir_llseek(struct file *file, loff_t offset, int origin)
+ 	struct unionfs_dir_state *rdstate;
+ 	loff_t err;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 
+ 	err = unionfs_file_revalidate(file, false);
+ 	if (unlikely(err))
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 864383e..5f31015 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -284,10 +284,20 @@ static inline struct vfsmount *unionfs_lower_mnt(const struct dentry *dent)
+ }
+ 
+ /* Macros for locking a dentry. */
+-static inline void unionfs_lock_dentry(struct dentry *d)
++enum unionfs_dentry_lock_class {
++	UNIONFS_DMUTEX_NORMAL,
++	UNIONFS_DMUTEX_ROOT,
++	UNIONFS_DMUTEX_PARENT,
++	UNIONFS_DMUTEX_CHILD,
++	UNIONFS_DMUTEX_WHITEOUT,
++	UNIONFS_DMUTEX_REVAL,	/* for file/dentry revalidate */
++};
++
++static inline void unionfs_lock_dentry(struct dentry *d,
++				       unsigned int subclass)
+ {
+ 	BUG_ON(!d);
+-	mutex_lock(&UNIONFS_D(d)->lock);
++	mutex_lock_nested(&UNIONFS_D(d)->lock, subclass);
+ }
+ 
+ static inline void unionfs_unlock_dentry(struct dentry *d)
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 94784c3..b632042 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -30,7 +30,7 @@ static int unionfs_mmap(struct file *file, struct vm_area_struct *vma)
+ 	bool willwrite;
+ 	struct file *lower_file;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 
+ 	/* This might be deferred to mmap's writepage */
+ 	willwrite = ((vma->vm_flags | VM_SHARED | VM_WRITE) == vma->vm_flags);
+@@ -80,7 +80,7 @@ int unionfs_fsync(struct file *file, struct dentry *dentry, int datasync)
+ 	struct inode *lower_inode, *inode;
+ 	int err = -EINVAL;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	err = unionfs_file_revalidate(file, true);
+ 	if (unlikely(err))
+ 		goto out;
+@@ -128,7 +128,7 @@ int unionfs_fasync(int fd, struct file *file, int flag)
+ 	struct inode *lower_inode, *inode;
+ 	int err = 0;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	err = unionfs_file_revalidate(file, true);
+ 	if (unlikely(err))
+ 		goto out;
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 4890f42..df6138a 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -29,8 +29,8 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 	int valid = 0;
+ 	struct nameidata lower_nd;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	valid = __unionfs_d_revalidate_chain(dentry, nd, false);
+ 	/*
+@@ -79,7 +79,7 @@ static int unionfs_create(struct inode *parent, struct dentry *dentry,
+ 			 */
+ 			struct dentry *lower_dir_dentry;
+ 
+-			lower_dir_dentry = lock_parent(wh_dentry);
++			lower_dir_dentry = lock_parent_wh(wh_dentry);
+ 			/* see Documentation/filesystems/unionfs/issues.txt */
+ 			lockdep_off();
+ 			err = vfs_unlink(lower_dir_dentry->d_inode, wh_dentry);
+@@ -178,7 +178,9 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 	struct path path_save;
+ 	struct dentry *ret;
+ 
+-	unionfs_read_lock(dentry->d_sb);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	if (dentry != dentry->d_parent)
++		unionfs_lock_dentry(dentry->d_parent, UNIONFS_DMUTEX_PARENT);
+ 
+ 	/* save the dentry & vfsmnt from namei */
+ 	if (nd) {
+@@ -210,6 +212,9 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 	unionfs_check_nd(nd);
+ 	if (!IS_ERR(ret))
+ 		unionfs_unlock_dentry(dentry);
++
++	if (dentry != dentry->d_parent)
++		unionfs_unlock_dentry(dentry->d_parent);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 
+ 	return ret;
+@@ -225,7 +230,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	struct dentry *whiteout_dentry;
+ 	char *name = NULL;
+ 
+-	unionfs_read_lock(old_dentry->d_sb);
++	unionfs_read_lock(old_dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+ 	unionfs_double_lock_dentry(new_dentry, old_dentry);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(old_dentry, NULL, false))) {
+@@ -263,7 +268,7 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 		whiteout_dentry = NULL;
+ 	} else {
+ 		/* found a .wh.foo entry, unlink it and then call vfs_link() */
+-		lower_dir_dentry = lock_parent(whiteout_dentry);
++		lower_dir_dentry = lock_parent_wh(whiteout_dentry);
+ 		err = is_robranch_super(new_dentry->d_sb, dbstart(new_dentry));
+ 		if (!err) {
+ 			/* see Documentation/filesystems/unionfs/issues.txt */
+@@ -389,8 +394,8 @@ static int unionfs_symlink(struct inode *parent, struct dentry *dentry,
+ 	int valid = 0;
+ 	umode_t mode;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(dentry->d_inode &&
+ 		     !__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+@@ -444,7 +449,7 @@ static int unionfs_symlink(struct inode *parent, struct dentry *dentry,
+ 			 */
+ 			struct dentry *lower_dir_dentry;
+ 
+-			lower_dir_dentry = lock_parent(wh_dentry);
++			lower_dir_dentry = lock_parent_wh(wh_dentry);
+ 			err = vfs_unlink(lower_dir_dentry->d_inode, wh_dentry);
+ 			unlock_dir(lower_dir_dentry);
+ 
+@@ -532,8 +537,8 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 	int whiteout_unlinked = 0;
+ 	struct sioq_args args;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(dentry->d_inode &&
+ 		     !__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+@@ -566,7 +571,7 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 		dput(whiteout_dentry);
+ 		whiteout_dentry = NULL;
+ 	} else {
+-		lower_parent_dentry = lock_parent(whiteout_dentry);
++		lower_parent_dentry = lock_parent_wh(whiteout_dentry);
+ 
+ 		/* found a.wh.foo entry, remove it then do vfs_mkdir */
+ 		err = is_robranch_super(dentry->d_sb, bstart);
+@@ -686,8 +691,8 @@ static int unionfs_mknod(struct inode *parent, struct dentry *dentry, int mode,
+ 	char *name = NULL;
+ 	int valid = 0;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(dentry->d_inode &&
+ 		     !__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+@@ -741,7 +746,7 @@ static int unionfs_mknod(struct inode *parent, struct dentry *dentry, int mode,
+ 			 */
+ 			struct dentry *lower_dir_dentry;
+ 
+-			lower_dir_dentry = lock_parent(wh_dentry);
++			lower_dir_dentry = lock_parent_wh(wh_dentry);
+ 			err = vfs_unlink(lower_dir_dentry->d_inode, wh_dentry);
+ 			unlock_dir(lower_dir_dentry);
+ 
+@@ -823,8 +828,8 @@ static int unionfs_readlink(struct dentry *dentry, char __user *buf,
+ 	int err;
+ 	struct dentry *lower_dentry;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+@@ -901,9 +906,9 @@ out:
+ static void unionfs_put_link(struct dentry *dentry, struct nameidata *nd,
+ 			     void *cookie)
+ {
+-	unionfs_read_lock(dentry->d_sb);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+ 
+-	unionfs_lock_dentry(dentry);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, nd, false)))
+ 		printk(KERN_ERR
+ 		       "unionfs: put_link failed to revalidate dentry\n");
+@@ -1011,8 +1016,8 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	int bstart, bend, bindex;
+ 	loff_t size;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index a1904c9..85a85aa 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -98,7 +98,6 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	struct dentry *first_dentry = NULL;
+ 	struct dentry *first_lower_dentry = NULL;
+ 	struct vfsmount *first_lower_mnt = NULL;
+-	int locked_parent = 0;
+ 	int opaque;
+ 	char *whname = NULL;
+ 	const char *name;
+@@ -119,7 +118,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	case INTERPOSE_PARTIAL:
+ 		break;
+ 	case INTERPOSE_LOOKUP:
+-		err = new_dentry_private_data(dentry);
++		err = new_dentry_private_data(dentry, UNIONFS_DMUTEX_CHILD);
+ 		if (unlikely(err))
+ 			goto out;
+ 		break;
+@@ -136,10 +135,7 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 
+ 	parent_dentry = dget_parent(dentry);
+ 	/* We never partial lookup the root directory. */
+-	if (parent_dentry != dentry) {
+-		unionfs_lock_dentry(parent_dentry);
+-		locked_parent = 1;
+-	} else {
++	if (parent_dentry == dentry) {
+ 		dput(parent_dentry);
+ 		parent_dentry = NULL;
+ 		goto out;
+@@ -426,8 +422,6 @@ out:
+ 		}
+ 	}
+ 	kfree(whname);
+-	if (locked_parent)
+-		unionfs_unlock_dentry(parent_dentry);
+ 	dput(parent_dentry);
+ 	if (err && (lookupmode == INTERPOSE_LOOKUP))
+ 		unionfs_unlock_dentry(dentry);
+@@ -441,6 +435,7 @@ out:
+ 
+ /*
+  * This is a utility function that fills in a unionfs dentry.
++ * Caller must lock this dentry with unionfs_lock_dentry.
+  *
+  * Returns: 0 (ok), or -ERRNO if an error occurred.
+  */
+@@ -530,7 +525,7 @@ static int realloc_dentry_private_data(struct dentry *dentry)
+ }
+ 
+ /* allocate new dentry private data */
+-int new_dentry_private_data(struct dentry *dentry)
++int new_dentry_private_data(struct dentry *dentry, int subclass)
+ {
+ 	struct unionfs_dentry_info *info = UNIONFS_D(dentry);
+ 
+@@ -541,7 +536,7 @@ int new_dentry_private_data(struct dentry *dentry)
+ 		return -ENOMEM;
+ 
+ 	mutex_init(&info->lock);
+-	mutex_lock(&info->lock);
++	mutex_lock_nested(&info->lock, subclass);
+ 
+ 	info->lower_paths = NULL;
+ 
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index ea8976d..92f0e9d 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -653,7 +653,7 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 
+ 	/* link the upper and lower dentries */
+ 	sb->s_root->d_fsdata = NULL;
+-	err = new_dentry_private_data(sb->s_root);
++	err = new_dentry_private_data(sb->s_root, UNIONFS_DMUTEX_ROOT);
+ 	if (unlikely(err))
+ 		goto out_freedpd;
+ 
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index aad2137..a0e654b 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -152,7 +152,7 @@ static int unionfs_readpage(struct file *file, struct page *page)
+ 	char *page_data = NULL;
+ 	mode_t orig_mode;
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	err = unionfs_file_revalidate(file, false);
+ 	if (unlikely(err))
+ 		goto out;
+@@ -245,7 +245,7 @@ static int unionfs_commit_write(struct file *file, struct page *page,
+ 
+ 	BUG_ON(file == NULL);
+ 
+-	unionfs_read_lock(file->f_path.dentry->d_sb);
++	unionfs_read_lock(file->f_path.dentry->d_sb, UNIONFS_SMUTEX_PARENT);
+ 	err = unionfs_file_revalidate(file, true);
+ 	if (unlikely(err))
+ 		goto out;
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index 8b04acf..824c285 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -76,7 +76,7 @@ static int __unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 			goto out;
+ 		}
+ 
+-		lower_wh_dir_dentry = lock_parent(lower_wh_dentry);
++		lower_wh_dir_dentry = lock_parent_wh(lower_wh_dentry);
+ 		err = is_robranch_super(old_dentry->d_sb, bindex);
+ 		if (!err)
+ 			err = vfs_unlink(lower_wh_dir_dentry->d_inode,
+@@ -274,7 +274,7 @@ static int do_unionfs_rename(struct inode *old_dir,
+ 		err = init_lower_nd(&nd, LOOKUP_CREATE);
+ 		if (unlikely(err < 0))
+ 			goto out;
+-		lower_parent = lock_parent(wh_old);
++		lower_parent = lock_parent_wh(wh_old);
+ 		local_err = vfs_create(lower_parent->d_inode, wh_old, S_IRUGO,
+ 				       &nd);
+ 		unlock_dir(lower_parent);
+@@ -362,7 +362,7 @@ static struct dentry *lookup_whiteout(struct dentry *dentry)
+ 		return (void *)whname;
+ 
+ 	parent = dget_parent(dentry);
+-	unionfs_lock_dentry(parent);
++	unionfs_lock_dentry(parent, UNIONFS_DMUTEX_WHITEOUT);
+ 	bstart = dbstart(parent);
+ 	bend = dbend(parent);
+ 	wh_dentry = ERR_PTR(-ENOENT);
+@@ -421,7 +421,7 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	int err = 0;
+ 	struct dentry *wh_dentry;
+ 
+-	unionfs_read_lock(old_dentry->d_sb);
++	unionfs_read_lock(old_dentry->d_sb, UNIONFS_SMUTEX_CHILD);
+ 	unionfs_double_lock_dentry(old_dentry, new_dentry);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(old_dentry, NULL, false))) {
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index 1a26c57..0a0fce9 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -90,7 +90,7 @@ int create_whiteout(struct dentry *dentry, int start)
+ 		err = init_lower_nd(&nd, LOOKUP_CREATE);
+ 		if (unlikely(err < 0))
+ 			goto out;
+-		lower_dir_dentry = lock_parent(lower_wh_dentry);
++		lower_dir_dentry = lock_parent_wh(lower_wh_dentry);
+ 		err = is_robranch_super(dentry->d_sb, bindex);
+ 		if (!err)
+ 			err = vfs_create(lower_dir_dentry->d_inode,
+@@ -126,7 +126,7 @@ int unionfs_refresh_lower_dentry(struct dentry *dentry, int bindex)
+ 
+ 	verify_locked(dentry);
+ 
+-	unionfs_lock_dentry(dentry->d_parent);
++	unionfs_lock_dentry(dentry->d_parent, UNIONFS_DMUTEX_CHILD);
+ 	lower_parent = unionfs_lower_dentry_idx(dentry->d_parent, bindex);
+ 	unionfs_unlock_dentry(dentry->d_parent);
+ 
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 45bcf89..986c980 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -134,8 +134,8 @@ static int unionfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 
+ 	sb = dentry->d_sb;
+ 
+-	unionfs_read_lock(sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+@@ -944,7 +944,7 @@ static void unionfs_umount_begin(struct vfsmount *mnt, int flags)
+ 
+ 	sb = mnt->mnt_sb;
+ 
+-	unionfs_read_lock(sb);
++	unionfs_read_lock(sb, UNIONFS_SMUTEX_CHILD);
+ 
+ 	bstart = sbstart(sb);
+ 	bend = sbend(sb);
+@@ -969,9 +969,9 @@ static int unionfs_show_options(struct seq_file *m, struct vfsmount *mnt)
+ 	int bindex, bstart, bend;
+ 	int perms;
+ 
+-	unionfs_read_lock(sb);
++	unionfs_read_lock(sb, UNIONFS_SMUTEX_CHILD);
+ 
+-	unionfs_lock_dentry(sb->s_root);
++	unionfs_lock_dentry(sb->s_root, UNIONFS_DMUTEX_CHILD);
+ 
+ 	tmp_page = (char *) __get_free_page(GFP_KERNEL);
+ 	if (unlikely(!tmp_page)) {
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index d8f46a2..9295ee2 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -250,12 +250,18 @@ static inline off_t rdstate2offset(struct unionfs_dir_state *buf)
+ 	return tmp;
+ }
+ 
+-static inline void unionfs_read_lock(struct super_block *sb)
++/* Macros for locking a super_block. */
++enum unionfs_super_lock_class {
++	UNIONFS_SMUTEX_NORMAL,
++	UNIONFS_SMUTEX_PARENT,	/* when locking on behalf of file */
++	UNIONFS_SMUTEX_CHILD,	/* when locking on behalf of dentry */
++};
++static inline void unionfs_read_lock(struct super_block *sb, int subclass)
+ {
+ 	if (UNIONFS_SB(sb)->write_lock_owner &&
+ 	    UNIONFS_SB(sb)->write_lock_owner == current->pid)
+ 		return;
+-	down_read(&UNIONFS_SB(sb)->rwsem);
++	down_read_nested(&UNIONFS_SB(sb)->rwsem, subclass);
+ }
+ static inline void unionfs_read_unlock(struct super_block *sb)
+ {
+@@ -278,16 +284,17 @@ static inline void unionfs_write_unlock(struct super_block *sb)
+ static inline void unionfs_double_lock_dentry(struct dentry *d1,
+ 					      struct dentry *d2)
+ {
+-	if (d2 < d1) {
+-		struct dentry *tmp = d1;
+-		d1 = d2;
+-		d2 = tmp;
++	BUG_ON(d1 == d2);
++	if (d1 < d2) {
++		unionfs_lock_dentry(d1, UNIONFS_DMUTEX_PARENT);
++		unionfs_lock_dentry(d2, UNIONFS_DMUTEX_CHILD);
++	} else {
++		unionfs_lock_dentry(d2, UNIONFS_DMUTEX_PARENT);
++		unionfs_lock_dentry(d1, UNIONFS_DMUTEX_CHILD);
+ 	}
+-	unionfs_lock_dentry(d1);
+-	unionfs_lock_dentry(d2);
+ }
+ 
+-extern int new_dentry_private_data(struct dentry *dentry);
++extern int new_dentry_private_data(struct dentry *dentry, int subclass);
+ extern void free_dentry_private_data(struct dentry *dentry);
+ extern void update_bstart(struct dentry *dentry);
+ extern int init_lower_nd(struct nameidata *nd, unsigned int flags);
+@@ -484,15 +491,18 @@ extern char *alloc_whname(const char *name, int len);
+ extern int check_branch(struct nameidata *nd);
+ extern int parse_branch_mode(const char *name, int *perms);
+ 
+-/*
+- * These two functions are here because it is kind of daft to copy and paste
+- * the contents of the two functions to 32+ places in unionfs
+- */
++/* locking helpers */
+ static inline struct dentry *lock_parent(struct dentry *dentry)
+ {
+ 	struct dentry *dir = dget(dentry->d_parent);
++	mutex_lock_nested(&dir->d_inode->i_mutex, I_MUTEX_PARENT);
++	return dir;
++}
++static inline struct dentry *lock_parent_wh(struct dentry *dentry)
++{
++	struct dentry *dir = dget(dentry->d_parent);
+ 
+-	mutex_lock(&dir->d_inode->i_mutex);
++	mutex_lock_nested(&dir->d_inode->i_mutex, UNIONFS_DMUTEX_WHITEOUT);
+ 	return dir;
+ }
+ 
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index 677a5ae..1e81494 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -92,8 +92,8 @@ int unionfs_unlink(struct inode *dir, struct dentry *dentry)
+ {
+ 	int err = 0;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+@@ -167,8 +167,8 @@ int unionfs_rmdir(struct inode *dir, struct dentry *dentry)
+ 	struct unionfs_dir_state *namelist = NULL;
+ 	int dstart, dend;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index 00c6d0d..8001c65 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -45,8 +45,8 @@ ssize_t unionfs_getxattr(struct dentry *dentry, const char *name, void *value,
+ 	struct dentry *lower_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+@@ -74,8 +74,8 @@ int unionfs_setxattr(struct dentry *dentry, const char *name,
+ 	struct dentry *lower_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+@@ -103,8 +103,8 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	struct dentry *lower_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+@@ -132,8 +132,8 @@ ssize_t unionfs_listxattr(struct dentry *dentry, char *list, size_t size)
+ 	int err = -EOPNOTSUPP;
+ 	char *encoded_list = NULL;
+ 
+-	unionfs_read_lock(dentry->d_sb);
+-	unionfs_lock_dentry(dentry);
++	unionfs_read_lock(dentry->d_sb, UNIONFS_SMUTEX_CHILD);
++	unionfs_lock_dentry(dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (unlikely(!__unionfs_d_revalidate_chain(dentry, NULL, false))) {
+ 		err = -ESTALE;
+-- 
+1.5.4.3
+

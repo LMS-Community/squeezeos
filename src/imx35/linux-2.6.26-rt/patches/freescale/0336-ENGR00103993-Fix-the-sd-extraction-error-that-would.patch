@@ -1,0 +1,67 @@
+From 71809427b342575d8c5420c2ad1b5e04a00e9667 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 20 Jan 2009 14:51:30 +0800
+Subject: [PATCH] ENGR00103993 Fix the sd extraction error that would hang system
+
+Reinitialized the controller status in every card
+insertion to clear the unknow state.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack.c |    4 ++--
+ drivers/mmc/host/mxc_mmc.c     |   10 +++++++++-
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 6dcb40d..7d5b98a 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -657,7 +657,7 @@ static struct mxc_mmc_platform_data mmc0_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
+ 	.min_clk = 150000,
+ 	.max_clk = 25000000,
+-	.card_inserted_state = 1,
++	.card_inserted_state = 0,
+ 	.status = sdhc_get_card_det_status,
+ 	.wp_status = sdhc_write_protect,
+ 	.power_mmc = "GPO1",
+@@ -690,7 +690,7 @@ static struct mxc_mmc_platform_data mmc1_data = {
+ 	.min_clk = 150000,
+ 	.max_clk = 25000000,
+ 	.card_fixed = 1,
+-	.card_inserted_state = 1,
++	.card_inserted_state = 0,
+ 	.status = sdhc_get_card_det_status,
+ 	.power_mmc = "VMMC2",
+ };
+diff --git a/drivers/mmc/host/mxc_mmc.c b/drivers/mmc/host/mxc_mmc.c
+index 7b7695d..81384f8 100644
+--- a/drivers/mmc/host/mxc_mmc.c
++++ b/drivers/mmc/host/mxc_mmc.c
+@@ -13,7 +13,7 @@
+  */
+ 
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -789,6 +789,14 @@ static irqreturn_t mxcmci_gpio_irq(int irq, void *devid)
+ 		 card_gpio_status, card_gpio_status ? "removed" : "inserted");
+ 
+ 	if (card_gpio_status == host->plat_data->card_inserted_state) {
++		/*
++		 * Reinitialized the controller to clear the unknown
++		 * error state when a card is inserted.
++		 */
++		mxcmci_softreset(host);
++		__raw_writel(READ_TO_VALUE, host->base + MMC_READ_TO);
++		__raw_writel(INT_CNTR_END_CMD_RES, host->base + MMC_INT_CNTR);
++
+ 		mmc_detect_change(host->mmc, msecs_to_jiffies(100));
+ 	} else {
+ 		mxcmci_cmd_done(host, STATUS_TIME_OUT_RESP);
+-- 
+1.5.4.4
+

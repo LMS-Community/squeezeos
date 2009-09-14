@@ -1,0 +1,80 @@
+From 8cfe759a813206b14be9153347d03f7bf1ed0ee1 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 17 Jun 2007 22:36:55 -0400
+Subject: [PATCH] Unionfs: introduce two functions to maintain time invariants
+
+A new function unionfs_copy_attr_times to maintain the inode time invariants
+as per the Unionfs design (i.e., lower times should never be newer than our
+times), as documented in Documentation/filesystems/unionfs/concepts.txt.
+The second function, unionfs_copy_attr_all, is the unionfs-specific function
+to copy all attributes: it uses the special Unionfs handling of hard-links
+(via unionfs_get_nlinks) and it uses the special a/c/mtime handling (via
+unionfs_copy_attr_times).  This second function is the special
+fanout-version of fsstack_copy_attr_all, which was simplified for
+linear-stack stackable file systems.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/fanout.h |   48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 48 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 366c408..4d1a620 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -261,4 +261,52 @@ static inline void verify_locked(struct dentry *d)
+ 	BUG_ON(!mutex_is_locked(&UNIONFS_D(d)->lock));
+ }
+ 
++/* copy a/m/ctime from the lower branch with the newest times */
++static inline void unionfs_copy_attr_times(struct inode *upper)
++{
++	int bindex;
++	struct inode *lower;
++
++	if (!upper)
++		return;
++	for (bindex=ibstart(upper); bindex <= ibend(upper); bindex++) {
++		lower = unionfs_lower_inode_idx(upper, bindex);
++		if (!lower)
++			continue; /* not all lower dir objects may exist */
++		if (timespec_compare(&upper->i_mtime, &lower->i_mtime) < 0)
++			upper->i_mtime = lower->i_mtime;
++		if (timespec_compare(&upper->i_ctime, &lower->i_ctime) < 0)
++			upper->i_ctime = lower->i_ctime;
++		if (timespec_compare(&upper->i_atime, &lower->i_atime) < 0)
++			upper->i_atime = lower->i_atime;
++		/* XXX: should we notify_change on our upper inode? */
++	}
++}
++
++/*
++ * A unionfs/fanout version of fsstack_copy_attr_all.  Uses a
++ * unionfs_get_nlinks to properly calcluate the number of links to a file.
++ * Also, copies the max() of all a/m/ctimes for all lower inodes (which is
++ * important if the lower inode is a directory type)
++ */
++static inline void unionfs_copy_attr_all(struct inode *dest,
++					 const struct inode *src)
++{
++	dest->i_mode = src->i_mode;
++	dest->i_uid = src->i_uid;
++	dest->i_gid = src->i_gid;
++	dest->i_rdev = src->i_rdev;
++
++	unionfs_copy_attr_times(dest);
++
++	dest->i_blkbits = src->i_blkbits;
++	dest->i_flags = src->i_flags;
++
++	/*
++	 * Update the nlinks AFTER updating the above fields, because the
++	 * get_links callback may depend on them.
++	 */
++	dest->i_nlink = unionfs_get_nlinks(dest);
++}
++
+ #endif	/* not _FANOUT_H */
+-- 
+1.5.4.3
+

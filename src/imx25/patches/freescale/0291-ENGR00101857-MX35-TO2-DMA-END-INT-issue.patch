@@ -1,0 +1,82 @@
+From 63ba1f4193175d43a08ad8b759aaaeec1678f421 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 25 Dec 2008 15:12:03 +0800
+Subject: [PATCH] ENGR00101857 [MX35] TO2 DMA END INT issue
+
+Fix the exceptional DMA END INT.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ drivers/mmc/host/mx_sdhci.c |   21 +++++++++++++--------
+ 1 files changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index ab58f0f..dac441e 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -216,7 +216,7 @@ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ 	    SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_INDEX |
+ 	    SDHCI_INT_END_BIT | SDHCI_INT_CRC | SDHCI_INT_TIMEOUT |
+ 	    SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL |
+-	    SDHCI_INT_DATA_END | SDHCI_INT_RESPONSE;
++	    SDHCI_INT_DMA_END | SDHCI_INT_DATA_END | SDHCI_INT_RESPONSE;
+ 
+ 	if (host->flags & SDHCI_USE_DMA)
+ 		mask_u32 &= ~(SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL);
+@@ -239,7 +239,7 @@ static void sdhci_init(struct sdhci_host *host)
+ 	    SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_INDEX |
+ 	    SDHCI_INT_END_BIT | SDHCI_INT_CRC | SDHCI_INT_TIMEOUT |
+ 	    SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL |
+-	    SDHCI_INT_DATA_END | SDHCI_INT_RESPONSE;
++	    SDHCI_INT_DMA_END | SDHCI_INT_DATA_END | SDHCI_INT_RESPONSE;
+ 
+ 	if (host->flags & SDHCI_USE_DMA)
+ 		intmask &= ~(SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL);
+@@ -428,10 +428,6 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 	if (data == NULL)
+ 		return;
+ 
+-	/* Enable the DMA INT */
+-	writel(readl(host->ioaddr + SDHCI_INT_ENABLE) |
+-	       SDHCI_INT_DMA_END, host->ioaddr + SDHCI_INT_ENABLE);
+-
+ 	/* Sanity checks */
+ 	BUG_ON(data->blksz * data->blocks > 524288);
+ 	BUG_ON(data->blksz > host->mmc->max_blk_size);
+@@ -439,6 +435,11 @@ static void sdhci_prepare_data(struct sdhci_host *host, struct mmc_data *data)
+ 
+ 	host->data = data;
+ 	host->data_early = 0;
++	if (host->data->flags & MMC_DATA_READ)
++		writel(readl(host->ioaddr + SDHCI_CLOCK_CONTROL) |
++		       SDHCI_CLOCK_HLK_EN,
++		       host->ioaddr + SDHCI_CLOCK_CONTROL);
++
+ 
+ 	/* timeout in us */
+ 	target_timeout = data->timeout_ns / 1000 +
+@@ -1293,6 +1294,10 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
+ 			       host->ioaddr + SDHCI_DMA_ADDRESS);
+ 
+ 		if (intmask & SDHCI_INT_DATA_END) {
++			if (host->data->flags & MMC_DATA_READ)
++				writel(readl(host->ioaddr + SDHCI_CLOCK_CONTROL)
++				       & ~SDHCI_CLOCK_HLK_EN,
++				       host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 			if (host->cmd) {
+ 				/*
+ 				 * Data managed to finish before the
+@@ -1319,8 +1324,8 @@ static void sdhci_data_irq(struct sdhci_host *host, u32 intmask)
+ 		}
+ 	}
+ data_irq_out:
+-	/* Enable the INT except the DMA INT */
+-	writel(intsave & (~SDHCI_INT_DMA_END), host->ioaddr + SDHCI_INT_ENABLE);
++	/* Enable the INT */
++	writel(intsave, host->ioaddr + SDHCI_INT_ENABLE);
+ }
+ 
+ /*!
+-- 
+1.5.4.4
+

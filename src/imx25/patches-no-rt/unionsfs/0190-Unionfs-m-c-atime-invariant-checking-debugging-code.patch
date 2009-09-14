@@ -1,0 +1,136 @@
+From 71c501585836a1637d3baa7f05ec78a199545dde Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 17 Jun 2007 22:33:56 -0400
+Subject: [PATCH] Unionfs: m/c/atime invariant checking debugging code
+
+Add checks to verify that lower inode times are not newer than our own inode
+times.  Introduce two useful utility debugging functions to print inode
+times.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |   67 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ fs/unionfs/union.h |   11 ++++++++
+ 2 files changed, 78 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 34ef190..b4d35d6 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -299,6 +299,26 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 				       bindex, dstart, dend);
+ 			}
+ 		}
++	/* check if lower inode is newer than upper one (it shouldn't) */
++	if (is_newer_lower(dentry)) {
++		PRINT_CALLER();
++		for (bindex=ibstart(inode); bindex <= ibend(inode); bindex++) {
++			lower_inode = unionfs_lower_inode_idx(inode, bindex);
++			if (!lower_inode)
++				continue;
++			printk(" CI8: bindex=%d mtime/lmtime=%lu.%lu/%lu.%lu "
++			       "ctime/lctime=%lu.%lu/%lu.%lu\n",
++			       bindex,
++			       inode->i_mtime.tv_sec,
++			       inode->i_mtime.tv_nsec,
++			       lower_inode->i_mtime.tv_sec,
++			       lower_inode->i_mtime.tv_nsec,
++			       inode->i_ctime.tv_sec,
++			       inode->i_ctime.tv_nsec,
++			       lower_inode->i_ctime.tv_sec,
++			       lower_inode->i_ctime.tv_nsec);
++		}
++	}
+ }
+ 
+ void __unionfs_check_file(const struct file *file,
+@@ -401,3 +421,50 @@ void __show_branch_counts(const struct super_block *sb,
+ 	}
+ 	printk("%s:%s:%d\n",file,fxn,line);
+ }
++
++void __show_inode_times(const struct inode *inode,
++			const char *file, const char *fxn, int line)
++{
++	struct inode *lower_inode;
++	int bindex;
++
++	for (bindex=ibstart(inode); bindex <= ibend(inode); bindex++) {
++		lower_inode = unionfs_lower_inode_idx(inode, bindex);
++		if (!lower_inode)
++			continue;
++		printk("IT(%lu:%d): ", inode->i_ino, bindex);
++		printk("%s:%s:%d ",file,fxn,line);
++		printk("um=%lu/%lu lm=%lu/%lu ",
++		       inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
++		       lower_inode->i_mtime.tv_sec,
++		       lower_inode->i_mtime.tv_nsec);
++		printk("uc=%lu/%lu lc=%lu/%lu\n",
++		       inode->i_ctime.tv_sec, inode->i_ctime.tv_nsec,
++		       lower_inode->i_ctime.tv_sec,
++		       lower_inode->i_ctime.tv_nsec);
++	}
++}
++
++void __show_dinode_times(const struct dentry *dentry,
++			const char *file, const char *fxn, int line)
++{
++	struct inode *inode = dentry->d_inode;
++	struct inode *lower_inode;
++	int bindex;
++
++	for (bindex=ibstart(inode); bindex <= ibend(inode); bindex++) {
++		lower_inode = unionfs_lower_inode_idx(inode, bindex);
++		if (!lower_inode)
++			continue;
++		printk("DT(%s:%lu:%d): ", dentry->d_name.name, inode->i_ino, bindex);
++		printk("%s:%s:%d ",file,fxn,line);
++		printk("um=%lu/%lu lm=%lu/%lu ",
++		       inode->i_mtime.tv_sec, inode->i_mtime.tv_nsec,
++		       lower_inode->i_mtime.tv_sec,
++		       lower_inode->i_mtime.tv_nsec);
++		printk("uc=%lu/%lu lc=%lu/%lu\n",
++		       inode->i_ctime.tv_sec, inode->i_ctime.tv_nsec,
++		       lower_inode->i_ctime.tv_sec,
++		       lower_inode->i_ctime.tv_nsec);
++	}
++}
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 6cd3207..f7c65e8 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -533,6 +533,11 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 	__FILE__,__FUNCTION__,__LINE__)
+ #define show_branch_counts(sb)	__show_branch_counts((sb),	\
+ 	__FILE__,__FUNCTION__,__LINE__)
++#define show_inode_times(i)	__show_inode_times((i),		\
++	__FILE__,__FUNCTION__,__LINE__)
++#define show_dinode_times(d)	__show_dinode_times((d),	\
++	__FILE__,__FUNCTION__,__LINE__)
++
+ extern void __unionfs_check_inode(const struct inode *inode, const char *fname,
+ 				  const char *fxn, int line);
+ extern void __unionfs_check_dentry(const struct dentry *dentry,
+@@ -542,6 +547,10 @@ extern void __unionfs_check_file(const struct file *file,
+ 				 const char *fname, const char *fxn, int line);
+ extern void __show_branch_counts(const struct super_block *sb,
+ 				 const char *file, const char *fxn, int line);
++extern void __show_inode_times(const struct inode *inode,
++			       const char *file, const char *fxn, int line);
++extern void __show_dinode_times(const struct dentry *dentry,
++				const char *file, const char *fxn, int line);
+ 
+ #else /* not UNIONFS_DEBUG */
+ 
+@@ -550,6 +559,8 @@ extern void __show_branch_counts(const struct super_block *sb,
+ #define unionfs_check_dentry(d)
+ #define unionfs_check_file(f)
+ #define show_branch_counts(sb)
++#define show_inode_times(i)
++#define show_dinode_times(d)
+ 
+ #endif /* not UNIONFS_DEBUG */
+ 
+-- 
+1.5.4.3
+

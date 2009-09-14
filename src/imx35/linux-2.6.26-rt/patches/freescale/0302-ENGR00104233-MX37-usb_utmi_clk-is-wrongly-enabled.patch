@@ -1,0 +1,68 @@
+From 3508d838d506f6f35efb409b485b5a5368fa7109 Mon Sep 17 00:00:00 2001
+From: Albert Chen <R65187@freescale.com>
+Date: Wed, 7 Jan 2009 11:06:53 +0800
+Subject: [PATCH] ENGR00104233 MX37: usb_utmi_clk is wrongly enabled.
+
+usb_utmi_clk is wrongly enabled.
+add _clk_enable_normal function.
+
+Signed-off-by: Albert Chen <r65187@freescale.com>
+---
+ arch/arm/mach-mx37/clock.c |   27 ++++++++++++++++++++++++---
+ 1 files changed, 24 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/clock.c b/arch/arm/mach-mx37/clock.c
+index 56688a1..7b5a06a 100644
+--- a/arch/arm/mach-mx37/clock.c
++++ b/arch/arm/mach-mx37/clock.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -59,6 +59,27 @@ extern void board_ref_clk_rate(unsigned long *ckil, unsigned long *osc,
+ 			       unsigned long *ckih);
+ static int cpu_clk_set_wp(int wp);
+ 
++
++static int _clk_enable_normal(struct clk *clk)
++{
++	u32 reg;
++
++	reg = __raw_readl(clk->enable_reg);
++	reg |= 1 << clk->enable_shift;
++	__raw_writel(reg, clk->enable_reg);
++
++	return 0;
++}
++
++static void _clk_disable_normal(struct clk *clk)
++{
++	u32 reg;
++
++	reg = __raw_readl(clk->enable_reg);
++	reg &= ~(1 << clk->enable_shift);
++	__raw_writel(reg, clk->enable_reg);
++}
++
+ static int _clk_enable(struct clk *clk)
+ {
+ 	u32 reg;
+@@ -2462,10 +2483,10 @@ static struct clk usb_utmi_clk = {
+ #else
+ 	.secondary = &emi_fast_clk,
+ #endif
+-	.enable = _clk_enable,
++	.enable = _clk_enable_normal,
+ 	.enable_reg = MXC_CCM_CSCMR1,
+ 	.enable_shift = MXC_CCM_CSCMR1_USB_PHY_CLK_SEL_OFFSET,
+-	.disable = _clk_disable,
++	.disable = _clk_disable_normal,
+ };
+ 
+ static struct clk rtc_clk = {
+-- 
+1.5.4.4
+

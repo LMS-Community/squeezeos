@@ -1,0 +1,44 @@
+From 03e18e0006af7288d01892adfc5fe11767ff9c31 Mon Sep 17 00:00:00 2001
+From: Lionel.Xu <r63889@freescale.com>
+Date: Fri, 12 Dec 2008 17:45:14 +0800
+Subject: [PATCH] ENGR00098769 MX35 mmc/sd card could not be checked after system resumed
+
+Force the card status to be updated before detecting mmc/sd card, in
+case any insert/remove operation happened for the card during system
+sleeps.
+
+Signed-off-by: Lionel Xu <r63889@freescale.com>
+---
+ drivers/mmc/host/mx_sdhci.c |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index 2fed450..c85ba5d 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -1547,6 +1547,7 @@ static int sdhci_resume(struct platform_device *pdev)
+ {
+ 	struct sdhci_chip *chip;
+ 	int i, ret;
++	unsigned int cd_status = 0;
+ 
+ 	chip = dev_get_drvdata(&pdev->dev);
+ 	if (!chip)
+@@ -1569,6 +1570,14 @@ static int sdhci_resume(struct platform_device *pdev)
+ 			return ret;
+ 		sdhci_init(chip->hosts[i]);
+ 		mmiowb();
++
++		cd_status = chip->hosts[i]->plat_data->status(chip->hosts[i]->
++		mmc->parent);
++		if (cd_status)
++			chip->hosts[i]->flags &= ~SDHCI_CD_PRESENT;
++		else
++			chip->hosts[i]->flags |= SDHCI_CD_PRESENT;
++
+ 		ret = mmc_resume_host(chip->hosts[i]->mmc);
+ 		if (ret)
+ 			return ret;
+-- 
+1.5.4.4
+

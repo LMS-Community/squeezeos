@@ -1,0 +1,367 @@
+From f84ed2bf880896d0736f889e2b50ef20f7198dbd Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 8 Sep 2008 12:21:34 -0500
+Subject: [PATCH] ENGR00069681-1 mmcsd: add device struct to write protect function
+
+add device struct to write protect function
+esdhci: remove LEDS support
+esdhci: add regulator support
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx3/board-mx3_3stack.h   |    4 ++
+ arch/arm/mach-mx3/mx3_3stack.c         |   11 ++----
+ arch/arm/mach-mx3/mx3_3stack_gpio.c    |    4 +-
+ arch/arm/mach-mx35/board-mx35_3stack.h |    2 +-
+ arch/arm/mach-mx35/mx35_3stack_gpio.c  |    2 +-
+ arch/arm/mach-mx37/board-mx37_3stack.h |    6 +++-
+ arch/arm/mach-mx37/mx37_3stack.c       |    7 ----
+ arch/arm/mach-mx37/mx37_3stack_gpio.c  |    2 +-
+ drivers/mmc/host/mx_sdhci.c            |   59 +++++++++-----------------------
+ drivers/mmc/host/mxc_mmc.c             |    2 +-
+ include/asm-arm/arch-mxc/mmc.h         |    2 +-
+ 11 files changed, 36 insertions(+), 65 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/board-mx3_3stack.h b/arch/arm/mach-mx3/board-mx3_3stack.h
+index bd98dc5..2377b78 100644
+--- a/arch/arm/mach-mx3/board-mx3_3stack.h
++++ b/arch/arm/mach-mx3/board-mx3_3stack.h
+@@ -142,5 +142,9 @@
+ #define MXC_BD_LED_ON(led)
+ #define MXC_BD_LED_OFF(led)
+ 
++extern unsigned int sdhc_get_card_det_status(struct device *dev);
++extern int sdhc_init_card_det(int id);
++extern int sdhc_write_protect(struct device *dev);
++
+ #endif				/* CONFIG_MACH_MX31_3DS */
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX31PDK_H__ */
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index e961515..51f5210 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -652,10 +652,6 @@ static void __inline mxc_init_pmic_audio(void)
+ /* MMC device data */
+ 
+ #if defined(CONFIG_MMC_MXC) || defined(CONFIG_MMC_MXC_MODULE)
+-extern unsigned int sdhc_get_card_det_status(struct device *dev);
+-extern int sdhc_init_card_det(int id);
+-extern int sdhc_write_protect(void);
+-
+ static struct mxc_mmc_platform_data mmc0_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
+ 	.min_clk = 150000,
+@@ -689,7 +685,7 @@ static struct resource mxcsdhc1_resources[] = {
+ 
+ static struct mxc_mmc_platform_data mmc1_data = {
+ 	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30 |
+-		    MMC_VDD_31_32,
++	    MMC_VDD_31_32,
+ 	.min_clk = 150000,
+ 	.max_clk = 25000000,
+ 	.card_fixed = 1,
+@@ -937,8 +933,8 @@ static struct mxc_unifi_platform_data unifi_data = {
+ 	.reg_gpo2 = "GPO4",
+ 
+ 	.reg_1v5_ana_bb = "VRF1",	/* VRF1 -> WL_1V5ANA and WL_1V5BB */
+-	.reg_vdd_vpa = "VMMC2",		/* VMMC2 -> WL_VDD and WL_VPA */
+-	.reg_1v5_dd = "VRF2",		/* VRF2 -> WL_1V5DD */
++	.reg_vdd_vpa = "VMMC2",	/* VMMC2 -> WL_VDD and WL_VPA */
++	.reg_1v5_dd = "VRF2",	/* VRF2 -> WL_1V5DD */
+ 
+ 	.host_id = 1,
+ };
+@@ -947,6 +943,7 @@ struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+ {
+ 	return &unifi_data;
+ }
++
+ EXPORT_SYMBOL(get_unifi_plat_data);
+ 
+ #if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
+diff --git a/arch/arm/mach-mx3/mx3_3stack_gpio.c b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+index 399f486..847bbc3 100644
+--- a/arch/arm/mach-mx3/mx3_3stack_gpio.c
++++ b/arch/arm/mach-mx3/mx3_3stack_gpio.c
+@@ -551,7 +551,7 @@ EXPORT_SYMBOL(gpio_sdhc_inactive);
+ /*
+  * Probe for the card. If present the GPIO data would be set.
+  */
+-int sdhc_get_card_det_status(struct device *dev)
++unsigned int sdhc_get_card_det_status(struct device *dev)
+ {
+ 	int ret;
+ 
+@@ -605,7 +605,7 @@ EXPORT_SYMBOL(sdhc_init_card_det);
+ /*!
+  * Get SD1_WP ADIN7 of ATLAS pin value to detect write protection
+  */
+-int sdhc_write_protect(void)
++int sdhc_write_protect(struct device *dev)
+ {
+ 	unsigned short rc = 0;
+ 
+diff --git a/arch/arm/mach-mx35/board-mx35_3stack.h b/arch/arm/mach-mx35/board-mx35_3stack.h
+index 61d84db..e630f12 100644
+--- a/arch/arm/mach-mx35/board-mx35_3stack.h
++++ b/arch/arm/mach-mx35/board-mx35_3stack.h
+@@ -197,7 +197,7 @@ extern void __init early_console_setup(char *);
+ extern void gpio_tsc_active(void);
+ extern void gpio_tsc_inactive(void);
+ extern unsigned int sdhc_get_card_det_status(struct device *dev);
+-extern int sdhc_write_protect(void);
++extern int sdhc_write_protect(struct device *dev);
+ extern void gpio_can_active(int id);
+ extern void gpio_can_inactive(int id);
+ extern struct flexcan_platform_data flexcan_data[];
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 6c2e5b6..d2f1635 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -620,7 +620,7 @@ EXPORT_SYMBOL(sdhc_get_card_det_status);
+ /*!
+  * Get pin value to detect write protection
+  */
+-int sdhc_write_protect(void)
++int sdhc_write_protect(struct device *dev)
+ {
+ 	unsigned int rc = 0;
+ 
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index 7ca4b7b..1ce1bbe 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -102,4 +102,8 @@
+ /* CPLD code version */
+ #define CPLD_CODE_VER_REG	BOARD_IO_ADDR + 0x50
+ 
++extern unsigned int sdhc_get_card_det_status(struct device *dev);
++extern int sdhc_write_protect(struct device *dev);
++extern int sdhc_init_card_det(int id);
++
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX37_3STACK_H__ */
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index da33290..4a50988 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -62,7 +62,6 @@ extern void mxc_cpu_common_init(void);
+ extern int mxc_clocks_init(void);
+ extern void __init early_console_setup(char *);
+ 
+-
+ /* working point(wp): 0 - 532MHz; 1 - 200MHz; */
+ static struct cpu_wp cpu_wp_auto[] = {
+ 	{
+@@ -87,8 +86,6 @@ struct cpu_wp *get_cpu_wp(int *wp)
+ 	return cpu_wp_auto;
+ }
+ 
+-
+-
+ static void mxc_nop_release(struct device *dev)
+ {
+ 	/* Nothing */
+@@ -425,10 +422,6 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ }
+ 
+ #if defined(CONFIG_MMC_IMX_ESDHCI) || defined(CONFIG_MMC_IMX_ESDHCI_MODULE)
+-extern unsigned int sdhc_get_card_det_status(struct device *dev);
+-extern int sdhc_init_card_det(int id);
+-extern int sdhc_write_protect(void);
+-
+ static struct mxc_mmc_platform_data mmc_data = {
+ 	.ocr_mask = MMC_VDD_32_33,
+ 	.min_clk = 400000,
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index db1fbf8..d7e6264 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -399,7 +399,7 @@ EXPORT_SYMBOL(sdhc_init_card_det);
+ /*!
+  * Get CSPI1_SS0 pin value to detect write protection
+  */
+-int sdhc_write_protect(void)
++int sdhc_write_protect(struct device *dev)
+ {
+ 	unsigned short rc = 0;
+ 
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index 665c10d..f57331f 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -245,24 +245,6 @@ static void sdhci_deactivate_led(struct sdhci_host *host)
+ 	writel(ctrl, host->ioaddr + SDHCI_HOST_CONTROL);
+ }
+ 
+-#ifdef CONFIG_LEDS_CLASS
+-static void sdhci_led_control(struct led_classdev *led,
+-			      enum led_brightness brightness)
+-{
+-	struct sdhci_host *host = container_of(led, struct sdhci_host, led);
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&host->lock, flags);
+-
+-	if (brightness == LED_OFF)
+-		sdhci_deactivate_led(host);
+-	else
+-		sdhci_activate_led(host);
+-
+-	spin_unlock_irqrestore(&host->lock, flags);
+-}
+-#endif
+-
+ /*****************************************************************************\
+  *                                                                           *
+  * Core functions                                                            *
+@@ -868,9 +850,7 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ 
+ 	WARN_ON(host->mrq != NULL);
+ 
+-#ifndef CONFIG_LEDS_CLASS
+ 	sdhci_activate_led(host);
+-#endif
+ 
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ 	host->mrq = mrq;
+@@ -977,7 +957,7 @@ static int sdhci_get_ro(struct mmc_host *mmc)
+ 	host = mmc_priv(mmc);
+ 
+ 	if (host->plat_data->wp_status)
+-		return host->plat_data->wp_status();
++		return host->plat_data->wp_status(mmc->parent);
+ 	else
+ 		return 0;
+ }
+@@ -1100,9 +1080,7 @@ static void sdhci_tasklet_finish(unsigned long param)
+ 	host->cmd = NULL;
+ 	host->data = NULL;
+ 
+-#ifndef CONFIG_LEDS_CLASS
+ 	sdhci_deactivate_led(host);
+-#endif
+ 
+ 	mmiowb();
+ 	spin_unlock_irqrestore(&host->lock, flags);
+@@ -1562,6 +1540,15 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	/* Active the eSDHC bus */
+ 	gpio_sdhc_active(pdev->id);
+ 
++	/* Get pwr supply for eSDHC */
++	if (NULL != mmc_plat->power_mmc) {
++		host->regulator_mmc =
++		    regulator_get(&pdev->dev, mmc_plat->power_mmc);
++		if (IS_ERR(host->regulator_mmc)) {
++			ret = PTR_ERR(host->regulator_mmc);
++			goto out1;
++		}
++	}
+ 	/* Get the SDHC clock from clock system APIs */
+ 	host->clk = clk_get(&pdev->dev, mmc_plat->clock_mmc);
+ 	if (NULL != host->clk) {
+@@ -1574,17 +1561,17 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	host->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!host->res) {
+ 		ret = -ENOMEM;
+-		goto out1;
++		goto out2;
+ 	}
+ 	host->irq = platform_get_irq(pdev, 0);
+ 	if (!host->irq) {
+ 		ret = -ENOMEM;
+-		goto out1;
++		goto out2;
+ 	}
+ 	host->detect_irq = platform_get_irq(pdev, 1);
+ 	if (!host->detect_irq) {
+ 		ret = -ENOMEM;
+-		goto out1;
++		goto out2;
+ 	}
+ 
+ 	do {
+@@ -1608,7 +1595,7 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 				host->res->start + 1, pdev->name)) {
+ 		printk(KERN_ERR "request_mem_region failed\n");
+ 		ret = -ENOMEM;
+-		goto out1;
++		goto out2;
+ 	}
+ 	host->ioaddr = (void *)ioremap(host->res->start, host->res->end -
+ 				       host->res->start + 1);
+@@ -1774,17 +1761,6 @@ static int __devinit sdhci_probe_slot(struct platform_device
+ 	sdhci_dumpregs(host);
+ #endif
+ 
+-#ifdef CONFIG_LEDS_CLASS
+-	host->led.name = mmc_hostname(mmc);
+-	host->led.brightness = LED_OFF;
+-	host->led.default_trigger = mmc_hostname(mmc);
+-	host->led.brightness_set = sdhci_led_control;
+-
+-	ret = led_classdev_register(&pdev->dev, &host->led);
+-	if (ret)
+-		goto out6;
+-#endif
+-
+ 	mmiowb();
+ 
+ 	if (mmc_add_host(mmc) < 0)
+@@ -1814,8 +1790,9 @@ out3:
+ 		kfree(adma_des_table);
+ 	release_mem_region(host->res->start,
+ 			   host->res->end - host->res->start + 1);
+-out1:
++out2:
+ 	clk_disable(host->clk);
++out1:
+ 	gpio_sdhc_inactive(pdev->id);
+ out0:
+ 	mmc_free_host(mmc);
+@@ -1836,10 +1813,6 @@ static void sdhci_remove_slot(struct platform_device *pdev, int slot)
+ 
+ 	mmc_remove_host(mmc);
+ 
+-#ifdef CONFIG_LEDS_CLASS
+-	led_classdev_unregister(&host->led);
+-#endif
+-
+ 	sdhci_reset(host, SDHCI_RESET_ALL);
+ 
+ 	if (host->detect_irq)
+diff --git a/drivers/mmc/host/mxc_mmc.c b/drivers/mmc/host/mxc_mmc.c
+index 0b8d132..89bd40a 100644
+--- a/drivers/mmc/host/mxc_mmc.c
++++ b/drivers/mmc/host/mxc_mmc.c
+@@ -1099,7 +1099,7 @@ static int mxcmci_get_ro(struct mmc_host *mmc)
+ 	struct mxcmci_host *host = mmc_priv(mmc);
+ 
+ 	if (host->plat_data->wp_status)
+-		return host->plat_data->wp_status();
++		return host->plat_data->wp_status(mmc->parent);
+ 	else
+ 		return 0;
+ }
+diff --git a/include/asm-arm/arch-mxc/mmc.h b/include/asm-arm/arch-mxc/mmc.h
+index cfb7828..f3c0527 100644
+--- a/include/asm-arm/arch-mxc/mmc.h
++++ b/include/asm-arm/arch-mxc/mmc.h
+@@ -24,7 +24,7 @@ struct mxc_mmc_platform_data {
+ 	unsigned int card_inserted_state:1;
+ //      u32 (*translate_vdd)(struct device *, unsigned int);
+ 	unsigned int (*status) (struct device *);
+-	int (*wp_status) (void);
++	int (*wp_status) (struct device *);
+ 	char *power_mmc;
+ 	char *clock_mmc;
+ };
+-- 
+1.5.4.4
+

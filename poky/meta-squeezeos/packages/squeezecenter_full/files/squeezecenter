@@ -1,0 +1,38 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+	echo "Starting SqueezeCenter"
+	
+	/usr/squeezecenter/slimserver.pl --notranscoding --nosb1slimp3sync --noinfolog --nodebuglog &
+	;;
+
+    stop)
+	echo "Stopping SqueezeCenter"
+
+	killall -q slimserver.pl
+	;;
+
+    rescan)
+	$0 stop
+	
+	echo "Running scanner"
+	(
+		/usr/squeezecenter/scanner.pl --wipe --rescan --json /etc/squeezecenter/scan.json --noinfolog --nodebuglog
+	
+		$0 start
+	) &
+	;;
+
+    restart)
+	$0 stop
+	sleep 2
+	$0 start
+	;;
+
+    *)
+	echo "Usage: $0 {start|stop|rescan|restart}"
+	exit 1
+esac
+
+exit 0

@@ -1,0 +1,46 @@
+From 712005e660c699bd04a9e85c9c60d79905c4ca79 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Thu, 2 Oct 2008 10:04:13 -0500
+Subject: [PATCH] ENGR00093895 Fix minor USB differences in 2.6.26 kernel
+
+fix a couple of minor differences in the ehci-iram code
+to the ehci 2.6.26 kernel.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/host/ehci-mem-iram.c |    4 ++--
+ drivers/usb/host/ehci-q-iram.c   |    2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-mem-iram.c b/drivers/usb/host/ehci-mem-iram.c
+index 8c9344f..66dd6e4 100644
+--- a/drivers/usb/host/ehci-mem-iram.c
++++ b/drivers/usb/host/ehci-mem-iram.c
+@@ -483,9 +483,9 @@ static int ehci_mem_init(struct ehci_hcd *ehci, gfp_t flags)
+ 	if (!ehci->sitd_pool)
+ 		goto fail;
+ 
+-	ehci->periodic = (__hc32 *)
++	ehci->periodic = (__le32 *)
+ 	    dma_alloc_coherent(ehci_to_hcd(ehci)->self.controller,
+-			       ehci->periodic_size * sizeof(__hc32),
++			       ehci->periodic_size * sizeof(__le32),
+ 			       &ehci->periodic_dma, 0);
+ 
+ 	if (ehci->periodic == NULL)
+diff --git a/drivers/usb/host/ehci-q-iram.c b/drivers/usb/host/ehci-q-iram.c
+index 860357c..3188885 100644
+--- a/drivers/usb/host/ehci-q-iram.c
++++ b/drivers/usb/host/ehci-q-iram.c
+@@ -1288,7 +1288,7 @@ static void start_unlink_async(struct ehci_hcd *ehci, struct ehci_qh *qh)
+ 	cmd |= CMD_IAAD;
+ 	ehci_writel(ehci, cmd, &ehci->regs->command);
+ 	(void)ehci_readl(ehci, &ehci->regs->command);
+-	iaa_watchdog_done(ehci);
++	iaa_watchdog_start(ehci);
+ }
+ 
+ /*-------------------------------------------------------------------------*/
+-- 
+1.5.4.4
+

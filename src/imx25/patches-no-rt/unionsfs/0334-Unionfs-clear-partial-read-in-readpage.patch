@@ -1,0 +1,28 @@
+From 580ad06def695215f46a91e6cb72ac05a06b2f25 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 9 Nov 2007 10:27:32 -0500
+Subject: [PATCH] Unionfs: clear partial read in readpage
+
+Signed-off-by: Hugh Dickins <hugh@veritas.com>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 468dc61..bb00fd5 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -178,7 +178,8 @@ static int unionfs_do_readpage(struct file *file, struct page *page)
+ 	err = vfs_read(lower_file, page_data, PAGE_CACHE_SIZE,
+ 		       &lower_file->f_pos);
+ 	set_fs(old_fs);
+-
++	if (err >= 0 && err < PAGE_CACHE_SIZE)
++		memset(page_data + err, 0, PAGE_CACHE_SIZE - err);
+ 	kunmap(page);
+ 
+ 	if (err < 0)
+-- 
+1.5.4.3
+

@@ -1,0 +1,264 @@
+From 328b21e07bb9714d10ad20203291b164c162e4ce Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Thu, 30 Oct 2008 12:56:18 +0800
+Subject: [PATCH] ENGR00096986-2 camera gpio and regulator on/off change
+
+1) Move enabling gpio to camera module init to avoid
+   double enabling gpio in config function.
+2) Move enabling regulator to probe to correct regulator
+   enabling counter. And, fix regulator put issue.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov3640.c |  158 ++++++++++++++++-------------
+ 1 files changed, 87 insertions(+), 71 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index 926bbb4..932b5e5 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -30,7 +30,7 @@
+ #endif
+ 
+ #define OV3640_VOLTAGE_ANALOG               2800000
+-/*#define OV3640_VOLTAGE_DIGITAL_CORE         1500000*/
++#define OV3640_VOLTAGE_DIGITAL_CORE         1500000
+ #define OV3640_VOLTAGE_DIGITAL_IO           1800000
+ 
+ enum ov3640_mode {
+@@ -227,9 +227,9 @@ static struct ov3640_mode_info ov3640_mode_info_data[] = {
+ 
+ static s32 s32csi_index;
+ static struct regulator *io_regulator;
+-/*static struct regulator *core_regulator; */
++static struct regulator *core_regulator;
+ static struct regulator *analog_regulator;
+-/*static struct regulator *gpo_regulator;*/
++static struct regulator *gpo_regulator;
+ 
+ u32 mclk = 24000000; /* 6 - 54 MHz, typical 24MHz */
+ 
+@@ -279,14 +279,65 @@ static int ov3640_probe(struct i2c_client *client,
+ 	mclk = plat_data->mclk;
+ 	s32csi_index = camera_sensor_if.csi = plat_data->csi;
+ 
+-	io_regulator     = regulator_get(&client->dev,
+-						plat_data->io_regulator);
+-	/*core_regulator   = regulator_get(&client->dev,
+-						plat_data->core_regulator); */
++	io_regulator = regulator_get(&client->dev,
++				     plat_data->io_regulator);
++
++	if (!IS_ERR_VALUE((u32)io_regulator)) {
++		regulator_set_voltage(io_regulator, OV3640_VOLTAGE_DIGITAL_IO);
++		if (regulator_enable(io_regulator) != 0) {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:io set voltage error\n", __func__);
++			goto err1;
++		} else {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:io set voltage ok\n", __func__);
++		}
++	}
++
++	core_regulator = regulator_get(&client->dev,
++				       plat_data->core_regulator);
++
++	if (!IS_ERR_VALUE((u32)core_regulator)) {
++		regulator_set_voltage(core_regulator,
++					OV3640_VOLTAGE_DIGITAL_CORE);
++		if (regulator_enable(core_regulator) != 0) {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:core set voltage error\n", __func__);
++			goto err2;
++		} else {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:core set voltage ok\n", __func__);
++		}
++	}
++
+ 	analog_regulator = regulator_get(&client->dev,
+-						plat_data->analog_regulator);
+-	/*gpo_regulator    = regulator_get(&client->dev,
+-						plat_data->gpo_regulator); */
++					 plat_data->analog_regulator);
++
++	if (!IS_ERR_VALUE((u32)analog_regulator)) {
++		regulator_set_voltage(analog_regulator, OV3640_VOLTAGE_ANALOG);
++		if (regulator_enable(analog_regulator) != 0) {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:analog set voltage error\n", __func__);
++			goto err3;
++		} else {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:analog set voltage ok\n", __func__);
++		}
++	}
++
++	gpo_regulator = regulator_get(&client->dev,
++				      plat_data->gpo_regulator);
++
++	if (!IS_ERR_VALUE((u32)gpo_regulator)) {
++		if (regulator_enable(gpo_regulator) != 0) {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:gpo3 enable error\n", __func__);
++			goto err4;
++		} else {
++			dev_dbg(&ov3640_i2c_client->dev,
++				"%s:gpo3 enable ok\n", __func__);
++		}
++	}
+ 
+ 	if (NULL == interface_param) {
+ 		interface_param = kmalloc(sizeof(sensor_interface), GFP_KERNEL);
+@@ -305,6 +356,23 @@ static int ov3640_probe(struct i2c_client *client,
+ 	CAMERA_TRACE(("CAMERA_DBG Exit: ov3640_probe\n"));
+ 
+ 	return 0;
++err4:
++	if (!IS_ERR_VALUE((u32)analog_regulator)) {
++		regulator_disable(analog_regulator);
++		regulator_put(analog_regulator, &client->dev);
++	}
++err3:
++	if (!IS_ERR_VALUE((u32)core_regulator)) {
++		regulator_disable(core_regulator);
++		regulator_put(core_regulator, &client->dev);
++	}
++err2:
++	if (!IS_ERR_VALUE((u32)io_regulator)) {
++		regulator_disable(io_regulator);
++		regulator_put(io_regulator, &client->dev);
++	}
++err1:
++	return -1;
+ }
+ 
+ /*!
+@@ -324,24 +392,22 @@ static int ov3640_remove(struct i2c_client *client)
+ 
+ 	if (!IS_ERR_VALUE((u32)io_regulator)) {
+ 		regulator_disable(io_regulator);
+-		regulator_put(io_regulator, NULL);
++		regulator_put(io_regulator, &client->dev);
+ 	}
+ 
+-/*
+ 	if (!IS_ERR_VALUE((u32)core_regulator)) {
+ 		regulator_disable(core_regulator);
+-		regulator_put(core_regulator, NULL);
++		regulator_put(core_regulator, &client->dev);
+ 	}
+ 
+ 	if (!IS_ERR_VALUE((u32)gpo_regulator)) {
+ 		regulator_disable(gpo_regulator);
+-		regulator_put(gpo_regulator, NULL);
++		regulator_put(gpo_regulator, &client->dev);
+ 	}
+-*/
+ 
+ 	if (!IS_ERR_VALUE((u32)analog_regulator)) {
+ 		regulator_disable(analog_regulator);
+-		regulator_put(analog_regulator, NULL);
++		regulator_put(analog_regulator, &client->dev);
+ 	}
+ 
+ 	CAMERA_TRACE(("CAMERA_DBG Exit: ov3640_remove\n"));
+@@ -488,8 +554,6 @@ static void ov3640_get_std_mode(v4l2_std_id * std)
+ 
+ }
+ 
+-extern void gpio_sensor_active(unsigned int csi_index);
+-
+ static sensor_interface *ov3640_config(int *frame_rate, int mode)
+ {
+ 
+@@ -506,59 +570,6 @@ static sensor_interface *ov3640_config(int *frame_rate, int mode)
+ 
+ 	CAMERA_TRACE(("mode: %d\n", mode));
+ 
+-	if (!IS_ERR_VALUE((u32)io_regulator)) {
+-		regulator_set_voltage(io_regulator, OV3640_VOLTAGE_DIGITAL_IO);
+-		if (regulator_enable(io_regulator) != 0) {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:io set voltage error\n", __func__);
+-			return NULL;
+-		} else {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:io set voltage ok\n", __func__);
+-		}
+-	}
+-
+-/*
+-	if (!IS_ERR_VALUE((u32)core_regulator)) {
+-		regulator_set_voltage(core_regulator,
+-					OV3640_VOLTAGE_DIGITAL_CORE);
+-
+-		if (regulator_enable(core_regulator) != 0) {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:core set voltage error\n", __func__);
+-			return NULL;
+-		} else {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:core set voltage ok\n", __func__);
+-		}
+-	}
+-
+-	if (!IS_ERR_VALUE((u32)gpo_regulator)) {
+-		if (regulator_enable(gpo_regulator) != 0) {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:gpo3 enable error\n", __func__);
+-			return NULL;
+-		} else {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:gpo3 enable ok\n", __func__);
+-		}
+-	}
+-*/
+-
+-	if (!IS_ERR_VALUE((u32)analog_regulator)) {
+-		regulator_set_voltage(analog_regulator, OV3640_VOLTAGE_ANALOG);
+-		if (regulator_enable(analog_regulator) != 0) {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:analog set voltage error\n", __func__);
+-			return NULL;
+-		} else {
+-			dev_dbg(&ov3640_i2c_client->dev,
+-				"%s:analog set voltage ok\n", __func__);
+-		}
+-	}
+-
+-	gpio_sensor_active(s32csi_index);
+-
+ 	u32OutWidth  = ov3640_mode_info_data[mode].width;
+ 	u32OutHeight = ov3640_mode_info_data[mode].height;
+ 
+@@ -592,6 +603,8 @@ struct camera_sensor camera_sensor_if = {
+ 
+ EXPORT_SYMBOL(camera_sensor_if);
+ 
++extern void gpio_sensor_active(unsigned int csi_index);
++
+ /*!
+  * ov3640 init function
+  *
+@@ -603,6 +616,8 @@ static __init int ov3640_init(void)
+ 
+ 	CAMERA_TRACE(("CAMERA_DBG Entry: ov3640_init\n"));
+ 
++	gpio_sensor_active(s32csi_index);
++
+ 	err = i2c_add_driver(&ov3640_i2c_driver);
+ 
+ 	CAMERA_TRACE(("CAMERA_DBG Exit: ov3640_init\n"));
+@@ -611,6 +626,7 @@ static __init int ov3640_init(void)
+ }
+ 
+ extern void gpio_sensor_inactive(unsigned int csi);
++
+ /*!
+  * OV3640 cleanup function
+  *
+-- 
+1.5.4.4
+

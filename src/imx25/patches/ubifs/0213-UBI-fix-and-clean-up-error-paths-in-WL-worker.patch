@@ -1,0 +1,258 @@
+From f572048337d0a384b8e3513d231f1403874a11c0 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 24 May 2009 11:58:58 +0300
+Subject: [PATCH] UBI: fix and clean-up error paths in WL worker
+
+This patch fixes the error path in the WL worker - in same cases
+UBI oopses when 'goto out_error' happens and e1 or e2 are NULL.
+This patch also cleans up the error paths a little. And I have
+tested nearly all error paths in the WL worker.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c |   14 +++---
+ drivers/mtd/ubi/wl.c  |  100 ++++++++++++++++++++++--------------------------
+ 2 files changed, 53 insertions(+), 61 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 63e08cc..5501d32 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -963,7 +963,7 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	vol_id = be32_to_cpu(vid_hdr->vol_id);
+ 	lnum = be32_to_cpu(vid_hdr->lnum);
+ 
+-	dbg_eba("copy LEB %d:%d, PEB %d to PEB %d", vol_id, lnum, from, to);
++	dbg_wl("copy LEB %d:%d, PEB %d to PEB %d", vol_id, lnum, from, to);
+ 
+ 	if (vid_hdr->vol_type == UBI_VID_STATIC) {
+ 		data_size = be32_to_cpu(vid_hdr->data_size);
+@@ -984,7 +984,7 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	spin_unlock(&ubi->volumes_lock);
+ 	if (!vol) {
+ 		/* No need to do further work, cancel */
+-		dbg_eba("volume %d is being removed, cancel", vol_id);
++		dbg_wl("volume %d is being removed, cancel", vol_id);
+ 		return MOVE_CANCEL_RACE;
+ 	}
+ 
+@@ -1003,7 +1003,7 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	 */
+ 	err = leb_write_trylock(ubi, vol_id, lnum);
+ 	if (err) {
+-		dbg_eba("contention on LEB %d:%d, cancel", vol_id, lnum);
++		dbg_wl("contention on LEB %d:%d, cancel", vol_id, lnum);
+ 		return MOVE_CANCEL_RACE;
+ 	}
+ 
+@@ -1013,9 +1013,9 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	 * cancel it.
+ 	 */
+ 	if (vol->eba_tbl[lnum] != from) {
+-		dbg_eba("LEB %d:%d is no longer mapped to PEB %d, mapped to "
+-			"PEB %d, cancel", vol_id, lnum, from,
+-			vol->eba_tbl[lnum]);
++		dbg_wl("LEB %d:%d is no longer mapped to PEB %d, mapped to "
++		       "PEB %d, cancel", vol_id, lnum, from,
++		       vol->eba_tbl[lnum]);
+ 		err = MOVE_CANCEL_RACE;
+ 		goto out_unlock_leb;
+ 	}
+@@ -1027,7 +1027,7 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	 * @ubi->buf_mutex.
+ 	 */
+ 	mutex_lock(&ubi->buf_mutex);
+-	dbg_eba("read %d bytes of data", aldata_size);
++	dbg_wl("read %d bytes of data", aldata_size);
+ 	err = ubi_io_read_data(ubi, ubi->peb_buf1, from, 0, aldata_size);
+ 	if (err && err != UBI_IO_BITFLIPS) {
+ 		ubi_warn("error %d while reading data from PEB %d",
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 6c4848e..088e630 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -653,7 +653,7 @@ static int schedule_erase(struct ubi_device *ubi, struct ubi_wl_entry *e,
+ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 				int cancel)
+ {
+-	int err, scrubbing = 0, torture = 0;
++	int err, scrubbing = 0, torture = 0, protect = 0;
+ 	struct ubi_wl_entry *e1, *e2;
+ 	struct ubi_vid_hdr *vid_hdr;
+ 
+@@ -738,64 +738,52 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 			/*
+ 			 * We are trying to move PEB without a VID header. UBI
+ 			 * always write VID headers shortly after the PEB was
+-			 * given, so we have a situation when it did not have
+-			 * chance to write it down because it was preempted.
+-			 * Just re-schedule the work, so that next time it will
+-			 * likely have the VID header in place.
++			 * given, so we have a situation when it has not yet
++			 * had a chance to write it, because it was preempted.
++			 * So add this PEB to the protection queue so far,
++			 * because presubably more data will be written there
++			 * (including the missin VID header), and then we'll
++			 * move it.
+ 			 */
+ 			dbg_wl("PEB %d has no VID header", e1->pnum);
++			protect = 1;
+ 			goto out_not_moved;
+ 		}
+ 
+ 		ubi_err("error %d while reading VID header from PEB %d",
+ 			err, e1->pnum);
+-		if (err > 0)
+-			err = -EIO;
+ 		goto out_error;
+ 	}
+ 
+ 	err = ubi_eba_copy_leb(ubi, e1->pnum, e2->pnum, vid_hdr);
+ 	if (err) {
++		if (err == MOVE_CANCEL_RACE) {
++			/*
++			 * The LEB has not been moved because the volume is
++			 * being deleted or the PEB has been put meanwhile. We
++			 * should prevent this PEB from being selected for
++			 * wear-leveling movement again, so put it to the
++			 * protection queue.
++			 */
++			protect = 1;
++			goto out_not_moved;
++		}
++
+ 		if (err == MOVE_CANCEL_BITFLIPS ||
+ 		    err == MOVE_TARGET_WR_ERR) {
+ 			/* Target PEB bit-flips or write error, torture it */
+ 			torture = 1;
+ 			goto out_not_moved;
+ 		}
++
+ 		if (err < 0)
+ 			goto out_error;
+ 
+-		/*
+-		 * The LEB has not been moved because the volume is being
+-		 * deleted or the PEB has been put meanwhile. We should prevent
+-		 * this PEB from being selected for wear-leveling movement
+-		 * again, so put it to the protection queue.
+-		 */
+-
+-		dbg_wl("canceled moving PEB %d", e1->pnum);
+-		ubi_assert(err == MOVE_CANCEL_RACE);
+-
+-		ubi_free_vid_hdr(ubi, vid_hdr);
+-		vid_hdr = NULL;
+-
+-		spin_lock(&ubi->wl_lock);
+-		prot_queue_add(ubi, e1);
+-		ubi_assert(!ubi->move_to_put);
+-		ubi->move_from = ubi->move_to = NULL;
+-		ubi->wl_scheduled = 0;
+-		spin_unlock(&ubi->wl_lock);
+-
+-		e1 = NULL;
+-		err = schedule_erase(ubi, e2, 0);
+-		if (err)
+-			goto out_error;
+-		mutex_unlock(&ubi->move_mutex);
+-		return 0;
++		ubi_assert(0);
+ 	}
+ 
+ 	/* The PEB has been successfully moved */
+ 	ubi_free_vid_hdr(ubi, vid_hdr);
+-	vid_hdr = NULL;
+ 	if (scrubbing)
+ 		ubi_msg("scrubbed PEB %d, data moved to PEB %d",
+ 			e1->pnum, e2->pnum);
+@@ -811,8 +799,9 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 
+ 	err = schedule_erase(ubi, e1, 0);
+ 	if (err) {
+-		e1 = NULL;
+-		goto out_error;
++		kmem_cache_free(ubi_wl_entry_slab, e1);
++		kmem_cache_free(ubi_wl_entry_slab, e2);
++		goto out_ro;
+ 	}
+ 
+ 	if (e2) {
+@@ -822,8 +811,10 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 		 */
+ 		dbg_wl("PEB %d was put meanwhile, erase", e2->pnum);
+ 		err = schedule_erase(ubi, e2, 0);
+-		if (err)
+-			goto out_error;
++		if (err) {
++			kmem_cache_free(ubi_wl_entry_slab, e2);
++			goto out_ro;
++		}
+ 	}
+ 
+ 	dbg_wl("done");
+@@ -836,11 +827,12 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 	 * have been changed, schedule it for erasure.
+ 	 */
+ out_not_moved:
+-	dbg_wl("canceled moving PEB %d", e1->pnum);
+-	ubi_free_vid_hdr(ubi, vid_hdr);
+-	vid_hdr = NULL;
++	dbg_wl("cancel moving PEB %d to PEB %d (%d)",
++	       e1->pnum, e2->pnum, err);
+ 	spin_lock(&ubi->wl_lock);
+-	if (scrubbing)
++	if (protect)
++		prot_queue_add(ubi, e1);
++	else if (scrubbing)
+ 		wl_tree_add(e1, &ubi->scrub);
+ 	else
+ 		wl_tree_add(e1, &ubi->used);
+@@ -849,32 +841,32 @@ out_not_moved:
+ 	ubi->wl_scheduled = 0;
+ 	spin_unlock(&ubi->wl_lock);
+ 
+-	e1 = NULL;
++	ubi_free_vid_hdr(ubi, vid_hdr);
+ 	err = schedule_erase(ubi, e2, torture);
+-	if (err)
+-		goto out_error;
+-
++	if (err) {
++		kmem_cache_free(ubi_wl_entry_slab, e2);
++		goto out_ro;
++	}
+ 	mutex_unlock(&ubi->move_mutex);
+ 	return 0;
+ 
+ out_error:
+ 	ubi_err("error %d while moving PEB %d to PEB %d",
+ 		err, e1->pnum, e2->pnum);
+-
+-	ubi_free_vid_hdr(ubi, vid_hdr);
+ 	spin_lock(&ubi->wl_lock);
+ 	ubi->move_from = ubi->move_to = NULL;
+ 	ubi->move_to_put = ubi->wl_scheduled = 0;
+ 	spin_unlock(&ubi->wl_lock);
+ 
+-	if (e1)
+-		kmem_cache_free(ubi_wl_entry_slab, e1);
+-	if (e2)
+-		kmem_cache_free(ubi_wl_entry_slab, e2);
+-	ubi_ro_mode(ubi);
++	ubi_free_vid_hdr(ubi, vid_hdr);
++	kmem_cache_free(ubi_wl_entry_slab, e1);
++	kmem_cache_free(ubi_wl_entry_slab, e2);
+ 
++out_ro:
++	ubi_ro_mode(ubi);
+ 	mutex_unlock(&ubi->move_mutex);
+-	return err;
++	ubi_assert(err != 0);
++	return err < 0 ? err : -EIO;
+ 
+ out_cancel:
+ 	ubi->wl_scheduled = 0;
+-- 
+1.5.4.3
+

@@ -1,0 +1,896 @@
+From 23a5847f9e41a38dc75205143a7c5be56ebaa7e8 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Fri, 10 Oct 2008 11:02:07 +0800
+Subject: [PATCH] ENGR00069672-2 IPUv3EX: v4l2 capture changes
+
+v4l2 capture code changes for capture feature
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/ipu_prp_enc.c      |   16 +++-
+ drivers/media/video/mxc/capture/ipu_prp_vf_adc.c   |   22 +++--
+ drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c   |   57 +++++++-----
+ .../media/video/mxc/capture/ipu_prp_vf_sdc_bg.c    |   31 ++++---
+ drivers/media/video/mxc/capture/ipu_still.c        |   44 ++++++++--
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   94 +++++++++++++++----
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |   12 +++-
+ drivers/media/video/mxc/capture/sensor_clock.c     |   35 +++++++
+ 8 files changed, 232 insertions(+), 79 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index 31fe635..9d870a9 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -68,11 +68,15 @@ static int prp_enc_setup(cam_data * cam)
+ 		return -ENXIO;
+ 	}
+ 
++	memset(&enc, 0, sizeof(ipu_channel_params_t));
++
+ 	ipu_csi_get_window_size(&enc.csi_prp_enc_mem.in_width,
+-				&enc.csi_prp_enc_mem.in_height);
+-	enc.csi_prp_enc_mem.in_pixel_fmt = IPU_PIX_FMT_UYVY;
++				&enc.csi_prp_enc_mem.in_height,
++				cam->cam_sensor->csi);
++	enc.csi_prp_enc_mem.in_pixel_fmt = sensor_output_fmt;
+ 	enc.csi_prp_enc_mem.out_width = cam->v2f.fmt.pix.width;
+ 	enc.csi_prp_enc_mem.out_height = cam->v2f.fmt.pix.height;
++	enc.csi_prp_enc_mem.csi = cam->cam_sensor->csi;
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		enc.csi_prp_enc_mem.out_width = cam->v2f.fmt.pix.height;
+ 		enc.csi_prp_enc_mem.out_height = cam->v2f.fmt.pix.width;
+@@ -108,7 +112,8 @@ static int prp_enc_setup(cam_data * cam)
+ 		printk(KERN_ERR "ipu_init_channel %d\n", err);
+ 		return err;
+ 	}
+-	ipu_csi_enable_mclk(CSI_MCLK_ENC, true, true);
++
++	ipu_csi_enable_mclk_if(CSI_MCLK_ENC, cam->cam_sensor->csi, true, true);
+ 
+ 	grotation = cam->rotation;
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+@@ -344,7 +349,8 @@ static int prp_enc_disabling_tasks(void *private)
+ 		ipu_uninit_channel(MEM_ROT_ENC_MEM);
+ 	}
+ 
+-	ipu_csi_enable_mclk(CSI_MCLK_ENC, false, false);
++	ipu_csi_enable_mclk_if(CSI_MCLK_ENC,
++		cam->cam_sensor->csi, false, false);
+ 
+ 	return err;
+ }
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c b/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c
+index 56a82fb..1493292 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -59,7 +59,7 @@ static int prpvf_start(void *private)
+ 	memset(&vf, 0, sizeof(ipu_channel_params_t));
+ 	ipu_csi_get_window_size(&vf.csi_prp_vf_adc.in_width,
+ 				&vf.csi_prp_vf_adc.in_height);
+-	vf.csi_prp_vf_adc.in_pixel_fmt = IPU_PIX_FMT_UYVY;
++	vf.csi_prp_vf_adc.in_pixel_fmt = sensor_output_fmt;
+ 	vf.csi_prp_vf_adc.out_width = cam->win.w.width;
+ 	vf.csi_prp_vf_adc.out_height = cam->win.w.height;
+ 	vf.csi_prp_vf_adc.graphics_combine_en = 0;
+@@ -85,7 +85,8 @@ static int prpvf_start(void *private)
+ 		if (err != 0)
+ 			return err;
+ 
+-		ipu_csi_enable_mclk(CSI_MCLK_VF, true, true);
++		ipu_csi_enable_mclk_if(CSI_MCLK_VF,
++			cam->cam_sensor->csi, true, true);
+ 
+ 		if (cam->vf_bufs_vaddr[0]) {
+ 			dma_free_coherent(0, cam->vf_bufs_size[0],
+@@ -281,7 +282,8 @@ static int prpvf_start(void *private)
+ 			       "initializing CSI_PRP_VF_ADC\n");
+ 			return err;
+ 		}
+-		ipu_csi_enable_mclk(CSI_MCLK_VF, true, true);
++		ipu_csi_enable_mclk_if(CSI_MCLK_VF,
++			cam->cam_sensor->csi, true, true);
+ 		err = ipu_init_channel_buffer(CSI_PRP_VF_ADC, IPU_OUTPUT_BUFFER,
+ 					      format, cam->win.w.width,
+ 					      cam->win.w.height,
+@@ -305,7 +307,8 @@ static int prpvf_start(void *private)
+ 			return err;
+ 		}
+ 
+-		ipu_csi_enable_mclk(CSI_MCLK_VF, true, true);
++		ipu_csi_enable_mclk_if(CSI_MCLK_VF,
++			cam->cam_sensor->csi, true, true);
+ 
+ 		if (cam->vf_bufs[0]) {
+ 			dma_free_coherent(0, cam->vf_bufs_size[0],
+@@ -475,13 +478,15 @@ static int prpvf_stop(void *private)
+ 		ipu_uninit_channel(MEM_ROT_VF_MEM);
+ 		ipu_uninit_channel(ADC_SYS2);
+ 
+-		ipu_csi_enable_mclk(CSI_MCLK_VF, false, false);
++		ipu_csi_enable_mclk_if(CSI_MCLK_VF,
++			cam->cam_sensor->csi, false, false);
+ 	}
+ #ifndef CONFIG_MXC_IPU_PRP_VF_SDC
+ 	else if (cam->rotation == IPU_ROTATE_NONE) {
+ 		ipu_disable_channel(CSI_PRP_VF_ADC, false);
+ 		ipu_uninit_channel(CSI_PRP_VF_ADC);
+-		ipu_csi_enable_mclk(CSI_MCLK_VF, false, false);
++		ipu_csi_enable_mclk_if(CSI_MCLK_VF,
++			cam->cam_sensor->csi, false, false);
+ 	}
+ #endif
+ 	else {
+@@ -493,7 +498,8 @@ static int prpvf_stop(void *private)
+ 		ipu_uninit_channel(CSI_PRP_VF_MEM);
+ 		ipu_uninit_channel(ADC_SYS2);
+ 
+-		ipu_csi_enable_mclk(CSI_MCLK_VF, false, false);
++		ipu_csi_enable_mclk_if(CSI_MCLK_VF,
++			cam->cam_sensor->csi, false, false);
+ 	}
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+index def6881..89568d6 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -37,7 +37,7 @@
+ static int prpvf_start(void *private)
+ {
+ 	cam_data *cam = (cam_data *) private;
+-	ipu_channel_params_t vf;
++	ipu_channel_params_t vf, params;
+ 	u32 format = IPU_PIX_FMT_RGB565;
+ 	u32 size = 2;
+ 	int err = 0;
+@@ -54,10 +54,12 @@ static int prpvf_start(void *private)
+ 
+ 	memset(&vf, 0, sizeof(ipu_channel_params_t));
+ 	ipu_csi_get_window_size(&vf.csi_prp_vf_mem.in_width,
+-				&vf.csi_prp_vf_mem.in_height);
+-	vf.csi_prp_vf_mem.in_pixel_fmt = IPU_PIX_FMT_UYVY;
++				&vf.csi_prp_vf_mem.in_height,
++				cam->cam_sensor->csi);
++	vf.csi_prp_vf_mem.in_pixel_fmt = sensor_output_fmt;
+ 	vf.csi_prp_vf_mem.out_width = cam->win.w.width;
+ 	vf.csi_prp_vf_mem.out_height = cam->win.w.height;
++	vf.csi_prp_vf_mem.csi = cam->cam_sensor->csi;
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		vf.csi_prp_vf_mem.out_width = cam->win.w.height;
+ 		vf.csi_prp_vf_mem.out_height = cam->win.w.width;
+@@ -69,7 +71,7 @@ static int prpvf_start(void *private)
+ 	if (err != 0)
+ 		goto out_4;
+ 
+-	ipu_csi_enable_mclk(CSI_MCLK_VF, true, true);
++	ipu_csi_enable_mclk_if(CSI_MCLK_VF, cam->cam_sensor->csi, true, true);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+@@ -81,7 +83,7 @@ static int prpvf_start(void *private)
+ 				  cam->vf_bufs_vaddr[1],
+ 				  (dma_addr_t) cam->vf_bufs[1]);
+ 	}
+-	cam->vf_bufs_size[0] = size;
++	cam->vf_bufs_size[0] = PAGE_ALIGN(size);
+ 	cam->vf_bufs_vaddr[0] = (void *)dma_alloc_coherent(0,
+ 							   cam->vf_bufs_size[0],
+ 							   (dma_addr_t *) &
+@@ -93,7 +95,7 @@ static int prpvf_start(void *private)
+ 		err = -ENOMEM;
+ 		goto out_3;
+ 	}
+-	cam->vf_bufs_size[1] = size;
++	cam->vf_bufs_size[1] = PAGE_ALIGN(size);
+ 	cam->vf_bufs_vaddr[1] = (void *)dma_alloc_coherent(0,
+ 							   cam->vf_bufs_size[1],
+ 							   (dma_addr_t *) &
+@@ -203,14 +205,18 @@ static int prpvf_start(void *private)
+ 			       "Error link CSI_PRP_VF_MEM-MEM_ROT_VF_MEM\n");
+ 			goto out_2;
+ 		}
+-		err = ipu_init_channel(MEM_SDC_FG, NULL);
++
++		memset(&params, 0, sizeof(ipu_channel_params_t));
++		params.mem_dp_fg_sync.in_pixel_fmt = format;
++		params.mem_dp_fg_sync.out_pixel_fmt = IPU_PIX_FMT_RGB24;
++		err = ipu_init_channel(MEM_FG_SYNC, &params);
+ 		if (err != 0)
+ 			goto out_2;
+ 
+-		ipu_sdc_set_window_pos(MEM_SDC_FG, cam->win.w.left,
++		ipu_disp_set_window_pos(MEM_FG_SYNC, cam->win.w.left,
+ 				       cam->win.w.top);
+ 
+-		err = ipu_init_channel_buffer(MEM_SDC_FG, IPU_INPUT_BUFFER,
++		err = ipu_init_channel_buffer(MEM_FG_SYNC, IPU_INPUT_BUFFER,
+ 					      format,
+ 					      vf.csi_prp_vf_mem.out_height,
+ 					      vf.csi_prp_vf_mem.out_width,
+@@ -223,16 +229,16 @@ static int prpvf_start(void *private)
+ 			goto out_2;
+ 		}
+ 
+-		err = ipu_link_channels(MEM_ROT_VF_MEM, MEM_SDC_FG);
++		err = ipu_link_channels(MEM_ROT_VF_MEM, MEM_FG_SYNC);
+ 		if (err < 0) {
+ 			printk(KERN_ERR
+-			       "Error link MEM_ROT_VF_MEM-MEM_SDC_FG\n");
++			       "Error link MEM_ROT_VF_MEM-MEM_FG_SYNC\n");
+ 			goto out_1;
+ 		}
+ 
+ 		ipu_enable_channel(CSI_PRP_VF_MEM);
+ 		ipu_enable_channel(MEM_ROT_VF_MEM);
+-		ipu_enable_channel(MEM_SDC_FG);
++		ipu_enable_channel(MEM_FG_SYNC);
+ 
+ 		ipu_select_buffer(CSI_PRP_VF_MEM, IPU_OUTPUT_BUFFER, 0);
+ 		ipu_select_buffer(CSI_PRP_VF_MEM, IPU_OUTPUT_BUFFER, 1);
+@@ -249,13 +255,16 @@ static int prpvf_start(void *private)
+ 			printk(KERN_ERR "Error initializing CSI_PRP_VF_MEM\n");
+ 			goto out_4;
+ 		}
+-		err = ipu_init_channel(MEM_SDC_FG, NULL);
++		memset(&params, 0, sizeof(ipu_channel_params_t));
++		params.mem_dp_fg_sync.in_pixel_fmt = format;
++		params.mem_dp_fg_sync.out_pixel_fmt = IPU_PIX_FMT_RGB24;
++		err = ipu_init_channel(MEM_FG_SYNC, &params);
+ 		if (err != 0)
+ 			goto out_3;
+ 
+-		ipu_sdc_set_window_pos(MEM_SDC_FG, cam->win.w.left,
++		ipu_disp_set_window_pos(MEM_FG_SYNC, cam->win.w.left,
+ 				       cam->win.w.top);
+-		err = ipu_init_channel_buffer(MEM_SDC_FG,
++		err = ipu_init_channel_buffer(MEM_FG_SYNC,
+ 					      IPU_INPUT_BUFFER, format,
+ 					      cam->win.w.width,
+ 					      cam->win.w.height,
+@@ -267,14 +276,14 @@ static int prpvf_start(void *private)
+ 			goto out_1;
+ 		}
+ 
+-		err = ipu_link_channels(CSI_PRP_VF_MEM, MEM_SDC_FG);
++		err = ipu_link_channels(CSI_PRP_VF_MEM, MEM_FG_SYNC);
+ 		if (err < 0) {
+ 			printk(KERN_ERR "Error linking ipu channels\n");
+ 			goto out_1;
+ 		}
+ 
+ 		ipu_enable_channel(CSI_PRP_VF_MEM);
+-		ipu_enable_channel(MEM_SDC_FG);
++		ipu_enable_channel(MEM_FG_SYNC);
+ 
+ 		ipu_select_buffer(CSI_PRP_VF_MEM, IPU_OUTPUT_BUFFER, 0);
+ 		ipu_select_buffer(CSI_PRP_VF_MEM, IPU_OUTPUT_BUFFER, 1);
+@@ -284,7 +293,7 @@ static int prpvf_start(void *private)
+ 	return err;
+ 
+       out_1:
+-	ipu_uninit_channel(MEM_SDC_FG);
++	ipu_uninit_channel(MEM_FG_SYNC);
+       out_2:
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		ipu_uninit_channel(MEM_ROT_VF_MEM);
+@@ -339,22 +348,22 @@ static int prpvf_stop(void *private)
+ 
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		ipu_unlink_channels(CSI_PRP_VF_MEM, MEM_ROT_VF_MEM);
+-		ipu_unlink_channels(MEM_ROT_VF_MEM, MEM_SDC_FG);
++		ipu_unlink_channels(MEM_ROT_VF_MEM, MEM_FG_SYNC);
+ 	} else {
+-		ipu_unlink_channels(CSI_PRP_VF_MEM, MEM_SDC_FG);
++		ipu_unlink_channels(CSI_PRP_VF_MEM, MEM_FG_SYNC);
+ 	}
+ 
+-	ipu_disable_channel(MEM_SDC_FG, true);
++	ipu_disable_channel(MEM_FG_SYNC, true);
+ 	ipu_disable_channel(CSI_PRP_VF_MEM, true);
+ 
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		ipu_disable_channel(MEM_ROT_VF_MEM, true);
+ 		ipu_uninit_channel(MEM_ROT_VF_MEM);
+ 	}
+-	ipu_uninit_channel(MEM_SDC_FG);
++	ipu_uninit_channel(MEM_FG_SYNC);
+ 	ipu_uninit_channel(CSI_PRP_VF_MEM);
+ 
+-	ipu_csi_enable_mclk(CSI_MCLK_VF, false, false);
++	ipu_csi_enable_mclk_if(CSI_MCLK_VF, cam->cam_sensor->csi, false, false);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+index 009cc26..b3f2b1b 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -83,7 +83,7 @@ static int prpvf_start(void *private)
+ 	ipu_channel_params_t vf;
+ 	u32 format;
+ 	u32 offset;
+-	u32 size = 3;
++	u32 bpp, size = 3;
+ 	int err = 0;
+ 
+ 	if (!cam) {
+@@ -98,13 +98,13 @@ static int prpvf_start(void *private)
+ 
+ 	format = cam->v4l2_fb.fmt.pixelformat;
+ 	if (cam->v4l2_fb.fmt.pixelformat == IPU_PIX_FMT_BGR24) {
+-		size = 3;
++		bpp = 3, size = 3;
+ 		pr_info("BGR24\n");
+ 	} else if (cam->v4l2_fb.fmt.pixelformat == IPU_PIX_FMT_RGB565) {
+-		size = 2;
++		bpp = 2, size = 2;
+ 		pr_info("RGB565\n");
+ 	} else if (cam->v4l2_fb.fmt.pixelformat == IPU_PIX_FMT_BGR32) {
+-		size = 4;
++		bpp = 4, size = 4;
+ 		pr_info("BGR32\n");
+ 	} else {
+ 		printk(KERN_ERR
+@@ -123,10 +123,12 @@ static int prpvf_start(void *private)
+ 
+ 	memset(&vf, 0, sizeof(ipu_channel_params_t));
+ 	ipu_csi_get_window_size(&vf.csi_prp_vf_mem.in_width,
+-				&vf.csi_prp_vf_mem.in_height);
+-	vf.csi_prp_vf_mem.in_pixel_fmt = IPU_PIX_FMT_UYVY;
++				&vf.csi_prp_vf_mem.in_height,
++				cam->cam_sensor->csi);
++	vf.csi_prp_vf_mem.in_pixel_fmt = sensor_output_fmt;
+ 	vf.csi_prp_vf_mem.out_width = cam->win.w.width;
+ 	vf.csi_prp_vf_mem.out_height = cam->win.w.height;
++	vf.csi_prp_vf_mem.csi = cam->cam_sensor->csi;
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		vf.csi_prp_vf_mem.out_width = cam->win.w.height;
+ 		vf.csi_prp_vf_mem.out_height = cam->win.w.width;
+@@ -138,7 +140,7 @@ static int prpvf_start(void *private)
+ 	if (err != 0)
+ 		goto out_4;
+ 
+-	ipu_csi_enable_mclk(CSI_MCLK_VF, true, true);
++	ipu_csi_enable_mclk_if(CSI_MCLK_VF, cam->cam_sensor->csi, true, true);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+@@ -203,7 +205,7 @@ static int prpvf_start(void *private)
+ 					      format,
+ 					      vf.csi_prp_vf_mem.out_height,
+ 					      vf.csi_prp_vf_mem.out_width,
+-					      cam->overlay_fb->var.xres,
++					      cam->overlay_fb->var.xres * bpp,
+ 					      IPU_ROTATE_NONE, offset, 0, 0, 0);
+ 
+ 		if (err != 0) {
+@@ -215,7 +217,7 @@ static int prpvf_start(void *private)
+ 					      format,
+ 					      vf.csi_prp_vf_mem.out_width,
+ 					      vf.csi_prp_vf_mem.out_height,
+-					      cam->overlay_fb->var.xres,
++					      cam->overlay_fb->var.xres * bpp,
+ 					      IPU_ROTATE_NONE, offset, 0, 0, 0);
+ 		if (err != 0) {
+ 			printk(KERN_ERR "Error MEM_ROT_VF_MEM output buffer\n");
+@@ -231,11 +233,11 @@ static int prpvf_start(void *private)
+ 		goto out_2;
+ 	}
+ 
+-	err = ipu_request_irq(IPU_IRQ_SDC_BG_OUT_EOF, prpvf_sdc_vsync_callback,
++	err = ipu_request_irq(IPU_IRQ_BG_SF_END, prpvf_sdc_vsync_callback,
+ 			      0, "Mxc Camera", NULL);
+ 	if (err != 0) {
+ 		printk(KERN_ERR
+-		       "Error registering IPU_IRQ_SDC_BG_OUT_EOF irq.\n");
++		       "Error registering IPU_IRQ_BG_SF_END irq.\n");
+ 		goto out_1;
+ 	}
+ 
+@@ -298,14 +300,15 @@ static int prpvf_stop(void *private)
+ 	if (cam->overlay_active == false)
+ 		return 0;
+ 
+-	ipu_free_irq(IPU_IRQ_SDC_BG_OUT_EOF, NULL);
++	ipu_free_irq(IPU_IRQ_BG_SF_END, NULL);
++
+ 	ipu_free_irq(IPU_IRQ_PRP_VF_OUT_EOF, cam);
+ 
+ 	ipu_disable_channel(CSI_PRP_VF_MEM, true);
+ 	ipu_disable_channel(MEM_ROT_VF_MEM, true);
+ 	ipu_uninit_channel(CSI_PRP_VF_MEM);
+ 	ipu_uninit_channel(MEM_ROT_VF_MEM);
+-	ipu_csi_enable_mclk(CSI_MCLK_VF, false, false);
++	ipu_csi_enable_mclk_if(CSI_MCLK_VF, cam->cam_sensor->csi, false, false);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+diff --git a/drivers/media/video/mxc/capture/ipu_still.c b/drivers/media/video/mxc/capture/ipu_still.c
+index ccbe671..746df1e 100644
+--- a/drivers/media/video/mxc/capture/ipu_still.c
++++ b/drivers/media/video/mxc/capture/ipu_still.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -24,11 +24,13 @@
+ #include <asm/arch/ipu.h>
+ #include "ipu_prp_sw.h"
+ 
++static int callback_eof_flag;
++
++#ifdef CONFIG_MXC_IPU_V1
+ static int callback_flag;
+ /*
+  * Function definitions
+  */
+-
+ /*!
+  * CSI EOF callback function.
+  *
+@@ -47,6 +49,7 @@ static irqreturn_t prp_csi_eof_callback(int irq, void *dev_id)
+ 	callback_flag++;
+ 	return IRQ_HANDLED;
+ }
++#endif
+ 
+ /*!
+  * CSI callback function.
+@@ -60,8 +63,13 @@ static irqreturn_t prp_still_callback(int irq, void *dev_id)
+ {
+ 	cam_data *cam = (cam_data *) dev_id;
+ 
+-	cam->still_counter++;
+-	wake_up_interruptible(&cam->still_queue);
++	callback_eof_flag++;
++	if (callback_eof_flag < 5)
++		ipu_select_buffer(CSI_MEM, IPU_OUTPUT_BUFFER, 0);
++	else {
++		cam->still_counter++;
++		wake_up_interruptible(&cam->still_queue);
++	}
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -77,6 +85,7 @@ static int prp_still_start(void *private)
+ 	cam_data *cam = (cam_data *) private;
+ 	u32 pixel_fmt;
+ 	int err;
++	ipu_channel_params_t params;
+ 
+ 	if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV420)
+ 		pixel_fmt = IPU_PIX_FMT_YUV420P;
+@@ -99,10 +108,11 @@ static int prp_still_start(void *private)
+ 		return -EINVAL;
+ 	}
+ 
+-	err = ipu_init_channel(CSI_MEM, NULL);
++	memset(&params, 0, sizeof(params));
++	err = ipu_init_channel(CSI_MEM, &params);
+ 	if (err != 0)
+ 		return err;
+-	ipu_csi_enable_mclk(CSI_MCLK_RAW, true, true);
++	ipu_csi_enable_mclk_if(CSI_MCLK_RAW, cam->cam_sensor->csi, true, true);
+ 
+ 	err = ipu_init_channel_buffer(CSI_MEM, IPU_OUTPUT_BUFFER,
+ 				      pixel_fmt, cam->v2f.fmt.pix.width,
+@@ -112,6 +122,7 @@ static int prp_still_start(void *private)
+ 	if (err != 0)
+ 		return err;
+ 
++#ifdef CONFIG_MXC_IPU_V1
+ 	err = ipu_request_irq(IPU_IRQ_SENSOR_OUT_EOF, prp_still_callback,
+ 			      0, "Mxc Camera", cam);
+ 	if (err != 0) {
+@@ -119,12 +130,26 @@ static int prp_still_start(void *private)
+ 		return err;
+ 	}
+ 	callback_flag = 0;
++	callback_eof_flag = 0;
+ 	err = ipu_request_irq(IPU_IRQ_SENSOR_EOF, prp_csi_eof_callback,
+ 			      0, "Mxc Camera", NULL);
+ 	if (err != 0) {
+ 		printk(KERN_ERR "Error IPU_IRQ_SENSOR_EOF \n");
+ 		return err;
+ 	}
++#else
++	err = ipu_request_irq(IPU_IRQ_CSI0_OUT_EOF, prp_still_callback,
++			      0, "Mxc Camera", cam);
++	if (err != 0) {
++		printk(KERN_ERR "Error registering irq.\n");
++		return err;
++	}
++
++	callback_eof_flag = 0;
++
++	ipu_select_buffer(CSI_MEM, IPU_OUTPUT_BUFFER, 0);
++	ipu_enable_channel(CSI_MEM);
++#endif
+ 
+ 	return err;
+ }
+@@ -140,12 +165,17 @@ static int prp_still_stop(void *private)
+ 	cam_data *cam = (cam_data *) private;
+ 	int err = 0;
+ 
++#ifdef CONFIG_MXC_IPU_V1
+ 	ipu_free_irq(IPU_IRQ_SENSOR_EOF, NULL);
+ 	ipu_free_irq(IPU_IRQ_SENSOR_OUT_EOF, cam);
++#else
++	ipu_free_irq(IPU_IRQ_CSI0_OUT_EOF, cam);
++#endif
+ 
+ 	ipu_disable_channel(CSI_MEM, true);
+ 	ipu_uninit_channel(CSI_MEM);
+-	ipu_csi_enable_mclk(CSI_MCLK_RAW, false, false);
++	ipu_csi_enable_mclk_if(CSI_MCLK_RAW,
++		cam->cam_sensor->csi, false, false);
+ 
+ 	return err;
+ }
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 9e3c97c..0c3d9d9 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -38,9 +38,12 @@
+ #include "mxc_v4l2_capture.h"
+ #include "ipu_prp_sw.h"
+ 
++#ifdef CONFIG_MXC_IPU_V1
+ static int csi_mclk_flag_backup;
++#endif
+ static int video_nr = -1;
+ static cam_data *g_cam;
++uint32_t sensor_output_fmt;
+ 
+ #define MXC_V4L2_CAPTURE_NUM_OUTPUTS        2
+ static struct v4l2_output mxc_capture_outputs[MXC_V4L2_CAPTURE_NUM_OUTPUTS] = {
+@@ -694,20 +697,27 @@ static int mxc_set_v42l_control(cam_data * cam, struct v4l2_control *c)
+ 		cam->red = c->value;
+ 	case V4L2_CID_BLUE_BALANCE:
+ 		cam->blue = c->value;
+-		ipu_csi_enable_mclk(CSI_MCLK_I2C, true, true);
++		ipu_csi_enable_mclk_if(CSI_MCLK_I2C,
++			cam->cam_sensor->csi, true, true);
+ 		cam->cam_sensor->set_color(cam->bright, cam->saturation,
+ 					   cam->red, cam->green, cam->blue);
+-		ipu_csi_enable_mclk(CSI_MCLK_I2C, false, false);
++		ipu_csi_enable_mclk_if(CSI_MCLK_I2C,
++			cam->cam_sensor->csi, false, false);
+ 		break;
+ 	case V4L2_CID_BLACK_LEVEL:
+ 		cam->ae_mode = c->value & 0x03;
+-		ipu_csi_enable_mclk(CSI_MCLK_I2C, true, true);
++		ipu_csi_enable_mclk_if(CSI_MCLK_I2C,
++			cam->cam_sensor->csi, true, true);
+ 		if (cam->cam_sensor->set_ae_mode)
+ 			cam->cam_sensor->set_ae_mode(cam->ae_mode);
+-		ipu_csi_enable_mclk(CSI_MCLK_I2C, false, false);
++
++		ipu_csi_enable_mclk_if(CSI_MCLK_I2C,
++			cam->cam_sensor->csi, false, false);
+ 		break;
+ 	case V4L2_CID_MXC_FLASH:
++#ifdef CONFIG_MXC_IPU_V1
+ 		ipu_csi_flash_strobe(true);
++#endif
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -751,11 +761,15 @@ static int mxc_v4l2_s_param(cam_data * cam, struct v4l2_streamparm *parm)
+ 
+ 	cam->streamparm.parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
+ 
+-	ipu_csi_enable_mclk(CSI_MCLK_I2C, true, true);
++	ipu_csi_enable_mclk_if(CSI_MCLK_I2C, cam->cam_sensor->csi, true, true);
++
+ 	param = cam->cam_sensor->config
+ 	    (&parm->parm.capture.timeperframe.denominator,
+ 	     parm->parm.capture.capturemode);
+-	ipu_csi_enable_mclk(CSI_MCLK_I2C, false, false);
++
++	ipu_csi_enable_mclk_if(CSI_MCLK_I2C, cam->cam_sensor->csi,
++			false, false);
++
+ 	cam->streamparm.parm.capture.timeperframe =
+ 	    parm->parm.capture.timeperframe;
+ 
+@@ -781,9 +795,18 @@ static int mxc_v4l2_s_param(cam_data * cam, struct v4l2_streamparm *parm)
+ 	csi_param.ext_vsync = param->ext_vsync;
+ 	csi_param.Vsync_pol = param->Vsync_pol;
+ 	csi_param.Hsync_pol = param->Hsync_pol;
++	csi_param.data_fmt = param->pixel_fmt;
++	csi_param.pack_tight = param->pack_tight;
++	csi_param.force_eof = param->force_eof;
++	csi_param.data_en_pol = param->data_en_pol;
++	csi_param.csi = cam->cam_sensor->csi;
+ 	ipu_csi_init_interface(param->width, param->height,
+ 			       param->pixel_fmt, csi_param);
+-	ipu_csi_set_window_size(param->active_width, param->active_height);
++
++	sensor_output_fmt = param->pixel_fmt;
++
++	ipu_csi_set_window_size(param->active_width,
++		param->active_height, cam->cam_sensor->csi);
+ 
+ 	if (parm->parm.capture.capturemode != V4L2_MODE_HIGHQUALITY) {
+ 		cam->streamparm.parm.capture.capturemode = 0;
+@@ -892,11 +915,13 @@ static int mxc_v4l_open(struct inode *inode, struct file *file)
+ 		INIT_LIST_HEAD(&cam->working_q);
+ 		INIT_LIST_HEAD(&cam->done_q);
+ 
+-		ipu_csi_enable_mclk(CSI_MCLK_I2C, true, true);
++		ipu_csi_enable_mclk_if(CSI_MCLK_I2C,
++			cam->cam_sensor->csi, true, true);
+ 		param = cam->cam_sensor->reset();
+ 		if (param == NULL) {
+ 			cam->open_count--;
+-			ipu_csi_enable_mclk(CSI_MCLK_I2C, false, false);
++			ipu_csi_enable_mclk_if(CSI_MCLK_I2C,
++				cam->cam_sensor->csi, false, false);
+ 			err = -ENODEV;
+ 			goto oops;
+ 		}
+@@ -909,8 +934,14 @@ static int mxc_v4l_open(struct inode *inode, struct file *file)
+ 		csi_param.ext_vsync = param->ext_vsync;
+ 		csi_param.Vsync_pol = param->Vsync_pol;
+ 		csi_param.Hsync_pol = param->Hsync_pol;
++		csi_param.data_fmt = param->pixel_fmt;
++		csi_param.pack_tight = param->pack_tight;
++		csi_param.force_eof = param->force_eof;
++		csi_param.data_en_pol = param->data_en_pol;
++		csi_param.csi = cam->cam_sensor->csi;
+ 		ipu_csi_init_interface(param->width, param->height,
+ 				       param->pixel_fmt, csi_param);
++		sensor_output_fmt = param->pixel_fmt;
+ 
+ 		cam->cam_sensor->get_color(&cam->bright, &cam->saturation,
+ 					   &cam->red, &cam->green, &cam->blue);
+@@ -920,7 +951,8 @@ static int mxc_v4l_open(struct inode *inode, struct file *file)
+ 		/* pr_info("mxc_v4l_open saturation %x ae_mode %x\n",
+ 		   cam->saturation, cam->ae_mode); */
+ 
+-		ipu_csi_enable_mclk(CSI_MCLK_I2C, false, false);
++		ipu_csi_enable_mclk_if(CSI_MCLK_I2C, cam->cam_sensor->csi,
++				false, false);
+ 	}
+ 
+ 	file->private_data = dev;
+@@ -1327,9 +1359,11 @@ mxc_v4l_do_ioctl(struct inode *inode, struct file *file,
+ 			cam->crop_current = crop->c;
+ 
+ 			ipu_csi_set_window_size(cam->crop_current.width,
+-						cam->crop_current.height);
++						cam->crop_current.height,
++						cam->cam_sensor->csi);
+ 			ipu_csi_set_window_pos(cam->crop_current.left,
+-					       cam->crop_current.top);
++					       cam->crop_current.top,
++						cam->cam_sensor->csi);
+ 			break;
+ 		}
+ 
+@@ -1657,6 +1691,8 @@ static void init_camera_struct(cam_data * cam)
+ 	init_waitqueue_head(&cam->enc_queue);
+ 	init_waitqueue_head(&cam->still_queue);
+ 
++	cam->cam_sensor = &camera_sensor_if;
++
+ 	/* setup cropping */
+ 	cam->crop_bounds.left = 0;
+ 	cam->crop_bounds.width = 640;
+@@ -1664,8 +1700,9 @@ static void init_camera_struct(cam_data * cam)
+ 	cam->crop_bounds.height = 480;
+ 	cam->crop_current = cam->crop_defrect = cam->crop_bounds;
+ 	ipu_csi_set_window_size(cam->crop_current.width,
+-				cam->crop_current.height);
+-	ipu_csi_set_window_pos(cam->crop_current.left, cam->crop_current.top);
++				cam->crop_current.height, cam->cam_sensor->csi);
++	ipu_csi_set_window_pos(cam->crop_current.left,
++		cam->crop_current.top, cam->cam_sensor->csi);
+ 	cam->streamparm.parm.capture.capturemode = 0;
+ 
+ 	cam->standard.index = 0;
+@@ -1691,34 +1728,51 @@ static void init_camera_struct(cam_data * cam)
+ 	cam->win.w.left = 0;
+ 	cam->win.w.top = 0;
+ 
+-	cam->cam_sensor = &camera_sensor_if;
+ 	cam->enc_callback = camera_callback;
+ 	init_waitqueue_head(&cam->power_queue);
+ 	cam->int_lock = SPIN_LOCK_UNLOCKED;
+ 	spin_lock_init(&cam->int_lock);
+ }
+ 
++#ifdef CONFIG_MXC_IPU_V1
+ extern void gpio_sensor_active(void);
+ extern void gpio_sensor_inactive(void);
++#else
++extern void gpio_sensor_active(unsigned int csi);
++extern void gpio_sensor_inactive(unsigned int csi);
++#endif
+ 
+ /*!
+  * camera_power function
+  *    Turn Sensor power On/Off
+  *
++ * @param       cam           cam data struct
+  * @param       cameraOn      true to turn camera on, otherwise shut down
+  *
+  * @return status
+  */
+-static u8 camera_power(bool cameraOn)
++static u8 camera_power(cam_data *cam, bool cameraOn)
+ {
++#ifdef CONFIG_MXC_IPU_V1
+ 	if (cameraOn == true) {
+ 		gpio_sensor_active();
+-		ipu_csi_enable_mclk(csi_mclk_flag_backup, true, true);
++		ipu_csi_enable_mclk_if(csi_mclk_flag_backup,
++			cam->cam_sensor->csi, true, true);
+ 	} else {
+ 		csi_mclk_flag_backup = ipu_csi_read_mclk_flag();
+-		ipu_csi_enable_mclk(csi_mclk_flag_backup, false, false);
++		ipu_csi_enable_mclk_if(csi_mclk_flag_backup,
++			cam->cam_sensor->csi, false, false);
+ 		gpio_sensor_inactive();
+ 	}
++#else
++	if (cameraOn == true) {
++		gpio_sensor_active(cam->cam_sensor->csi);
++		ipu_csi_enable_mclk_if(0, cam->cam_sensor->csi, true, true);
++	} else {
++		ipu_csi_enable_mclk_if(0, cam->cam_sensor->csi, false, false);
++		gpio_sensor_inactive(cam->cam_sensor->csi);
++	}
++#endif
+ 	return 0;
+ }
+ 
+@@ -1748,7 +1802,7 @@ static int mxc_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
+ 	if ((cam->capture_on == true) && cam->enc_disable) {
+ 		cam->enc_disable(cam);
+ 	}
+-	camera_power(false);
++	camera_power(cam, false);
+ 
+ 	return 0;
+ }
+@@ -1777,7 +1831,7 @@ static int mxc_v4l2_resume(struct platform_device *pdev)
+ 		start_preview(cam);
+ 	if (cam->capture_on == true)
+ 		mxc_streamon(cam);
+-	camera_power(true);
++	camera_power(cam, true);
+ 
+ 	return 0;
+ }
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index cf9883c..8510f7a 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -37,6 +37,8 @@
+ 
+ #define FRAME_NUM 3
+ 
++extern uint32_t sensor_output_fmt;
++
+ /*!
+  * v4l2 frame structure.
+  */
+@@ -60,6 +62,9 @@ typedef struct {
+ 	u8 pixclk_pol;
+ 	u8 data_pol;
+ 	u8 data_width;
++	u8 pack_tight;
++	u8 force_eof;
++	u8 data_en_pol;
+ 	u16 width;
+ 	u16 height;
+ 	u32 pixel_fmt;
+@@ -80,6 +85,7 @@ struct camera_sensor {
+ 	sensor_interface *(*reset) (void);
+ 	void (*get_std) (v4l2_std_id *std);
+ 	void (*set_std) (v4l2_std_id std);
++	unsigned int csi;
+ };
+ 
+ /*!
+@@ -177,5 +183,9 @@ typedef struct _cam_data {
+ 	struct camera_sensor *cam_sensor;
+ } cam_data;
+ 
+-void set_mclk_rate(uint32_t * p_mclk_freq);
++#ifdef CONFIG_MXC_IPU_V1
++void set_mclk_rate(uint32_t *p_mclk_freq);
++#else
++void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi);
++#endif
+ #endif				/* __MXC_V4L2_CAPTURE_H__ */
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 9da391a..460f56c 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -24,6 +24,7 @@
+ #include <linux/device.h>
+ #include <linux/clk.h>
+ 
++#ifdef CONFIG_MXC_IPU_V1
+ /*
+  * set_mclk_rate
+  *
+@@ -45,6 +46,40 @@ void set_mclk_rate(uint32_t * p_mclk_freq)
+ 	clk_put(clk);
+ 	pr_debug("mclk frequency = %d\n", *p_mclk_freq);
+ }
++#else
++/*
++ * set_mclk_rate
++ *
++ * @param       p_mclk_freq  mclk frequence
++ * @param	csi         csi 0 or csi 1
++ *
++ */
++void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
++{
++	struct clk *clk;
++	uint32_t freq = 0;
++	char *mclk;
++
++	if (csi == 0) {
++		mclk = "csi_mclk1";
++	} else if (csi == 1) {
++		mclk = "csi_mclk2";
++	} else {
++		pr_debug("invalid csi num %d\n", csi);
++		return;
++	}
++
++	clk = clk_get(NULL, mclk);
++
++	freq = clk_round_rate(clk, *p_mclk_freq);
++	clk_set_rate(clk, freq);
++
++	*p_mclk_freq = freq;
++
++	clk_put(clk);
++	pr_debug("%s frequency = %d\n", mclk, *p_mclk_freq);
++}
++#endif
+ 
+ /* Exported symbols for modules. */
+ EXPORT_SYMBOL(set_mclk_rate);
+-- 
+1.5.4.4
+

@@ -1,0 +1,168 @@
+From c828bd52f46d5953395e2ec9ac9b84e8e2922e10 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Tue, 23 Sep 2008 12:33:07 -0500
+Subject: [PATCH] ENGR00092528-5: ASoC: Ensure WM8903 playback and record substreams are in sync
+
+The WM8903 has shared clocks for playback and record so ignore the
+parameters configured for the second stream activated and use constraints
+to tell user space.
+
+commit 7865a87041262f274603d967308e4cc5f8576ecc from
+Wolfson linux-2.6-asoc repo
+http://opensource.wolfsonmicro.com/
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/codecs/wm8903.c |   77 +++++++++++++++++++++++++++++++++++++-------
+ 1 files changed, 64 insertions(+), 13 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8903.c b/sound/soc/codecs/wm8903.c
+index fe08041..241fbf9 100644
+--- a/sound/soc/codecs/wm8903.c
++++ b/sound/soc/codecs/wm8903.c
+@@ -36,10 +36,15 @@
+ 
+ struct wm8903_priv {
+ 	int sysclk;
++
++	/* Reference counts */
+ 	int charge_pump_users;
+ 	int class_w_users;
+ 	int playback_active;
+ 	int capture_active;
++
++	struct snd_pcm_substream *master_substream;
++	struct snd_pcm_substream *slave_substream;
+ };
+ 
+ static struct i2c_client *wm8903_i2c_client;
+@@ -1325,12 +1330,38 @@ static int wm8903_pcm_startup(struct snd_pcm_substream *substream)
+ 	struct snd_soc_pcm_link *pcm_link = substream->private_data;
+ 	struct snd_soc_codec *codec = pcm_link->codec;
+ 	struct wm8903_priv *wm8903 = codec->private_data;
++	struct snd_pcm_runtime *master_runtime;
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+ 		wm8903->playback_active++;
+ 	else
+ 		wm8903->capture_active++;
+ 
++	/* The DAI has shared clocks so if we already have a playback or
++	 * capture going then constrain this substream to match it.
++	 */
++	if (wm8903->master_substream) {
++		master_runtime = wm8903->master_substream->runtime;
++
++		dev_dbg(&wm8903_i2c_client->dev,
++		    "Constraining to %d bits at %dHz\n",
++			master_runtime->sample_bits,
++			master_runtime->rate);
++
++		snd_pcm_hw_constraint_minmax(substream->runtime,
++					     SNDRV_PCM_HW_PARAM_RATE,
++					     master_runtime->rate,
++					     master_runtime->rate);
++
++		snd_pcm_hw_constraint_minmax(substream->runtime,
++					     SNDRV_PCM_HW_PARAM_SAMPLE_BITS,
++					     master_runtime->sample_bits,
++					     master_runtime->sample_bits);
++
++		wm8903->slave_substream = substream;
++	} else
++		wm8903->master_substream = substream;
++
+ 	return 0;
+ }
+ 
+@@ -1344,6 +1375,11 @@ static void wm8903_pcm_shutdown(struct snd_pcm_substream *substream)
+ 		wm8903->playback_active--;
+ 	else
+ 		wm8903->capture_active--;
++
++	if (wm8903->master_substream == substream)
++		wm8903->master_substream = wm8903->slave_substream;
++
++	wm8903->slave_substream = NULL;
+ }
+ 
+ /*
+@@ -1373,6 +1409,12 @@ static int wm8903_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	u16 clock0 = wm8903_read(codec, WM8903_CLOCK_RATES_0);
+ 	u16 clock1 = wm8903_read(codec, WM8903_CLOCK_RATES_1);
+ 
++	if (substream == wm8903->slave_substream) {
++		dev_dbg(&wm8903_i2c_client->dev,
++		"Ignoring hw_params for slave substream\n");
++		return 0;
++	}
++
+ 	/* Configure sample rate logic for DSP - reject unsupported rates */
+ 	for (i = 0; (sample_rates[i].rate != fs) &&
+ 	     (i < ARRAY_SIZE(sample_rates)); i++) ;
+@@ -1383,6 +1425,7 @@ static int wm8903_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	}
+ 	dsp_config = i;
+ 
++	/* Constraints should stop us hitting this but let's make sure */
+ 	if (wm8903->capture_active)
+ 		switch (sample_rates[dsp_config].rate) {
+ 		case 88200:
+@@ -1509,15 +1552,23 @@ static int wm8903_pcm_hw_params(struct snd_pcm_substream *substream,
+ 	return 0;
+ }
+ 
+-#define WM8903_RATES (SNDRV_PCM_RATE_8000 |\
+-		      SNDRV_PCM_RATE_11025 |\
+-		      SNDRV_PCM_RATE_16000 |\
+-		      SNDRV_PCM_RATE_22050 |\
+-		      SNDRV_PCM_RATE_32000 |\
+-		      SNDRV_PCM_RATE_44100 |\
+-		      SNDRV_PCM_RATE_48000 |\
+-		      SNDRV_PCM_RATE_88200 |\
+-		      SNDRV_PCM_RATE_96000)
++#define WM8903_PLAYBACK_RATES (SNDRV_PCM_RATE_8000 |\
++			       SNDRV_PCM_RATE_11025 |	\
++			       SNDRV_PCM_RATE_16000 |	\
++			       SNDRV_PCM_RATE_22050 |	\
++			       SNDRV_PCM_RATE_32000 |	\
++			       SNDRV_PCM_RATE_44100 |	\
++			       SNDRV_PCM_RATE_48000 |	\
++			       SNDRV_PCM_RATE_88200 |	\
++			       SNDRV_PCM_RATE_96000)
++
++#define WM8903_CAPTURE_RATES (SNDRV_PCM_RATE_8000 |\
++			      SNDRV_PCM_RATE_11025 |	\
++			      SNDRV_PCM_RATE_16000 |	\
++			      SNDRV_PCM_RATE_22050 |	\
++			      SNDRV_PCM_RATE_32000 |	\
++			      SNDRV_PCM_RATE_44100 |	\
++			      SNDRV_PCM_RATE_48000)
+ 
+ #define WM8903_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
+ 			SNDRV_PCM_FMTBIT_S20_3LE |\
+@@ -1525,17 +1576,17 @@ static int wm8903_pcm_hw_params(struct snd_pcm_substream *substream,
+ 
+ static const struct snd_soc_pcm_stream wm8903_hifi_dai_playback = {
+ 	.stream_name = "Playback",
+-	.channels_min = 1,
++	.channels_min = 2,
+ 	.channels_max = 2,
+-	.rates = WM8903_RATES,
++	.rates = WM8903_PLAYBACK_RATES,
+ 	.formats = WM8903_FORMATS,
+ };
+ 
+ static const struct snd_soc_pcm_stream wm8903_hifi_dai_capture = {
+ 	.stream_name = "Capture",
+-	.channels_min = 1,
++	.channels_min = 2,
+ 	.channels_max = 2,
+-	.rates = WM8903_RATES,
++	.rates = WM8903_CAPTURE_RATES,
+ 	.formats = WM8903_FORMATS,
+ };
+ 
+-- 
+1.5.4.4
+

@@ -1,0 +1,420 @@
+From 58a0109f40b90a102ccc6de78093af41cbb29330 Mon Sep 17 00:00:00 2001
+From: Kevin Zhang <k.zhang@freescale.com>
+Date: Fri, 14 Mar 2008 19:04:36 -0500
+Subject: [PATCH] ENGR00068828 Support i.MX37-3stack low power modes
+
+This patch adds the various low power modes support on i.MX37 3Stack board.
+
+Signed-off-by: Kevin Zhang <k.zhang@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |   14 +++++-
+ arch/arm/mach-mx37/Makefile             |    3 +
+ arch/arm/mach-mx37/crm_regs.h           |   43 ++++++++++++++++++
+ arch/arm/mach-mx37/pm.c                 |   72 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx37/system.c             |   63 ++++++++++++++++++++++++++-
+ arch/arm/plat-mxc/tzic.c                |   49 +++++++++++++++++----
+ include/asm-arm/arch-mxc/mx37.h         |    2 +-
+ include/asm-arm/arch-mxc/mxc.h          |   13 +++++-
+ 8 files changed, 243 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 1f0d707..212b7fb 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Mon Feb 25 13:31:49 2008
++# Sat Mar 15 22:18:33 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -268,8 +268,13 @@ CONFIG_BINFMT_ELF=y
+ #
+ # Power management options
+ #
+-# CONFIG_PM is not set
++CONFIG_PM=y
++# CONFIG_PM_LEGACY is not set
++# CONFIG_PM_DEBUG is not set
++CONFIG_PM_SLEEP=y
+ CONFIG_SUSPEND_UP_POSSIBLE=y
++CONFIG_SUSPEND=y
++# CONFIG_APM_EMULATION is not set
+ 
+ #
+ # Networking
+@@ -983,6 +988,11 @@ CONFIG_RTC_DRV_MXC_V2=y
+ # CONFIG_MXC_HMP4E is not set
+ 
+ #
++# MXC HARDWARE EVENT
++#
++CONFIG_MXC_HWEVENT=y
++
++#
+ # MXC VPU(Video Processing Unit) support
+ #
+ CONFIG_MXC_VPU=y
+diff --git a/arch/arm/mach-mx37/Makefile b/arch/arm/mach-mx37/Makefile
+index acf1fd0..6429f03 100644
+--- a/arch/arm/mach-mx37/Makefile
++++ b/arch/arm/mach-mx37/Makefile
+@@ -9,3 +9,6 @@ obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o
+ obj-$(CONFIG_MACH_MX37_3DS) += mx37_3stack.o mx37_3stack_gpio.o
+ obj-$(CONFIG_SPI_MXC) += mx37_3stack_cpld.o
+ obj-$(CONFIG_REGULATOR_WM8350) += mx37_3stack_pmic_wm8350.o
++
++# power management
++obj-$(CONFIG_PM) 		+= pm.o
+diff --git a/arch/arm/mach-mx37/crm_regs.h b/arch/arm/mach-mx37/crm_regs.h
+index 4b92e88..46cd75e 100644
+--- a/arch/arm/mach-mx37/crm_regs.h
++++ b/arch/arm/mach-mx37/crm_regs.h
+@@ -499,4 +499,47 @@
+ #define MXC_CCM_CCGR5_CG1_OFFSET			2
+ #define MXC_CCM_CCGR5_CG0_OFFSET			0
+ 
++#define MXC_ARM1176_BASE	IO_ADDRESS(ARM1176_BASE_ADDR)
++#define MXC_GPC_BASE		IO_ADDRESS(GPC_BASE_ADDR)
++#define MXC_DPTC_LP_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x80)
++#define MXC_DPTC_GP_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x100)
++#define MXC_DVFS_CORE_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x180)
++#define MXC_DPTC_PER_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x1C0)
++#define MXC_PGC_IPU_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x220)
++#define MXC_PGC_VPU_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x240)
++#define MXC_SRPGC_EMI_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x280)
++#define MXC_SRPGC_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2A0)
++#define MXC_EMPGC0_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2C0)
++#define MXC_EMPGC1_ARM_BASE	IO_ADDRESS(GPC_BASE_ADDR + 0x2D0)
++
++/* ARM1176 platform */
++#define MXC_ARM1176_PLAT_PVID	(MXC_ARM1176_BASE + 0x0)
++#define MXC_ARM1176_PLAT_GPC	(MXC_ARM1176_BASE + 0x4)
++#define MXC_ARM1176_PLAT_PIC	(MXC_ARM1176_BASE + 0x8)
++#define MXC_ARM1176_PLAT_L2SO	(MXC_ARM1176_BASE + 0xC)
++#define MXC_ARM1176_PLAT_EMSO	(MXC_ARM1176_BASE + 0x10)
++#define MXC_ARM1176_PLAT_LPC	(MXC_ARM1176_BASE + 0x14)
++#define MXC_ARM1176_PLAT_ICGC	(MXC_ARM1176_BASE + 0x18)
++#define MXC_ARM1176_PLAT_AMC	(MXC_ARM1176_BASE + 0x1C)
++
++/* GPC */
++#define MXC_GPC_CNTR		(MXC_GPC_BASE + 0x0)
++#define MXC_GPC_PGR		(MXC_GPC_BASE + 0x4)
++#define MXC_GPC_VCR		(MXC_GPC_BASE + 0x8)
++
++/* SRPG */
++#define MXC_SRPGC_EMI_SRPGCR	(MXC_SRPGC_EMI_BASE + 0x0)
++#define MXC_SRPGC_ARM_SRPGCR	(MXC_SRPGC_ARM_BASE + 0x0)
++#define MXC_EMPGC0_ARM_EMPGCR	(MXC_EMPGC0_ARM_BASE + 0x0)
++#define MXC_EMPGC1_ARM_EMPGCR	(MXC_EMPGC1_ARM_BASE + 0x0)
++
++#define MXC_ARM1176_PLAT_LPC_DSM	(1 << 16)
++#define MXC_ARM1176_PLAT_LPC_DBG_DSM	(1 << 17)
++
++#define MXC_GPC_PGR_ARMPG_OFFSET	8
++#define MXC_GPC_PGR_ARMPG_MASK		(3 << 8)
++
++#define MXC_SRPGCR_PCR			1
++#define MXC_EMPGCR_PCR			1
++
+ #endif				/* __ARCH_ARM_MACH_MX37_CRM_REGS_H__ */
+diff --git a/arch/arm/mach-mx37/pm.c b/arch/arm/mach-mx37/pm.c
+new file mode 100644
+index 0000000..d8318d5
+--- /dev/null
++++ b/arch/arm/mach-mx37/pm.c
+@@ -0,0 +1,72 @@
++/*
++ *  Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/suspend.h>
++
++static int mx37_suspend_enter(suspend_state_t state)
++{
++	if (tzic_enable_wake(0) != 0)
++		return -EAGAIN;
++
++	switch (state) {
++	case PM_SUSPEND_MEM:
++		mxc_cpu_lp_set(STOP_POWER_OFF);
++		break;
++	case PM_SUSPEND_STANDBY:
++		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++		break;
++	default:
++		return -EINVAL;
++	}
++	cpu_do_idle();
++
++	return 0;
++}
++
++/*
++ * Called after processes are frozen, but before we shut down devices.
++ */
++static int mx37_suspend_prepare(void)
++{
++	return 0;
++}
++
++/*
++ * Called after devices are re-setup, but before processes are thawed.
++ */
++static void mx37_suspend_finish(void)
++{
++}
++
++static int mx37_pm_valid(suspend_state_t state)
++{
++	return (state > PM_SUSPEND_ON && state <= PM_SUSPEND_MAX);
++}
++
++struct platform_suspend_ops mx37_suspend_ops = {
++	.valid = mx37_pm_valid,
++	.prepare = mx37_suspend_prepare,
++	.enter = mx37_suspend_enter,
++	.finish = mx37_suspend_finish,
++};
++
++static int __init mx37_pm_init(void)
++{
++	pr_info("Static Power Management for Freescale i.MX37\n");
++	suspend_set_ops(&mx37_suspend_ops);
++
++	return 0;
++}
++
++late_initcall(mx37_pm_init);
+diff --git a/arch/arm/mach-mx37/system.c b/arch/arm/mach-mx37/system.c
+index e90663c..8f866e2 100644
+--- a/arch/arm/mach-mx37/system.c
++++ b/arch/arm/mach-mx37/system.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -11,6 +11,7 @@
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+ 
++#include <linux/kernel.h>
+ #include <linux/clk.h>
+ #include <asm/io.h>
+ #include <asm/hardware.h>
+@@ -32,13 +33,71 @@
+ 
+ extern int mxc_jtag_enabled;
+ 
++/* set cpu low power mode before WFI instruction */
++void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
++{
++	u32 plat_lpc, gpc_pgr, arm_srpgcr, empgcr0, empgcr1, ccm_clpcr;
++
++	/* always allow platform to issue a deep sleep mode request */
++	plat_lpc = __raw_readl(MXC_ARM1176_PLAT_LPC) &
++	    ~(MXC_ARM1176_PLAT_LPC_DSM);
++
++	ccm_clpcr = __raw_readl(MXC_CCM_CLPCR) & ~(MXC_CCM_CLPCR_LPM_MASK);
++	gpc_pgr = __raw_readl(MXC_GPC_PGR) & ~(MXC_GPC_PGR_ARMPG_MASK);
++	arm_srpgcr = __raw_readl(MXC_SRPGC_ARM_SRPGCR) & ~(MXC_SRPGCR_PCR);
++	empgcr0 = __raw_readl(MXC_EMPGC0_ARM_EMPGCR) & ~(MXC_EMPGCR_PCR);
++	empgcr1 = __raw_readl(MXC_EMPGC1_ARM_EMPGCR) & ~(MXC_EMPGCR_PCR);
++
++	switch (mode) {
++	case WAIT_CLOCKED:
++		break;
++	case WAIT_UNCLOCKED:
++		ccm_clpcr |= (0x1 << MXC_CCM_CLPCR_LPM_OFFSET);
++		break;
++	case WAIT_UNCLOCKED_POWER_OFF:
++	case STOP_POWER_OFF:
++		plat_lpc |= MXC_ARM1176_PLAT_LPC_DSM;
++		if (mode == WAIT_UNCLOCKED_POWER_OFF)
++			ccm_clpcr |= (0x1 << MXC_CCM_CLPCR_LPM_OFFSET);
++		else
++			ccm_clpcr |= (0x2 << MXC_CCM_CLPCR_LPM_OFFSET);
++
++		gpc_pgr |= (0x1 << MXC_GPC_PGR_ARMPG_OFFSET);
++		arm_srpgcr |= MXC_SRPGCR_PCR;
++		empgcr0 |= MXC_EMPGCR_PCR;
++		empgcr1 |= MXC_EMPGCR_PCR;
++		if (tzic_enable_wake(1) != 0)
++			return;
++		break;
++	case STOP_POWER_ON:
++		ccm_clpcr |= (0x2 << MXC_CCM_CLPCR_LPM_OFFSET);
++		break;
++	default:
++		printk(KERN_WARNING "UNKNOWN cpu power mode: %d\n", mode);
++		return;
++	}
++	__raw_writel(plat_lpc, MXC_ARM1176_PLAT_LPC);
++	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
++	__raw_writel(gpc_pgr, MXC_GPC_PGR);
++	__raw_writel(arm_srpgcr, MXC_SRPGC_ARM_SRPGCR);
++	/* __raw_writel(empgcr0, MXC_EMPGC0_ARM_EMPGCR); TODO: system crash */
++	__raw_writel(empgcr1, MXC_EMPGC1_ARM_EMPGCR);
++}
++
++/* To change the idle power mode, need to set arch_idle_mode to a different
++ * power mode as in enum mxc_cpu_pwr_mode.
++ * May allow dynamically changing the idle mode.
++ */
++static int arch_idle_mode = WAIT_UNCLOCKED_POWER_OFF;
++
+ /*!
+  * This function puts the CPU into idle mode. It is called by default_idle()
+  * in process.c file.
+  */
+ void arch_idle(void)
+ {
+-	if (!mxc_jtag_enabled) {
++	if (likely(!mxc_jtag_enabled)) {
++		mxc_cpu_lp_set(arch_idle_mode);
+ 		cpu_do_idle();
+ 	}
+ }
+diff --git a/arch/arm/plat-mxc/tzic.c b/arch/arm/plat-mxc/tzic.c
+index 64615cc..f57ae4f 100644
+--- a/arch/arm/plat-mxc/tzic.c
++++ b/arch/arm/plat-mxc/tzic.c
+@@ -1,5 +1,5 @@
+ /*
+- *  Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -73,6 +73,8 @@ static void mxc_unmask_irq(unsigned int irq)
+ 	__raw_writel(1 << off, TZIC_ENSET0 + (index << 2));
+ }
+ 
++static unsigned int wakeup_intr[4];
++
+ /*!
+  * Set interrupt number "irq" in the TZIC as a wake-up source.
+  *
+@@ -84,20 +86,18 @@ static void mxc_unmask_irq(unsigned int irq)
+  */
+ static int mxc_set_wake_irq(unsigned int irq, unsigned int enable)
+ {
+-	int index, off;
+-	u32 reg;
++	unsigned int index, off;
+ 
+ 	index = irq >> 5;
+ 	off = irq & 0x1F;
+-	reg = __raw_readl(TZIC_WAKEUP0 + (index << 2));
+ 
+-	if (enable) {
+-		reg |= (1 << off);
+-	} else {
+-		reg &= ~(1 << off);
+-	}
++	if (index > 3)
++		return -1;
+ 
+-	__raw_writel(reg, TZIC_WAKEUP0 + (index << 2));
++	if (enable)
++		wakeup_intr[index] |= (1 << off);
++	else
++		wakeup_intr[index] &= ~(1 << off);
+ 
+ 	return 0;
+ }
+@@ -148,3 +148,32 @@ void __init mxc_init_irq(void)
+ 
+ 	printk(KERN_INFO "MXC IRQ initialized\n");
+ }
++
++/*!
++ * enable wakeup interrupt
++ *
++ * @param is_idle		1 if called in idle loop (enset registers);
++ *				0 to be used when called from low power entry
++ * @return			0 if successful; non-zero otherwise
++ */
++int tzic_enable_wake(int is_idle)
++{
++	unsigned int i, v;
++
++	__raw_writel(1, TZIC_DSMINT);
++	if (unlikely(__raw_readl(TZIC_DSMINT) == 0))
++		return -EAGAIN;
++
++	if (likely(is_idle)) {
++		for (i = 0; i < 4; i++) {
++			v = __raw_readl(TZIC_ENSET0 + i * 4);
++			__raw_writel(v, TZIC_WAKEUP0 + i * 4);
++		}
++	} else {
++		for (i = 0; i < 4; i++) {
++			v = wakeup_intr[i];
++			__raw_writel(v, TZIC_WAKEUP0 + i * 4);
++		}
++	}
++	return 0;
++}
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index 77081b0..06f5415 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -88,7 +88,7 @@
+ #define PLATFORM_BASE_ADDR_VIRT 0xFA000000
+ #define PLATFORM_SIZE		SZ_1M
+ #define EVTMON_BASE_ADDR	(PLATFORM_BASE_ADDR + 0x00000000)
+-#define ARM1176_BASE_ADDR	(PLATFORM_BASE_ADDR + 0x00002000)
++#define ARM1176_BASE_ADDR	(PLATFORM_BASE_ADDR + 0x00004000)
+ 
+ #define TZIC_BASE_ADDR		0xB0800000
+ #define TZIC_BASE_ADDR_VIRT	0xFA100000
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 35cd1e7..46c4eb5 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -19,7 +19,7 @@
+ #include <linux/types.h>
+ 
+ /*!
+- * @ingroup MSL_MX27 MSL_MX31 MSL_MXC91321
++ * @ingroup MSL_MX27 MSL_MX31 MSL_MXC91321  MSL_MX37
+  */
+ /*!
+  * gpio port structure
+@@ -207,6 +207,17 @@ void dptc_disable(void);
+  */
+ void dptc_enable(void);
+ 
++enum mxc_cpu_pwr_mode {
++	WAIT_CLOCKED,		/* wfi only */
++	WAIT_UNCLOCKED,		/* WAIT */
++	WAIT_UNCLOCKED_POWER_OFF,	/* WAIT + SRPG */
++	STOP_POWER_ON,		/* just STOP */
++	STOP_POWER_OFF,		/* STOP + SRPG */
++};
++
++void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode);
++int tzic_enable_wake(int is_idle);
++
+ #endif
+ 
+ #endif				/*  __ASM_ARCH_MXC_H__ */
+-- 
+1.5.4.4
+

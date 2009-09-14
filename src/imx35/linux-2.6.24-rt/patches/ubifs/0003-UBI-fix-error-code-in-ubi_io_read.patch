@@ -1,0 +1,50 @@
+From bdf2946ad30f39f2e006b7e0f7677d65b650416d Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 18 Oct 2007 20:09:41 +0300
+Subject: [PATCH] UBI: fix error code in ubi_io_read()
+
+When NAND detects an ECC error, it returns -EBADMSG. It does not
+stop reading requested data if one page has an ECC error, it keeps
+going and reads all the requested data. If it fails to read all
+the data, it does not return -EBADMSG, but returns the error code
+which reflects the reason of the failure.
+
+But some drivers may have bugs (e.g., OneNAND had) and stop reading
+after the first ECC error, so it returns -EBADMSG. In turn, UBI
+propagates this up to the caller. The caller will treat this as
+"all the requested data was read, but there was an ECC error".
+
+So we change the error code to -EIO if it is -EBADMSG and the read
+length is less then the requested length. We also add an assertion,
+so if UBI debugging is enabled, UBI will bug.
+
+Pointed-to-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/io.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mtd/ubi/io.c b/drivers/mtd/ubi/io.c
+index 7c304ee..db3efde 100644
+--- a/drivers/mtd/ubi/io.c
++++ b/drivers/mtd/ubi/io.c
+@@ -173,6 +173,16 @@ retry:
+ 		ubi_err("error %d while reading %d bytes from PEB %d:%d, "
+ 			"read %zd bytes", err, len, pnum, offset, read);
+ 		ubi_dbg_dump_stack();
++
++		/*
++		 * The driver should never return -EBADMSG if it failed to read
++		 * all the requested data. But some buggy drivers might do
++		 * this, so we change it to -EIO.
++		 */
++		if (read != len && err == -EBADMSG) {
++			ubi_assert(0);
++			err = -EIO;
++		}
+ 	} else {
+ 		ubi_assert(len == read);
+ 
+-- 
+1.5.6.3
+

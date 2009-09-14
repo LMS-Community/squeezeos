@@ -1,0 +1,667 @@
+diff -Naur linux-2.6.26.clean/arch/arm/mach-mx25/frequency_finder.c linux-2.6.26.caleb.cleaned/arch/arm/mach-mx25/frequency_finder.c
+--- linux-2.6.26.clean/arch/arm/mach-mx25/frequency_finder.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.26.caleb.cleaned/arch/arm/mach-mx25/frequency_finder.c	2009-03-05 20:23:27.000000000 -0800
+@@ -0,0 +1,81 @@
++#include <stdio.h>
++#include <math.h>
++
++#define I_MIN 5
++#define I_MAX 15
++#define N_MIN -512
++//#define N_MIN 0
++#define N_MAX 511
++#define D_MIN 1
++#define D_MAX 1024
++#define PD_MIN 1
++#define PD_MAX 16
++
++#define CRYSTAL_MHZ 24.0
++typedef struct {
++  int i, n, d, pd;  // These are not register settings, but rather than numerical values
++  double frequency;
++  double deviance;
++} clock_setting_t;
++
++
++void print_clock_setting(const clock_setting_t *closest)
++{
++  int MFD = closest->d-1;
++  int PD  = closest->pd-1;
++  int MFI = closest->i;
++  int MFN = closest->n;
++  double fraction = (double)closest->n/closest->d;
++  int BRMO;
++  if (fraction > .1 && fraction < 0.9) {
++    BRMO = 0;
++  } else {
++    BRMO = 1;
++  }
++  int PCTL = 
++    (BRMO          << 31) |
++    ((PD & 0xF)    << 26) |
++    ((MFD & 0x3FF) << 16) |
++    ((MFI & 0xF)   << 10) |
++    ((MFN & 0x3FF) <<  0);
++  printf("I = %d, N = %d, D = %d, PD = %d, deviance = %f, frequency = %f, REG = 0x%08x\n", 
++	 closest->i, closest->n, closest->d, closest->pd, closest->deviance, closest->frequency, PCTL);
++}
++
++int get_closest(double target, int should_i_print, clock_setting_t *closest) 
++{
++  int i, n, d, pd;
++  for (i = I_MIN; i <= I_MAX; i++) {
++    for (n = N_MIN; n <= N_MAX; n++) {
++      for (d = D_MIN; d <= D_MAX; d++) {
++	for (pd = PD_MIN; pd <= PD_MAX; pd++) {
++	  double fraction = (double)n/d;
++	  double numerator = (double)i + fraction;
++	  double frequency = (double)2.0 * CRYSTAL_MHZ * numerator/pd;
++	  double deviance = target-frequency;
++	  if ((fabs(deviance) <= fabs(closest->deviance)) && (fabs(fraction) < 1.0)){
++	    closest->i  = i;
++	    closest->n  = n;
++	    closest->d  = d;
++	    closest->pd = pd;
++	    closest->deviance = deviance;
++	    closest->frequency = frequency;
++	    if (should_i_print) {
++	      print_clock_setting(closest);
++	    }
++	  }
++	}
++      }
++    }
++  }
++}
++int main(int argc, char *argv[]) 
++{
++    double target = 88.2 * 256 / 1000;  // MHz
++    clock_setting_t closest;
++    closest.deviance = 1e100;  // ensures the first time through the loop will reset the settings.
++    printf("Finding best match to %f MHz\n", target);
++    get_closest(target, 0, &closest);
++    printf("Here are all the matches\n");
++    get_closest(target, 1, &closest);
++}
+diff -Naur linux-2.6.26.clean/arch/arm/mach-mx25/wintek_init_from_steve_dusse.c linux-2.6.26.caleb.cleaned/arch/arm/mach-mx25/wintek_init_from_steve_dusse.c
+--- linux-2.6.26.clean/arch/arm/mach-mx25/wintek_init_from_steve_dusse.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.26.caleb.cleaned/arch/arm/mach-mx25/wintek_init_from_steve_dusse.c	2009-02-26 03:00:50.000000000 -0800
+@@ -0,0 +1,138 @@
++/*
++ * wintek24Init.c
++ *
++ * This module uses GPIO to toggle the Wintek LCM reset line and
++ * uses SPI communications to set the registers on the LCM. The register
++ * settings are according to the Wintek specification with application
++ * specific exceptions noted below.
++ *
++ * CONFIDENTIAL AND PROPRIETARY
++ * (C) 2007-2008 Logitech, Inc. All Rights Reserved.
++ *
++ * Last Modified: 8/21/08 SD
++ *
++ */
++/****************************
++ * Include files *
++ ****************************/
++#include "gpio.h"
++#include "lcmSPI.h"
++#include "nt39116Regs.h"
++#include "wintek24Init.h"
++/****************************
++ * #defines and macros *
++ ****************************/
++#define GPIO_RESET 2
++/*************************
++ * register setting data *
++ *************************/
++// these values were supplied by Wintek in their LCM spec WD-F2432YL-9FLWa/b
++// Updated 9-23-2008 to be in synch with Version 3 of WD-F2432YL-9FLWa/b
++unsigned char PWCTR1data[] = { 0x0A };
++unsigned char PWCTR2data[] = { 0x06, 0x06, 0x06 };
++unsigned char PWCTR3data[] = { 0x55, 0x00 };
++unsigned char PWCTR4data[] = { 0x55, 0x00 };
++unsigned char PWCTR5data[] = { 0x55, 0x00 };
++unsigned char VMCTR1data[] = { 0x27, 0x34 };
++unsigned char VMFCTRdata[] = { 0x40 };
++unsigned char GAMCTRPdata[] = {
++  0x0d, 0x0f, 0x13, 0x0c, 0x15, 0x17, 0x3b, 0x8c, 0x4d,
++  0x0b, 0x1e, 0x25, 0x1c, 0x23, 0x37 };
++unsigned char GAMCTRNdata[] = {
++  0x0d, 0x1f, 0x26, 0x0a, 0x11, 0x13, 0x3a, 0x37, 0x4c,
++  0x09, 0x1a, 0x23, 0x33, 0x37, 0x37 };
++unsigned char GAMSETdata[] = { 0x10 };
++/* change from spec; enable is active low */
++//unsigned char IFMODEdata[] = { 0x04 };
++/*
++ * change to IFMODE due to revision in data setup/hold timing
++ * starting with Wintek modules date code 43/08. Need to flip
++ * polarity of PCLK. 20090116 SD
++ */
++unsigned char IFMODEdata[] = { 0x0C };
++unsigned char FRMCTR1data[] = { 0x6A, 0x15 };
++unsigned char FRMCTR2data[] = { 0x6A, 0x15 };
++unsigned char FRMCTR3data[] = { 0x6A, 0x15 };
++unsigned char DISSETdata[] = { 0x01, 0x04 };
++// add (not part of spec): value is set according to panel orientation
++unsigned char MADCTRdata[] = { 0x90 };
++/****************************
++ * main() function *
++ ****************************/
++int wintek24Init ()
++{
++  int status = 0;
++  unsigned char dummy;
++  /* Open the gpio device */
++  if (GPIOOpenDevice())
++    return -1;
++  while (1) /* error handling block */
++    {
++      /* set reset gpio to output and set reset line low */
++      if (GPIOSetOutputDirection(GPIO_RESET) ||
++	  GPIOSetOutputLow(GPIO_RESET))
++	{
++	  status = -1;
++	  break;
++	}
++      // enforce minimum reset time
++      mdelay (10);
++      // set reset high
++      if (GPIOSetOutputHigh(GPIO_RESET))
++	status = -1;
++      break;
++    }
++  GPIOCloseDevice ();
++  if (status == -1)
++    return -1;
++  // enforce after-reset startup delay
++  mdelay (120);
++  /* setup the SPI communications */
++  if (lcmCommStartup ())
++    return -1;
++  /* set the various ST7787 registers */
++  while (1) /* error handling for open spi */
++    {
++      /* first send a software reset */
++      if (registerWriteCommand (SWRESET, &dummy, 0))
++	{
++	  status = -1;
++	  break;
++	}
++      mdelay (120);
++      /* then, send the sleep out command (wake up) */
++      if (registerWriteCommand (SLPOUT, &dummy, 0))
++	{
++	  status = -1;
++	  break;
++	}
++      mdelay (120);
++      /* ...rest of the registers */
++      if (registerWriteCommand (PWCTR1, PWCTR1data, sizeof(PWCTR1data)) ||
++	  registerWriteCommand (PWCTR2, PWCTR2data, sizeof(PWCTR2data)) ||
++	  registerWriteCommand (PWCTR3, PWCTR3data, sizeof(PWCTR3data)) ||
++	  registerWriteCommand (PWCTR4, PWCTR4data, sizeof(PWCTR4data)) ||
++	  registerWriteCommand (PWCTR5, PWCTR5data, sizeof(PWCTR5data)) ||
++	  registerWriteCommand (VMCTR1, VMCTR1data, sizeof(VMCTR1data)) ||
++	  registerWriteCommand (VMFCTR, VMFCTRdata, sizeof(VMFCTRdata)) ||
++	  registerWriteCommand (GAMCTRP, GAMCTRPdata,
++				sizeof(GAMCTRPdata)) ||
++	  registerWriteCommand (GAMCTRN, GAMCTRNdata,
++				sizeof(GAMCTRNdata)) ||
++	  registerWriteCommand (GAMSET, GAMSETdata, sizeof(GAMSETdata)) ||
++	  registerWriteCommand (IFMODE, IFMODEdata, sizeof(IFMODEdata)) ||
++	  registerWriteCommand (FRMCTR1,FRMCTR1data,sizeof(FRMCTR1data)) ||
++	  registerWriteCommand (FRMCTR2,FRMCTR2data,sizeof(FRMCTR2data)) ||
++	  registerWriteCommand (FRMCTR3,FRMCTR3data,sizeof(FRMCTR3data)) ||
++	  registerWriteCommand (DISSET, DISSETdata, sizeof(DISSETdata)) ||
++	  /* extra setting, not part of spec set orientation of display */
++	  registerWriteCommand (MADCTR, MADCTRdata, sizeof(MADCTRdata)) ||
++	  registerWriteCommand (DISPON, &dummy, 0))
++	{
++	  status = -1;
++	}
++      break;
++    }
++  lcmCommShutdown ();
++  return status;
++}
+diff -Naur linux-2.6.26.clean/arch/arm/mach-mx25/wintek_init_from_steve_dusse_spi_driver.c linux-2.6.26.caleb.cleaned/arch/arm/mach-mx25/wintek_init_from_steve_dusse_spi_driver.c
+--- linux-2.6.26.clean/arch/arm/mach-mx25/wintek_init_from_steve_dusse_spi_driver.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.26.caleb.cleaned/arch/arm/mach-mx25/wintek_init_from_steve_dusse_spi_driver.c	2009-02-26 03:04:19.000000000 -0800
+@@ -0,0 +1,430 @@
++/*
++ * Copyright (C) 2006 Texas Instruments
++ */
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/types.h>
++#include <linux/kernel.h>
++#include <linux/completion.h>
++#include <linux/interrupt.h>
++#include <linux/delay.h>
++#include <linux/irq.h>
++#include <linux/fs.h>
++#include <asm/io.h>
++#include <asm/errno.h>
++#include <asm/uaccess.h>
++#include <linux/device.h>
++#include <linux/major.h>
++#include <linux/spi/spi.h>
++#include "loopback_spi.h"
++#include <linux/platform_device.h>
++#include "dm350_spi_master.h"
++#include <asm/arch/gpio.h>
++#define DRIVER_NAME "DLCD_SPI"
++#if defined(CONFIG_SPI_DEBUG)
++#define DEBUG_DLCD(fmt,arg...) printk(KERN_EMERG fmt , ##arg);
++#else
++#define DEBUG_DLCD(fmt,arg...)
++#endif
++#define ENTER DEBUG_DLCD("\nEntry in %s function\n", __FUNCTION__);
++#define EXIT DEBUG_DLCD("\nExit from %s function\n", __FUNCTION__);
++MODULE_LICENSE("GPL");
++/**********************************MACROS****************************/
++struct spi_dlcd_t {
++  struct spi_device *spi;
++  spinlock_t lock;
++};
++struct spi_dlcd_t dlcd_spi_obj;
++int major_num = SPI_MAJOR;
++unsigned int conf_slave = 0;
++/**
++ * spi_dlcd_open - open function of client
++ * @inode: device node
++ * @filp: device file structure
++ *
++ * This function will be called when process attemps to open
++ * device file.
++ */
++static int spi_dlcd_open(struct inode *inode, struct file *filp)
++{
++  filp->private_data = (void *)&dlcd_spi_obj;
++  return 0;
++}
++/**
++ * spi_dlcd_release - open function of SPI client
++ * @inode: device node
++ * @filp: device file structure
++ *
++ * This function will be called when process attemps to release
++ * device.
++ */
++static int spi_dlcd_release(struct inode *inode, struct file *file)
++{
++  file->private_data = NULL;
++  DEBUG_DLCD("spi-client: Released");
++  return 0;
++}
++/**
++ * spi_dlcd_write - write function of SPI client
++ */
++static int
++spi_dlcd_write(struct file *filp, const char *buff, size_t count, loff_t * offp)
++{
++  DEBUG_DLCD("\n%s function is dummy & not doing anything\n", __FUNCTION__);
++  return 0;
++}
++/**
++ * spi_dlcd_read - read function of SPI client
++ */
++static int
++spi_dlcd_read(struct file *filp, char *buff, size_t count, loff_t * offp)
++{
++  DEBUG_DLCD("\n%s function is dummy & not doing anything\n", __FUNCTION__);
++  return 0;
++}
++/**
++ * spi_dlcd_config - configures SPI for DLCD transfer
++ */
++int spi_dlcd_config(dm350_spi_config_t * u_config)
++{
++  int status = 0;
++  struct spi_device *spi;
++  dm350_spi_config_t *spi_cfg;
++  if (dlcd_spi_obj.spi == NULL)
++    printk("*** dlcd_spi_obj.spi = NULL ***\n");
++  spi = dlcd_spi_obj.spi;
++  ENTER if (spi == NULL)
++    {
++      printk("\n*** SPI is NULL ***\n");
++      return -1;
++    }
++  status = spi_setup(spi);
++  if (status != 0)
++    return status;
++  if (spi->controller_data == NULL)
++    {
++      printk("spi->controller_data = NULL\n");
++    }
++  spi_cfg = (dm350_spi_config_t *) spi->controller_data;
++  if (spi_cfg == NULL)
++    {
++      printk("spi_cfg = NULL\n");
++    }
++  spi_cfg->clkInternal = TRUE;
++  spi_cfg->csHold = u_config->csHold;
++  spi_cfg->intrLevel = FALSE;
++  spi_cfg->pinOpModes = u_config->pinOpModes;
++  spi_cfg->clkHigh = u_config->clkHigh;
++  spi_cfg->lsbFirst = u_config->lsbFirst;
++  spi_cfg->parityEnable = FALSE; //For sensor set it as FALSE
++  spi_cfg->oddParity = FALSE;
++  spi_cfg->phaseIn = u_config->phaseIn;
++  spi_cfg->op_mode = TRUE; // Polling mode -> FALSE
++  // Interrupt mode -> TRUE
++  spi_cfg->loopBack = FALSE;
++  spi_cfg->is_cs_gpio = u_config->is_cs_gpio;
++  spi_cfg->cs_gpio_num = u_config->cs_gpio_num;
++  spi_cfg->active_cs = u_config->active_cs;
++  // if the caller is requesting a GPIO for chip select...
++  if (spi_cfg->is_cs_gpio)
++    {
++      // special case:
++      // if the caller is requesting to use the SPI0_SDE line as a GPIO,
++      // set the pin mux so that the SPI0_SDE line is under GPIO control
++      if (spi_cfg->cs_gpio_num == 103)
++	{
++	  PINMUX4 |= 0x1;
++	}
++      gpio_set_direction(spi_cfg->cs_gpio_num, 0);
++      gpio_set_value(spi_cfg->cs_gpio_num, 1);
++    }
++  else
++    { // set the pin mux so that the SPIO_SDE line is under SPI control
++      PINMUX4 &= 0xfffffe;
++    }
++  spi->bits_per_word = u_config->bits_per_word;
++  status = spi_setup(spi);
++  if (status != 0)
++    return status;
++  return 0;
++}
++EXPORT_SYMBOL_GPL(spi_dlcd_config);
++int spi_dlcd_transfer_ili9320 (unsigned int addr, unsigned int val)
++{
++  struct spi_message message;
++  struct spi_transfer xfer[3];
++  struct spi_device *spi;
++  unsigned char data[3];
++  int status = 0;
++  spi = dlcd_spi_obj.spi;
++  spi_message_init(&message);
++  memset(xfer, 0, sizeof(struct spi_transfer) * 3);
++  data[0] = (unsigned char) (addr & 0xFF);
++  xfer[0].tx_buf = &data[0];
++  xfer[0].len = 1;
++  spi_message_add_tail(&xfer[0], &message);
++  data[1] = (unsigned char) ((val >> 8) & 0xFF);
++  xfer[1].tx_buf = &data[1];
++  xfer[1].len = 1;
++  spi_message_add_tail(&xfer[1], &message);
++  data[2] = (unsigned char) (val & 0xFF);
++  xfer[2].tx_buf = &data[2];
++  xfer[2].len = 1;
++  spi_message_add_tail(&xfer[2], &message);
++  status = spi_sync(spi, &message);
++  if (status < 0)
++    {
++      printk("Error from spi_sync = 0x%x\n", status);
++      return status;
++    }
++  return 0;
++}
++EXPORT_SYMBOL_GPL(spi_dlcd_transfer_ili9320);
++int spi_dlcd_transfer_bytes (struct spi_2way_data_t *spi_2way_data)
++{
++  struct spi_message message;
++  struct spi_transfer xfer;
++  struct spi_device *spi;
++  unsigned int transmitBuffer;
++  unsigned int receiveBuffer;
++  int status = 0;
++  int i;
++  spi = dlcd_spi_obj.spi;
++  memset(&xfer, 0, sizeof(struct spi_transfer));
++  for (i=0; i<spi_2way_data->dataLen; i++) {
++    spi_message_init(&message);
++    transmitBuffer = (unsigned int)spi_2way_data->tx[i];
++    xfer.tx_buf = &transmitBuffer;
++    xfer.rx_buf = &receiveBuffer;
++    xfer.len = 1;
++    spi_message_add_tail(&xfer, &message);
++    status = spi_sync(spi, &message);
++    if (status < 0)
++      {
++	printk("Error from spi_sync = 0x%x\n", status);
++	return status;
++      }
++    spi_2way_data->rx[i] = (unsigned char)(receiveBuffer & 0xff);
++  }
++  return 0;
++}
++EXPORT_SYMBOL_GPL(spi_dlcd_transfer_bytes);
++#define MAX_ST7787_XFER 16
++#define DCX_DATA 0x100
++int spi_dlcd_transfer_st7787 (unsigned int addr, unsigned int *val,
++			      unsigned int valLen)
++{
++  struct spi_message message;
++  struct spi_transfer xfer[MAX_ST7787_XFER];
++  struct spi_device *spi;
++  unsigned int data[MAX_ST7787_XFER];
++  int status = 0, i;
++  if (valLen > MAX_ST7787_XFER - 1)
++    {
++      printk("Error trying to SPI too much data %d bytes\n",valLen);
++      return -1;
++    }
++  spi = dlcd_spi_obj.spi;
++  spi_message_init(&message);
++  memset(xfer, 0, sizeof(struct spi_transfer) * MAX_ST7787_XFER);
++  data[0] = addr;
++  xfer[0].tx_buf = &data[0];
++  xfer[0].len = 2;
++  spi_message_add_tail(&xfer[0], &message);
++  for (i=0;i<valLen;i++)
++    {
++      data[i+1] = val[i] | DCX_DATA;
++      xfer[i+1].tx_buf = &data[i+1];
++      xfer[i+1].len = 2;
++      spi_message_add_tail(&xfer[i+1], &message);
++    }
++  status = spi_sync(spi, &message);
++  if (status < 0)
++    {
++      printk("Error from spi_sync = 0x%x\n", status);
++      return status;
++    }
++  return 0;
++}
++EXPORT_SYMBOL_GPL(spi_dlcd_transfer_st7787);
++static int
++spi_dlcd_ioctl(struct inode *inode, struct file *file,
++	       unsigned int cmd, unsigned long arg)
++{
++  int status = 0;
++  struct spi_data_t spi_cmd;
++  struct spi_2way_data_t spi_2way_data;
++  dm350_spi_config_t spi_user_cfg;
++  struct spi_device *spi;
++  dm350_spi_config_t *spi_cfg;
++  if ((void *)arg == NULL)
++    {
++      printk("No args from Application EXITING FROM IOCTL\n");
++      return -1;
++    }
++  switch (cmd)
++    {
++    case CONFIG:
++      copy_from_user(&spi_user_cfg, (dm350_spi_config_t *) arg,
++		     sizeof(dm350_spi_config_t));
++      status = spi_dlcd_config(&spi_user_cfg);
++      conf_slave = spi_user_cfg.conf_slave;
++      if (!status)
++	DEBUG_DLCD("config done\n");
++      break;
++    case XFER_BYTES:
++      spi = dlcd_spi_obj.spi;
++      spi_cfg = (dm350_spi_config_t *) spi->controller_data;
++      copy_from_user(&spi_2way_data, (struct spi_2way_data_t *)arg,
++		     sizeof(struct spi_2way_data_t));
++      if (conf_slave != spi_2way_data.xfer_slave)
++	{
++	  printk("\nSpecified slave device is not configured.\n");
++	  return -1;
++	}
++      if (spi_cfg->is_cs_gpio)
++	gpio_set_value(spi_cfg->cs_gpio_num, 0);
++      status = spi_dlcd_transfer_bytes(&spi_2way_data);
++      if (spi_cfg->is_cs_gpio)
++	gpio_set_value(spi_cfg->cs_gpio_num, 1);
++      break;
++    case XFER_ILI9320:
++      spi = dlcd_spi_obj.spi;
++      spi_cfg = (dm350_spi_config_t *) spi->controller_data;
++      copy_from_user(&spi_cmd, (struct spi_data_t *)arg,
++		     sizeof(struct spi_data_t));
++      if (conf_slave != spi_cmd.xfer_slave)
++	{
++	  printk("\nSpecified slave device is not configured.\n");
++	  return -1;
++	}
++      if (spi_cfg->is_cs_gpio)
++	gpio_set_value(spi_cfg->cs_gpio_num, 0);
++      status = spi_dlcd_transfer_ili9320(spi_cmd.addr, spi_cmd.data[0]);
++      if (spi_cfg->is_cs_gpio)
++	gpio_set_value(spi_cfg->cs_gpio_num, 1);
++      break;
++    case XFER_ST7787:
++      spi = dlcd_spi_obj.spi;
++      spi_cfg = (dm350_spi_config_t *) spi->controller_data;
++      copy_from_user(&spi_cmd, (struct spi_data_t *)arg,
++		     sizeof(struct spi_data_t));
++      if (conf_slave != spi_cmd.xfer_slave)
++	{
++	  printk("\nSpecified slave device is not configured.\n");
++	  return -1;
++	}
++      if (spi_cfg->is_cs_gpio)
++	gpio_set_value(spi_cfg->cs_gpio_num, 0);
++      status = spi_dlcd_transfer_st7787(spi_cmd.addr, spi_cmd.data,
++					spi_cmd.dataLen);
++      if (spi_cfg->is_cs_gpio)
++	gpio_set_value(spi_cfg->cs_gpio_num, 1);
++      break;
++    default:
++      printk("command not found");
++      return -1;
++    } // switch
++  return 0;
++}
++/**
++ * spiee_probe - probe function for client driver
++ * @this_dev: structure spi_device of SPI Master Controller
++ *
++ * This function will be called from kernel when match will be successful
++ * for SPI controller device and client driver.
++ */
++static ssize_t
++spi_dlcd_attr_show(struct device *d, struct device_attribute *attr, char *text)
++{
++  DEBUG_DLCD("\n%s function is dummy & not doing anything\n", __FUNCTION__);
++  return 1;
++}
++DEVICE_ATTR(spi_dlcd, S_IRUGO, spi_dlcd_attr_show, NULL);
++static int spiee_probe(struct spi_device *this_dev)
++{
++  /*Assign the pointer of SPI device so that whenevr in future during
++    open call of this driver it will be assigned to file->privare_data */
++  if (this_dev)
++    {
++      dlcd_spi_obj.spi = this_dev;
++    }
++  else
++    {
++      return -1;
++    }
++  /* Initialize bits per word */
++  this_dev->bits_per_word = 16;
++  /*create the attribute file for this client driver */
++  device_create_file(&this_dev->dev, &dev_attr_spi_dlcd);
++  return 0;
++}
++/**
++ * spiee_remove - remove function for client driver
++ * @this_dev: structure spi_device of SPI Master Controller
++ *
++ * This function will be called from kernel when client driver will be
++ * released from SPI Maser controller.
++ */
++static int spiee_remove(struct spi_device *this_dev)
++{
++  /*remove the attribute file for this client driver */
++  DEBUG_DLCD("\nIn function spiee_remove\n");
++  device_remove_file(&this_dev->dev, &dev_attr_spi_dlcd);
++  return 0;
++}
++struct file_operations spi_dlcd_ops = {
++  .owner = THIS_MODULE,
++  .open = spi_dlcd_open, // open function
++  .ioctl = spi_dlcd_ioctl, // ioctl function
++  .read = spi_dlcd_read, // read function
++  .write = spi_dlcd_write, // write function
++  .release = spi_dlcd_release, // release function
++};
++static struct spi_driver spi_dlcd_driver = {
++  .driver = {
++    .name = DRIVER_NAME,
++  },
++  .probe = spiee_probe,
++  .remove = spiee_remove,
++};
++/**
++ * module_init - Initialization function of SPI Client driver
++ *
++ * This function will register the client driver as a character driver
++ * and assign the major number of character device
++ */
++static int __init spi_dlcd_init(void)
++{
++  int ret = 0;
++  ret = register_chrdev(major_num, DRIVER_NAME, &spi_dlcd_ops);
++  if (ret < 0) {
++    DEBUG_DLCD
++      ("\nSPI_DLCD register_chrdev fails with ret value %d\n",
++       ret);
++    return -1;
++  } else {
++    //major_num = ret;
++    DEBUG_DLCD
++      ("SPI_DLCD driver registered successful and the major \
++number is %d\n", ret);
++  }
++  ret = spi_register_driver(&spi_dlcd_driver);
++  if (ret < 0)
++    DEBUG_DLCD("\nError from spi_register_driver function = [%d]",
++	       ret);
++  return ret;
++}
++/**
++ *
++ * This function will unregister the client driver
++ */
++static void __exit spi_dlcd_cleanup(void)
++{
++  unregister_chrdev(major_num, DRIVER_NAME);
++  spi_unregister_driver(&spi_dlcd_driver);
++  DEBUG_DLCD("SPI_DLCD module cleanup done\n");
++}
++/* module_init(spi_dlcd_init); */
++device_initcall(spi_dlcd_init);
++module_exit(spi_dlcd_cleanup);
+diff -Naur linux-2.6.26.clean/build.sh linux-2.6.26.caleb.cleaned/build.sh
+--- linux-2.6.26.clean/build.sh	1969-12-31 16:00:00.000000000 -0800
++++ linux-2.6.26.caleb.cleaned/build.sh	2009-03-14 12:20:39.000000000 -0700
+@@ -0,0 +1,2 @@
++PATH=/home/slim/poky/baby/build/tmp/cross/bin:$PATH
++make ARCH=arm CROSS_COMPILE=arm-poky-linux-gnueabi- 

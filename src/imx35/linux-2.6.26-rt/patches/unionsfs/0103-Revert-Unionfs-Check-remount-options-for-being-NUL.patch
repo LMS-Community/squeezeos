@@ -1,0 +1,44 @@
+From ba0a0d4e8991f9d821f3b3f3d633ac1f036fe41e Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 27 Apr 2007 12:35:44 -0400
+Subject: [PATCH] Revert "Unionfs: Check remount options for being NULL"
+
+This reverts commit 49491b290f0f791a531316c6197437547985537b.
+---
+ fs/unionfs/super.c |   12 +++++-------
+ 1 files changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 199b477..10520c0 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -430,12 +430,11 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ 	unionfs_write_lock(sb);
+ 
+ 	/*
+-	 * The VFS will take care of "ro" and "rw" flags, and we can safely
+-	 * ignore MS_SILENT, but anything else left over is an error.  So we
+-	 * need to check if any other flags may have been passed (none are
+-	 * allowed/supported as of now).
++	 * The VFS will take care of "ro" and "rw" flags, so anything else
++	 * is an error.  So we need to check if any other flags may have
++	 * been passed (none are allowed/supported as of now).
+ 	 */
+-	if ((*flags & ~(MS_RDONLY | MS_SILENT)) != 0) {
++	if ((*flags & ~MS_RDONLY) != 0) {
+ 		printk(KERN_WARNING
+ 		       "unionfs: remount flags 0x%x unsupported\n", *flags);
+ 		err = -EINVAL;
+@@ -737,8 +736,7 @@ out_no_change:
+ 	i = atomic_inc_return(&UNIONFS_SB(sb)->generation);
+ 	atomic_set(&UNIONFS_D(sb->s_root)->generation, i);
+ 	atomic_set(&UNIONFS_I(sb->s_root->d_inode)->generation, i);
+-	if (!(*flags & MS_SILENT)) 
+-		printk("unionfs: new generation number %d\n", i);
++	printk("unionfs: new generation number %d\n", i);
+ 	err = 0;		/* reset to success */
+ 
+ 	/*
+-- 
+1.5.4.3
+

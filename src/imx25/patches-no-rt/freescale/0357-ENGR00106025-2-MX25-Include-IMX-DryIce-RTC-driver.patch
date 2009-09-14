@@ -1,0 +1,119 @@
+From 9e35eeaa5a3f309b117f531d43c8ccea2f7026d2 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Fri, 23 Jan 2009 15:47:41 -0700
+Subject: [PATCH] ENGR00106025-2 MX25: Include IMX DryIce RTC driver
+
+Add IMX DryIce RTC support to the i.MX25 platform.
+  Supply the necessary platform resources
+  Fix up DryIce interrupt names
+  Define a BASE_ADDR for DryIce RTC
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |    1 +
+ arch/arm/mach-mx25/devices.c            |   34 ++++++++++++++++++++++++++++++-
+ include/asm-arm/arch-mxc/mx25.h         |    5 ++-
+ 3 files changed, 37 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 47dfccc..b1de98b 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -1002,6 +1002,7 @@ CONFIG_RTC_INTF_DEV=y
+ #
+ # CONFIG_RTC_MXC is not set
+ # CONFIG_RTC_DRV_MXC_V2 is not set
++CONFIG_RTC_DRV_IMXDI=y
+ # CONFIG_UIO is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx25/devices.c b/arch/arm/mach-mx25/devices.c
+index edffc49..1d87e40 100644
+--- a/arch/arm/mach-mx25/devices.c
++++ b/arch/arm/mach-mx25/devices.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -80,6 +80,37 @@ static void mxc_nop_release(struct device *dev)
+ 	/* Nothing */
+ }
+ 
++#if defined(CONFIG_RTC_DRV_IMXDI) || defined(CONFIG_RTC_DRV_IMXDI_MODULE)
++static struct resource rtc_resources[] = {
++	{
++	 .start = SRTC_BASE_ADDR,
++	 .end = SRTC_BASE_ADDR + 0x40,
++	 .flags = IORESOURCE_MEM,
++	 },
++	{
++	 .start = MXC_INT_DRYICE_NORM,
++	 .flags = IORESOURCE_IRQ,
++	 },
++};
++static struct platform_device imxdi_rtc_device = {
++	.name = "imxdi_rtc",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		},
++	.num_resources = ARRAY_SIZE(rtc_resources),
++	.resource = rtc_resources,
++};
++static void mxc_init_rtc(void)
++{
++	(void)platform_device_register(&imxdi_rtc_device);
++}
++#else
++static inline void mxc_init_rtc(void)
++{
++}
++#endif
++
+ #if defined(CONFIG_MXC_WATCHDOG) || defined(CONFIG_MXC_WATCHDOG_MODULE)
+ static struct resource wdt_resources[] = {
+ 	{
+@@ -424,6 +455,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_i2c();
+ 	mxc_init_dma();
+ 	mxc_init_ssi();
++	mxc_init_rtc();
+ 
+ 	return 0;
+ }
+diff --git a/include/asm-arm/arch-mxc/mx25.h b/include/asm-arm/arch-mxc/mx25.h
+index 3cb8eef..d9cb2b8 100644
+--- a/include/asm-arm/arch-mxc/mx25.h
++++ b/include/asm-arm/arch-mxc/mx25.h
+@@ -233,6 +233,7 @@
+ #define OTG_BASE_ADDR       USBOTG_BASE_ADDR
+ #define CSI_BASE_ADDR       (AIPS2_BASE_ADDR + 0x000F8000)
+ #define DRYICE_BASE_ADDR    (AIPS2_BASE_ADDR + 0x000FC000)
++#define SRTC_BASE_ADDR      (DRYICE_BASE_ADDR)
+ 
+ /*
+  * ROMP and ASIC
+@@ -407,7 +408,7 @@
+ #define MXC_INT_RNG                 22
+ #define MXC_INT_GPIO4               23
+ #define MXC_INT_KPP                 24
+-#define MXC_INT_DRYICE_RTC          25
++#define MXC_INT_DRYICE_NORM         25
+ #define MXC_INT_PWM                 26
+ #define MXC_INT_EPIT2               27
+ #define MXC_INT_EPIT1               28
+@@ -437,7 +438,7 @@
+ #define MXC_INT_GPT2                53
+ #define MXC_INT_GPT1                54
+ #define MXC_INT_WDOG                55
+-#define MXC_INT_DRYICE              56
++#define MXC_INT_DRYICE_SEC          56
+ #define MXC_INT_FEC                 57
+ #define MXC_INT_EXT_INT5            58
+ #define MXC_INT_EXT_INT4            59
+-- 
+1.5.4.4
+

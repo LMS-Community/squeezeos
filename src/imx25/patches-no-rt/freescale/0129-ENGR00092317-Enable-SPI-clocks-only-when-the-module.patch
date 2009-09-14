@@ -1,0 +1,130 @@
+From 9765544026710cb6a034db7cbdb2a60554ddb78b Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Tue, 7 Oct 2008 13:42:07 +0800
+Subject: [PATCH] ENGR00092317 Enable SPI clocks only when the module is active
+
+Enable SPI clocks only when the module is active
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/spi/mxc_spi.c |   23 ++++++++++++++++-------
+ 1 files changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/spi/mxc_spi.c b/drivers/spi/mxc_spi.c
+index e0f5c09..77684e3 100644
+--- a/drivers/spi/mxc_spi.c
++++ b/drivers/spi/mxc_spi.c
+@@ -570,6 +570,7 @@ void mxc_spi_chipselect(struct spi_device *spi, int is_active)
+ 	/* Get the master controller driver data from spi device's master */
+ 
+ 	master_drv_data = spi_master_get_devdata(spi->master);
++	clk_enable(master_drv_data->clk);
+ 	spi_ver_def = master_drv_data->spi_ver_def;
+ 
+ 	xfer_len = spi->bits_per_word;
+@@ -665,6 +666,7 @@ void mxc_spi_chipselect(struct spi_device *spi, int is_active)
+ 				     master_drv_data->test_addr);
+ 	}
+ #endif
++	clk_disable(master_drv_data->clk);
+ 	return;
+ }
+ 
+@@ -766,6 +768,8 @@ int mxc_spi_poll_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 	/* Get the master controller driver data from spi device's master */
+ 	master_drv_data = spi_master_get_devdata(spi->master);
+ 
++	clk_enable(master_drv_data->clk);
++
+ 	/* Modify the Tx, Rx, Count */
+ 	master_drv_data->transfer.tx_buf = t->tx_buf;
+ 	master_drv_data->transfer.rx_buf = t->rx_buf;
+@@ -784,6 +788,8 @@ int mxc_spi_poll_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 		master_drv_data->transfer.rx_get(master_drv_data, rx_tmp);
+ 	}
+ 
++	clk_disable(master_drv_data->clk);
++
+ 	return 0;
+ }
+ 
+@@ -808,8 +814,9 @@ int mxc_spi_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 
+ 	master_drv_data = spi_master_get_devdata(spi->master);
+ 
+-	/* Modify the Tx, Rx, Count */
++	clk_enable(master_drv_data->clk);
+ 
++	/* Modify the Tx, Rx, Count */
+ 	master_drv_data->transfer.tx_buf = t->tx_buf;
+ 	master_drv_data->transfer.rx_buf = t->rx_buf;
+ 	master_drv_data->transfer.count = t->len;
+@@ -838,6 +845,7 @@ int mxc_spi_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 				    master_drv_data->spi_ver_def->
+ 				    rx_inten_dif));
+ 
++	clk_disable(master_drv_data->clk);
+ 	return (t->len - master_drv_data->transfer.count);
+ }
+ 
+@@ -1009,6 +1017,7 @@ static int mxc_spi_probe(struct platform_device *pdev)
+ 	/* Start the SPI Master Controller driver */
+ 
+ 	ret = spi_bitbang_start(&master_drv_data->mxc_bitbang);
++
+ 	if (ret != 0)
+ 		goto err2;
+ 
+@@ -1030,6 +1039,7 @@ static int mxc_spi_probe(struct platform_device *pdev)
+ 		}
+ 	}
+ #endif
++	clk_disable(master_drv_data->clk);
+ 	return ret;
+ 
+       err2:
+@@ -1065,13 +1075,12 @@ static int mxc_spi_remove(struct platform_device *pdev)
+ 		    spi_master_get_devdata(master);
+ 
+ 		gpio_spi_inactive(master->bus_num - 1);
+-		clk_disable(master_drv_data->clk);
+ 
+ 		/* Disable the CSPI module */
+-
++		clk_enable(master_drv_data->clk);
+ 		__raw_writel(MXC_CSPICTRL_DISABLE,
+ 			     master_drv_data->base + MXC_CSPICTRL);
+-
++		clk_disable(master_drv_data->clk);
+ 		/* Unregister for SPI Interrupt */
+ 
+ 		free_irq(master_drv_data->irq, master_drv_data);
+@@ -1141,9 +1150,9 @@ static int mxc_spi_suspend(struct platform_device *pdev, pm_message_t state)
+ 	int ret = 0;
+ 
+ 	spi_bitbang_suspend(&master_drv_data->mxc_bitbang);
++	clk_enable(master_drv_data->clk);
+ 	__raw_writel(MXC_CSPICTRL_DISABLE,
+ 		     master_drv_data->base + MXC_CSPICTRL);
+-
+ 	clk_disable(master_drv_data->clk);
+ 	gpio_spi_inactive(master->bus_num - 1);
+ 
+@@ -1164,12 +1173,12 @@ static int mxc_spi_resume(struct platform_device *pdev)
+ 	struct mxc_spi *master_drv_data = spi_master_get_devdata(master);
+ 
+ 	gpio_spi_active(master->bus_num - 1);
+-	clk_enable(master_drv_data->clk);
+ 
+ 	spi_bitbang_resume(&master_drv_data->mxc_bitbang);
++	clk_enable(master_drv_data->clk);
+ 	__raw_writel(master_drv_data->spi_ver_def->spi_enable,
+ 		     master_drv_data->base + MXC_CSPICTRL);
+-
++	clk_disable(master_drv_data->clk);
+ 	return 0;
+ }
+ #else
+-- 
+1.5.4.4
+

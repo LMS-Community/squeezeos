@@ -1,0 +1,62 @@
+From c365642639b36d0a9470f2b7a36da5b93a8f0e88 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Fri, 16 Jan 2009 18:10:01 +0800
+Subject: [PATCH] ENGR00105328 Add NV12 pixel format support for mxc V4L2 capture
+
+Add NV12(partial-interleaved) pixel format support for mxc V4L2 capture.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/ipu_prp_enc.c      |    5 ++++-
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    7 ++++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index 2f46da3..fb1d019 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -94,6 +94,9 @@ static int prp_enc_setup(cam_data * cam)
+ 	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_YUV422P) {
+ 		enc.csi_prp_enc_mem.out_pixel_fmt = IPU_PIX_FMT_YUV422P;
+ 		pr_info("YUV422P\n");
++	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_NV12) {
++		enc.csi_prp_enc_mem.out_pixel_fmt = IPU_PIX_FMT_NV12;
++		pr_info("NV12\n");
+ 	} else if (cam->v2f.fmt.pix.pixelformat == V4L2_PIX_FMT_BGR24) {
+ 		enc.csi_prp_enc_mem.out_pixel_fmt = IPU_PIX_FMT_BGR24;
+ 		pr_info("BGR24\n");
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 5d41f1d..146fa2f 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -283,7 +283,8 @@ static inline int valid_mode(u32 palette)
+ 		(palette == V4L2_PIX_FMT_RGB32) ||
+ 		(palette == V4L2_PIX_FMT_YUV422P) ||
+ 		(palette == V4L2_PIX_FMT_UYVY) ||
+-		(palette == V4L2_PIX_FMT_YUV420));
++		(palette == V4L2_PIX_FMT_YUV420) ||
++		(palette == V4L2_PIX_FMT_NV12));
+ }
+ 
+ /*!
+@@ -692,6 +693,10 @@ static int mxc_v4l2_s_fmt(cam_data *cam, struct v4l2_format *f)
+ 			size = f->fmt.pix.width * f->fmt.pix.height * 3 / 2;
+ 			bytesperline = f->fmt.pix.width;
+ 			break;
++		case V4L2_PIX_FMT_NV12:
++			size = f->fmt.pix.width * f->fmt.pix.height * 3 / 2;
++			bytesperline = f->fmt.pix.width;
++			break;
+ 		default:
+ 			break;
+ 		}
+-- 
+1.5.4.4
+

@@ -2,7 +2,7 @@ DESCRIPTION = "Marvell wps app"
 SECTION = "base"
 LICENSE = "binary only"
 
-#PR = "r0"
+PR = "r1"
 
 PROVIDES = "marvell-wps"
 

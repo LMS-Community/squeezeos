@@ -1,0 +1,115 @@
+Index: linux-2.6.26/drivers/mmc/host/mx_sdhci.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mmc/host/mx_sdhci.c	2009-06-17 10:26:29.000000000 +0100
++++ linux-2.6.26/drivers/mmc/host/mx_sdhci.c	2009-06-17 10:29:56.000000000 +0100
+@@ -95,6 +95,8 @@
+ /*
+  * defines the mxc flags refer to the special hw pre-conditons and behavior
+  */
++//???????????????????
++#define CONFIG_MMC_IMX_ESDHCI_PIO_MODE 1
+ static unsigned int mxc_quirks;
+ #ifdef CONFIG_MMC_IMX_ESDHCI_PIO_MODE
+ static unsigned int debug_quirks = SDHCI_QUIRK_ONLY_PIO;
+@@ -884,6 +886,14 @@
+ 	}
+ 
+ 	spin_lock_irqsave(&host->lock, flags);
++	{
++		int se, cc, is, ie;
++		se  = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE);
++		cc  = readl(host->ioaddr + SDHCI_CLOCK_CONTROL);
++		is  = readl(host->ioaddr + SDHCI_INT_STATUS);
++		ie  = readl(host->ioaddr + SDHCI_INT_ENABLE);
++		//printk(KERN_INFO "se:%08x\ncc:%08x\nis:%08d\nie:%08x\n", se, cc, is, ie);
++	}
+ 
+ 	WARN_ON(host->mrq != NULL);
+ 
+@@ -900,7 +910,7 @@
+ 			}
+ 		}
+ 	}
+-	spin_unlock_irqrestore(&host->lock, flags);
++//??	spin_unlock_irqrestore(&host->lock, flags);
+ 	host->mrq = mrq;
+ 	if (!(host->flags & SDHCI_CD_PRESENT)) {
+ 		host->mrq->cmd->error = -ENOMEDIUM;
+@@ -909,6 +919,7 @@
+ 		sdhci_send_command(host, mrq->cmd);
+ 
+ 	mmiowb();
++	spin_unlock_irqrestore(&host->lock, flags);
+ }
+ 
+ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+@@ -1034,6 +1045,7 @@
+ 	host = mmc_priv(mmc);
+ 
+ 	spin_lock_irqsave(&host->lock, flags);
++//	printk(KERN_INFO "e:%d\n", enable);
+ 
+ 	if (enable) {
+ 		if (host->sdio_enable++)
+@@ -1177,8 +1189,8 @@
+ 	flags = SDHCI_DATA_ACTIVE | SDHCI_DOING_WRITE | SDHCI_DOING_READ;
+ 	if (!(readl(host->ioaddr + SDHCI_PRESENT_STATE) & flags)) {
+ 		if (host->plat_data->clk_flg) {
+-			clk_disable(host->clk);
+-			host->plat_data->clk_flg = 0;
++//???			clk_disable(host->clk);
++//???			host->plat_data->clk_flg = 0;
+ 		}
+ 	}
+ 
+@@ -1457,6 +1469,14 @@
+ 
+ 	spin_lock(&host->lock);
+ 
++//	{
++//		int se, cc, is, ie;
++//		se  = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE);
++//		cc  = readl(host->ioaddr + SDHCI_CLOCK_CONTROL);
++//		is  = readl(host->ioaddr + SDHCI_INT_STATUS);
++//		ie  = readl(host->ioaddr + SDHCI_INT_ENABLE);
++//		printk(KERN_INFO "ise:%08x\nicc:%08x\niis:%08d\niie:%08x\n", se, cc, is, ie);
++//	}
+ 	intmask = readl(host->ioaddr + SDHCI_INT_STATUS);
+ 
+ 	if (!intmask || intmask == 0xffffffff) {
+@@ -1490,7 +1510,9 @@
+ 			     SDHCI_TRNS_READ))
+ 				intmask &= ~SDHCI_INT_DATA_END_BIT;
+ 		}
+-		sdhci_data_irq(host, intmask & SDHCI_INT_DATA_MASK);
++		if (intmask & SDHCI_INT_DATA_MASK) { //??????
++			sdhci_data_irq(host, intmask & SDHCI_INT_DATA_MASK);
++		}
+ 	}
+ 
+ 	intmask &= ~(SDHCI_INT_CMD_MASK | SDHCI_INT_DATA_MASK);
+@@ -1505,9 +1527,13 @@
+ 
+ 	intmask &= ~SDHCI_INT_BUS_POWER;
+ 
+-	if (intmask & SDHCI_INT_CARD_INT)
++	if (intmask & SDHCI_INT_CARD_INT) {
+ 		cardint = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE) &
+-		    SDHCI_INT_CARD_INT;
++			SDHCI_INT_CARD_INT;
++		if (!( (intmask & SDHCI_INT_CARD_INT) & cardint)) {
++//			printk(KERN_INFO "CINT WITHOUT ENABLE:%d:%08x:\n", host->sdio_enable, readl(host->ioaddr + SDHCI_SIGNAL_ENABLE));
++		}
++	}
+ 
+ 	intmask &= ~SDHCI_INT_CARD_INT;
+ 
+@@ -1689,7 +1715,7 @@
+ 	}
+ 	host->detect_irq = platform_get_irq(pdev, 1);
+ 	if (!host->detect_irq) {
+-		host->flags &= ~SDHCI_CD_PRESENT;
++		host->flags |= SDHCI_CD_PRESENT;
+ 		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
+ 			mxc_fix_chips[pdev->id] = chip;
+ 		goto no_detect_irq;

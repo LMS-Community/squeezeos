@@ -1,0 +1,84 @@
+From 056cf180187c6ed177ed7b37d792be50b348afef Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Mon, 21 Jul 2008 17:56:29 -0500
+Subject: [PATCH] ENGR00083330-14 Fix OTG support
+
+If the kernel is configured with OTG enabled and you load gadget
+driver without first loading the otg xcvr driver, the kernel will
+fault. This push fixes that problem.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   27 +++++++++++++++++----------
+ 1 files changed, 17 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index c22d789..38a27ad 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -2430,7 +2430,8 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
+ 	udc_controller->transceiver = otg_get_transceiver();
+ 	if (!udc_controller->transceiver) {
+ 		printk(KERN_ERR "Can't find OTG driver!\n");
+-		return -ENODEV;
++		ret = -ENODEV;
++		goto err1a;
+ 	}
+ 
+ 	res = otg_get_resources();
+@@ -2441,15 +2442,15 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
+ #else
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res) {
+-		kfree(udc_controller);
+-		return -ENXIO;
++		ret = -ENXIO;
++		goto err1a;
+ 	}
+ 
+ 	if (!request_mem_region(res->start, res->end - res->start + 1,
+ 				driver_name)) {
+ 		ERR("request mem region for %s failed \n", pdev->name);
+-		kfree(udc_controller);
+-		return -EBUSY;
++		ret = -EBUSY;
++		goto err1a;
+ 	}
+ #endif
+ 	dr_regs = ioremap(res->start, res->end - res->start + 1);
+@@ -2461,8 +2462,10 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
+ 	/*
+ 	 * do platform specific init: check the clock, grab/config pins, etc.
+ 	 */
+-	if (pdata->platform_init && pdata->platform_init(pdev))
+-		return -ENODEV;
++	if (pdata->platform_init && pdata->platform_init(pdev)) {
++		ret = -ENODEV;
++		goto err2a;
++	}
+ 
+ 	if (pdata->have_sysif_regs)
+ 		usb_sys_regs = (struct usb_sys_interface *)
+@@ -2568,12 +2571,16 @@ err4:
+ err3:
+ 	free_irq(udc_controller->irq, udc_controller);
+ err2:
++	if (pdata->platform_uninit)
++		pdata->platform_uninit(pdata);
++err2a:
+ 	iounmap(dr_regs);
+ err1:
+-	release_mem_region(res->start, res->end - res->start + 1);
++	if (!udc_controller->transceiver)
++		release_mem_region(res->start, res->end - res->start + 1);
++err1a:
+ 	kfree(udc_controller);
+-	if (pdata->platform_uninit)
+-		pdata->platform_uninit(pdata);
++	udc_controller = NULL;
+ 	return ret;
+ }
+ 
+-- 
+1.5.4.4
+

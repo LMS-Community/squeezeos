@@ -1,0 +1,187 @@
+From 4a0223db800c7e59ec3968ebe4339cce0f8ba8bb Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Thu, 3 Apr 2008 17:00:23 +0800
+Subject: [PATCH] ENGR00069799 several play/pause of audio stream causes audio noise
+
+Incoperate the implementation of audio stop/suspend/push commands
+Fix the audio dma buffer disorder issue by audio stop/restart
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/arm/mxc-alsa-pmic.c |  128 ++-------------------------------------------
+ 1 files changed, 4 insertions(+), 124 deletions(-)
+
+diff --git a/sound/arm/mxc-alsa-pmic.c b/sound/arm/mxc-alsa-pmic.c
+index 3665f30..392dab2 100644
+--- a/sound/arm/mxc-alsa-pmic.c
++++ b/sound/arm/mxc-alsa-pmic.c
+@@ -1930,78 +1930,6 @@ static u_int audio_get_playback_dma_pos(audio_stream_t * s)
+ }
+ 
+ /*!
+-  * This function stops the current dma transfert for playback
+-  * and clears the dma pointers.
+-  *
+-  * @param	substream	pointer to the structure of the current stream.
+-  *
+-  */
+-static void audio_playback_stop_dma(audio_stream_t * s)
+-{
+-	unsigned long flags;
+-	struct snd_pcm_substream *substream;
+-	struct snd_pcm_runtime *runtime;
+-	unsigned int dma_size;
+-	unsigned int offset;
+-
+-	substream = s->stream;
+-	runtime = substream->runtime;
+-	dma_size = frames_to_bytes(runtime, runtime->period_size);
+-	offset = dma_size * s->periods;
+-
+-	spin_lock_irqsave(&s->dma_lock, flags);
+-
+-	pr_debug("MXC : audio_stop_dma active = 0\n");
+-	s->active = 0;
+-	s->period = 0;
+-	s->periods = 0;
+-
+-	/* this stops the dma channel and clears the buffer ptrs */
+-	mxc_dma_disable(s->dma_wchannel);
+-	dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+-			 DMA_TO_DEVICE);
+-
+-	spin_unlock_irqrestore(&s->dma_lock, flags);
+-
+-}
+-
+-/*!
+-  * This function stops the current dma transfert for capture
+-  * and clears the dma pointers.
+-  *
+-  * @param	substream	pointer to the structure of the current stream.
+-  *
+-  */
+-static void audio_capture_stop_dma(audio_stream_t * s)
+-{
+-	unsigned long flags;
+-	struct snd_pcm_substream *substream;
+-	struct snd_pcm_runtime *runtime;
+-	unsigned int dma_size;
+-	unsigned int offset;
+-
+-	substream = s->stream;
+-	runtime = substream->runtime;
+-	dma_size = frames_to_bytes(runtime, runtime->period_size);
+-	offset = dma_size * s->periods;
+-
+-	spin_lock_irqsave(&s->dma_lock, flags);
+-
+-	pr_debug("MXC : audio_stop_dma active = 0\n");
+-	s->active = 0;
+-	s->period = 0;
+-	s->periods = 0;
+-
+-	/* this stops the dma channel and clears the buffer ptrs */
+-	mxc_dma_disable(s->dma_wchannel);
+-	dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+-			 DMA_FROM_DEVICE);
+-
+-	spin_unlock_irqrestore(&s->dma_lock, flags);
+-
+-}
+-
+-/*!
+   * This function is called whenever a new audio block needs to be
+   * transferred to PMIC. The function receives the address and the size
+   * of the new block and start a new DMA transfer.
+@@ -2510,41 +2438,17 @@ snd_mxc_audio_playback_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	spin_lock(&s->dma_lock);
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_START\n");
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		s->tx_spin = 0;
+-		/* requested stream startup */
+ 		s->active = 1;
+ 		audio_playback_dma(s);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_STOP\n");
+-		/* requested stream shutdown */
+-		audio_playback_stop_dma(s);
+-		break;
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:
+-		pr_debug("MXC : SNDRV_PCM_TRIGGER_SUSPEND active = 0\n");
+-		s->active = 0;
+-		s->periods = 0;
+-		break;
+-	case SNDRV_PCM_TRIGGER_RESUME:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_RESUME\n");
+-		s->active = 1;
+-		s->tx_spin = 0;
+-		audio_playback_dma(s);
+-		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_PAUSE_PUSH\n");
+ 		s->active = 0;
+ 		break;
+-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_PAUSE_RELEASE\n");
+-		s->active = 1;
+-		if (s->old_offset) {
+-			s->tx_spin = 0;
+-			audio_playback_dma(s);
+-			break;
+-		}
+-		break;
+ 	default:
+ 		err = -EINVAL;
+ 		break;
+@@ -2579,41 +2483,17 @@ snd_mxc_audio_capture_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	spin_lock(&s->dma_lock);
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_START\n");
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		s->tx_spin = 0;
+-		/* requested stream startup */
+ 		s->active = 1;
+ 		audio_capture_dma(s);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_STOP\n");
+-		/* requested stream shutdown */
+-		audio_capture_stop_dma(s);
+-		break;
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:
+-		pr_debug("MXC : SNDRV_PCM_TRIGGER_SUSPEND active = 0\n");
+-		s->active = 0;
+-		s->periods = 0;
+-		break;
+-	case SNDRV_PCM_TRIGGER_RESUME:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_RESUME\n");
+-		s->active = 1;
+-		s->tx_spin = 0;
+-		audio_capture_dma(s);
+-		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_PAUSE_PUSH\n");
+ 		s->active = 0;
+ 		break;
+-	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+-		pr_debug("MXC: SNDRV_PCM_TRIGGER_PAUSE_RELEASE\n");
+-		s->active = 1;
+-		if (s->old_offset) {
+-			s->tx_spin = 0;
+-			audio_capture_dma(s);
+-			break;
+-		}
+-		break;
+ 	default:
+ 		err = -EINVAL;
+ 		break;
+-- 
+1.5.4.4
+

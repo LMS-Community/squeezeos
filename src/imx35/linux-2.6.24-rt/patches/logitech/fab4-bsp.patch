@@ -1,0 +1,2868 @@
+---
+ drivers/i2c/chips/Kconfig             |   19 +
+ drivers/i2c/chips/Makefile            |    2 
+ drivers/i2c/chips/clearpad.c          |  300 ++++++++++++++++
+ drivers/i2c/chips/tsl2569.c           |  335 ++++++++++++++++++
+ drivers/input/touchscreen/Kconfig     |    2 
+ drivers/input/touchscreen/tsc2007.c   |   11 
+ drivers/mmc/card/Kconfig              |    3 
+ drivers/mmc/card/unifi_fs/fs_lx.c     |  193 ++++++----
+ drivers/mmc/host/mx_sdhci.c           |  208 ++++++++---
+ drivers/mmc/host/mx_sdhci.h           |   11 
+ drivers/mmc/host/mxc_mmc.c            |    9 
+ drivers/mtd/mtd_blkdevs.c             |   22 +
+ drivers/mxc/Kconfig                   |    2 
+ drivers/mxc/Makefile                  |    2 
+ drivers/mxc/fab4/Kconfig              |   22 +
+ drivers/mxc/fab4/Makefile             |    6 
+ drivers/mxc/fab4/fab4_gpio.c          |  177 +++++++++
+ drivers/mxc/fab4/fab4_ir.c            |  610 ++++++++++++++++++++++++++++++++++
+ drivers/mxc/fab4/psoc.h               |  201 +++++++++++
+ drivers/mxc/ipu/ipu_regs.h            |    1 
+ drivers/mxc/ipu/ipu_sdc.c             |    6 
+ drivers/mxc/pmic/core/mcu_pmic_core.c |    2 
+ include/asm-arm/arch-mxc/hardware.h   |    9 
+ include/asm-arm/arch-mxc/mmc.h        |    1 
+ include/asm-arm/arch-mxc/mx35_fab4.h  |   20 +
+ include/asm-arm/arch-mxc/mxc.h        |    5 
+ include/asm-arm/setup.h               |    8 
+ localversion                          |    1 
+ 28 files changed, 2043 insertions(+), 145 deletions(-)
+
+Index: linux-2.6.24/drivers/i2c/chips/clearpad.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c/chips/clearpad.c	2009-01-26 19:07:33.000000000 +0100
+@@ -0,0 +1,300 @@
++/* drivers/i2c/chips/clearpad.c
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++
++
++static struct i2c_driver clearpad_driver;
++
++struct clearpad_data {
++	struct i2c_client	*client;
++	struct input_dev	*input_dev;
++
++	struct mutex		lock;
++	struct work_struct	irq_work;
++
++	char			product_id[0x1F];
++	s32			max_x;
++	s32			max_y;
++	u8			resolution;
++};
++
++#define RMI_ADDR_STATUS      0x00
++#define RMI_ADDR_Z           0x01
++#define RMI_ADDR_XH          0x02
++#define RMI_ADDR_XL          0x03
++#define RMI_ADDR_YH          0x04
++#define RMI_ADDR_YL          0x05
++#define RMI_ADDR_DELTA_X     0x06
++#define RMI_ADDR_DELTA_Y     0x07
++#define RMI_ADDR_GESTURE     0x08
++#define RMI_ADDR_MAGNITUDE   0x09
++
++
++#define work_to_data(_w) container_of(_w, struct clearpad_data, irq_work)
++
++static void clearpad_irq_work(struct work_struct *work)
++{
++	struct clearpad_data *data = work_to_data(work);
++	struct i2c_client *client = data->client;
++	u8 values[I2C_SMBUS_BLOCK_MAX];
++	int status, width, pressure, gesture, flick;
++	int x, y, xmag, ymag;
++
++	i2c_smbus_read_i2c_block_data(client, 0x00, 0x0A, values);
++
++	status = (values[RMI_ADDR_STATUS] & 0x07);
++	gesture = (values[RMI_ADDR_GESTURE] & 0x80) >> 7;
++
++	/* number of fingers */
++	input_report_abs(data->input_dev, ABS_MISC, status);
++
++	if (status >= 1 ) {
++		width = (values[RMI_ADDR_STATUS] & 0xf0) >> 4;
++		pressure = values[RMI_ADDR_Z];
++		x = ((values[RMI_ADDR_XH] & 0x1f) << 8) | values[RMI_ADDR_XL];
++		y = ((values[RMI_ADDR_YH] & 0x1f) << 8) | values[RMI_ADDR_YL];
++
++		/* button down on finger contact */
++		input_report_abs(data->input_dev, ABS_X, data->max_x - x);
++		input_report_abs(data->input_dev, ABS_Y, y);
++		input_report_abs(data->input_dev, ABS_PRESSURE, pressure);
++		input_report_abs(data->input_dev, ABS_TOOL_WIDTH, width);
++
++		input_report_rel(data->input_dev, REL_X, (s8) values[RMI_ADDR_DELTA_X]);
++		input_report_rel(data->input_dev, REL_Y, (s8) values[RMI_ADDR_DELTA_Y]);
++
++		//printk("%d,%d F%d W%d P%d\n", x,y, status, width, pressure);
++	}
++
++	if (gesture) {
++		flick = (values[RMI_ADDR_GESTURE] & 0x10) >> 4;
++
++		if (flick) {
++			xmag = ((s8)(values[RMI_ADDR_MAGNITUDE] << 4)) >> 4;
++			ymag = ((s8)values[RMI_ADDR_MAGNITUDE]) >> 4;
++
++			input_report_rel(data->input_dev, REL_RX, xmag);
++			input_report_rel(data->input_dev, REL_RY, ymag);
++
++			//printk("FLICK %d,%d\n", xmag, ymag);
++		}
++	}
++
++	input_sync(data->input_dev);
++
++	enable_irq(client->irq);
++}
++
++
++static irqreturn_t clearpad_irq(int irq, void *dev_id)
++{
++	struct clearpad_data *data = dev_id;
++
++	schedule_work(&data->irq_work);
++	disable_irq(irq);
++
++	return IRQ_HANDLED;
++}
++
++
++static int clearpad_init_client(struct i2c_client *client)
++{
++	struct clearpad_data *data = i2c_get_clientdata(client);
++	u8 values[I2C_SMBUS_BLOCK_MAX];
++	u8 reg;
++
++	/* Check Manufacturer id */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x04);
++	if (i2c_smbus_read_byte_data(client, 0xE1) != 0x01) {
++		return 0;
++	}
++
++	/* Check for 2-D sensor pad */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x03);
++	if (i2c_smbus_read_byte_data(client, 0x10) == 0x00) {
++		return 0;
++	}
++
++	/* Check Product ID */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x02);
++
++	i2c_smbus_read_i2c_block_data(client, 0x10, 16, values);
++	memcpy(data->product_id, values, sizeof(data->product_id));
++
++	/* Check Sensor Query Registers */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x10);
++
++	i2c_smbus_read_i2c_block_data(client, 0x00, 8, values);
++
++	data->max_x = (values[4] & 0x1F) << 8 | (values[5]);
++	data->max_y = (values[6] & 0x1F) << 8 | (values[7]);
++	data->resolution = values[8];
++
++	printk(KERN_INFO "Clearpad: %s (%d,%d)\n", data->product_id, data->max_x, data->max_y);
++
++	/* Enable Attention IRQ */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x00);
++	reg = i2c_smbus_read_byte_data(client, 0x01);
++	reg |= 0x07;
++	i2c_smbus_write_byte_data(client, 0x01, reg);
++
++	/* Restore to Data page */
++	i2c_smbus_write_byte_data(client, 0xFF, 0x04);
++
++	INIT_WORK(&data->irq_work, clearpad_irq_work);
++
++	return 1;
++}
++
++
++int clearpad_probe(struct i2c_client *client)
++{
++	struct clearpad_data *data;
++	struct input_dev *input_dev;
++	int err = 0;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
++		dev_err(&client->dev, "No SMBUS byte data capability\n");
++		goto error0;
++	}
++
++	if (!(data = kzalloc(sizeof(struct clearpad_data), GFP_KERNEL))) {
++		dev_err(&client->dev, "No space for state\n");
++		err = -ENOMEM;
++		goto error0;
++	}
++
++	i2c_set_clientdata(client, data);
++	data->client = client;
++
++	mutex_init(&data->lock);
++
++	/* Initialize the ClearPad */
++	if (!clearpad_init_client(client)) {
++		goto error1;
++	}
++
++	input_dev = input_allocate_device();
++	if (input_dev == NULL) {
++		dev_err(&client->dev, "Could not allocate input device\n");
++		goto error1;
++	}
++
++	input_dev->name = "Synaptics ClearPad";
++	input_dev->phys = data->product_id;
++	input_dev->dev.parent = &client->dev;
++
++	input_dev->evbit[0] = BIT(EV_ABS) | BIT(EV_REL);
++	set_bit(REL_X, input_dev->relbit);
++	set_bit(REL_Y, input_dev->relbit);
++	set_bit(REL_RX, input_dev->relbit);
++	set_bit(REL_RY, input_dev->relbit);
++	input_set_abs_params(input_dev, ABS_X, 0, data->max_x, 0, 0);
++	input_set_abs_params(input_dev, ABS_Y, 0, data->max_y, 0, 0);
++	input_set_abs_params(input_dev, ABS_PRESSURE, 0, 0xFF, 0, 0);
++	input_set_abs_params(input_dev, ABS_TOOL_WIDTH, 0, 0x0F, 0, 0);
++	input_set_abs_params(input_dev, ABS_MISC, 0, 0x03, 0, 0);
++
++	data->input_dev = input_dev;
++
++	err = input_register_device(input_dev);
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register input device\n");
++		input_free_device(input_dev);
++		goto error1;
++	}
++
++	err = request_irq(client->irq, clearpad_irq,
++			  IRQF_TRIGGER_LOW | IRQF_SAMPLE_RANDOM,
++			  client->dev.bus_id, data);
++
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register IRQ %d\n",
++			client->irq);
++		goto error2;
++	}
++
++	return 0;
++
++ error2:
++	input_unregister_device(input_dev);
++ error1:
++	kfree(data);
++ error0:
++	return err;
++}
++
++
++int clearpad_remove(struct i2c_client *client)
++{
++	struct clearpad_data *data = i2c_get_clientdata(client);
++	int err;
++
++	free_irq(client->irq, data);
++
++	input_unregister_device(data->input_dev);
++
++	/* Try to detach the client from i2c space */
++	if ((err = i2c_detach_client(client))) {
++		dev_err(&client->dev,
++			"Client deregistration failed, not detached.\n");
++		return err;
++	}
++
++	kfree(client);
++
++	return 0;
++}
++
++
++static struct i2c_driver clearpad_driver = {
++	.driver		= {
++		.owner		= THIS_MODULE,
++		.name		= "clearpad",
++	},
++	.probe	= clearpad_probe,
++	.remove	= clearpad_remove,
++};
++
++
++static int __init clearpad_init(void)
++{
++	return i2c_add_driver(&clearpad_driver);
++}
++
++
++static void __exit clearpad_exit(void)
++{
++	i2c_del_driver(&clearpad_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("Synatics ClearPad driver");
++
++module_init(clearpad_init)
++module_exit(clearpad_exit)
+Index: linux-2.6.24/drivers/i2c/chips/Kconfig
+===================================================================
+--- linux-2.6.24.orig/drivers/i2c/chips/Kconfig	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/i2c/chips/Kconfig	2009-01-26 19:07:28.000000000 +0100
+@@ -163,4 +163,23 @@ config MENELAUS
+ 	  and other features that are often used in portable devices like
+ 	  cell phones and PDAs.
+ 
++config SENSORS_CLEARPAD
++        tristate "Synaptics ClearPad"
++        depends on EXPERIMENTAL
++        help
++          If you say yes here you get support for the Synaptics ClearPad.
++
++          This driver can also be built as a module.  If so, the module
++          will be called clearpad.
++
++config SENSORS_TSL2569
++	tristate "Taos TSL2569 ambient light sensor"
++	depends on EXPERIMENTAL
++	help
++	  If you say yes here you get support for the Taos TSL2569
++	  ambient light sensor.
++
++	  This driver can also be built as a module.  If so, the module
++	  will be called tsl2569.
++
+ endmenu
+Index: linux-2.6.24/drivers/i2c/chips/Makefile
+===================================================================
+--- linux-2.6.24.orig/drivers/i2c/chips/Makefile	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/i2c/chips/Makefile	2009-01-26 19:07:28.000000000 +0100
+@@ -15,6 +15,8 @@ obj-$(CONFIG_ISP1301_OMAP)	+= isp1301_om
+ obj-$(CONFIG_TPS65010)		+= tps65010.o
+ obj-$(CONFIG_MENELAUS)		+= menelaus.o
+ obj-$(CONFIG_SENSORS_TSL2550)	+= tsl2550.o
++obj-$(CONFIG_SENSORS_CLEARPAD)  += clearpad.o
++obj-$(CONFIG_SENSORS_TSL2569)	+= tsl2569.o
+ 
+ ifeq ($(CONFIG_I2C_DEBUG_CHIP),y)
+ EXTRA_CFLAGS += -DDEBUG
+Index: linux-2.6.24/drivers/i2c/chips/tsl2569.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c/chips/tsl2569.c	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1,335 @@
++/*
++ *  tsl2569.c - Linux kernel modules for ambient light sensor
++ *
++ *  Copyright (C) 2008 Logitech
++ *       Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ *  Some parts based on tsl2550.c:
++ *  Copyright (C) 2007 Rodolfo Giometti <giometti@linux.it>
++ *  Copyright (C) 2007 Eurotech S.p.A. <info@eurotech.it>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License as published by
++ *  the Free Software Foundation; either version 2 of the License, or
++ *  (at your option) any later version.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/mutex.h>
++#include <linux/delay.h>
++
++#define TSL2569_DRV_NAME	"tsl2569"
++#define DRIVER_VERSION		"1.0"
++
++/*
++ * Defines
++ */
++
++#define TSL2569_REG_CONTROL		0x80
++#define TSL2569_REG_TIMING		0x81
++#define TSL2569_REG_PARTNO		0x8A
++#define TSL2569_REG_ADC0		0x9C
++#define TSL2569_REG_ADC1		0x9E
++
++#define TSL2569_PARTNO			0xB0
++
++#define TSL2569_POWER_DOWN		0x00
++#define TSL2569_POWER_UP		0x03
++
++
++/*
++ * Structs
++ */
++
++struct tsl2569_data {
++	struct i2c_client *client;
++	struct mutex update_lock;
++
++	unsigned int power_state : 1;
++};
++
++/*
++ * Management functions
++ */
++
++static int tsl2569_set_power_state(struct i2c_client *client, int state)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret;
++
++	if (state == 0)
++		ret = i2c_smbus_write_byte_data(client, TSL2569_REG_CONTROL, TSL2569_POWER_UP);
++	else {
++		ret = i2c_smbus_write_byte_data(client, TSL2569_REG_CONTROL, TSL2569_POWER_DOWN);
++	}
++
++	data->power_state = state;
++
++	return ret;
++}
++
++static int tsl2569_get_adc_value(struct i2c_client *client, u8 cmd)
++{
++	int ret = 0;
++	u8 values[2];
++
++	ret = i2c_smbus_read_i2c_block_data(client, cmd, 2, values);
++	if (ret < 0)
++		return ret;
++
++	ret = (values[1] << 8) | values[0];
++	return ret;
++}
++
++static int tsl2569_get_lux_value(struct i2c_client *client, u8 cmd)
++{
++	int lux, ch0, ch1;
++
++	ch0 = tsl2569_get_adc_value(client, TSL2569_REG_ADC0);
++	if (ch0 < 0)
++		return ch0;
++
++	ch1 = tsl2569_get_adc_value(client, TSL2569_REG_ADC1);
++	if (ch1 < 0)
++		return ch1;
++
++	// FIXME calculate lux
++	lux = 0;
++
++	return lux;
++}
++
++
++/*
++ * SysFS support
++ */
++
++static ssize_t tsl2569_show_power_state(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(to_i2c_client(dev));
++
++	return sprintf(buf, "%u\n", data->power_state);
++}
++
++static ssize_t tsl2569_store_power_state(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	unsigned long val = simple_strtoul(buf, NULL, 10);
++	int ret;
++
++	if (val < 0 || val > 1)
++		return -EINVAL;
++
++	mutex_lock(&data->update_lock);
++	ret = tsl2569_set_power_state(client, val);
++	mutex_unlock(&data->update_lock);
++
++	if (ret < 0)
++		return ret;
++
++	return count;
++}
++
++static DEVICE_ATTR(power_state, S_IWUSR | S_IRUGO,
++		   tsl2569_show_power_state, tsl2569_store_power_state);
++
++static ssize_t tsl2569_show_adc(struct device *dev,
++			struct device_attribute *attr, char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret, ch0, ch1;
++
++	/* No LUX data if not operational */
++	if (!data->power_state)
++		return -EBUSY;
++
++	mutex_lock(&data->update_lock);
++
++	ch0 = tsl2569_get_adc_value(client, TSL2569_REG_ADC0);
++	if (ch0 < 0)
++		return ch0;
++
++	ch1 = tsl2569_get_adc_value(client, TSL2569_REG_ADC1);
++	if (ch1 < 0)
++		return ch1;
++
++	ret = 0; // FIXME tsl2569_calculate_lux(ch0, ch1);
++	if (ret < 0)
++		return ret;
++
++	ret = sprintf(buf, "%d,%d\n", ch0, ch1);
++
++	mutex_unlock(&data->update_lock);
++
++	return ret;
++}
++
++static DEVICE_ATTR(adc, S_IRUGO,
++		   tsl2569_show_adc, NULL);
++
++
++static ssize_t tsl2569_show_lux(struct device *dev,
++			struct device_attribute *attr, char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int ret, lux;
++
++	/* No LUX data if not operational */
++	if (!data->power_state)
++		return -EBUSY;
++
++	mutex_lock(&data->update_lock);
++
++	lux = tsl2569_get_lux_value(client, TSL2569_REG_ADC0);
++	if (lux < 0)
++		return lux;
++
++	ret = sprintf(buf, "%d\n", lux);
++
++	mutex_unlock(&data->update_lock);
++
++	return ret;
++}
++
++static DEVICE_ATTR(lux, S_IRUGO,
++		   tsl2569_show_lux, NULL);
++
++static struct attribute *tsl2569_attributes[] = {
++	&dev_attr_power_state.attr,
++	&dev_attr_adc.attr,
++	&dev_attr_lux.attr,
++	NULL
++};
++
++static const struct attribute_group tsl2569_attr_group = {
++	.attrs = tsl2569_attributes,
++};
++
++/*
++ * Initialization function
++ */
++
++static int tsl2569_init_client(struct i2c_client *client)
++{
++	struct tsl2569_data *data = i2c_get_clientdata(client);
++	int err;
++
++	/* Verify the part number */
++	if ((i2c_smbus_read_byte_data(client, TSL2569_REG_PARTNO) & 0xF0) != TSL2569_PARTNO)
++		return -ENODEV;
++
++	/* Power up the device, and then read the status back */
++	err = i2c_smbus_write_byte_data(client, TSL2569_REG_CONTROL, TSL2569_POWER_UP);
++	if (err < 0)
++		return err;
++
++	mdelay(1);
++	if ((i2c_smbus_read_byte_data(client, TSL2569_REG_CONTROL) & 0x03) != TSL2569_POWER_UP)
++		return -ENODEV;
++
++	data->power_state = 1;
++
++	return 0;
++}
++
++/*
++ * I2C init/probing/exit functions
++ */
++
++static struct i2c_driver tsl2569_driver;
++static int __devinit tsl2569_probe(struct i2c_client *client)
++{
++	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
++	struct tsl2569_data *data;
++	int err = 0;
++
++	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE)) {
++		err = -EIO;
++		goto exit;
++	}
++
++	data = kzalloc(sizeof(struct tsl2569_data), GFP_KERNEL);
++	if (!data) {
++		err = -ENOMEM;
++		goto exit;
++	}
++	data->client = client;
++	i2c_set_clientdata(client, data);
++
++	mutex_init(&data->update_lock);
++
++	/* Initialize the TSL2569 chip */
++	err = tsl2569_init_client(client);
++	if (err)
++		goto exit_kfree;
++
++	/* Register sysfs hooks */
++	err = sysfs_create_group(&client->dev.kobj, &tsl2569_attr_group);
++	if (err)
++		goto exit_kfree;
++
++	dev_info(&client->dev, "support ver. %s enabled\n", DRIVER_VERSION);
++
++	return 0;
++
++exit_kfree:
++	kfree(data);
++exit:
++	return err;
++}
++
++static int __devexit tsl2569_remove(struct i2c_client *client)
++{
++	sysfs_remove_group(&client->dev.kobj, &tsl2569_attr_group);
++
++	/* Power down the device */
++	tsl2569_set_power_state(client, 0);
++
++	kfree(i2c_get_clientdata(client));
++
++	return 0;
++}
++
++static struct i2c_driver tsl2569_driver = {
++	.driver = {
++		.name	= TSL2569_DRV_NAME,
++		.owner	= THIS_MODULE,
++	},
++	.probe	= tsl2569_probe,
++	.remove	= __devexit_p(tsl2569_remove),
++};
++
++static int __init tsl2569_init(void)
++{
++	return i2c_add_driver(&tsl2569_driver);
++}
++
++static void __exit tsl2569_exit(void)
++{
++	i2c_del_driver(&tsl2569_driver);
++}
++
++MODULE_AUTHOR("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("TSL2569 ambient light sensor driver");
++MODULE_LICENSE("GPL");
++MODULE_VERSION(DRIVER_VERSION);
++
++module_init(tsl2569_init);
++module_exit(tsl2569_exit);
+Index: linux-2.6.24/drivers/input/touchscreen/Kconfig
+===================================================================
+--- linux-2.6.24.orig/drivers/input/touchscreen/Kconfig	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/input/touchscreen/Kconfig	2009-01-26 19:07:28.000000000 +0100
+@@ -277,7 +277,7 @@ config TOUCHSCREEN_USB_GOTOP
+ 
+ config TOUCHSCREEN_TSC2007
+ 	tristate "TI Touch Screen Controller Chip TSC2007"
+-	depends on ARCH_MX37 || MACH_MX35_3DS
++	depends on ARCH_MX37 || MACH_MX35_3DS || MACH_FAB4
+ 	help
+ 	  If you say yes here you get support for TSC2007 touch screen controller chip.
+ 	 
+Index: linux-2.6.24/drivers/input/touchscreen/tsc2007.c
+===================================================================
+--- linux-2.6.24.orig/drivers/input/touchscreen/tsc2007.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/input/touchscreen/tsc2007.c	2009-01-26 19:07:28.000000000 +0100
+@@ -184,7 +184,6 @@ static int tsc2007ts_thread(void *v)
+ 		tsc2007_read_pressure(d, PD_PENIRQ_DISARM, &p);
+ 		input_report_abs(d->idev, ABS_X, 4096 - x);
+ 		input_report_abs(d->idev, ABS_Y, 4096 - y);
+-		input_report_abs(d->idev, ABS_PRESSURE, p);
+ 		input_sync(d->idev);
+ 
+ 		while (p > d->penup_threshold) {
+@@ -199,14 +198,14 @@ static int tsc2007ts_thread(void *v)
+ 
+ 			input_report_abs(d->idev, ABS_X, 4096 - x);
+ 			input_report_abs(d->idev, ABS_Y, 4096 - y);
+-			input_report_abs(d->idev, ABS_PRESSURE, p);
++			input_report_key(d->idev, BTN_TOUCH, (p > 1500));
+ 			input_sync(d->idev);
+ 		};
+ 
+ 		/* Pen Up */
+ 		input_report_abs(d->idev, ABS_X, 4096 - x);
+ 		input_report_abs(d->idev, ABS_Y, 4096 - y);
+-		input_report_abs(d->idev, ABS_PRESSURE, 0);
++		input_report_key(d->idev, BTN_TOUCH, 0);
+ 		input_sync(d->idev);
+ 
+ 		tsc2007_read(d, MEAS_TEMP0, PD_PENIRQ_ARM, 0);
+@@ -271,13 +270,13 @@ static int tsc2007_driver_register(struc
+ 	data->idev = idev;
+ 	idev->private = data;
+ 	idev->name = DRIVER_NAME;
+-	idev->evbit[0] = BIT(EV_ABS);
++	idev->evbit[0] = BIT(EV_KEY) | BIT(EV_ABS);
++	idev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
+ 	idev->open = tsc2007_idev_open;
+ 	idev->close = tsc2007_idev_close;
+-	idev->absbit[0] = BIT(ABS_X) | BIT(ABS_Y) | BIT(ABS_PRESSURE);
++	idev->absbit[0] = BIT(ABS_X) | BIT(ABS_Y);
+ 	input_set_abs_params(idev, ABS_X, 0, ADC_MAX, 0, 0);
+ 	input_set_abs_params(idev, ABS_Y, 0, ADC_MAX, 0, 0);
+-	input_set_abs_params(idev, ABS_PRESSURE, 0, 0, 0, 0);
+ 
+ 	if (!ret)
+ 		ret = input_register_device(idev);
+Index: linux-2.6.24/drivers/mmc/card/Kconfig
+===================================================================
+--- linux-2.6.24.orig/drivers/mmc/card/Kconfig	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mmc/card/Kconfig	2009-01-26 19:07:28.000000000 +0100
+@@ -41,7 +41,8 @@ config SDIO_UART
+ 
+ config SDIO_UNIFI_FS
+ 	tristate "UniFi SDIO glue for Freescale MMC/SDIO"
+-	depends on MMC_MXC && MACH_MX31_3DS
++	depends on (MMC_MXC || MMC_IMX_ESDHCI)
++	depends on (MACH_MX31_3DS || MACH_MX35_3DS)
+ 	help
+ 	  This provides an interface between the CSR UniFi WiFi
+ 	  driver and the Freescale MMC/SDIO interface.
+Index: linux-2.6.24/drivers/mmc/card/unifi_fs/fs_lx.c
+===================================================================
+--- linux-2.6.24.orig/drivers/mmc/card/unifi_fs/fs_lx.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mmc/card/unifi_fs/fs_lx.c	2009-01-26 19:07:33.000000000 +0100
+@@ -70,8 +70,7 @@ static struct sdio_dev *available_sdio_d
+ static struct fs_driver *available_driver;
+ struct mxc_unifi_platform_data *plat_data;
+ 
+-static struct mmc_host *fsl_mmc_host;
+-struct mmc_host *mxc_mmc_get_host(int id);
++extern void mxc_mmc_force_detect(int id);
+ 
+ enum sdio_cmd_direction {
+ 	CMD_READ,
+@@ -252,27 +251,44 @@ EXPORT_SYMBOL(fs_sdio_set_block_size);
+ static void fs_unifi_power_on(int check_card)
+ {
+ 	struct regulator_unifi *reg_unifi;
++ 	unsigned int tmp;
+ 
+ 	reg_unifi = plat_data->priv;
+ 
+-	regulator_enable(reg_unifi->reg_gpo1);
+-	regulator_enable(reg_unifi->reg_gpo2);
+-
+-	regulator_set_voltage(reg_unifi->reg_1v5_ana_bb, 1500000);
+-	regulator_enable(reg_unifi->reg_1v5_ana_bb);
+-
+-	regulator_set_voltage(reg_unifi->reg_vdd_vpa, 2300000);
+-	regulator_enable(reg_unifi->reg_vdd_vpa);
+-
++ 	if (reg_unifi->reg_gpo1)
++ 		regulator_enable(reg_unifi->reg_gpo1);
++ 	if (reg_unifi->reg_gpo2)
++ 		regulator_enable(reg_unifi->reg_gpo2);
++
++ 	if (plat_data->enable)
++ 		plat_data->enable(1);
++
++ 	if (reg_unifi->reg_1v5_ana_bb) {
++ 		tmp = regulator_get_voltage(reg_unifi->reg_1v5_ana_bb);
++ 		if (tmp < 1500000)
++ 			regulator_set_voltage(reg_unifi->reg_1v5_ana_bb,
++ 					     1500000);
++ 		regulator_enable(reg_unifi->reg_1v5_ana_bb);
++ 	}
++ 	if (reg_unifi->reg_vdd_vpa) {
++ 		tmp = regulator_get_voltage(reg_unifi->reg_vdd_vpa);
++ 		if (tmp < 3000000)
++ 			regulator_set_voltage(reg_unifi->reg_vdd_vpa, 3000000);
++ 		regulator_enable(reg_unifi->reg_vdd_vpa);
++ 	}
+ 	/* WL_1V5DD should come on last, 10ms after other supplies */
+ 	msleep(10);
+-	regulator_set_voltage(reg_unifi->reg_1v5_dd, 1500000);
+-	regulator_enable(reg_unifi->reg_1v5_dd);
++ 	if (reg_unifi->reg_1v5_dd) {
++ 		tmp = regulator_get_voltage(reg_unifi->reg_1v5_dd);
++ 		if (tmp < 1500000)
++ 			regulator_set_voltage(reg_unifi->reg_1v5_dd, 1500000);
++ 		regulator_enable(reg_unifi->reg_1v5_dd);
++ 	}
+ 	msleep(10);
+-	if (check_card && fsl_mmc_host) {
++ 	if (check_card) {
+ 		do_sdio_hard_reset(NULL);
+ 		msleep(500);
+-		mmc_detect_change(fsl_mmc_host, msecs_to_jiffies(100));
++ 		mxc_mmc_force_detect(plat_data->host_id);
+ 	}
+ }
+ 
+@@ -288,14 +304,25 @@ static void fs_unifi_power_off(int check
+ 	struct regulator_unifi *reg_unifi;
+ 
+ 	reg_unifi = plat_data->priv;
+-	regulator_disable(reg_unifi->reg_gpo2);
+-	regulator_disable(reg_unifi->reg_1v5_ana_bb);
+-	regulator_disable(reg_unifi->reg_1v5_dd);
+-	regulator_disable(reg_unifi->reg_vdd_vpa);
++ 	if (reg_unifi->reg_1v5_dd)
++ 		regulator_disable(reg_unifi->reg_1v5_dd);
++ 	if (reg_unifi->reg_vdd_vpa)
++ 		regulator_disable(reg_unifi->reg_vdd_vpa);
++
++ 	if (reg_unifi->reg_1v5_ana_bb)
++ 		regulator_disable(reg_unifi->reg_1v5_ana_bb);
++
++ 	if (plat_data->enable)
++ 		plat_data->enable(0);
++
++ 	if (reg_unifi->reg_gpo2)
++ 		regulator_disable(reg_unifi->reg_gpo2);
+ 
+-	if (check_card && fsl_mmc_host)
+-		mmc_detect_change(fsl_mmc_host, msecs_to_jiffies(50));
++ 	if (reg_unifi->reg_gpo1)
++ 		regulator_disable(reg_unifi->reg_gpo1);
+ 
++ 	if (check_card)
++ 		mxc_mmc_force_detect(plat_data->host_id);
+ }
+ 
+ /* This should be made conditional on being slot 2 too - so we can
+@@ -436,6 +463,8 @@ static int fs_sdio_probe(struct sdio_fun
+ 
+ 	/* Allocate our private context */
+ 	fdev = kmalloc(sizeof(struct sdio_dev), GFP_KERNEL);
++	if (!fdev)
++		return -ENOMEM;
+ 	available_sdio_dev = fdev;
+ 	memset(fdev, 0, sizeof(struct sdio_dev));
+ 	fdev->func = func;
+@@ -500,63 +529,78 @@ static int fs_unifi_init(void)
+ 	int err = 0;
+ 
+ 	plat_data = get_unifi_plat_data();
+-	fsl_mmc_host = mxc_mmc_get_host(plat_data->host_id);
+-	if (!fsl_mmc_host || !plat_data)
++
++	if (!plat_data)
+ 		return -ENOENT;
+ 
+ 	reg_unifi = kzalloc(sizeof(struct regulator_unifi), GFP_KERNEL);
++	if (!reg_unifi)
++		return -ENOMEM;
++
++	if (plat_data->reg_gpo1) {
++		reg = regulator_get(NULL, plat_data->reg_gpo1);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_gpo1 = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_gpo1;
++		}
++	}
+ 
+-	reg = regulator_get(NULL, plat_data->reg_gpo1);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_gpo1 = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_gpo1;
+-	}
+-
+-	reg = regulator_get(NULL, plat_data->reg_gpo2);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_gpo2 = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_gpo2;
+-	}
+-
+-	reg = regulator_get(NULL, plat_data->reg_1v5_ana_bb);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_1v5_ana_bb = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_1v5_ana_bb;
+-	}
+-
+-	reg = regulator_get(NULL, plat_data->reg_vdd_vpa);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_vdd_vpa = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_vdd_vpa;
+-	}
+-
+-	reg = regulator_get(NULL, plat_data->reg_1v5_dd);
+-	if (reg != ERR_PTR(-ENOENT))
+-		reg_unifi->reg_1v5_dd = reg;
+-	else {
+-		err = -EINVAL;
+-		goto err_reg_1v5_dd;
++	if (plat_data->reg_gpo2) {
++		reg = regulator_get(NULL, plat_data->reg_gpo2);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_gpo2 = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_gpo2;
++		}
+ 	}
+ 
++	if (plat_data->reg_1v5_ana_bb) {
++		reg = regulator_get(NULL, plat_data->reg_1v5_ana_bb);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_1v5_ana_bb = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_1v5_ana_bb;
++		}
++	}
++
++	if (plat_data->reg_vdd_vpa) {
++		reg = regulator_get(NULL, plat_data->reg_vdd_vpa);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_vdd_vpa = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_vdd_vpa;
++		}
++	}
++
++	if (plat_data->reg_1v5_dd) {
++		reg = regulator_get(NULL, plat_data->reg_1v5_dd);
++		if (!IS_ERR(reg))
++			reg_unifi->reg_1v5_dd = reg;
++		else {
++			err = -EINVAL;
++			goto err_reg_1v5_dd;
++		}
++	}
+ 	plat_data->priv = reg_unifi;
+ 	return 0;
+ 
+ err_reg_1v5_dd:
+-	regulator_put(reg_unifi->reg_vdd_vpa, NULL);
++	if (reg_unifi->reg_vdd_vpa)
++		regulator_put(reg_unifi->reg_vdd_vpa, NULL);
+ err_reg_vdd_vpa:
+-	regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
++	if (reg_unifi->reg_1v5_ana_bb)
++		regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
+ err_reg_1v5_ana_bb:
+-	regulator_put(reg_unifi->reg_gpo2, NULL);
++	if (reg_unifi->reg_gpo2)
++		regulator_put(reg_unifi->reg_gpo2, NULL);
+ err_reg_gpo2:
+-	regulator_put(reg_unifi->reg_gpo1, NULL);
++	if (reg_unifi->reg_gpo1)
++		regulator_put(reg_unifi->reg_gpo1, NULL);
+ err_reg_gpo1:
+ 	kfree(reg_unifi);
+ 	return err;
+@@ -569,11 +613,20 @@ int fs_unifi_remove(void)
+ 	reg_unifi = plat_data->priv;
+ 	plat_data->priv = NULL;
+ 
+-	regulator_put(reg_unifi->reg_1v5_dd, NULL);
+-	regulator_put(reg_unifi->reg_vdd_vpa, NULL);
+-	regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
+-	regulator_put(reg_unifi->reg_gpo2, NULL);
+-	regulator_put(reg_unifi->reg_gpo1, NULL);
++	if (reg_unifi->reg_1v5_dd)
++		regulator_put(reg_unifi->reg_1v5_dd, NULL);
++	if (reg_unifi->reg_vdd_vpa)
++		regulator_put(reg_unifi->reg_vdd_vpa, NULL);
++
++	if (reg_unifi->reg_1v5_ana_bb)
++		regulator_put(reg_unifi->reg_1v5_ana_bb, NULL);
++
++	if (reg_unifi->reg_gpo2)
++		regulator_put(reg_unifi->reg_gpo2, NULL);
++
++	if (reg_unifi->reg_gpo1)
++		regulator_put(reg_unifi->reg_gpo1, NULL);
++
+ 	kfree(reg_unifi);
+ 	return 0;
+ }
+Index: linux-2.6.24/drivers/mmc/host/mxc_mmc.c
+===================================================================
+--- linux-2.6.24.orig/drivers/mmc/host/mxc_mmc.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mmc/host/mxc_mmc.c	2009-01-26 19:07:28.000000000 +0100
+@@ -315,14 +315,13 @@ static int mxcmci_data_done(struct mxcmc
+ #define MAX_HOST 10
+ static struct mmc_host *hosts[MAX_HOST];
+ 
+-struct mmc_host *mxc_mmc_get_host(int id)
++void mxc_mmc_force_detect(int id)
+ {
+ 	if (id < MAX_HOST)
+-		return hosts[id];
+-	else
+-		return NULL;
++		mmc_detect_change(hosts[id], msecs_to_jiffies(100));
+ }
+-EXPORT_SYMBOL(mxc_mmc_get_host);
++
++EXPORT_SYMBOL(mxc_mmc_force_detect);
+ 
+ /*!
+  * This function sets the SDHC register to stop the clock and waits for the
+Index: linux-2.6.24/drivers/mmc/host/mx_sdhci.c
+===================================================================
+--- linux-2.6.24.orig/drivers/mmc/host/mx_sdhci.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mmc/host/mx_sdhci.c	2009-01-26 19:07:28.000000000 +0100
+@@ -54,6 +54,7 @@
+ 	pr_debug(DRIVER_NAME " [%s()]: " f, __func__, ## x)
+ 
+ static unsigned int debug_quirks;
++static int last_op_dir;
+ 
+ /*
+  * Different quirks to handle when the hardware deviates from a strict
+@@ -103,6 +104,12 @@ static unsigned int debug_quirks;
+ static unsigned int mxc_wml_value = 512;
+ static unsigned int *adma_des_table;
+ 
++#ifndef MXC_SDHCI_NUM
++#define MXC_SDHCI_NUM	4
++#endif
++
++static struct sdhci_chip *mxc_fix_chips[MXC_SDHCI_NUM];
++
+ static void sdhci_prepare_data(struct sdhci_host *, struct mmc_data *);
+ static void sdhci_finish_data(struct sdhci_host *);
+ 
+@@ -114,6 +121,25 @@ extern void gpio_sdhc_active(int module)
+ extern void gpio_sdhc_inactive(int module);
+ static void sdhci_dma_irq(void *devid, int error, unsigned int cnt);
+ 
++void mxc_mmc_force_detect(int id)
++{
++	struct sdhci_host *host;
++	if ((id < 0) || (id >= MXC_SDHCI_NUM))
++		return;
++	if (!mxc_fix_chips[id])
++		return;
++	host = mxc_fix_chips[id]->hosts[0];
++	if (host->flags & SDHCI_CD_PRESENT)
++		return;
++	if (host->detect_irq)
++		return;
++
++	schedule_work(&host->cd_wq);
++	return;
++}
++
++EXPORT_SYMBOL(mxc_mmc_force_detect);
++
+ static void sdhci_dumpregs(struct sdhci_host *host)
+ {
+ 	printk(KERN_DEBUG DRIVER_NAME
+@@ -153,8 +179,9 @@ static void sdhci_dumpregs(struct sdhci_
+ 
+ static void sdhci_reset(struct sdhci_host *host, u8 mask)
+ {
+-	unsigned long timeout;
+-	unsigned long mask_u32 = mask;
++	unsigned long tmp;
++	unsigned long mask_u32;
++	unsigned long reg_save = 0;
+ 
+ 	if (host->chip->quirks & SDHCI_QUIRK_NO_CARD_NO_RESET) {
+ 		if (!(readl(host->ioaddr + SDHCI_PRESENT_STATE) &
+@@ -162,45 +189,44 @@ static void sdhci_reset(struct sdhci_hos
+ 			return;
+ 	}
+ 
+-	mask_u32 = readl(host->ioaddr + SDHCI_CLOCK_CONTROL) | (mask_u32 << 24);
+-	writel(mask_u32, host->ioaddr + SDHCI_CLOCK_CONTROL);
+-
+ 	if (mask & SDHCI_RESET_ALL)
+ 		host->clock = 0;
++	else if (host->flags & SDHCI_CD_PRESENT)
++		reg_save = readl(host->ioaddr + SDHCI_HOST_CONTROL);
++
++	tmp = readl(host->ioaddr + SDHCI_CLOCK_CONTROL) | (mask << 24);
++	mask_u32 = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	writel(tmp, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	/* Wait max 100 ms */
+-	timeout = 100;
++	tmp = 5000;
+ 
+ 	/* hw clears the bit when it's done */
+ 	while ((readl(host->ioaddr + SDHCI_CLOCK_CONTROL) >> 24) & mask) {
+-		if (timeout == 0) {
++		if (tmp == 0) {
+ 			printk(KERN_ERR "%s: Reset 0x%x never completed.\n",
+ 			       mmc_hostname(host->mmc), (int)mask);
+ 			sdhci_dumpregs(host);
+ 			return;
+ 		}
+-		timeout--;
+-		mdelay(1);
++		tmp--;
++		udelay(20);
+ 	}
+ 	/*
+ 	 * The INT_EN SIG_EN regs have been modified after reset.
+ 	 * re-configure them ag.
+ 	 */
+-	mask_u32 = SDHCI_INT_ADMA_ERROR |
+-	    SDHCI_INT_DATA_END_BIT | SDHCI_INT_DATA_CRC |
+-	    SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_INDEX |
+-	    SDHCI_INT_END_BIT | SDHCI_INT_CRC | SDHCI_INT_TIMEOUT |
+-	    SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL |
+-	    SDHCI_INT_DMA_END | SDHCI_INT_DATA_END | SDHCI_INT_RESPONSE;
+-
++	if (!(mask & SDHCI_RESET_ALL) && (host->flags & SDHCI_CD_PRESENT))
++		writel(reg_save, host->ioaddr + SDHCI_HOST_CONTROL);
+ 	if (host->flags & SDHCI_USE_DMA)
+ 		mask_u32 &= ~(SDHCI_INT_DATA_AVAIL | SDHCI_INT_SPACE_AVAIL);
+ 	if (mxc_wml_value == 512)
+ 		writel(SDHCI_WML_128_WORDS, host->ioaddr + SDHCI_WML);
+ 	else
+ 		writel(SDHCI_WML_16_WORDS, host->ioaddr + SDHCI_WML);
+-	writel(mask_u32, host->ioaddr + SDHCI_INT_ENABLE);
++	writel(mask_u32 | SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(mask_u32, host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	last_op_dir = 0;
+ }
+ 
+ static void sdhci_init(struct sdhci_host *host)
+@@ -223,7 +249,7 @@ static void sdhci_init(struct sdhci_host
+ 		writel(SDHCI_WML_128_WORDS, host->ioaddr + SDHCI_WML);
+ 	else
+ 		writel(SDHCI_WML_16_WORDS, host->ioaddr + SDHCI_WML);
+-	writel(intmask, host->ioaddr + SDHCI_INT_ENABLE);
++	writel(intmask | SDHCI_INT_CARD_INT, host->ioaddr + SDHCI_INT_ENABLE);
+ 	writel(intmask, host->ioaddr + SDHCI_SIGNAL_ENABLE);
+ }
+ 
+@@ -428,6 +454,11 @@ static void sdhci_prepare_data(struct sd
+ 
+ 	host->data = data;
+ 	host->data_early = 0;
++	if (host->data->flags & MMC_DATA_READ)
++		writel(readl(host->ioaddr + SDHCI_CLOCK_CONTROL) |
++		       SDHCI_CLOCK_HLK_EN,
++		       host->ioaddr + SDHCI_CLOCK_CONTROL);
++
+ 
+ 	/* timeout in us */
+ 	target_timeout = data->timeout_ns / 1000 +
+@@ -538,7 +569,7 @@ static void sdhci_prepare_data(struct sd
+ 		/* Write the physical address to ADMA address reg */
+ 		writel(virt_to_phys(adma_des_table),
+ 		       host->ioaddr + SDHCI_ADMA_ADDRESS);
+-Single_DMA:
++	      Single_DMA:
+ 		/* Rollback to the Single DMA mode */
+ 		i = readl(host->ioaddr + SDHCI_HOST_CONTROL);
+ 		i &= ~SDHCI_CTRL_ADMA;
+@@ -615,14 +646,7 @@ static void sdhci_finish_data(struct sdh
+ 		blocks = (data->error == 0) ? 0 : 1;
+ 	else
+ 		blocks = readl(host->ioaddr + SDHCI_BLOCK_COUNT) >> 16;
+-	data->bytes_xfered = data->blksz * (data->blocks - blocks);
+-
+-	if (!data->error && blocks) {
+-		printk(KERN_ERR "%s: Controller signalled completion even "
+-		       "though there were blocks left.\n",
+-		       mmc_hostname(host->mmc));
+-		data->error = -EIO;
+-	}
++	data->bytes_xfered = data->blksz * data->blocks;
+ 
+ 	if (data->stop) {
+ 		/*
+@@ -809,7 +833,11 @@ static void sdhci_set_clock(struct sdhci
+ 	/* Configure the clock control register */
+ 	clk |=
+ 	    (readl(host->ioaddr + SDHCI_CLOCK_CONTROL) & (~SDHCI_CLOCK_MASK));
+-	writel(clk, host->ioaddr + SDHCI_CLOCK_CONTROL);
++	if (host->plat_data->vendor_ver < ESDHC_VENDOR_V22)
++		writel(clk, host->ioaddr + SDHCI_CLOCK_CONTROL);
++	else
++		writel(clk | SDHCI_CLOCK_SD_EN,
++		       host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	/* Wait max 10 ms */
+ 	timeout = 10;
+@@ -818,7 +846,7 @@ static void sdhci_set_clock(struct sdhci
+ 		mdelay(1);
+ 	}
+ 
+-out:
++      out:
+ 	host->clock = clock;
+ }
+ 
+@@ -871,6 +899,18 @@ static void sdhci_request(struct mmc_hos
+ #ifndef CONFIG_LEDS_CLASS
+ 	sdhci_activate_led(host);
+ #endif
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++		if (mrq->cmd && mrq->data) {
++			if (mrq->data->flags & MMC_DATA_READ)
++				last_op_dir = 1;
++			else {
++				if (last_op_dir)
++					sdhci_reset(host,
++						    SDHCI_RESET_CMD |
++						    SDHCI_RESET_DATA);
++			}
++		}
++	}
+ 
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ 	host->mrq = mrq;
+@@ -986,23 +1026,43 @@ static void sdhci_enable_sdio_irq(struct
+ {
+ 	struct sdhci_host *host;
+ 	unsigned long flags;
+-	u32 ier;
++	u32 ier, prot, clk, present;
+ 
+ 	host = mmc_priv(mmc);
+ 
+ 	spin_lock_irqsave(&host->lock, flags);
+ 
+-	ier = readl(host->ioaddr + SDHCI_INT_ENABLE);
++	if (enable) {
++		if (host->sdio_enable++)
++			goto exit_unlock;
++	} else {
++		if (--(host->sdio_enable))
++			goto exit_unlock;
++	}
++	ier = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	prot = readl(host->ioaddr + SDHCI_HOST_CONTROL);
++	clk = readl(host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+-	ier &= ~SDHCI_INT_CARD_INT;
+-	if (enable)
++	if (enable) {
+ 		ier |= SDHCI_INT_CARD_INT;
++		prot |= SDHCI_CTRL_D3CD;
++		clk |= SDHCI_CLOCK_PER_EN | SDHCI_CLOCK_IPG_EN;
++		present = readl(host->ioaddr + SDHCI_PRESENT_STATE);
++		if ((present & SDHCI_CARD_INT_MASK) != SDHCI_CARD_INT_ID)
++			writel(SDHCI_INT_CARD_INT,
++			       host->ioaddr + SDHCI_INT_STATUS);
++	} else {
++		ier &= ~SDHCI_INT_CARD_INT;
++		prot &= ~SDHCI_CTRL_D3CD;
++		clk &= ~(SDHCI_CLOCK_PER_EN | SDHCI_CLOCK_IPG_EN);
++	}
+ 
+-	writel(ier, host->ioaddr + SDHCI_INT_ENABLE);
++	writel(prot, host->ioaddr + SDHCI_HOST_CONTROL);
+ 	writel(ier, host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	writel(clk, host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 
+ 	mmiowb();
+-
++      exit_unlock:
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ }
+ 
+@@ -1189,7 +1249,6 @@ static void sdhci_data_irq(struct sdhci_
+ 		       "though no data operation was in progress.\n",
+ 		       mmc_hostname(host->mmc), (unsigned)intmask);
+ 		sdhci_dumpregs(host);
+-
+ 		return;
+ 	}
+ 
+@@ -1201,7 +1260,10 @@ static void sdhci_data_irq(struct sdhci_
+ 	if (intmask & SDHCI_INT_DATA_TIMEOUT)
+ 		host->data->error = -ETIMEDOUT;
+ 	else if (intmask & (SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_END_BIT))
++	{
++		printk("DATA IRQ EILSEQ %x\n", intmask);
+ 		host->data->error = -EILSEQ;
++	}
+ 
+ 	if (host->data->error)
+ 		sdhci_finish_data(host);
+@@ -1234,6 +1296,10 @@ static void sdhci_data_irq(struct sdhci_
+ 			       host->ioaddr + SDHCI_DMA_ADDRESS);
+ 
+ 		if (intmask & SDHCI_INT_DATA_END) {
++			if (host->data->flags & MMC_DATA_READ)
++				writel(readl(host->ioaddr + SDHCI_CLOCK_CONTROL)
++				       & ~SDHCI_CLOCK_HLK_EN,
++				       host->ioaddr + SDHCI_CLOCK_CONTROL);
+ 			if (host->cmd) {
+ 				/*
+ 				 * Data managed to finish before the
+@@ -1242,19 +1308,24 @@ static void sdhci_data_irq(struct sdhci_
+ 				 */
+ 				host->data_early = 1;
+ 			} else {
+-				/* ????
+-				 * There are the DATA END INT when writing is
+-				 * not complete. Double check on it.
+-				 */
+-				intmask = readl(host->ioaddr +
+-						SDHCI_PRESENT_STATE);
+-				if (intmask & SDHCI_DATA_ACTIVE)
+-					goto data_irq_out;
++
++				if (host->plat_data->vendor_ver
++				    < ESDHC_VENDOR_V22) {
++					/*
++					 * There are the DATA END INT when
++					 * writing is not complete. Double
++					 * check on it. TO2 has been fixed it.
++					 */
++					intmask = readl(host->ioaddr +
++							SDHCI_PRESENT_STATE);
++					if (intmask & SDHCI_DATA_ACTIVE)
++						goto data_irq_out;
++				}
+ 				sdhci_finish_data(host);
+ 			}
+ 		}
+ 	}
+-data_irq_out:
++      data_irq_out:
+ 	/* Enable the INT */
+ 	writel(intsave, host->ioaddr + SDHCI_INT_ENABLE);
+ }
+@@ -1332,6 +1403,8 @@ static void esdhc_cd_callback(struct wor
+ 
+ 	mmc_detect_change(host->mmc, msecs_to_jiffies(500));
+ 
++	if (!host->detect_irq)
++		return;
+ 	do {
+ 		cd_status = host->plat_data->status(host->mmc->parent);
+ 		if (cd_status)
+@@ -1395,6 +1468,12 @@ static irqreturn_t sdhci_irq(int irq, vo
+ 	if (intmask & SDHCI_INT_DATA_MASK) {
+ 		writel(intmask & SDHCI_INT_DATA_MASK,
+ 		       host->ioaddr + SDHCI_INT_STATUS);
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 0) {
++			if (!
++			    (readl(host->ioaddr + SDHCI_TRANSFER_MODE) &
++			     SDHCI_TRNS_READ))
++				intmask &= ~SDHCI_INT_DATA_END_BIT;
++		}
+ 		sdhci_data_irq(host, intmask & SDHCI_INT_DATA_MASK);
+ 	}
+ 
+@@ -1411,7 +1490,8 @@ static irqreturn_t sdhci_irq(int irq, vo
+ 	intmask &= ~SDHCI_INT_BUS_POWER;
+ 
+ 	if (intmask & SDHCI_INT_CARD_INT)
+-		cardint = 1;
++		cardint = readl(host->ioaddr + SDHCI_SIGNAL_ENABLE) &
++			SDHCI_INT_CARD_INT;
+ 
+ 	intmask &= ~SDHCI_INT_CARD_INT;
+ 
+@@ -1426,7 +1506,7 @@ static irqreturn_t sdhci_irq(int irq, vo
+ 	result = IRQ_HANDLED;
+ 
+ 	mmiowb();
+-out:
++      out:
+ 	spin_unlock(&host->lock);
+ 
+ 	/*
+@@ -1582,9 +1662,12 @@ static int __devinit sdhci_probe_slot(st
+ 		goto out1;
+ 	}
+ 	host->detect_irq = platform_get_irq(pdev, 1);
++	/* Don't worry if we have no detect irq */
+ 	if (!host->detect_irq) {
+-		ret = -ENOMEM;
+-		goto out1;
++	  	host->flags |= SDHCI_CD_PRESENT;
++ 		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
++ 			mxc_fix_chips[pdev->id] = chip;
++ 		goto no_detect_irq;
+ 	}
+ 
+ 	do {
+@@ -1602,7 +1685,7 @@ static int __devinit sdhci_probe_slot(st
+ 		host->flags |= SDHCI_CD_PRESENT;
+ 
+ 	DBG("slot %d at 0x%x, irq %d\n", slot, host->res->start, host->irq);
+-
++      no_detect_irq:
+ 	if (!request_mem_region(host->res->start,
+ 				host->res->end -
+ 				host->res->start + 1, pdev->name)) {
+@@ -1620,6 +1703,8 @@ static int __devinit sdhci_probe_slot(st
+ 	sdhci_reset(host, SDHCI_RESET_ALL);
+ 
+ 	version = readl(host->ioaddr + SDHCI_HOST_VERSION);
++	host->plat_data->vendor_ver = (version & SDHCI_VENDOR_VER_MASK) >>
++	    SDHCI_VENDOR_VER_SHIFT;
+ 	version = (version & SDHCI_SPEC_VER_MASK) >> SDHCI_SPEC_VER_SHIFT;
+ 	if (version != 1) {
+ 		printk(KERN_ERR "%s: Unknown controller version (%d). "
+@@ -1661,7 +1746,7 @@ static int __devinit sdhci_probe_slot(st
+ 	if (caps & SDHCI_CAN_DO_HISPD)
+ 		mmc->caps |= MMC_CAP_SD_HIGHSPEED;
+ 
+-	mmc->ocr_avail = 0;
++	mmc->ocr_avail = mmc_plat->ocr_mask;
+ 	if (caps & SDHCI_CAN_VDD_330)
+ 		mmc->ocr_avail |= MMC_VDD_32_33 | MMC_VDD_33_34;
+ 	if (caps & SDHCI_CAN_VDD_300)
+@@ -1747,9 +1832,12 @@ static int __devinit sdhci_probe_slot(st
+ 
+ 	setup_timer(&host->timer, sdhci_timeout_timer, (unsigned long)host);
+ 
+-	ret = request_irq(host->detect_irq, sdhci_cd_irq, 0, pdev->name, host);
+-	if (ret)
+-		goto out4;
++	if (host->detect_irq) {
++		ret = request_irq(host->detect_irq, sdhci_cd_irq, 0,
++				  pdev->name, host);
++		if (ret)
++			goto out4;
++	}
+ 
+ 	ret = request_irq(host->irq, sdhci_irq, IRQF_SHARED, pdev->name, host);
+ 	if (ret)
+@@ -1805,6 +1893,10 @@ out6:
+ out5:
+ 	if (host->detect_irq)
+ 		free_irq(host->detect_irq, host);
++	else {
++		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
++			mxc_fix_chips[pdev->id] = chip;
++	}
+ out4:
+ 	del_timer_sync(&host->timer);
+ 	tasklet_kill(&host->card_tasklet);
+@@ -1844,6 +1936,10 @@ static void sdhci_remove_slot(struct pla
+ 
+ 	if (host->detect_irq)
+ 		free_irq(host->detect_irq, host);
++	else {
++		if ((pdev->id >= 0) && (pdev->id < MXC_SDHCI_NUM))
++			mxc_fix_chips[pdev->id] = NULL;
++	}
+ 	free_irq(host->irq, host);
+ 	if (chip->quirks & SDHCI_QUIRK_EXTERNAL_DMA_MODE) {
+ 		host->flags &= ~SDHCI_USE_EXTERNAL_DMA;
+@@ -1907,11 +2003,11 @@ static int sdhci_probe(struct platform_d
+ 
+ 	return 0;
+ 
+-free:
++      free:
+ 	dev_set_drvdata(&pdev->dev, NULL);
+ 	kfree(chip);
+ 
+-err:
++      err:
+ 	return ret;
+ }
+ 
+Index: linux-2.6.24/drivers/mmc/host/mx_sdhci.h
+===================================================================
+--- linux-2.6.24.orig/drivers/mmc/host/mx_sdhci.h	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mmc/host/mx_sdhci.h	2009-01-26 19:07:28.000000000 +0100
+@@ -61,6 +61,8 @@
+ #define  SDHCI_CARD_PRESENT	0x00010000
+ #define  SDHCI_WRITE_PROTECT	0x00080000
+ #define  SDHCI_DAT0_IDLE	0x01000000
++#define  SDHCI_CARD_INT_MASK	0x0E000000
++#define  SDHCI_CARD_INT_ID	0x0C000000
+ 
+ #define SDHCI_HOST_CONTROL 	0x28
+ #define  SDHCI_CTRL_LED		0x00000001
+@@ -88,6 +90,7 @@
+ 
+ #define SDHCI_CLOCK_CONTROL	0x2C
+ #define  SDHCI_DIVIDER_SHIFT	8
++#define  SDHCI_CLOCK_SD_EN	0x00000008
+ #define  SDHCI_CLOCK_PER_EN	0x00000004
+ #define  SDHCI_CLOCK_HLK_EN	0x00000002
+ #define  SDHCI_CLOCK_IPG_EN	0x00000001
+@@ -195,6 +198,7 @@ enum {
+ #define  SDHCI_SPEC_VER_SHIFT	0
+ #define   SDHCI_SPEC_100	0
+ #define   SDHCI_SPEC_200	1
++#define   ESDHC_VENDOR_V22 	0x12
+ 
+ struct sdhci_chip;
+ 
+@@ -211,9 +215,9 @@ struct sdhci_host {
+ 	int flags;		/* Host attributes */
+ #define SDHCI_USE_DMA		(1<<0)	/* Host is DMA capable */
+ #define SDHCI_REQ_USE_DMA	(1<<1)	/* Use DMA for this req. */
+-#define SDHCI_USE_EXTERNAL_DMA	(1<<2)	/* Use DMA for this req. */
+-#define SDHCI_CD_PRESENT 	(1<<8)	/* Use DMA for this req. */
+-#define SDHCI_WP_ENABLED	(1<<9)	/* Use DMA for this req. */
++#define SDHCI_USE_EXTERNAL_DMA	(1<<2)	/* Use the External DMA */
++#define SDHCI_CD_PRESENT 	(1<<8)	/* CD present */
++#define SDHCI_WP_ENABLED	(1<<9)	/* Write protect */
+ 
+ 	unsigned int max_clk;	/* Max possible freq (MHz) */
+ 	unsigned int min_clk;	/* Min possible freq (MHz) */
+@@ -243,6 +247,7 @@ struct sdhci_host {
+ 	struct resource *res;	/* IO map memory */
+ 	int irq;		/* Device IRQ */
+ 	int detect_irq;		/* Card Detect IRQ number. */
++	int sdio_enable;	/* sdio interrupt enable number. */
+ 	struct clk *clk;	/* Clock id */
+ 	int bar;		/* PCI BAR index */
+ 	unsigned long addr;	/* Bus address */
+Index: linux-2.6.24/drivers/mtd/mtd_blkdevs.c
+===================================================================
+--- linux-2.6.24.orig/drivers/mtd/mtd_blkdevs.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mtd/mtd_blkdevs.c	2009-01-26 19:07:28.000000000 +0100
+@@ -215,6 +215,8 @@ int add_mtd_blktrans_dev(struct mtd_blkt
+ 	struct list_head *this;
+ 	int last_devnum = -1;
+ 	struct gendisk *gd;
++	char name[127];
++	int ret;
+ 
+ 	if (mutex_trylock(&mtd_table_mutex)) {
+ 		mutex_unlock(&mtd_table_mutex);
+@@ -289,16 +291,36 @@ int add_mtd_blktrans_dev(struct mtd_blkt
+ 
+ 	add_disk(gd);
+ 
++	/* HACK: create a symbolic link for the device to allow
++	 * it to be mounted at boot time using /dev/mtdblock:name */
++	snprintf(name, sizeof(name),
++		 "%s:%s", tr->name, new->mtd->name);
++
++	ret = sysfs_create_link(gd->kobj.parent, &gd->kobj, name);
++	if (ret)
++		printk(KERN_WARNING "Unable to link %s block device to %s\n",
++		       tr->name, name);
++
+ 	return 0;
+ }
+ 
+ int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
+ {
++	char name[127];
++	struct gendisk *gd;
++
+ 	if (mutex_trylock(&mtd_table_mutex)) {
+ 		mutex_unlock(&mtd_table_mutex);
+ 		BUG();
+ 	}
+ 
++	/* HACK: delete symbolic link for the device */
++	snprintf(name, sizeof(name),
++		 "%s:%s", old->tr->name, old->mtd->name);
++
++	gd = old->blkcore_priv;
++	sysfs_remove_link(gd->kobj.parent, name);
++
+ 	list_del(&old->list);
+ 
+ 	del_gendisk(old->blkcore_priv);
+Index: linux-2.6.24/drivers/mxc/fab4/fab4_gpio.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/mxc/fab4/fab4_gpio.c	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1,177 @@
++/*
++ * Copyright 2008 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++#include <linux/platform_device.h>
++
++#include <asm/hardware.h>
++#include <asm/arch/gpio.h>
++#include <asm/arch/mx35_fab4.h>
++
++extern struct mxc_gpio_port mxc_gpio_ports[];
++
++enum gpio_reg {
++	GPIO_DR = 0x00,
++	GPIO_GDIR = 0x04,
++	GPIO_PSR = 0x08,
++	GPIO_ICR1 = 0x0C,
++	GPIO_ICR2 = 0x10,
++	GPIO_IMR = 0x14,
++	GPIO_ISR = 0x18,
++};
++
++#define MUX_I		0
++#define PAD_I		10
++#define RSVD_I		21
++
++#define PIN_TO_MUX_MASK	((1<<(PAD_I - MUX_I)) - 1)
++#define PIN_TO_PAD_MASK	((1<<(RSVD_I - PAD_I)) - 1)
++
++#define PIN_TO_IOMUX_MUX(pin) ((pin >> MUX_I) & PIN_TO_MUX_MASK)
++#define PIN_TO_IOMUX_PAD(pin) ((pin >> PAD_I) & PIN_TO_PAD_MASK)
++
++static ssize_t fab4_gpio_show(struct device *dev,
++			      struct device_attribute *attr, char *buf)
++{
++	int i;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		int datain;
++		u32 gpio, base;
++		int dr, gdir, psr;
++		u32 pin;
++		int input;
++
++		if (strcmp(attr->attr.name, fab4_gpio_data->pins[i].name) != 0)
++			continue;
++
++		/* read gpio using offical api */
++		pin = fab4_gpio_data->pins[i].gpio;
++		datain = mxc_get_gpio_datain(pin);
++
++		/* read gpio state from registers */
++		gpio = IOMUX_TO_GPIO(pin);
++		base = mxc_gpio_ports[GPIO_TO_PORT(gpio)].base;
++
++		dr = (__raw_readl(base + GPIO_DR) >> GPIO_TO_INDEX(gpio)) & 1;
++		gdir = (__raw_readl(base + GPIO_GDIR) >> GPIO_TO_INDEX(gpio)) & 1;
++		psr = (__raw_readl(base + GPIO_PSR) >> GPIO_TO_INDEX(gpio)) & 1;
++
++		//input = __raw_readl(IO_ADDRESS(IOMUXC_BASE_ADDR) + 0x7AC + (pin << 2));
++
++		return snprintf(buf, PAGE_SIZE, "name:\t%s\ndatain:\t%d\ngdir:\t%s\ndr:\t%d\npsr:\t%d\ninput:\t%d\n", attr->attr.name, datain, (gdir==0)?"input":"output", dr, psr, input);
++	}
++
++	return 0;
++}
++
++static ssize_t fab4_gpio_store(struct device *dev,
++			       struct device_attribute *attr,
++			       const char *buf, size_t count)
++{
++	int i;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++	unsigned long val;
++	char *ptr;
++
++	val = simple_strtoul(buf, &ptr, 10);
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		if (strcmp(attr->attr.name, fab4_gpio_data->pins[i].name) != 0)
++			continue;
++
++		/* set gpio using offical api */
++		mxc_set_gpio_dataout(fab4_gpio_data->pins[i].gpio, val);
++
++		return count;
++	}
++
++	return count;
++}
++
++static int fab4_probe(struct platform_device *pdev)
++{
++	int i, err;
++	struct device *dev = &pdev->dev;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		struct device_attribute *attr;
++
++		attr = kmalloc(sizeof(struct device_attribute), GFP_KERNEL);
++
++		attr->attr.name = fab4_gpio_data->pins[i].name;
++		attr->attr.owner = THIS_MODULE;
++		attr->attr.mode = S_IRUGO | S_IWUSR;
++		attr->show = fab4_gpio_show;
++		attr->store = fab4_gpio_store;
++
++		fab4_gpio_data->pins[i].attr = attr;
++
++		if ((err = device_create_file(dev, attr))) {
++			dev_err(dev, "cannot attach resume attribute\n");
++			kfree(attr);
++		}
++	}
++
++	return 0;
++}
++
++static int fab4_remove(struct platform_device *pdev)
++{
++	int i;
++	struct device *dev = &pdev->dev;
++	struct mxc_fab4_gpio_platform_data *fab4_gpio_data = dev->platform_data;
++
++	for (i=0; i<fab4_gpio_data->nr_pins; i++) {
++		if (fab4_gpio_data->pins[i].attr) {
++			device_remove_file(dev, fab4_gpio_data->pins[i].attr);
++
++			kfree(fab4_gpio_data->pins[i].attr);
++			fab4_gpio_data->pins[i].attr = NULL;
++		}
++	}
++
++	return 0;
++}
++
++static struct platform_driver fab4_gpio_driver = {
++	.probe = fab4_probe,
++	.remove = fab4_remove,
++	.driver = {
++		.name = "fab4_gpio",
++	},
++};
++
++static int __init fab4_gpio_init(void)
++{
++	return platform_driver_register(&fab4_gpio_driver);
++}
++
++static void __exit fab4_gpio_exit(void)
++{
++	platform_driver_unregister(&fab4_gpio_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("Fab4 GPIO debug driver");
++MODULE_LICENSE("GPL");
++
++module_init(fab4_gpio_init)
++module_exit(fab4_gpio_exit)
+Index: linux-2.6.24/drivers/mxc/fab4/fab4_ir.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/mxc/fab4/fab4_ir.c	2009-01-26 19:07:33.000000000 +0100
+@@ -0,0 +1,610 @@
++/* drivers/mxc/fab4/fab4-ir.c
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/timer.h>
++#include <linux/workqueue.h>
++#include <linux/delay.h>
++#include <linux/firmware.h>
++#include <linux/ctype.h>
++
++#include <asm/arch/gpio.h>
++
++#include "psoc.h"
++
++
++/*
++ * The IR receiver is implemented in a PIC that supports i2c.
++ * To get the ir code, read 6 bytes at address 0x47; the format is:
++ *
++ * struct S_I2C_READ {
++ *   U8 status;   // when bit 0 is set: we got a new ir code since last read
++ *   U32 rc_code; // most recent ir code
++ *   U8 fw_rev;   // 0x02 on the FW you have
++ * } i2c_read;
++ *
++ * status bits are automatically cleared after read;
++ * you can use ATTN line to avoid polling but you still need to check the status field to know the source of the event.
++ *
++ * Note: ir decoding and i2c code are not yet synchronized and you may miss some event if the master reads at the same time a rc code is received; that will be fixed later.
++ *
++ * I use this to test in RedBoot:
++ * >i2c_init 0 100000 1 6
++ * >i2c 0x47
++ * ---> 0x00 0x00 0x00 0x00 0x00 0x02 // status is 0 -> nothing; last byte is fw revision (0x02)
++ *
++ * beam code "7"
++ * >i2c 0x47
++ * ---> 0x01 0x76 0x89 0xa8 0x57 0x02 // status is 0x01 -> rc_code = 0x7689a857
++ * >i2c 0x47 // let's read again
++ *---> 0x00 0x76 0x89 0xa8 0x57 0x02 // status is 0x00 because previous read command cleared it but previous code is still present in the buffer
++ */
++
++
++#undef USE_TIMER
++#define TIMER_INTERVAL (HZ/20)
++
++
++struct fab4_ir_data {
++	struct i2c_client	*client;
++	struct input_dev	*input_dev;
++
++	struct mutex		lock;
++	struct work_struct	irq_work;
++#ifdef USE_TIMER
++	struct timer_list	timer;
++#endif
++
++	/* psoc programming */
++	iomux_pin_name_t	xres;
++	iomux_pin_name_t	sdata;
++	iomux_pin_name_t	sclk;
++
++	u8			*program;
++	u8			*secure;
++	u8			*chksum;
++};
++
++
++#define MAX_INTEL_HEX_DATA_LENGTH 64
++
++struct intel_hex_record {
++	u32 length;
++	u32 address;
++	u32 type;
++	u8 data[MAX_INTEL_HEX_DATA_LENGTH];
++};
++
++
++static int intel_hex_parse_byte(char **ptr, u32 *cksum)
++{
++	char c[3];
++	int v;
++
++	c[0] = *((*ptr)++);
++	c[1] = *((*ptr)++);
++	c[2] = '\0';
++
++	sscanf(c, "%x", &v);
++
++	*cksum += v;
++	return v;
++}
++
++static char *intel_hex_parse_record(char *ptr, struct intel_hex_record *record)
++{
++	int i;
++	u32 cksum = 0;
++
++	while (isspace(*ptr)) {
++		ptr++;
++	}
++
++	if (*ptr++ != ':') {
++		return NULL;
++	}
++
++	record->length = intel_hex_parse_byte(&ptr, &cksum);
++	record->address = (intel_hex_parse_byte(&ptr, &cksum) << 8);
++	record->address |= intel_hex_parse_byte(&ptr, &cksum);
++	record->type = intel_hex_parse_byte(&ptr, &cksum);
++	for (i=0; i<record->length; i++) {
++		record->data[i] = intel_hex_parse_byte(&ptr, &cksum);
++	}
++	intel_hex_parse_byte(&ptr, &cksum); /* checksum */
++	if (cksum & 0xFF) {
++		printk(KERN_ERR "Invalid checksum");
++		return NULL;
++	}
++
++	return ptr;
++}
++
++static int intel_hex_parse_firmware(struct fab4_ir_data *data, const struct firmware *fw)
++{
++	struct intel_hex_record record;
++	char *cptr, *cend;
++	u8 *dptr, *dend;
++	int extended;
++
++	cptr = fw->data;
++	cend = fw->data + fw->size;
++
++	dptr = data->program;
++	dend = dptr + (64*64);
++
++	while (cptr && cptr < cend) {
++		cptr = intel_hex_parse_record(cptr, &record);
++
++		switch (record.type) {
++		case 0: /* Data */
++			if (dptr + record.length > dend) {
++				return -1;
++			}
++			memcpy(dptr, record.data, record.length);
++			dptr += record.length;
++			break;
++
++		case 1: /* End record */
++			return 0;
++
++		case 4: /* Extended */
++			extended = (record.data[0] << 8) | record.data[1];
++			if (extended == 0x0010) {
++				dptr = data->secure;
++				dend = dptr + 64;
++			}
++			else if (extended == 0x0020) {
++				dptr = data->chksum;
++				dend = dptr + 2;
++			}
++			else {
++				return -1;
++			}
++			break;
++
++		default:
++			return -1;
++		}
++	}
++
++	return -1;
++}
++
++static void psoc_reset(struct fab4_ir_data *data)
++{
++	mxc_set_gpio_dataout(data->xres, 1);
++	udelay(40);
++	mxc_set_gpio_dataout(data->xres, 0);
++	udelay(40);
++}
++
++static void psoc_clock(struct fab4_ir_data *data)
++{
++	mxc_set_gpio_dataout(data->sclk, 1);
++	udelay(PSOC_CLOCK_UDELAY);
++	mxc_set_gpio_dataout(data->sclk, 0);
++	udelay(PSOC_CLOCK_UDELAY);
++}
++
++static void psoc_write_vector(struct fab4_ir_data *data, u32 vector)
++{
++	int i;
++	u32 mask = 0x200000;
++
++	mxc_set_gpio_direction(data->sdata, 0);
++
++	for (i=0; i<22; i++) {
++		mxc_set_gpio_dataout(data->sdata, vector & mask);
++		mask >>= 1;
++
++		psoc_clock(data);
++	}
++}
++
++static void psoc_write_block(struct fab4_ir_data *data, u8 *block)
++{
++	int addr;
++
++	for (addr=0; addr<64; addr++) {
++		psoc_write_vector(data, 0x240007
++				  | (addr << 11)
++				  | (block[addr] << 3));
++	}
++}
++
++static u8 psoc_read_byte(struct fab4_ir_data *data, u8 addr)
++{
++	int i;
++	u32 cmd, mask = 0x400;
++	u8 val = 0;
++
++	cmd = 0x580 | addr;
++
++	mxc_set_gpio_direction(data->sdata, 0);
++	for (i=0; i<11; i++) {
++		mxc_set_gpio_dataout(data->sdata, cmd & mask);
++		psoc_clock(data);
++
++		mask >>= 1;
++	}
++
++	mxc_set_gpio_direction(data->sdata, 1);
++	psoc_clock(data);
++
++	for (i=0; i<8; i++) {
++		psoc_clock(data);
++
++		val <<= 1;
++		val |= mxc_get_gpio_datain(data->sdata);
++	}
++
++	psoc_clock(data);
++
++	mxc_set_gpio_dataout(data->sdata, 1);
++	mxc_set_gpio_direction(data->sdata, 0);
++	psoc_clock(data);
++
++	return val;
++}
++
++static int psoc_wait_and_poll(struct fab4_ir_data *data)
++{
++	int i;
++
++	/* Clock Z to device */
++	mxc_set_gpio_direction(data->sdata, 1);
++	psoc_clock(data);
++
++	/* Wait for HIGH to LOW transition */
++	i = 0;
++	while (mxc_get_gpio_datain(data->sdata) != 0) {
++		i += PSOC_WAIT_MDELAY;
++		if (i >= PSOC_WAIT_MTIMEOUT) {
++			return -1;
++		}
++
++		msleep(PSOC_WAIT_MDELAY);
++	}
++
++	/* Apply a bit stream of 40 zero bits */
++	mxc_set_gpio_dataout(data->sdata, 0);
++	mxc_set_gpio_direction(data->sdata, 1);
++
++	for (i=0; i<40; i++) {
++		psoc_clock(data);
++	}
++
++	return 0;
++}
++
++static void psoc_send_vectors(struct fab4_ir_data *data, u32 vectors[], size_t len)
++{
++	int i;
++
++	for (i=0; i<len; i++) {
++		if (vectors[i] == WAIT_AND_POLL) {
++			psoc_wait_and_poll(data);
++		}
++		else {
++			psoc_write_vector(data, vectors[i]);
++		}
++	}
++}
++
++static void fab4_prog_firmware(const struct firmware *fw, void *context)
++{
++	struct fab4_ir_data *data = (struct fab4_ir_data *) context;
++	u16 silicon_id, chksum;
++	int block;
++
++	if (fw == NULL) {
++		printk(KERN_ERR "FAB4 IR: fw request failed\n");
++		return;
++	}
++
++	data->program = kzalloc(64*64, GFP_KERNEL);
++	data->secure = kzalloc(64, GFP_KERNEL);
++	data->chksum = kzalloc(2, GFP_KERNEL);
++
++	if (intel_hex_parse_firmware(data, fw) != 0) {
++		printk(KERN_ERR "FAB4 IR: fw invalid\n");
++		goto done;
++	}
++
++	mxc_set_gpio_direction(data->xres, 0);
++	mxc_set_gpio_direction(data->sclk, 0);
++
++	/* reset target */
++	psoc_reset(data);
++
++	/* initialize target */
++	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init));
++
++	/* verify silicon id */
++	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup));
++	silicon_id = psoc_read_byte(data, 0x78) << 8;
++	silicon_id |= psoc_read_byte(data, 0x79);
++
++	if (silicon_id != 0x19 /* CY8C21323 */) {
++		printk(KERN_ERR "FAB4 IR: invalid silicon id: %x\n", silicon_id);
++		goto done;
++	}
++
++	/* checksum */
++	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup));
++	chksum = psoc_read_byte(data, 0x79) << 8;
++	chksum |= psoc_read_byte(data, 0x78);
++
++	if (chksum == ((data->chksum[0] << 8) | data->chksum[1])) {
++		printk(KERN_INFO "FAB4 IR: fw checksum ok %x\n", chksum);
++		goto done;
++	}
++
++	printk(KERN_INFO "FAB4 IR: programming fw (checksum was %x)\n", chksum);
++
++	/* bulk erase */
++	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase));
++
++	/* program */
++	for (block=0; block<64; block++) {
++		psoc_write_block(data, data->program + (block * 64));
++
++		psoc_write_vector(data, 0x27D007 | (block << 3));
++		psoc_send_vectors(data, psoc_program, ARRAY_SIZE(psoc_program));
++	}
++
++	/* secure */
++	psoc_write_block(data, data->secure);
++	psoc_send_vectors(data, psoc_secure, ARRAY_SIZE(psoc_secure));
++
++	/* checksum */
++	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup));
++	chksum = psoc_read_byte(data, 0x79) << 8;
++	chksum |= psoc_read_byte(data, 0x78);
++
++	if (chksum != ((data->chksum[0] << 8) | data->chksum[1])) {
++		printk(KERN_ERR "FAB4 IR: fw checksum failed %x\n", chksum);
++
++		// FIXME retry programming?
++		goto done;
++	}
++
++	printk(KERN_INFO "FAB4 IR: fw programming ok (checksum %x)\n", chksum);
++
++ done:
++	mxc_set_gpio_direction(data->sclk, 1);
++	mxc_set_gpio_direction(data->sdata, 1);
++
++	psoc_reset(data);
++	mxc_set_gpio_direction(data->xres, 1);
++
++	kfree(data->program);
++	kfree(data->secure);
++	kfree(data->chksum);
++}
++
++
++#define irq_work_to_data(_w) container_of(_w, struct fab4_ir_data, irq_work)
++
++static void fab4_ir_work(struct work_struct *work)
++{
++	struct fab4_ir_data *data = irq_work_to_data(work);
++	struct i2c_client *client = data->client;
++	u32 code;
++	u8 values[6];
++
++	mutex_lock(&data->lock);
++
++	i2c_smbus_read_i2c_block_data(client, 0x00, 0x06, values);
++
++	mutex_unlock(&data->lock);
++
++	if (values[0] & 0x01) {
++		code = (values[1] << 24) | (values[2] << 16) |
++			(values[3] << 8) | (values[4]);
++
++		input_event(data->input_dev, EV_MSC, MSC_RAW, code);
++		input_sync(data->input_dev);
++	}
++
++#ifndef USE_TIMER
++	enable_irq(client->irq);
++#endif
++}
++
++
++#ifdef USE_TIMER
++static void fab4_ir_timer(unsigned long ptr)
++{
++	struct fab4_ir_data *data = (struct fab4_ir_data *) ptr;
++
++	schedule_work(&data->irq_work);
++
++	data->timer.expires = jiffies + TIMER_INTERVAL;
++	add_timer(&data->timer);
++}
++#else
++static irqreturn_t fab4_ir_irq(int irq, void *dev_id)
++{
++	struct fab4_ir_data *data = dev_id;
++
++	schedule_work(&data->irq_work);
++	disable_irq(irq);
++
++	return IRQ_HANDLED;
++}
++#endif
++
++
++int fab4_ir_probe(struct i2c_client *client)
++{
++	struct fab4_ir_data *data;
++	struct input_dev *input_dev;
++	struct resource *res = client->dev.platform_data;
++	int err = 0;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
++		dev_err(&client->dev, "No SMBUS byte data capability\n");
++		goto error0;
++	}
++
++	if (!(data = kzalloc(sizeof(struct fab4_ir_data), GFP_KERNEL))) {
++		dev_err(&client->dev, "No space for state\n");
++		err = -ENOMEM;
++		goto error0;
++	}
++
++	i2c_set_clientdata(client, data);
++	data->client = client;
++	data->xres = res[0].start;
++	data->sdata = res[1].start;
++	data->sclk = res[2].start;
++
++	if (mxc_request_gpio(data->xres) != 0 ||
++	    mxc_request_gpio(data->sdata) != 0 ||
++	    mxc_request_gpio(data->sclk) != 0) {
++		printk(KERN_ERR "Failed to cliam XRES, SDATA or SCLK\n");
++	}
++
++
++	mutex_init(&data->lock);
++
++	INIT_WORK(&data->irq_work, fab4_ir_work);
++
++	input_dev = input_allocate_device();
++	if (input_dev == NULL) {
++		dev_err(&client->dev, "Could not allocate input device\n");
++		goto error1;
++	}
++
++	input_dev->name = "FAB4 IR";
++	input_dev->dev.parent = &client->dev;
++
++	input_set_capability(input_dev, EV_MSC, MSC_RAW);
++
++	data->input_dev = input_dev;
++
++	err = input_register_device(input_dev);
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register input device\n");
++		input_free_device(input_dev);
++		goto error1;
++	}
++
++#ifndef USE_TIMER
++	err = request_irq(client->irq, fab4_ir_irq,
++			  IRQF_TRIGGER_LOW | IRQF_SAMPLE_RANDOM,
++			  client->dev.bus_id, data);
++
++	if (err != 0) {
++		dev_err(&client->dev, "Failed to register IRQ %d\n",
++			client->irq);
++		goto error2;
++	}
++#else
++	init_timer(&data->timer);
++
++	data->timer.expires = jiffies + TIMER_INTERVAL;
++	data->timer.function = fab4_ir_timer;
++	data->timer.data = (unsigned long) data;
++	add_timer(&data->timer);
++#endif
++
++	/* verify PSoC firmware */
++	request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
++				"ir_controller_21323.hex", &client->dev,
++				data, fab4_prog_firmware);
++
++	return 0;
++
++ error3:
++#ifdef USE_TIMER
++	del_timer(&data->timer);
++#else
++	free_irq(client->irq, data);
++#endif
++ error2:
++	input_unregister_device(input_dev);
++ error1:
++	kfree(data);
++ error0:
++	return err;
++}
++
++
++int fab4_ir_remove(struct i2c_client *client)
++{
++	struct fab4_ir_data *data = i2c_get_clientdata(client);
++	int err;
++
++#ifdef USE_TIMER
++	del_timer(&data->timer);
++#else
++	free_irq(client->irq, data);
++#endif
++
++	input_unregister_device(data->input_dev);
++
++	/* Try to detach the client from i2c space */
++	if ((err = i2c_detach_client(client))) {
++		dev_err(&client->dev,
++			"Client deregistration failed, not detached.\n");
++		return err;
++	}
++
++	kfree(client);
++
++	return 0;
++}
++
++
++static struct i2c_driver fab4_ir_driver = {
++	.driver		= {
++		.owner		= THIS_MODULE,
++		.name		= "fab4-ir",
++	},
++	.probe	= fab4_ir_probe,
++	.remove	= fab4_ir_remove,
++};
++
++
++static int __init fab4_ir_init(void)
++{
++	return i2c_add_driver(&fab4_ir_driver);
++}
++
++
++static void __exit fab4_ir_exit(void)
++{
++	i2c_del_driver(&fab4_ir_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("FAB4 IR driver");
++
++module_init(fab4_ir_init)
++module_exit(fab4_ir_exit)
+Index: linux-2.6.24/drivers/mxc/fab4/Kconfig
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/mxc/fab4/Kconfig	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1,22 @@
++#
++# fab4 device driver configuration
++#
++
++menu "MXC FAB4 support"
++
++config MXC_FAB4_DEBUG_GPIO
++	bool "FAB4 Debug GPIO"
++	depends on MACH_FAB4
++	default n
++	---help---
++	This driver allows debugging Fab4 GPIOs via the /sys interface.
++
++
++config MXC_FAB4_IR
++	bool "FAB4 IR"
++	depends on MACH_FAB4
++	default n
++	---help---
++	This driver provides IR support on Fab4
++
++endmenu
+Index: linux-2.6.24/drivers/mxc/fab4/Makefile
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/mxc/fab4/Makefile	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1,6 @@
++#
++# Makefile for the MXC PMIC drivers.
++#
++
++obj-$(CONFIG_MXC_FAB4_DEBUG_GPIO)       += fab4_gpio.o
++obj-$(CONFIG_MXC_FAB4_IR)               += fab4_ir.o
+Index: linux-2.6.24/drivers/mxc/fab4/psoc.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/mxc/fab4/psoc.h	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1,201 @@
++/* drivers/mxc/fab4/psoc.h
++ *
++ * Copyright 2008 Logitech
++ *	Richard Titmuss <richard_titmuss@logitech.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++ *
++ */
++
++#define PSOC_WAIT_MDELAY 10
++#define PSOC_WAIT_MTIMEOUT 10000
++#define PSOC_CLOCK_UDELAY 5
++
++#define WAIT_AND_POLL 0x800000
++
++static u32 psoc_init[] = {
++	/* init1 */
++	0x328000, /* 1100101000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x37804f, /* 1101111000000001001111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++
++	/* init2 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x27d00f, /* 1001111101000000001111 */
++	0x378037, /* 1101111000000000110111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++
++	/* init3 3.3 V */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c28f, /* 1101111100001010001111 */
++	0x37cfc7, /* 1101111100111111000111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c307, /* 1101111100001100000111 */
++	0x37cf57, /* 1101111100111101010111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37b887, /* 1101111011100010000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c28f, /* 1101111100001010001111 */
++	0x37cfcf, /* 1101111100111111001111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37b047, /* 1101111011000001000111 */
++	0x37c307, /* 1101111100001100000111 */
++	0x37cf47, /* 1101111100111101000111 */
++	0x37d187, /* 1101111101000110000111 */
++	0x37b887, /* 1101111011100010000111 */
++	0x37f897, /* 1101111111100010010111 */
++	0x000000, /* 0000000000000000000000 */
++};
++
++static u32 psoc_id_setup[] = {
++	0x37b887, /* 1101111011100010000111 */
++	0x370017, /* 1101110000000000010111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x27d007, /* 1001111101000000000111 */
++	0x378037, /* 1101111000000000110111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_bluk_erase[] = {
++	0x27e0af, /* 1001111110000010101111 */
++	0x27f2b7, /* 1001111111001010110111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x37802f, /* 1101111000000000101111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_checksum_setup[] = {
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x27d207, /* 1001111101001000000111 */
++	0x37803f, /* 1101111000000000111111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_program[] = {
++	0x27e2a7, /* 1001111110001010100111 */
++	0x27f2b7, /* 1001111111001010110111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x378017, /* 1101111000000000010111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
++
++static u32 psoc_secure[] = {
++	0x27e2a7, /* 1001111110001010100111 */
++	0x27f2b7, /* 1001111111001010110111 */
++	0x37b807, /* 1101111011100000000111 */
++	0x37b007, /* 1101111011000000000111 */
++	0x27c1d7, /* 1001111100000111010111 */
++	0x27c81f, /* 1001111100100000011111 */
++	0x37a807, /* 1101111010100000000111 */
++	0x37a01f, /* 1101111010000000011111 */
++	0x27dc07, /* 1001111101110000000111 */
++	0x37c987, /* 1101111100100110000111 */
++	0x37d207, /* 1101111101001000000111 */
++	0x378027, /* 1101111000000000100111 */
++	0x37c007, /* 1101111100000000000111 */
++	0x37f897, /* 1101111111100010010111 */
++
++	WAIT_AND_POLL,
++};
+Index: linux-2.6.24/drivers/mxc/ipu/ipu_regs.h
+===================================================================
+--- linux-2.6.24.orig/drivers/mxc/ipu/ipu_regs.h	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mxc/ipu/ipu_regs.h	2009-01-26 19:07:28.000000000 +0100
+@@ -248,6 +248,7 @@ enum {
+ 	SDC_COM_GWSEL = 0x00000020UL,
+ 	SDC_COM_GLB_A = 0x00000040UL,
+ 	SDC_COM_KEY_COLOR_G = 0x00000080UL,
++	SDC_COM_MASK_EN = 0x00000100UL,
+ 	SDC_COM_BG_EN = 0x00000200UL,
+ 	SDC_COM_SHARP = 0x00001000UL,
+ 
+Index: linux-2.6.24/drivers/mxc/ipu/ipu_sdc.c
+===================================================================
+--- linux-2.6.24.orig/drivers/mxc/ipu/ipu_sdc.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mxc/ipu/ipu_sdc.c	2009-01-26 19:07:28.000000000 +0100
+@@ -31,7 +31,11 @@ static uint32_t g_h_start_width;
+ static uint32_t g_v_start_width;
+ 
+ static const uint32_t di_mappings[] = {
++#if CONFIG_MACH_FAB4
++	0x00070000, 0x000F0000, 0x00170000, 1,	/* RGB888 */
++#else
+ 	0x1600AAAA, 0x00E05555, 0x00070000, 3,	/* RGB888 */
++#endif
+ 	0x0005000F, 0x000B000F, 0x0011000F, 1,	/* RGB666 */
+ 	0x0011000F, 0x000B000F, 0x0005000F, 1,	/* BGR666 */
+ 	0x0004003F, 0x000A000F, 0x000F003F, 1	/* RGB565 */
+@@ -314,7 +318,7 @@ void _ipu_sdc_fg_init(ipu_channel_params
+ 
+ 	/* Enable FG channel */
+ 	reg = __raw_readl(SDC_COM_CONF);
+-	__raw_writel(reg | SDC_COM_FG_EN | SDC_COM_BG_EN, SDC_COM_CONF);
++	__raw_writel(reg | SDC_COM_FG_EN | SDC_COM_BG_EN | SDC_COM_MASK_EN, SDC_COM_CONF);
+ }
+ 
+ uint32_t _ipu_sdc_fg_uninit(void)
+Index: linux-2.6.24/drivers/mxc/Kconfig
+===================================================================
+--- linux-2.6.24.orig/drivers/mxc/Kconfig	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mxc/Kconfig	2009-01-26 19:07:28.000000000 +0100
+@@ -30,6 +30,8 @@ source "drivers/mxc/bt/Kconfig"
+ source "drivers/mxc/gps_ioctrl/Kconfig"
+ source "drivers/mxc/mlb/Kconfig"
+ 
++source "drivers/mxc/fab4/Kconfig"
++
+ endmenu
+ 
+ endif
+Index: linux-2.6.24/drivers/mxc/Makefile
+===================================================================
+--- linux-2.6.24.orig/drivers/mxc/Makefile	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mxc/Makefile	2009-01-26 19:07:28.000000000 +0100
+@@ -15,3 +15,5 @@ obj-$(CONFIG_MXC_ASRC)                 +
+ obj-$(CONFIG_MXC_BLUETOOTH)		+= bt/
+ obj-$(CONFIG_GPS_IOCTRL)		+= gps_ioctrl/
+ obj-$(CONFIG_MXC_MLB)                   += mlb/
++
++obj-$(CONFIG_MACH_FAB4)                 += fab4/
+Index: linux-2.6.24/drivers/mxc/pmic/core/mcu_pmic_core.c
+===================================================================
+--- linux-2.6.24.orig/drivers/mxc/pmic/core/mcu_pmic_core.c	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/drivers/mxc/pmic/core/mcu_pmic_core.c	2009-01-26 19:07:28.000000000 +0100
+@@ -368,7 +368,9 @@ extern void gpio_pmic_active(void);
+ static void pmic_pdev_register(void)
+ {
+ 	platform_device_register(&power_ldm);
++#if 0
+ 	reg_max8660_probe();
++#endif
+ }
+ 
+ /*!
+Index: linux-2.6.24/include/asm-arm/arch-mxc/hardware.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/arch-mxc/hardware.h	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/include/asm-arm/arch-mxc/hardware.h	2009-01-26 19:07:33.000000000 +0100
+@@ -45,7 +45,14 @@ extern unsigned int system_rev;
+ 
+ #define mxc_cpu()		(system_rev >> 12)
+ #define mxc_is_cpu(part)	((mxc_cpu() == part) ? 1 : 0)
+-#define mxc_cpu_rev()		(system_rev & 0xFF)
++/*
++ * Fab4 system_rev < 4 has MX35 TO1, later boards have MX35 TO2
++ *
++ * Freescale use the system_rev for the cpu type and version, but we use
++ * it for the board revision. This code has been changed to work on Fab4.
++ */
++#define mxc_cpu_rev()		((system_rev < 4) ? CHIP_REV_1_0 : CHIP_REV_2_0)
++//#define mxc_cpu_rev()		(system_rev & 0xFF)
+ #define mxc_cpu_rev_major()	((system_rev >> 4) & 0xF)
+ #define mxc_cpu_rev_minor()	(system_rev & 0xF)
+ #define mxc_cpu_is_rev(rev)	\
+Index: linux-2.6.24/include/asm-arm/arch-mxc/mmc.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/arch-mxc/mmc.h	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/include/asm-arm/arch-mxc/mmc.h	2009-01-26 19:07:28.000000000 +0100
+@@ -17,6 +17,7 @@
+ 
+ struct mxc_mmc_platform_data {
+ 	unsigned int ocr_mask;	/* available voltages */
++	unsigned int vendor_ver;
+ 	unsigned int min_clk;
+ 	unsigned int max_clk;
+ 	unsigned int reserved:16;
+Index: linux-2.6.24/include/asm-arm/arch-mxc/mx35_fab4.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/include/asm-arm/arch-mxc/mx35_fab4.h	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1,20 @@
++/*
++ * Copyright 2008 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++struct mxc_fab4_gpio_pins {
++	int gpio;
++	char *name;
++	struct device_attribute *attr;
++};
++
++struct mxc_fab4_gpio_platform_data {
++	int nr_pins;
++	struct mxc_fab4_gpio_pins *pins;
++};
+Index: linux-2.6.24/include/asm-arm/arch-mxc/mxc.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/arch-mxc/mxc.h	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/include/asm-arm/arch-mxc/mxc.h	2009-01-26 19:07:28.000000000 +0100
+@@ -86,6 +86,7 @@ struct mxc_audio_platform_data {
+ 	struct clk *ssi_clk[2];
+ 	char *regulator1;
+ 	char *regulator2;
++	void (*audio_set_clk) (int sample_rate);
+ };
+ 
+ struct mxc_spdif_platform_data {
+@@ -96,6 +97,8 @@ struct mxc_spdif_platform_data {
+ 	int spdif_clkid;
+ 	struct clk *spdif_clk;
+ 	struct clk *spdif_core_clk;
++	void (*spdif_set_clk) (int sample_rate);
++	void (*spdif_enable) (int enable);
+ };
+ 
+ struct mxc_asrc_platform_data {
+@@ -175,7 +178,7 @@ struct mxc_keyp_platform_data {
+ 
+ struct mxc_unifi_platform_data {
+ 	void (*hardreset) (void);
+-
++	void (*enable) (int en);
+ 	/* power parameters */
+ 	char *reg_gpo1;
+ 	char *reg_gpo2;
+Index: linux-2.6.24/include/asm-arm/setup.h
+===================================================================
+--- linux-2.6.24.orig/include/asm-arm/setup.h	2009-01-26 19:07:24.000000000 +0100
++++ linux-2.6.24/include/asm-arm/setup.h	2009-01-26 19:07:28.000000000 +0100
+@@ -143,6 +143,13 @@ struct tag_memclk {
+ 	__u32 fmemclk;
+ };
+ 
++
++#define ATAG_UUID	0x54410100
++
++struct tag_uuid {
++    u8 value[16];
++};
++
+ struct tag {
+ 	struct tag_header hdr;
+ 	union {
+@@ -155,6 +162,7 @@ struct tag {
+ 		struct tag_revision	revision;
+ 		struct tag_videolfb	videolfb;
+ 		struct tag_cmdline	cmdline;
++		struct tag_uuid         uuid;
+ 
+ 		/*
+ 		 * Acorn specific
+Index: linux-2.6.24/localversion
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/localversion	2009-01-26 19:07:28.000000000 +0100
+@@ -0,0 +1 @@
++-332-g5849bfa

@@ -1,0 +1,128 @@
+The fec driver locks a spinlock recursively.
+This is not allowed on preempt-RT and is thus a bug.
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ drivers/net/fec.c |   48 +++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 31 insertions(+), 17 deletions(-)
+
+Index: linux-2.6.24/drivers/net/fec.c
+===================================================================
+--- linux-2.6.24.orig/drivers/net/fec.c	2009-01-31 16:14:23.000000000 +0100
++++ linux-2.6.24/drivers/net/fec.c	2009-01-31 16:15:40.000000000 +0100
+@@ -347,6 +347,7 @@ fec_enet_start_xmit(struct sk_buff *skb,
+ 	volatile fec_t	*fecp;
+ 	volatile cbd_t	*bdp;
+ 	unsigned short	status;
++	unsigned long	flags;
+ 
+ 	fep = netdev_priv(dev);
+ 	fecp = (volatile fec_t*)dev->base_addr;
+@@ -404,7 +405,7 @@ fec_enet_start_xmit(struct sk_buff *skb,
+ 	fec_dcache_flush_range(__va(bdp->cbd_bufaddr), __va(bdp->cbd_bufaddr) +
+ 		 bdp->cbd_datlen);
+ 
+-	spin_lock_irq(&fep->lock);
++	spin_lock_irqsave(&fep->lock, flags);
+ 
+ 	/* Send it on its way.  Tell FEC it's ready, interrupt when done,
+ 	 * it's the last BD of the frame, and to put the CRC on the end.
+@@ -434,7 +435,7 @@ fec_enet_start_xmit(struct sk_buff *skb,
+ 
+ 	fep->cur_tx = (cbd_t *)bdp;
+ 
+-	spin_unlock_irq(&fep->lock);
++	spin_unlock_irqrestore(&fep->lock, flags);
+ 
+ 	return 0;
+ }
+@@ -527,9 +528,8 @@ fec_enet_interrupt(int irq, void * dev_i
+ 	return IRQ_RETVAL(handled);
+ }
+ 
+-
+-static void
+-fec_enet_tx(struct net_device *dev)
++/* Only called from interrupt context */
++static void fec_enet_tx(struct net_device *dev)
+ {
+ 	struct	fec_enet_private *fep;
+ 	volatile cbd_t	*bdp;
+@@ -605,8 +605,8 @@ fec_enet_tx(struct net_device *dev)
+  * not been given to the system, we just set the empty indicator,
+  * effectively tossing the packet.
+  */
+-static void
+-fec_enet_rx(struct net_device *dev)
++/* Only called from interrupt context */
++static void fec_enet_rx(struct net_device *dev)
+ {
+ 	struct	fec_enet_private *fep;
+ 	volatile fec_t	*fecp;
+@@ -748,9 +748,8 @@ while (!((status = bdp->cbd_sc) & BD_ENE
+ }
+ 
+ 
+-/* called from interrupt context */
+-static void
+-fec_enet_mii(struct net_device *dev)
++/* Only called from interrupt context */
++static void fec_enet_mii(struct net_device *dev)
+ {
+ 	struct	fec_enet_private *fep;
+ 	volatile fec_t	*ep;
+@@ -782,11 +781,11 @@ unlock:
+ 	spin_unlock(&fep->lock);
+ }
+ 
+-static int
+-mii_queue(struct net_device *dev, int regval, void (*func)(uint, struct net_device *))
++/* Must be called with fep->lock lock held, and interrupts disabled */
++static int mii_queue_nolock(struct net_device *dev, int regval,
++			    void (*func)(uint, struct net_device *))
+ {
+ 	struct fec_enet_private *fep;
+-	unsigned long	flags;
+ 	mii_list_t	*mip;
+ 	int		retval;
+ 
+@@ -797,8 +796,6 @@ mii_queue(struct net_device *dev, int re
+ 
+ 	retval = 0;
+ 
+-	spin_lock_irqsave(&fep->lock,flags);
+-
+ 	if ((mip = mii_free) != NULL) {
+ 		mii_free = mip->mii_next;
+ 		mip->mii_regval = regval;
+@@ -815,11 +812,28 @@ mii_queue(struct net_device *dev, int re
+ 		retval = 1;
+ 	}
+ 
+-	spin_unlock_irqrestore(&fep->lock,flags);
+-
+ 	return(retval);
+ }
+ 
++static int mii_queue(struct net_device *dev, int regval,
++		     void (*func)(uint, struct net_device *))
++{
++	int retval;
++
++	if (in_irq()) {
++		/* The interrupt handler already has it locked */
++		retval = mii_queue_nolock(dev, regval, func);
++	} else {
++		struct fec_enet_private *fep = netdev_priv(dev);
++		unsigned long	flags;
++
++		spin_lock_irqsave(&fep->lock,flags);
++		retval = mii_queue_nolock(dev, regval, func);
++		spin_unlock_irqrestore(&fep->lock,flags);
++	}
++	return retval;
++}
++
+ static void mii_do_cmd(struct net_device *dev, const phy_cmd_t *c)
+ {
+ 	if(!c)

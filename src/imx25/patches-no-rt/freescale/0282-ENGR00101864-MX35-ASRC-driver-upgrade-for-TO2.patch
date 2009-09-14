@@ -1,0 +1,137 @@
+From 17ea3b0f83d1c65343c0a2070ac96dc313f5fd13 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 16 Dec 2008 11:51:55 +0000
+Subject: [PATCH] ENGR00101864 MX35: ASRC driver upgrade for TO2
+
+Extend the ANCA,ANCB,ANCC to 4 bits for odd channels
+Add channel_bits in platform_data to distinguish ASRC version
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/devices.c   |    5 ++++
+ drivers/mxc/asrc/mxc_asrc.c    |   43 +++++++++++++++++++++++++++++++--------
+ include/asm-arm/arch-mxc/mxc.h |    1 +
+ 3 files changed, 40 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index 06f0ff7..eaa6926 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -615,6 +615,11 @@ static struct platform_device mxc_asrc_device = {
+ 
+ static inline void mxc_init_asrc(void)
+ {
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1)
++		mxc_asrc_data.channel_bits = 3;
++	else
++		mxc_asrc_data.channel_bits = 4;
++
+ 	mxc_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
+ 	clk_put(mxc_asrc_data.asrc_core_clk);
+ 	mxc_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_audio_clk");
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 19bb2d6..0e37721 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -288,15 +288,21 @@ EXPORT_SYMBOL(asrc_release_pair);
+ int asrc_config_pair(struct asrc_config *config)
+ {
+ 	int err = 0;
+-	int reg, tmp;
++	int reg, tmp, channel_num;
+ 	unsigned long lock_flags;
+ 	/* Set the channel number */
+ 	reg = __raw_readl(asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
+ 	spin_lock_irqsave(&data_lock, lock_flags);
+ 	g_asrc_data->asrc_pair[config->pair].chn_num = config->channel_num;
+ 	spin_unlock_irqrestore(&data_lock, lock_flags);
+-	reg &= ~(0x07 << (3 * config->pair));
+-	tmp = (((config->channel_num + 1) / 2) << (3 * config->pair));
++	reg &=
++	    ~((0xFFFFFFFF >> (32 - mxc_asrc_data->channel_bits)) <<
++	      (mxc_asrc_data->channel_bits * config->pair));
++	if (mxc_asrc_data->channel_bits > 3)
++		channel_num = config->channel_num;
++	else
++		channel_num = (config->channel_num + 1) / 2;
++	tmp = channel_num << (mxc_asrc_data->channel_bits * config->pair);
+ 	reg |= tmp;
+ 	__raw_writel(reg, asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
+ 
+@@ -416,7 +422,9 @@ static int mxc_init_asrc(void)
+ 	__raw_writel(0x00, asrc_vrt_base_addr + ASRC_ASRIER_REG);
+ 
+ 	/* Default 6: 2: 2 channel assignment */
+-	__raw_writel(0xC9, asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
++	__raw_writel((0x06 << mxc_asrc_data->channel_bits *
++		      2) | (0x02 << mxc_asrc_data->channel_bits) | 0x02,
++		     asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
+ 
+ 	/* Parameter Registers recommended settings */
+ 	__raw_writel(0x7fffff, asrc_vrt_base_addr + ASRC_ASRPM1_REG);
+@@ -1085,9 +1093,20 @@ static int asrc_read_proc_attr(char *page, char **start, off_t off,
+ 
+ 	reg = __raw_readl(asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
+ 
+-	len += sprintf(page, "ANCA: %d\n", (int)(reg & 0x7));
+-	len += sprintf(page + len, "ANCB: %d\n", (int)((reg >> 3) & 0x7));
+-	len += sprintf(page + len, "ANCC: %d\n", (int)((reg >> 6) & 0x7));
++	len += sprintf(page, "ANCA: %d\n",
++		       (int)(reg &
++			     (0xFFFFFFFF >>
++			      (32 - mxc_asrc_data->channel_bits))));
++	len +=
++	    sprintf(page + len, "ANCB: %d\n",
++		    (int)((reg >> mxc_asrc_data->
++			   channel_bits) & (0xFFFFFFFF >> (32 -
++							   mxc_asrc_data->
++							   channel_bits))));
++	len +=
++	    sprintf(page + len, "ANCC: %d\n",
++		    (int)((reg >> (mxc_asrc_data->channel_bits * 2)) &
++			  (0xFFFFFFFF >> (32 - mxc_asrc_data->channel_bits))));
+ 
+ 	if (off > len)
+ 		return 0;
+@@ -1104,6 +1123,7 @@ static int asrc_write_proc_attr(struct file *file, const char *buffer,
+ 	char buf[50];
+ 	unsigned long reg;
+ 	int na, nb, nc;
++	int total;
+ 	if (count > 48)
+ 		return -EINVAL;
+ 
+@@ -1114,11 +1134,16 @@ static int asrc_write_proc_attr(struct file *file, const char *buffer,
+ 
+ 	reg = __raw_readl(asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
+ 	sscanf(buf, "ANCA: %d\nANCB: %d\nANCC: %d", &na, &nb, &nc);
+-	if ((na + nb + nc) != 5) {
++	if (mxc_asrc_data->channel_bits > 3)
++		total = 10;
++	else
++		total = 5;
++	if ((na + nb + nc) != total) {
+ 		pr_info("Wrong ASRCNR settings\n");
+ 		return -EFAULT;
+ 	}
+-	reg = na | (nb << 3) | (nc << 6);
++	reg = na | (nb << mxc_asrc_data->
++		    channel_bits) | (nc << (mxc_asrc_data->channel_bits * 2));
+ 
+ 	__raw_writel(reg, asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index 82ba438..8964212 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -102,6 +102,7 @@ struct mxc_spdif_platform_data {
+ struct mxc_asrc_platform_data {
+ 	struct clk *asrc_core_clk;
+ 	struct clk *asrc_audio_clk;
++	unsigned int channel_bits;
+ };
+ 
+ struct mxc_bt_platform_data {
+-- 
+1.5.4.4
+

@@ -1,0 +1,48 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-07-24 16:46:53.000000000 -0700
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-07-24 16:46:57.000000000 -0700
+@@ -894,14 +894,13 @@
+ 
+ const unsigned int baby_lcd_spi_sequence_len = sizeof(baby_lcd_spi_sequence) >> 1;
+ 
+-static u32 spi_clk;
+-
+ #define SPI_CE_ENABLE             (mxc_set_gpio_dataout(BABY_LCD_SPI_CS, 0))
+ #define SPI_CE_DISABLE            (mxc_set_gpio_dataout(BABY_LCD_SPI_CS, 1))
+ #define SPI_CLK_LOW               (mxc_set_gpio_dataout(spi_clk, 0))
+ #define SPI_CLK_HIGH              (mxc_set_gpio_dataout(spi_clk, 1))
+ #define SPI_DATA(X)               (mxc_set_gpio_dataout(BABY_LCD_SPI_MOSI, (X) ? 1 : 0))
+-void baby_lcd_spi_send_word(unsigned int c)
++
++void baby_lcd_spi_send_word(u32 spi_clk, unsigned int c)
+ {
+ 	int i;
+ 
+@@ -937,17 +936,22 @@
+ int baby_lcd_spi_init(void)
+ {
+ 	int word;
++	u32 spi_clk;
++
++	printk("**** baby_lcd_spi_init\n");
+ 
+ 	spi_clk = (system_rev >= 2) ? BABY_LCD_SPI_CLK_PB2 : BABY_LCD_SPI_CLK_PB1;
+ 
++	/* hw reset */
+ 	mxc_set_gpio_dataout(BABY_LCD_RESET, 1);
+-	msleep(10);
++	udelay(11);
+ 	mxc_set_gpio_dataout(BABY_LCD_RESET, 0);
+-	msleep(50);
++	udelay(11);
+ 	mxc_set_gpio_dataout(BABY_LCD_RESET, 1);
+-	msleep(50);
++	msleep(6);
++
+ 	for (word = 0; word < baby_lcd_spi_sequence_len; word++) {
+-		baby_lcd_spi_send_word(baby_lcd_spi_sequence[word]);
++		baby_lcd_spi_send_word(spi_clk, baby_lcd_spi_sequence[word]);
+ 	}
+ 	return 0;
+ }

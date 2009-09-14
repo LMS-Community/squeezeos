@@ -1,0 +1,148 @@
+From 05a9f409a2d3f5125b329147fdbb6c45f7c0731c Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Fri, 24 Oct 2008 13:02:26 +0800
+Subject: [PATCH] ENGR00096176-2 MX51: Add light sensor(ISL29003) support
+
+MX51: Add light sensor(ISL29003) support
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |   60 +++++++++++++++++++++++++++++--
+ arch/arm/mach-mx51/mx51_3stack.c        |    9 +++++
+ 2 files changed, 66 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index 2a086b7..59d01e6 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Fri Oct 10 17:19:07 2008
++# Wed Oct 22 10:08:31 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -173,13 +173,14 @@ CONFIG_ARCH_MXC=y
+ CONFIG_ARCH_MX51=y
+ # CONFIG_ARCH_MX3 is not set
+ # CONFIG_ARCH_MX27 is not set
++# CONFIG_ARCH_MX25 is not set
+ # CONFIG_ARCH_MX21 is not set
+ # CONFIG_I2C_MXC_SELECT1 is not set
+ CONFIG_I2C_MXC_SELECT2=y
+ CONFIG_MXC_SDMA_API=y
++# CONFIG_I2C_MXC_SELECT3 is not set
+ CONFIG_SDMA_IRAM=y
+ CONFIG_SDMA_IRAM_SIZE=0x1000
+-# CONFIG_I2C_MXC_SELECT3 is not set
+ CONFIG_ARCH_MXC_HAS_NFC_V3=y
+ 
+ #
+@@ -689,6 +690,7 @@ CONFIG_TOUCHSCREEN_MXC=y
+ # CONFIG_TOUCHSCREEN_TOUCHWIN is not set
+ # CONFIG_TOUCHSCREEN_UCB1400 is not set
+ # CONFIG_TOUCHSCREEN_USB_COMPOSITE is not set
++# CONFIG_TOUCHSCREEN_TSC2007 is not set
+ # CONFIG_INPUT_MISC is not set
+ 
+ #
+@@ -781,7 +783,58 @@ CONFIG_SPI_MXC_SELECT1=y
+ # CONFIG_SPI_TLE62X0 is not set
+ # CONFIG_W1 is not set
+ # CONFIG_POWER_SUPPLY is not set
+-# CONFIG_HWMON is not set
++CONFIG_HWMON=y
++# CONFIG_HWMON_VID is not set
++# CONFIG_SENSORS_AD7418 is not set
++# CONFIG_SENSORS_ADM1021 is not set
++# CONFIG_SENSORS_ADM1025 is not set
++# CONFIG_SENSORS_ADM1026 is not set
++# CONFIG_SENSORS_ADM1029 is not set
++# CONFIG_SENSORS_ADM1031 is not set
++# CONFIG_SENSORS_ADM9240 is not set
++# CONFIG_SENSORS_ADT7470 is not set
++# CONFIG_SENSORS_ADT7473 is not set
++# CONFIG_SENSORS_ATXP1 is not set
++# CONFIG_SENSORS_DS1621 is not set
++# CONFIG_SENSORS_F71805F is not set
++# CONFIG_SENSORS_F71882FG is not set
++# CONFIG_SENSORS_F75375S is not set
++# CONFIG_SENSORS_GL518SM is not set
++# CONFIG_SENSORS_GL520SM is not set
++# CONFIG_SENSORS_IT87 is not set
++# CONFIG_SENSORS_LM63 is not set
++# CONFIG_SENSORS_LM70 is not set
++# CONFIG_SENSORS_LM75 is not set
++# CONFIG_SENSORS_LM77 is not set
++# CONFIG_SENSORS_LM78 is not set
++# CONFIG_SENSORS_LM80 is not set
++# CONFIG_SENSORS_LM83 is not set
++# CONFIG_SENSORS_LM85 is not set
++# CONFIG_SENSORS_LM87 is not set
++# CONFIG_SENSORS_LM90 is not set
++# CONFIG_SENSORS_LM92 is not set
++# CONFIG_SENSORS_LM93 is not set
++# CONFIG_SENSORS_MAX1619 is not set
++# CONFIG_SENSORS_MAX6650 is not set
++# CONFIG_SENSORS_PC87360 is not set
++# CONFIG_SENSORS_PC87427 is not set
++# CONFIG_SENSORS_DME1737 is not set
++# CONFIG_SENSORS_SMSC47M1 is not set
++# CONFIG_SENSORS_SMSC47M192 is not set
++# CONFIG_SENSORS_SMSC47B397 is not set
++# CONFIG_SENSORS_ADS7828 is not set
++# CONFIG_SENSORS_THMC50 is not set
++# CONFIG_SENSORS_VT1211 is not set
++# CONFIG_SENSORS_W83781D is not set
++# CONFIG_SENSORS_W83791D is not set
++# CONFIG_SENSORS_W83792D is not set
++# CONFIG_SENSORS_W83793 is not set
++# CONFIG_SENSORS_W83L785TS is not set
++# CONFIG_SENSORS_W83L786NG is not set
++# CONFIG_SENSORS_W83627HF is not set
++# CONFIG_SENSORS_W83627EHF is not set
++# CONFIG_HWMON_DEBUG_CHIP is not set
++CONFIG_SENSORS_ISL29003=y
+ CONFIG_WATCHDOG=y
+ CONFIG_WATCHDOG_NOWAYOUT=y
+ 
+@@ -1382,6 +1435,7 @@ CONFIG_MXC_MC13892_POWER=y
+ # MXC Security Drivers
+ #
+ # CONFIG_MXC_SECURITY_SCC is not set
++# CONFIG_MXC_SECURITY_SCC2 is not set
+ # CONFIG_MXC_SECURITY_RNG is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index f5da5cf..6bec3d0 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -397,6 +397,10 @@ static struct mxc_camera_platform_data camera_data = {
+ 	.mclk = 24000000,
+ 	.csi = 0,
+ };
++static struct mxc_lightsensor_platform_data ls_data = {
++	.vdd_reg = NULL,
++	.rext = 100,
++};
+ 
+ static struct i2c_board_info mxc_i2c_hs_board_info[] __initdata = {
+ 	{
+@@ -404,6 +408,11 @@ static struct i2c_board_info mxc_i2c_hs_board_info[] __initdata = {
+ 		.addr = 0x3C,
+ 		.platform_data = (void *)&camera_data,
+ 	},
++	{
++	 .type = "isl29003",
++	 .addr = 0x44,
++	 .platform_data = &ls_data,
++	 },
+ };
+ #endif
+ 
+-- 
+1.5.4.4
+

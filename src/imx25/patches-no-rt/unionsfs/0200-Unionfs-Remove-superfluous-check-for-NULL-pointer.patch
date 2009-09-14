@@ -1,0 +1,67 @@
+From 460d7f0695c5e737ee5208af473537a51e12aa9a Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 29 Jun 2007 00:45:47 -0400
+Subject: [PATCH] Unionfs: Remove superfluous check for NULL pointer
+
+Since we use containers and the struct inode is _inside_ the
+unionfs_inode_info structure, UNIONFS_I will always (given a non-NULL inode
+pointer), return a valid non-NULL pointer.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+
+Conflicts:
+
+	fs/unionfs/super.c
+---
+ fs/unionfs/fanout.h |    8 +++++++-
+ fs/unionfs/super.c  |    8 +++-----
+ 2 files changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index 4d1a620..4db1531 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -18,7 +18,13 @@
+ #ifndef _FANOUT_H_
+ #define _FANOUT_H_
+ 
+-/* Inode to private data */
++/*
++ * Inode to private data
++ *
++ * Since we use containers and the struct inode is _inside_ the
++ * unionfs_inode_info structure, UNIONFS_I will always (given a non-NULL
++ * inode pointer), return a valid non-NULL pointer.
++ */
+ static inline struct unionfs_inode_info *UNIONFS_I(const struct inode *inode)
+ {
+ 	return container_of(inode, struct unionfs_inode_info, vfs_inode);
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 79487c7..b150412 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -30,11 +30,7 @@ static void unionfs_read_inode(struct inode *inode)
+ 	int size;
+ 	struct unionfs_inode_info *info = UNIONFS_I(inode);
+ 
+-	if (!info) {
+-		printk(KERN_ERR "unionfs: no kernel memory when allocating "
+-		       "inode private data!\n");
+-		BUG();
+-	}
++	unionfs_read_lock(inode->i_sb);
+ 
+ 	memset(info, 0, offsetof(struct unionfs_inode_info, vfs_inode));
+ 	info->bstart = -1;
+@@ -59,6 +55,8 @@ static void unionfs_read_inode(struct inode *inode)
+ 	inode->i_fop = &unionfs_main_fops;
+ 
+ 	inode->i_mapping->a_ops = &unionfs_aops;
++
++	unionfs_read_unlock(inode->i_sb);
+ }
+ 
+ /*
+-- 
+1.5.4.3
+

@@ -14,13 +14,10 @@
 PSTAGE_PKGVERSION = "${PV}-${PR}"
 PSTAGE_PKGARCH    = "${BUILD_SYS}"
 PSTAGE_EXTRAPATH  ?= ""
-PSTAGE_PKGPATH    = "${DISTRO}${PSTAGE_EXTRAPATH}"
+PSTAGE_PKGPATH    = "${DISTRO}/${OELAYOUT_ABI}${PSTAGE_EXTRAPATH}"
 PSTAGE_PKGPN      = "${@bb.data.expand('staging-${PN}-${MULTIMACH_ARCH}${TARGET_VENDOR}-${TARGET_OS}', d).replace('_', '-')}"
 PSTAGE_PKGNAME    = "${PSTAGE_PKGPN}_${PSTAGE_PKGVERSION}_${PSTAGE_PKGARCH}.ipk"
 PSTAGE_PKG        = "${DEPLOY_DIR_PSTAGE}/${PSTAGE_PKGPATH}/${PSTAGE_PKGNAME}"
-
-# multimachine.bbclass will override this but add a default in case we're not using it
-MULTIMACH_ARCH ?= "${PACKAGE_ARCH}"
 
 PSTAGE_NATIVEDEPENDS = "\
     shasum-native \
@@ -91,6 +88,9 @@ def pstage_manualclean(srcname, destvarname, d):
 
 	for walkroot, dirs, files in os.walk(src):
 		for file in files:
+			# Avoid breaking the held lock
+			if (file == "staging.lock"):
+				continue
 			filepath = os.path.join(walkroot, file).replace(src, dest)
 			bb.note("rm %s" % filepath)
 			os.system("rm %s" % filepath)
@@ -160,7 +160,7 @@ staging_helper () {
 	fi
  	if [ ! -e ${TMPDIR}${layout_libdir}/ipkg/ ]; then
 		cd ${TMPDIR}${layout_libdir}/
-		ln -sf opkg/ ipkg
+		ln -sf opkg/ ipkg || true
 	fi
 }
 
@@ -287,7 +287,7 @@ populate_staging_postamble () {
 		if [ "$exitcode" != "5" -a "$exitcode" != "0" ]; then
 			exit $exitcode
 		fi
-		stage-manager -p ${CROSS_DIR} -c ${DEPLOY_DIR_PSTAGE}/stamp-cache-cross -u -d ${PSTAGE_TMPDIR_STAGE}/cross
+		stage-manager -p ${CROSS_DIR} -c ${DEPLOY_DIR_PSTAGE}/stamp-cache-cross -u -d ${PSTAGE_TMPDIR_STAGE}/cross/${BASE_PACKAGE_ARCH}
 		if [ "$exitcode" != "5" -a "$exitcode" != "0" ]; then
 			exit $exitcode
 		fi
@@ -364,6 +364,8 @@ python do_package_stage () {
             ipkpath = bb.data.getVar('DEPLOY_DIR_IPK', d, True).replace(tmpdir, stagepath)
         if bb.data.inherits_class('package_deb', d):
             debpath = bb.data.getVar('DEPLOY_DIR_DEB', d, True).replace(tmpdir, stagepath)
+        if bb.data.inherits_class('package_rpm', d):
+            rpmpath = bb.data.getVar('DEPLOY_DIR_RPM', d, True).replace(tmpdir, stagepath)
 
         for pkg in packages:
             pkgname = bb.data.getVar('PKG_%s' % pkg, d, 1)
@@ -395,6 +397,18 @@ python do_package_stage () {
                     destpath = debpath + "/" + arch + "/" 
                     bb.mkdirhier(destpath)
                     bb.copyfile(srcfile, destpath + srcname)
+
+            if bb.data.inherits_class('package_rpm', d):
+		version = bb.data.getVar('PV', d, 1)
+		version = version.replace('-', '+')
+		bb.data.setVar('RPMPV', version, d)
+                srcname = bb.data.expand(pkgname + "-${RPMPV}-" + pr + ".${TARGET_ARCH}.rpm", d)
+                srcfile = bb.data.expand("${DEPLOY_DIR_RPM}/" + arch + "/" + srcname, d)
+                if os.path.exists(srcfile):
+                    destpath = rpmpath + "/" + arch + "/" 
+                    bb.mkdirhier(destpath)
+                    bb.copyfile(srcfile, destpath + srcname)
+
 
     #
     # Handle stamps/ files

@@ -1,0 +1,176 @@
+From 65f73e2897e072c89096e25584d5278c68711308 Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Tue, 14 Oct 2008 11:54:05 +0800
+Subject: [PATCH] ENGR00046008 i.MX31/i.MX32: fix LCD clock stop issue
+
+1.add manual dvs control
+2.disable pll restart
+3.enable emi handshake
+
+Signed-off-by: Shen Yong<b00984@freescale.com>
+---
+ arch/arm/mach-mx3/clock.c   |   29 +++++++++++++++++++++++--
+ arch/arm/mach-mx3/dvfs_v2.c |   48 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 74 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/clock.c b/arch/arm/mach-mx3/clock.c
+index 971754d..4df7ea3 100644
+--- a/arch/arm/mach-mx3/clock.c
++++ b/arch/arm/mach-mx3/clock.c
+@@ -11,6 +11,7 @@
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+ 
++#include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/spinlock.h>
+ #include <linux/delay.h>
+@@ -1265,8 +1266,9 @@ static int cpu_clk_set_wp(int wp)
+ {
+ 	struct cpu_wp *p;
+ 	u32 dvsup;
+-	u32 pmcr0;
++	u32 pmcr0, pmcr1;
+ 	u32 pdr0;
++	u32 cgr2 = 0x80000000;
+ 	u32 vscnt = MXC_CCM_PMCR0_VSCNT_2;
+ 	u32 udsc = MXC_CCM_PMCR0_UDSC_DOWN;
+ 	u32 ipu_base = IO_ADDRESS(IPU_CTRL_BASE_ADDR);
+@@ -1281,6 +1283,7 @@ static int cpu_clk_set_wp(int wp)
+ 	}
+ 
+ 	pmcr0 = __raw_readl(MXC_CCM_PMCR0);
++	pmcr1 = __raw_readl(MXC_CCM_PMCR1);
+ 	pdr0 = __raw_readl(MXC_CCM_PDR0);
+ 
+ 	if (!(pmcr0 & MXC_CCM_PMCR0_UPDTEN)) {
+@@ -1298,6 +1301,19 @@ static int cpu_clk_set_wp(int wp)
+ 
+ 	p = &cpu_wp_tbl[wp];
+ 
++	dvsup = (cpu_wp_nr - 1 - wp) << MXC_CCM_PMCR0_DVSUP_OFFSET;
++
++	if ((mcu_main_clk.rate == 399000000) && (p->cpu_rate == 532000000)) {
++		cgr2 = __raw_readl(MXC_CCM_CGR2);
++		cgr2 &= 0x7fffffff;
++		vscnt = 0;
++		pmcr0 = (pmcr0 & ~MXC_PMCR0_DVFS_MASK) | dvsup | vscnt;
++		pr_debug("manul dvfs, dvsup = %x\n", dvsup);
++		__raw_writel(cgr2, MXC_CCM_CGR2);
++		__raw_writel(pmcr0, MXC_CCM_PMCR0);
++		udelay(100);
++	}
++
+ 	if (mcu_main_clk.rate == p->pll_rate) {
+ 		/* No pll switching and relocking needed */
+ 		pmcr0 |= MXC_CCM_PMCR0_DFSUP0_PDR;
+@@ -1307,8 +1323,6 @@ static int cpu_clk_set_wp(int wp)
+ 		pmcr0 &= ~(MXC_CCM_PMCR0_DFSUP0);
+ 	}
+ 
+-	dvsup = (cpu_wp_nr - 1 - wp) << MXC_CCM_PMCR0_DVSUP_OFFSET;
+-
+ 	pmcr0 = (pmcr0 & ~MXC_PMCR0_DVFS_MASK) | dvsup | vscnt | udsc;
+ 	/* also enable DVFS hardware */
+ 	pmcr0 |= MXC_CCM_PMCR0_DVFEN;
+@@ -1326,6 +1340,9 @@ static int cpu_clk_set_wp(int wp)
+ 		     MXC_CCM_PDR0);
+ 
+ 	if ((pmcr0 & MXC_CCM_PMCR0_DFSUP0) == MXC_CCM_PMCR0_DFSUP0_PLL) {
++		/* prevent pll restart */
++		pmcr1 |= 0x80;
++		__raw_writel(pmcr1, MXC_CCM_PMCR1);
+ 		/* PLL and post divider update */
+ 		if ((pmcr0 & MXC_CCM_PMCR0_DFSUP1) == MXC_CCM_PMCR0_DFSUP1_SPLL) {
+ 			__raw_writel(p->pll_reg, MXC_CCM_SRPCTL);
+@@ -1338,6 +1355,12 @@ static int cpu_clk_set_wp(int wp)
+ 		}
+ 	}
+ 
++	if ((cgr2 & 0x80000000) == 0x0) {
++		pr_debug("start auto dvfs\n");
++		cgr2 |= 0x80000000;
++		__raw_writel(cgr2, MXC_CCM_CGR2);
++	}
++
+ 	mcu_main_clk.rate = p->pll_rate;
+ 	cpu_clk.rate = p->cpu_rate;
+ 
+diff --git a/arch/arm/mach-mx3/dvfs_v2.c b/arch/arm/mach-mx3/dvfs_v2.c
+index e8dcfe6..027aa11 100644
+--- a/arch/arm/mach-mx3/dvfs_v2.c
++++ b/arch/arm/mach-mx3/dvfs_v2.c
+@@ -234,6 +234,12 @@ static int init_dvfs_controller(void)
+ 	reg |= MXC_CCM_PMCR0_DVFIS | MXC_CCM_PMCR0_LBMI;
+ 	__raw_writel(reg, MXC_CCM_PMCR0);
+ 
++	/* configuring EMI Handshake and PLL relock disable */
++	reg = __raw_readl(MXC_CCM_PMCR1);
++	reg |= MXC_CCM_PMCR1_PLLRDIS;
++	reg |= MXC_CCM_PMCR1_EMIRQ_EN;
++	__raw_writel(reg, MXC_CCM_PMCR1);
++
+ 	return 0;
+ }
+ 
+@@ -399,8 +405,49 @@ static ssize_t dvfs_status_store(struct sys_device *dev, const char *buf,
+ 	return size;
+ }
+ 
++static ssize_t dvfs_debug_show(struct sys_device *dev, char *buf)
++{
++	int size = 0;
++	u32 curr_ahb, curr_cpu;
++
++	curr_ahb = clk_get_rate(ahb_clk);
++	curr_cpu = clk_get_rate(cpu_clk);
++
++	pr_debug("ahb %d, cpu %d\n", curr_ahb, curr_cpu);
++
++	return size;
++}
++
++static ssize_t dvfs_debug_store(struct sys_device *dev, const char *buf,
++				size_t size)
++{
++	u32 curr_ahb, curr_cpu, rate = 0;
++
++	curr_ahb = clk_get_rate(ahb_clk);
++	curr_cpu = clk_get_rate(cpu_clk);
++
++	if (strstr(buf, "inc") != NULL) {
++		rate = 4 * curr_ahb;
++		pr_debug("inc to %d\n", rate);
++	}
++
++	if (strstr(buf, "dec") != NULL) {
++		rate = ((curr_cpu / curr_ahb) - 1) * curr_ahb;
++		if ((cpu_is_mx31_rev(CHIP_REV_2_0) < 0) &&
++		    ((curr_cpu / curr_ahb) == 4))
++			rate = ((curr_cpu / curr_ahb) - 2) * curr_ahb;
++
++		pr_debug("dec to %d\n", rate);
++	}
++
++	clk_set_rate(cpu_clk, rate);
++
++	return size;
++}
++
+ static SYSDEV_ATTR(enable, 0200, NULL, dvfs_enable_store);
+ static SYSDEV_ATTR(status, 0644, dvfs_status_show, dvfs_status_store);
++static SYSDEV_ATTR(debug, 0644, dvfs_debug_show, dvfs_debug_store);
+ 
+ static struct sysdev_class dvfs_sysclass = {
+ 	.name = "dvfs",
+@@ -421,6 +468,7 @@ static int dvfs_sysdev_ctrl_init(void)
+ 	if (!err) {
+ 		err = sysdev_create_file(&dvfs_device, &attr_enable);
+ 		err = sysdev_create_file(&dvfs_device, &attr_status);
++		err = sysdev_create_file(&dvfs_device, &attr_debug);
+ 	}
+ 
+ 	return err;
+-- 
+1.5.4.4
+

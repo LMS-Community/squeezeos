@@ -1,0 +1,142 @@
+From b170d64877d676f19c50a69ef5bca56834cc636c Mon Sep 17 00:00:00 2001
+From: Jingyu Zhou <b02241@freescale.com>
+Date: Mon, 21 Apr 2008 11:33:09 +0800
+Subject: [PATCH] ENGR00073581 add pmic designation register access
+
+Add pmic designation register access
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/mxc/pmic/core/mc9sdz60.h          |    1 +
+ drivers/mxc/pmic/core/mcu_pmic_core.c     |    5 +++--
+ drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c |   21 +++++++++++++++++++++
+ drivers/regulator/max8660/reg-max8660.c   |    2 +-
+ include/asm-arm/arch-mxc/pmic_external.h  |    8 ++++++++
+ 5 files changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/pmic/core/mc9sdz60.h b/drivers/mxc/pmic/core/mc9sdz60.h
+index c1af168..3e88839 100644
+--- a/drivers/mxc/pmic/core/mc9sdz60.h
++++ b/drivers/mxc/pmic/core/mc9sdz60.h
+@@ -61,6 +61,7 @@
+ #define MCU_INT_ENABLE_2	0x26
+ #define MCU_INT_FLAG_1	0x27
+ #define MCU_INT_FLAG_2	0x28
++#define MCU_DES_FLAG		0x29
+ int mc9sdz60_read_reg(u8 reg, u8 *value);
+ int mc9sdz60_write_reg(u8 reg, u8 value);
+ int mc9sdz60_init(void);
+diff --git a/drivers/mxc/pmic/core/mcu_pmic_core.c b/drivers/mxc/pmic/core/mcu_pmic_core.c
+index 807e45e..688f7b3 100644
+--- a/drivers/mxc/pmic/core/mcu_pmic_core.c
++++ b/drivers/mxc/pmic/core/mcu_pmic_core.c
+@@ -102,6 +102,7 @@ const static u8 mcu_pmic_reg_addr_table[] = {
+ 	MCU_INT_ENABLE_2,
+ 	MCU_INT_FLAG_1,
+ 	MCU_INT_FLAG_2,
++	MCU_DES_FLAG,
+ 	MAX8660_OUTPUT_ENABLE_1,
+ 	MAX8660_OUTPUT_ENABLE_2,
+ 	MAX8660_VOLT_CHANGE_CONTROL,
+@@ -122,7 +123,7 @@ int pmic_read(int reg_num, unsigned int *reg_val)
+ 	int ret;
+ 	u8 value = 0;
+ 	/* mcu ops */
+-	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_INT_FLAG_2) {
++	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_DES_FLAG) {
+ 
+ 		ret =
+ 		    mc9sdz60_read_reg(mcu_pmic_reg_addr_table[reg_num], &value);
+@@ -151,7 +152,7 @@ int pmic_write(int reg_num, const unsigned int reg_val)
+ 	int ret;
+ 	u8 value = reg_val;
+ 	/* mcu ops */
+-	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_INT_FLAG_2) {
++	if (reg_num >= REG_MCU_VERSION && reg_num <= REG_MCU_DES_FLAG) {
+ 
+ 		ret =
+ 		    mc9sdz60_write_reg(mcu_pmic_reg_addr_table[reg_num], value);
+diff --git a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c
+index cdf2711..a759f47 100644
+--- a/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c
++++ b/drivers/mxc/pmic/mc9sdz60/mcu_pmic_gpio.c
+@@ -109,3 +109,24 @@ PMIC_STATUS pmic_gpio_get_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+ 	return PMIC_SUCCESS;
+ }
+ EXPORT_SYMBOL(pmic_gpio_get_bit_val);
++
++PMIC_STATUS pmic_gpio_get_designation_bit_val(unsigned int bit,
++					unsigned int *val)
++{
++	unsigned int reg_read_val;
++	u8 reg_mask = 0;
++
++	if (bit > 7)
++		return PMIC_PARAMETER_ERROR;
++
++	SET_BIT_IN_BYTE(reg_mask, bit);
++	CHECK_ERROR(pmic_read_reg(REG_MCU_DES_FLAG, &reg_read_val, reg_mask));
++	if (0 == reg_read_val)
++		*val = 0;
++	else
++		*val = 1;
++
++	return PMIC_SUCCESS;
++}
++EXPORT_SYMBOL(pmic_gpio_get_designation_bit_val);
++
+diff --git a/drivers/regulator/max8660/reg-max8660.c b/drivers/regulator/max8660/reg-max8660.c
+index 7584fa8..ce7094e 100644
+--- a/drivers/regulator/max8660/reg-max8660.c
++++ b/drivers/regulator/max8660/reg-max8660.c
+@@ -137,7 +137,7 @@ enum {
+ #define SET_BIT_IN_BYTE(byte, pos) (byte |= (0x01 << pos))
+ #define CLEAR_BIT_IN_BYTE(byte, pos) (byte &= ~(0x01 << pos))
+ 
+-#define DEBUG_REG_MAX8660 1
++#define DEBUG_REG_MAX8660 0
+ #if DEBUG_REG_MAX8660
+ #define DPRINTK(format, args...) printk(KERN_ERR \
+ 	"reg-max8660: "format"\n", ##args)
+diff --git a/include/asm-arm/arch-mxc/pmic_external.h b/include/asm-arm/arch-mxc/pmic_external.h
+index aa51066..9284f4f 100644
+--- a/include/asm-arm/arch-mxc/pmic_external.h
++++ b/include/asm-arm/arch-mxc/pmic_external.h
+@@ -847,6 +847,7 @@ typedef enum {
+ 	REG_MCU_INT_ENABLE_2,
+ 	REG_MCU_INT_FLAG_1,
+ 	REG_MCU_INT_FLAG_2,
++	REG_MCU_DES_FLAG,
+ 
+ 	/* reg names for max8660 */
+ 	REG_MAX8660_OUTPUT_ENABLE_1,
+@@ -899,6 +900,7 @@ typedef enum {
+ #endif				/* MXC_PMIC_MC9SDZ60 */
+ 
+ /* EXPORTED FUNCTIONS */
++#if defined(CONFIG_MXC_PMIC_MC13783) || defined(CONFIG_MXC_PMIC_MC9SDZ60)
+ #ifdef __KERNEL__
+ 
+ /*!
+@@ -975,6 +977,10 @@ PMIC_STATUS pmic_gpio_set_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+ 
+ PMIC_STATUS pmic_gpio_get_bit_val(t_mcu_gpio_reg reg, unsigned int bit,
+ 				  unsigned int *val);
++
++PMIC_STATUS pmic_gpio_get_designation_bit_val(unsigned int bit,
++						unsigned int *val);
++
+ #endif
+ 
+ #ifdef CONFIG_REGULATOR_MC13783
+@@ -991,5 +997,7 @@ static inline int reg_mc13783_probe(void)
+ };
+ #endif
+ #endif				/* __KERNEL__ */
++#endif
++/* CONFIG_MXC_PMIC_MC13783 || CONFIG_MXC_PMIC_MC9SDZ60 */
+ 
+ #endif				/* __ASM_ARCH_MXC_PMIC_EXTERNAL_H__ */
+-- 
+1.5.4.4
+

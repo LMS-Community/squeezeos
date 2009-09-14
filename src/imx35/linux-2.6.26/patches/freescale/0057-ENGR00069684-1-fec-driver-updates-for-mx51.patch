@@ -1,0 +1,66 @@
+From 3ca439db36183a86e398223a3cce25f3db16bd97 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 8 Sep 2008 13:50:15 -0500
+Subject: [PATCH] ENGR00069684-1 fec: driver updates for mx51
+
+Support FEC feature in mx51 3stack
+
+Signed-off-by: Sam Yang <r52096@freescale.com>
+---
+ drivers/net/Kconfig |    2 +-
+ drivers/net/fec.c   |   11 +++++++----
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
+index c5c3951..8076679 100644
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -1855,7 +1855,7 @@ config 68360_ENET
+ 
+ config FEC
+ 	tristate "FEC ethernet controller"
+-	depends on M523x || M527x || M5272 || M528x || M520x || ARCH_MX27 || ARCH_MX37 || ARCH_MX35
++	depends on M523x || M527x || M5272 || M528x || M520x || ARCH_MX27 || ARCH_MX37 || ARCH_MX35 || ARCH_MX51
+ 	help
+ 	  Say Y here if you want to use the built-in 10/100 Fast ethernet
+ 	  controller on some Motorola/Freescale processors.
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 87e02f8..540675f 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -2105,7 +2105,7 @@ static void __inline__ fec_get_mac(struct net_device *dev)
+ 	}
+ 
+ 	memset(tmpaddr, 0, ETH_ALEN);
+-	if (!machine_is_mx35_3ds()) {
++	if (!(machine_is_mx35_3ds() || machine_is_mx51_3ds())) {
+ 	/*
+ 	 * Get MAC address from IIM.
+ 	 * If it is all 1's or 0's, use the default.
+@@ -2158,17 +2158,20 @@ __setup("fec_mac=", fec_mac_setup);
+ 
+ static void __inline__ fec_enable_phy_intr(void)
+ {
+-	enable_irq(expio_intr_fec);
++	if (expio_intr_fec > 0)
++		enable_irq(expio_intr_fec);
+ }
+ 
+ static void __inline__ fec_disable_phy_intr(void)
+ {
+-	disable_irq(expio_intr_fec);
++	if (expio_intr_fec > 0)
++		disable_irq(expio_intr_fec);
+ }
+ 
+ static void __inline__ fec_phy_ack_intr(void)
+ {
+-	disable_irq(expio_intr_fec);
++	if (expio_intr_fec > 0)
++		disable_irq(expio_intr_fec);
+ }
+ 
+ static void __inline__ fec_localhw_setup(void)
+-- 
+1.5.4.4
+

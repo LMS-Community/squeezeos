@@ -1,0 +1,107 @@
+From a451e5c2d01aa7fef6beb51bbe734b7ea09bd7ba Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Tue, 3 Jun 2008 11:40:28 +0800
+Subject: [PATCH] ENGR00077952 Fix Noise in Audio Record before Playback
+
+SSI synchronous mode - need stccr to control rx
+Add STCCR init to control rx in SSI synchronous mode
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/soc/imx/imx-ssi.c |   33 ++++++++++++++++++---------------
+ 1 files changed, 18 insertions(+), 15 deletions(-)
+
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 5320844..c391cb4 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -120,13 +120,13 @@ static int imx_ssi_set_dai_clkdiv(struct snd_soc_dai *cpu_dai,
+ 		if (SSI1_SCR & SSI_SCR_SSIEN)
+ 			return 0;
+ 
+-		srccr = SSI1_STCCR;
++		srccr = SSI1_SRCCR;
+ 		stccr = SSI1_STCCR;
+ 	} else {
+ 		if (SSI2_SCR & SSI_SCR_SSIEN)
+ 			return 0;
+ 
+-		srccr = SSI2_STCCR;
++		srccr = SSI2_SRCCR;
+ 		stccr = SSI2_STCCR;
+ 	}
+ 
+@@ -393,8 +393,7 @@ static int imx_ssi_hw_tx_params(struct snd_pcm_substream *substream,
+ 		stcr |= SSI_STCR_TFEN0;
+ 	else
+ 		stcr |= SSI_STCR_TFEN1;
+-	sier |= SSI_SIER_TDMAE	/*| SSI_SIER_TFE0_EN | SSI_SIER_TFE1_EN |
+-				   SSI_SIER_TUE0_EN | SSI_SIER_TUE1_EN */ ;
++	sier |= SSI_SIER_TDMAE | SSI_SIER_TIE | SSI_SIER_TUE0_EN;
+ 
+ 	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI1) {
+ 		SSI1_STCR = stcr;
+@@ -415,16 +414,20 @@ static int imx_ssi_hw_rx_params(struct snd_pcm_substream *substream,
+ 	struct snd_soc_pcm_link *pcm_link = substream->private_data;
+ 	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
+ 	u32 srccr, srcr, sier;
++	bool sync_mode;
+ 
+ 	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI1) {
+-		srccr = SSI1_SRCCR & ~SSI_SRCCR_WL_MASK;
++		sync_mode = ((SSI1_SCR & SSI_SCR_SYN) ? true : false);
++		srccr = sync_mode ? SSI1_STCCR : SSI1_SRCCR;
+ 		srcr = SSI1_SRCR;
+ 		sier = SSI1_SIER;
+ 	} else {
+-		srccr = SSI2_SRCCR & ~SSI_SRCCR_WL_MASK;
++		sync_mode = ((SSI2_SCR & SSI_SCR_SYN) ? true : false);
++		srccr = sync_mode ? SSI2_STCCR : SSI2_SRCCR;
+ 		srcr = SSI2_SRCR;
+ 		sier = SSI2_SIER;
+ 	}
++	srccr &= ~SSI_SRCCR_WL_MASK;
+ 
+ 	/* DAI data (word) size */
+ 	switch (params_format(params)) {
+@@ -444,16 +447,21 @@ static int imx_ssi_hw_rx_params(struct snd_pcm_substream *substream,
+ 		srcr |= SSI_SRCR_RFEN0;
+ 	else
+ 		srcr |= SSI_SRCR_RFEN1;
+-	sier |= SSI_SIER_RDMAE /*| SSI_SIER_RFF0_EN | SSI_SIER_RFF1_EN */  |
+-	    SSI_SIER_ROE0_EN | SSI_SIER_ROE1_EN;;
++	sier |= SSI_SIER_RDMAE | SSI_SIER_RIE | SSI_SIER_ROE0_EN;
+ 
+ 	if (cpu_dai->id == IMX_DAI_SSI0 || cpu_dai->id == IMX_DAI_SSI1) {
+ 		SSI1_SRCR = srcr;
+-		SSI1_SRCCR = srccr;
++		if (sync_mode)
++			SSI1_STCCR = srccr;
++		else
++			SSI1_SRCCR = srccr;
+ 		SSI1_SIER = sier;
+ 	} else {
+ 		SSI2_SRCR = srcr;
+-		SSI2_SRCCR = srccr;
++		if (sync_mode)
++			SSI2_STCCR = srccr;
++		else
++			SSI2_SRCCR = srccr;
+ 		SSI2_SIER = sier;
+ 	}
+ 	return 0;
+@@ -740,11 +748,6 @@ static int imx_ssi_probe(struct device *dev)
+ 		return -EBUSY;
+ 	}
+ 
+-	SSI1_SIER = SSI_SIER_TIE | SSI_SIER_TUE0_EN |
+-	    SSI_SIER_RIE | SSI_SIER_ROE0_EN;
+-	SSI2_SIER = SSI_SIER_TIE | SSI_SIER_TUE0_EN |
+-	    SSI_SIER_RIE | SSI_SIER_ROE0_EN;
+-
+ 	return 0;
+ }
+ 
+-- 
+1.5.4.4
+

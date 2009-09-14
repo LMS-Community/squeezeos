@@ -1,0 +1,242 @@
+From 303e5ecc4ce9af863a4e0f2f7330b30d8ae2d844 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 22 Mar 2007 19:43:29 -0400
+Subject: [PATCH] Unionfs: Introduce branch-id code
+
+Each branch gets a unique ID, which helps during branch additions,
+deletions, and changes, to locate where branches were moved to, and perform
+proper reference-counting.  This is useful even if the same directory was
+added more than once to union.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |   62 +++++++++++++++++++++++++++++++++++++++++++++-
+ fs/unionfs/fanout.h     |   22 ++++++++++++++++-
+ fs/unionfs/main.c       |    1 +
+ fs/unionfs/union.h      |    4 ++-
+ 4 files changed, 85 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index aa7c75d..8d0f8d1 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -86,6 +86,31 @@ out:
+ 	return err;
+ }
+ 
++/*
++ * Find new index of matching branch with an open file, since branches could
++ * have been added/deleted causing the one with open files to shift.
++ *
++ * @file: current file whose branches may have changed
++ * @bindex: index of branch within current file (could be old branch)
++ * @new_sb: the new superblock which may have new branch IDs
++ * Returns index of newly found branch (0 or greater), -1 otherwise.
++ */
++static int find_new_branch_index(struct file *file, int bindex,
++				 struct super_block *new_sb)
++{
++	int old_branch_id = UNIONFS_F(file)->saved_branch_ids[bindex];
++	int i;
++
++	for (i = 0; i < sbmax(new_sb); i++)
++		if (old_branch_id == branch_id(new_sb, i))
++			return i;
++	/*
++	 * XXX: maybe we should BUG_ON if not found new branch index?
++	 * (really that should never happen).
++	 */
++	return -1;
++}
++
+ /* put all references held by upper struct file and free lower file pointer
+  * array
+  */
+@@ -93,6 +118,7 @@ static void cleanup_file(struct file *file)
+ {
+ 	int bindex, bstart, bend;
+ 	struct file **lf;
++	struct super_block *sb = file->f_dentry->d_sb;
+ 
+ 	lf = UNIONFS_F(file)->lower_files;
+ 	bstart = fbstart(file);
+@@ -100,13 +126,29 @@ static void cleanup_file(struct file *file)
+ 
+ 	for (bindex = bstart; bindex <= bend; bindex++) {
+ 		if (unionfs_lower_file_idx(file, bindex)) {
+-			branchput(file->f_dentry->d_sb, bindex);
++			int i;	/* holds (possibly) updated branch index */
++			i = find_new_branch_index(file, bindex, sb);
++			if (i < 0)
++				printk(KERN_ERR "unionfs: no supberlock for file %p\n",
++				       file);
++			else {
++				unionfs_read_lock(sb);
++				branchput(sb, i);
++				unionfs_read_unlock(sb);
++				/* XXX: is it correct to use sb->s_root here? */
++				unionfs_mntput(sb->s_root, i);
++				/* XXX: mntget b/c fput below will call mntput */
++				unionfs_mntget(sb->s_root, bindex);
++			}
+ 			fput(unionfs_lower_file_idx(file, bindex));
+ 		}
+ 	}
+ 
+ 	UNIONFS_F(file)->lower_files = NULL;
+ 	kfree(lf);
++	kfree(UNIONFS_F(file)->saved_branch_ids);
++	/* set to NULL because caller needs to know if to kfree on error */
++	UNIONFS_F(file)->saved_branch_ids = NULL;
+ }
+ 
+ /* open all lower files for a given file */
+@@ -270,6 +312,12 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 			err = -ENOMEM;
+ 			goto out;
+ 		}
++		size = sizeof(int) * sbmax(sb);
++		UNIONFS_F(file)->saved_branch_ids = kzalloc(size, GFP_KERNEL);
++		if (!UNIONFS_F(file)->saved_branch_ids) {
++			err = -ENOMEM;
++			goto out;
++		}
+ 
+ 		if (S_ISDIR(dentry->d_inode->i_mode)) {
+ 			/* We need to open all the files. */
+@@ -297,8 +345,10 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	}
+ 
+ out:
+-	if (err)
++	if (err) {
+ 		kfree(UNIONFS_F(file)->lower_files);
++		kfree(UNIONFS_F(file)->saved_branch_ids);
++	}
+ out_nofree:
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+@@ -418,6 +468,12 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 		err = -ENOMEM;
+ 		goto out;
+ 	}
++	size = sizeof(int) * sbmax(inode->i_sb);
++	UNIONFS_F(file)->saved_branch_ids = kzalloc(size, GFP_KERNEL);
++	if (!UNIONFS_F(file)->saved_branch_ids) {
++		err = -ENOMEM;
++		goto out;
++	}
+ 
+ 	dentry = file->f_dentry;
+ 	unionfs_lock_dentry(dentry);
+@@ -456,6 +512,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ out:
+ 	if (err) {
+ 		kfree(UNIONFS_F(file)->lower_files);
++		kfree(UNIONFS_F(file)->saved_branch_ids);
+ 		kfree(UNIONFS_F(file));
+ 	}
+ out_nofree:
+@@ -487,6 +544,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 		}
+ 	}
+ 	kfree(fileinfo->lower_files);
++	kfree(fileinfo->saved_branch_ids);
+ 
+ 	if (fileinfo->rdstate) {
+ 		fileinfo->rdstate->access = jiffies;
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index e8c0fee..9e4a35f 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -32,12 +32,29 @@ static inline struct unionfs_inode_info *UNIONFS_I(const struct inode *inode)
+ #define sbstart(sb) 0
+ #define sbend(sb) (UNIONFS_SB(sb)->bend)
+ #define sbmax(sb) (UNIONFS_SB(sb)->bend + 1)
++#define sbhbid(sb) (UNIONFS_SB(sb)->high_branch_id)
+ 
+ /* File to private Data */
+ #define UNIONFS_F(file) ((struct unionfs_file_info *)((file)->private_data))
+ #define fbstart(file) (UNIONFS_F(file)->bstart)
+ #define fbend(file) (UNIONFS_F(file)->bend)
+ 
++/* macros to manipulate branch IDs in stored in our superblock */
++static inline int branch_id(struct super_block *sb, int index)
++{
++	return UNIONFS_SB(sb)->data[index].branch_id;
++}
++
++static inline void set_branch_id(struct super_block *sb, int index, int val)
++{
++	UNIONFS_SB(sb)->data[index].branch_id = val;
++}
++
++static inline void new_branch_id(struct super_block *sb, int index)
++{
++	set_branch_id(sb, index, ++UNIONFS_SB(sb)->high_branch_id);
++}
++
+ /* File to lower file. */
+ static inline struct file *unionfs_lower_file(const struct file *f)
+ {
+@@ -52,11 +69,14 @@ static inline struct file *unionfs_lower_file_idx(const struct file *f, int inde
+ static inline void unionfs_set_lower_file_idx(struct file *f, int index, struct file *val)
+ {
+ 	UNIONFS_F(f)->lower_files[index] = val;
++	/* save branch ID (may be redundant?) */
++	UNIONFS_F(f)->saved_branch_ids[index] =
++		branch_id((f)->f_dentry->d_sb, index);
+ }
+ 
+ static inline void unionfs_set_lower_file(struct file *f, struct file *val)
+ {
+-	UNIONFS_F(f)->lower_files[fbstart(f)] = val;
++	unionfs_set_lower_file_idx((f), fbstart(f), (val));
+ }
+ 
+ /* Inode to lower inode. */
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index a37916d..ed264c7 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -515,6 +515,7 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 	UNIONFS_SB(sb)->bend = -1;
+ 	atomic_set(&UNIONFS_SB(sb)->generation, 1);
+ 	init_rwsem(&UNIONFS_SB(sb)->rwsem);
++	UNIONFS_SB(sb)->high_branch_id = -1; /* -1 == invalid branch ID */
+ 
+ 	hidden_root_info = unionfs_parse_options(sb, raw_data);
+ 	if (IS_ERR(hidden_root_info)) {
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index df9b8c0..7bd6306 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -80,6 +80,7 @@ struct unionfs_file_info {
+ 
+ 	struct unionfs_dir_state *rdstate;
+ 	struct file **lower_files;
++	int *saved_branch_ids; /* IDs of branches when file was opened */
+ };
+ 
+ /* unionfs inode data in memory */
+@@ -123,6 +124,7 @@ struct unionfs_data {
+ 	struct super_block *sb;
+ 	atomic_t open_files;	/* number of open files on branch */
+ 	int branchperms;
++	int branch_id;		/* unique branch ID at re/mount time */
+ };
+ 
+ /* unionfs super-block data in memory */
+@@ -131,7 +133,7 @@ struct unionfs_sb_info {
+ 
+ 	atomic_t generation;
+ 	struct rw_semaphore rwsem; /* protects access to data+id fields */
+-
++	int high_branch_id;	/* last unique branch ID given */
+ 	struct unionfs_data *data;
+ };
+ 
+-- 
+1.5.4.3
+

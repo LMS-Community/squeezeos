@@ -1,0 +1,36 @@
+From 27d26bba652c9c26602625ece30ab063ae955799 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 7 Jan 2009 16:40:25 +0800
+Subject: [PATCH] ENGR00104318 i.MX35 USB Host2 change for 3stack 2.0 board.
+
+To enable USB Host2:
+Use GPIO CAN_PWDN to route signals to Host2 power and OC,
+instead of CAN_TX1 and CAN_RX1.
+Use GPIO MUX3_CTR to route signals to Host2 DP and DM, instead of BT.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack_gpio.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index ef5630e..cf07b5c 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -749,6 +749,13 @@ EXPORT_SYMBOL(sdhc_write_protect);
+  */
+ int gpio_usbh2_active(void)
+ {
++	if (board_is_mx35(BOARD_REV_2)) {
++		/* MUX3_CTR to be low for USB Host2 DP&DM */
++		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 6, 0);
++		/* CAN_PWDN to be high for USB Host2 Power&OC */
++		pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_2, 1, 1);
++	}
++
+ 	mxc_request_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_ALT2);
+ 	mxc_iomux_set_pad(MX35_PIN_I2C2_CLK, 0x0040);
+ 
+-- 
+1.5.4.4
+

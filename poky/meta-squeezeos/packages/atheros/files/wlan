@@ -1,0 +1,74 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+        /usr/bin/logger -s "wlan: starting"
+
+	# Load wlan drivers
+	export WORKAREA=/lib/atheros
+	export EEPROM=${WORKAREA}/calData_ar6102_15dBm.bin
+
+	# Set MAC address to the same as Ethernet
+	macaddr=`/sbin/ifconfig eth0 | sed -ne 's/.*\(..:..:..:..:..:..\).*/\1/p'`
+	if [ "x${macaddr}" != "x" ]
+	    then
+	    echo "Setting eth1 macaddr: ${macaddr}"
+	    SETMAC="--setmac $macaddr"
+	fi
+
+	/lib/atheros/loadAR6000l.sh $SETMAC
+	if [ $? -ne 0 ]; then
+	    /usr/bin/logger -s "wlan: failed"
+	    exit -1
+	fi
+
+	/lib/atheros/wmiconfig -eth1 --filter=all
+
+	# Temporary possible work-a-round to fix wireless connectivity issues
+	# Disable power save mode
+	/lib/atheros/wmiconfig -eth1 --power maxperf
+
+	# todo region codes?
+
+	# Start wpa_supplicant
+	/usr/bin/logger "Starting wpa_supplicant"
+	/usr/sbin/wpa_supplicant -B -Dwext -ieth1 -c/etc/wpa_supplicant.conf
+	/usr/sbin/wpa_cli -B -a/etc/network/wpa_action
+	/usr/bin/logger "Started wpa_supplicant"
+
+	/usr/bin/logger -s "wlan started"
+	;;
+
+    stop)
+        /usr/bin/logger -s "wlan: stopping"
+
+	# Stop wpa supplicant
+	killall wpa_cli
+	killall wpa_supplicant
+
+	# todo Make sure udhcpc is killed
+	if [ -r /var/run/udhcpc.eth1.pid ]
+	then
+	    PID=`cat /var/run/udhcpc.eth1.pid`
+	    kill -TERM $PID
+	    
+	    # Wait until udhcpc is dead
+	    kill -0 $PID >/dev/null 2>&1
+	    while [ $? == 0 ]; do
+	        sleep 1
+	        kill -0 $PID >/dev/null 2>&1
+	    done
+	fi
+
+	# remove wlan driver
+	/lib/atheros/loadAR6000l.sh unloadall
+
+	/usr/bin/logger -s "wlan stopped"
+	;;
+
+    *)
+	echo "Usage: $0 {start|stop}"
+        exit 1
+esac
+
+exit 0

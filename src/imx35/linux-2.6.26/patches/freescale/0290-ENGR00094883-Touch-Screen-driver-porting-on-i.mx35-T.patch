@@ -1,0 +1,37 @@
+From 2e007bcbb4bdb567232b770aba4c74cd95c9da94 Mon Sep 17 00:00:00 2001
+From: Fred Fan <r01011@freescale.com>
+Date: Wed, 24 Dec 2008 17:33:28 +0800
+Subject: [PATCH] ENGR00094883 Touch Screen driver porting on i.mx35 TO2 3stack
+
+Add status check to fix multiple penup events.
+Ignore penup event when the pen is already up.
+
+Signed-off-by: Fred Fan <r01011@freescale.com>
+---
+ drivers/input/touchscreen/mxc_ts.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/input/touchscreen/mxc_ts.c b/drivers/input/touchscreen/mxc_ts.c
+index a654a41..6f1c510 100644
+--- a/drivers/input/touchscreen/mxc_ts.c
++++ b/drivers/input/touchscreen/mxc_ts.c
+@@ -45,12 +45,16 @@ static int ts_thread(void *arg)
+ {
+ 	t_touch_screen ts_sample;
+ 	s32 wait = 0;
++
+ 	daemonize("mxc_ts");
+ 	while (input_ts_installed) {
+ 		try_to_freeze();
+ 		memset(&ts_sample, 0, sizeof(t_touch_screen));
+ 		if (0 != pmic_adc_get_touch_sample(&ts_sample, !wait))
+ 			continue;
++		if (!(ts_sample.contact_resistance || wait))
++			continue;
++
+ 		input_report_abs(mxc_inputdev, ABS_X, ts_sample.x_position);
+ 		input_report_abs(mxc_inputdev, ABS_Y, ts_sample.y_position);
+ 		input_report_abs(mxc_inputdev, ABS_PRESSURE,
+-- 
+1.5.4.4
+

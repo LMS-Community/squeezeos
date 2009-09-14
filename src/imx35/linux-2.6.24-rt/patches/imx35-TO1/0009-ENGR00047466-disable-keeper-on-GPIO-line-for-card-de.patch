@@ -1,0 +1,29 @@
+From de87c0e0dbd81f418824d228b217899eb60abbd7 Mon Sep 17 00:00:00 2001
+From: Jeet Chaudhuri <b00251@freescale.com>
+Date: Tue, 22 Jan 2008 15:29:50 -0600
+Subject: [PATCH] ENGR00047466 disable keeper on GPIO line for card det
+
+When the dumb LCD blanks off, there is a drop in the voltage level
+on the card detect GPIO line. Due to this, the GPIO is not able to detect a
+transition. By disabling the keeper, even in the absence of the IPU, the
+voltage rise during a card ejection is enough to trigger a GPIO level
+transition.
+---
+ arch/arm/mach-mxc91321/mxc30030evb_gpio.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mxc91321/mxc30030evb_gpio.c b/arch/arm/mach-mxc91321/mxc30030evb_gpio.c
+index 7f1b1d7..d1d10a0 100644
+--- a/arch/arm/mach-mxc91321/mxc30030evb_gpio.c
++++ b/arch/arm/mach-mxc91321/mxc30030evb_gpio.c
+@@ -476,6 +476,7 @@ int sdhc_init_card_det(int id)
+ 	if (id == 0) {
+ 		iomux_config_mux(PIN_GPIO37, OUTPUTCONFIG_FUNC,
+ 				 INPUTCONFIG_FUNC);
++		iomux_config_pad(PIN_GPIO37, PAD_CTL_PKE_NONE);
+ 		return IOMUX_TO_IRQ(PIN_GPIO37);
+ 	} else {
+ 		return 0;	//SD2 not supported
+-- 
+1.5.4.4
+

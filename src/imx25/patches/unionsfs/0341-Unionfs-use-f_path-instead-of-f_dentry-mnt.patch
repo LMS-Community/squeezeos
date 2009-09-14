@@ -1,0 +1,40 @@
+From 1931e24d5cf11d8baf5dfffb0e3d5c78b5beaddf Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 18 Nov 2007 20:23:08 -0500
+Subject: [PATCH] Unionfs: use f_path instead of f_dentry/mnt
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c  |    2 +-
+ fs/unionfs/fanout.h |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 8464fbb..bc221d6 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -437,7 +437,7 @@ void __unionfs_check_nd(const struct nameidata *nd,
+ 	if (nd->flags & LOOKUP_OPEN) {
+ 		file = nd->intent.open.file;
+ 		if (unlikely(file->f_path.dentry &&
+-			     strcmp(file->f_dentry->d_sb->s_type->name,
++			     strcmp(file->f_path.dentry->d_sb->s_type->name,
+ 				    UNIONFS_NAME))) {
+ 			PRINT_CALLER(fname, fxn, line);
+ 			pr_debug(" CND1: lower_file of type %s\n",
+diff --git a/fs/unionfs/fanout.h b/fs/unionfs/fanout.h
+index ec18013..864383e 100644
+--- a/fs/unionfs/fanout.h
++++ b/fs/unionfs/fanout.h
+@@ -106,7 +106,7 @@ static inline void unionfs_set_lower_file_idx(struct file *f, int index,
+ 	UNIONFS_F(f)->lower_files[index] = val;
+ 	/* save branch ID (may be redundant?) */
+ 	UNIONFS_F(f)->saved_branch_ids[index] =
+-		branch_id((f)->f_dentry->d_sb, index);
++		branch_id((f)->f_path.dentry->d_sb, index);
+ }
+ 
+ static inline void unionfs_set_lower_file(struct file *f, struct file *val)
+-- 
+1.5.4.3
+

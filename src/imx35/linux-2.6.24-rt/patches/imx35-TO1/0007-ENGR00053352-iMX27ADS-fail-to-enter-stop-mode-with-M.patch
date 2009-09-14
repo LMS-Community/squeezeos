@@ -1,0 +1,244 @@
+From deb8e23789e812a14d9c31905b4e49c64c3b0a3f Mon Sep 17 00:00:00 2001
+From: Kevin Zhang <akz002@freescale.com>
+Date: Tue, 22 Jan 2008 15:29:47 -0600
+Subject: [PATCH] ENGR00053352 iMX27ADS fail to enter stop mode with MC13783 USB
+
+Description:
+This patch is to fix this problem: i.MX27 ADS can't enter stop mode
+when MC13783 USB transceiver driver is loaded. It is caused by the kernel
+thread created in the original driver that keeps running even when system tries
+to go to stop mode. Now workqueue is used to replace the kernel thread.
+---
+ arch/arm/plat-mxc/mc13783_xc.c |  129 +++++++++++++++++-----------------------
+ 1 files changed, 55 insertions(+), 74 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/mc13783_xc.c b/arch/arm/plat-mxc/mc13783_xc.c
+index 1a0f519..963d9e6 100644
+--- a/arch/arm/plat-mxc/mc13783_xc.c
++++ b/arch/arm/plat-mxc/mc13783_xc.c
+@@ -12,17 +12,12 @@
+  */
+ 
+ #include <linux/kernel.h>
+-#include <asm/arch/hardware.h>
++#include <linux/workqueue.h>
++#include <linux/platform_device.h>
++#include <linux/usb/fsl_xcvr.h>
+ #include <asm/arch/pmic_external.h>
+ #include <asm/arch/pmic_convity.h>
+ #include <asm/arch/arc_otg.h>
+-#include <linux/platform_device.h>
+-#include <linux/usb/fsl_xcvr.h>
+-#include <linux/delay.h>
+-#include <linux/kthread.h>
+-
+-#define TRUE  1
+-#define FALSE 0
+ 
+ /* Events to be passed to the thread */
+ #define MC13783_USB_VBUS_ON		0x0001
+@@ -30,20 +25,18 @@
+ #define MC13783_USB_DETECT_MINI_A	0x0004
+ #define MC13783_USB_DETECT_MINI_B	0x0008
+ 
+-static inline void mc13783_set_host(void);
+-static inline void mc13783_set_peripheral(void);
+-
+-static int pmic_event_thread(void *arg);
+-
+ extern void otg_set_serial_peripheral(void);
+ extern void otg_set_serial_host(void);
+ 
+ static unsigned int p_event;
+-PMIC_CONVITY_EVENTS g_event;
+-PMIC_CONVITY_HANDLE pmic_handle = (PMIC_CONVITY_HANDLE) NULL;
++static PMIC_CONVITY_EVENTS g_event;
++static PMIC_CONVITY_HANDLE pmic_handle = (PMIC_CONVITY_HANDLE) NULL;
++
++static void xc_workqueue_handler(struct work_struct *work);
++
++DECLARE_WORK(xc_work, xc_workqueue_handler);
+ 
+ DECLARE_MUTEX(pmic_mx);
+-static struct task_struct *pmic_task;
+ 
+ static void pmic_event_handler(const PMIC_CONVITY_EVENTS event)
+ {
+@@ -70,14 +63,14 @@ static void pmic_event_handler(const PMIC_CONVITY_EVENTS event)
+ 		otg_set_serial_peripheral();
+ 		g_event = USB_DETECT_MINI_B;
+ 		p_event = MC13783_USB_DETECT_MINI_B;
+-		up(&pmic_mx);
++		schedule_work(&xc_work);
+ 	}
+ 	if (event & USB_DETECT_MINI_A) {
+ 		pr_debug("%s: USB_DETECT_MINI_A\n", __FUNCTION__);
+ 		otg_set_serial_host();
+ 		g_event = USB_DETECT_MINI_A;
+ 		p_event = MC13783_USB_DETECT_MINI_A;
+-		up(&pmic_mx);
++		schedule_work(&xc_work);
+ 	}
+ 
+ 	/*
+@@ -94,7 +87,7 @@ static void pmic_event_handler(const PMIC_CONVITY_EVENTS event)
+ 			otg_set_serial_peripheral();
+ 			g_event = USB_DETECT_MINI_B;
+ 			p_event = MC13783_USB_DETECT_MINI_B;
+-			up(&pmic_mx);
++			schedule_work(&xc_work);
+ 		}
+ 	}
+ }
+@@ -180,7 +173,7 @@ void mc13783_set_vbus_power(u32 * view, int on)
+ {
+ 	if (on) {
+ 		p_event = MC13783_USB_VBUS_ON;
+-		up(&pmic_mx);
++		schedule_work(&xc_work);
+ 	}
+ }
+ 
+@@ -194,6 +187,45 @@ static struct fsl_xcvr_ops mc13783_ops_otg = {
+ 
+ extern void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops);
+ 
++static void xc_workqueue_handler(struct work_struct *work)
++{
++	PMIC_STATUS rs = PMIC_ERROR;
++
++	down(&pmic_mx);
++
++	switch (p_event) {
++	case MC13783_USB_VBUS_OFF:
++		mc13783_set_peripheral();
++		break;
++	case MC13783_USB_VBUS_ON:
++		mc13783_set_host();
++		break;
++	case MC13783_USB_DETECT_MINI_B:
++		rs = pmic_convity_set_output(pmic_handle, true, false);
++		rs |=
++		    pmic_convity_usb_otg_clear_config(pmic_handle,
++						      USB_VBUS_CURRENT_LIMIT_LOW_30MS);
++
++		if (rs != PMIC_SUCCESS) {
++			printk(KERN_ERR "MC13783_USB_VBUS_OFF failed\n");
++		}
++		break;
++	case MC13783_USB_DETECT_MINI_A:
++		rs = pmic_convity_set_output(pmic_handle, true, true);
++		rs |=
++		    pmic_convity_usb_otg_set_config(pmic_handle,
++						    USB_VBUS_CURRENT_LIMIT_LOW_30MS);
++
++		if (rs != PMIC_SUCCESS) {
++			printk(KERN_ERR "MC13783_USB_VBUS_ON failed\n");
++		}
++		break;
++	default:
++		break;
++	}
++	up(&pmic_mx);
++}
++
+ int mc13783xc_init(void)
+ {
+ 	PMIC_STATUS rs = PMIC_ERROR;
+@@ -218,7 +250,7 @@ int mc13783xc_init(void)
+ 	rs = pmic_convity_usb_set_xcvr(pmic_handle, xc_mode);
+ 	rs |= pmic_convity_usb_otg_set_config(pmic_handle, USB_OTG_SE0CONN);
+ 	rs |= pmic_convity_usb_otg_set_config(pmic_handle, USBXCVREN);
+-	rs |= pmic_convity_set_output(pmic_handle, FALSE, TRUE);
++	rs |= pmic_convity_set_output(pmic_handle, false, true);
+ 
+ 	rs |= pmic_convity_usb_otg_set_config(pmic_handle, USB_PULL_OVERRIDE);
+ 	rs |= pmic_convity_usb_otg_clear_config(pmic_handle, USB_USBCNTRL);
+@@ -232,11 +264,6 @@ int mc13783xc_init(void)
+ 
+ 	mc13783_set_peripheral();
+ 
+-	pmic_task = kthread_run(pmic_event_thread, NULL, "pmic_usb_xc");
+-	if (pmic_task == NULL) {
+-		printk(KERN_ERR "pmic task creation failed\n");
+-	}
+-
+ 	return rs;
+ }
+ 
+@@ -244,12 +271,10 @@ extern void fsl_usb_xcvr_unregister(struct fsl_xcvr_ops *xcvr_ops);
+ 
+ void mc13783xc_uninit(void)
+ {
+-	int res = 0;
+-
+ 	/* Clear stuff from init */
+ 	pmic_convity_usb_otg_clear_config(pmic_handle, USB_OTG_SE0CONN);
+ 	pmic_convity_usb_otg_clear_config(pmic_handle, USBXCVREN);
+-	pmic_convity_set_output(pmic_handle, FALSE, FALSE);
++	pmic_convity_set_output(pmic_handle, false, false);
+ 	pmic_convity_usb_otg_clear_config(pmic_handle, USB_PULL_OVERRIDE);
+ 
+ 	/* Clear host mode */
+@@ -260,57 +285,13 @@ void mc13783xc_uninit(void)
+ 	pmic_convity_usb_otg_clear_config(pmic_handle, USB_PU);
+ 
+ 	/* Vbus off */
+-	pmic_convity_set_output(pmic_handle, TRUE, FALSE);
++	pmic_convity_set_output(pmic_handle, true, false);
+ 	pmic_convity_usb_otg_clear_config(pmic_handle,
+ 					  USB_VBUS_CURRENT_LIMIT_LOW_30MS);
+ 
+ 	usb_pmic_mod_exit();
+ 
+ 	fsl_usb_xcvr_unregister(&mc13783_ops_otg);
+-
+-	res = kthread_stop(pmic_task);
+-	if (res < 0) {
+-		printk(KERN_ERR "pmic task stop failed\n");
+-	}
+-}
+-
+-static int pmic_event_thread(void *arg)
+-{
+-	PMIC_STATUS rs = PMIC_ERROR;
+-
+-	while (1) {
+-		down(&pmic_mx);
+-
+-		if (p_event == MC13783_USB_VBUS_OFF) {
+-			mc13783_set_peripheral();
+-		}
+-		if (p_event == MC13783_USB_VBUS_ON) {
+-			mc13783_set_host();
+-		}
+-		if (p_event == MC13783_USB_DETECT_MINI_B) {
+-			rs = pmic_convity_set_output(pmic_handle, TRUE, FALSE);
+-			rs |=
+-			    pmic_convity_usb_otg_clear_config(pmic_handle,
+-							      USB_VBUS_CURRENT_LIMIT_LOW_30MS);
+-
+-			if (rs != PMIC_SUCCESS) {
+-				printk(KERN_ERR
+-				       "MC13783_USB_VBUS_OFF failed\n");
+-			}
+-		}
+-		if (p_event == MC13783_USB_DETECT_MINI_A) {
+-			rs = pmic_convity_set_output(pmic_handle, TRUE, TRUE);
+-			rs |=
+-			    pmic_convity_usb_otg_set_config(pmic_handle,
+-							    USB_VBUS_CURRENT_LIMIT_LOW_30MS);
+-
+-			if (rs != PMIC_SUCCESS) {
+-				printk(KERN_ERR "MC13783_USB_VBUS_ON failed\n");
+-			}
+-		}
+-	}
+-
+-	return 0;
+ }
+ 
+ module_init(mc13783xc_init);
+-- 
+1.5.4.4
+

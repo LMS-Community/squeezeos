@@ -1,0 +1,449 @@
+From 2e193dec195b620ffbe10d66dc63e4d1645f3aa3 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Wed, 14 May 2008 14:28:04 +0800
+Subject: [PATCH] ENGR00058781 MX35 low power modes
+
+Support MX35 low power modes and enable power key as wakeup source.
+Modify pseudo irq driver to support suspend and resume.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |   12 ++++-
+ arch/arm/mach-mx35/Makefile             |    1 +
+ arch/arm/mach-mx35/mx35_3stack.c        |   45 +++++++++++++++++
+ arch/arm/mach-mx35/mx35_3stack_irq.c    |   67 +++++++++++++++++++++++++-
+ arch/arm/mach-mx35/pm.c                 |   79 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx35/system.c             |   65 +++++++++++++++++++++++++
+ 6 files changed, 263 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 1122a3f..5e8b775 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.24
+-# Tue Apr 29 14:04:16 2008
++# Tue May  6 21:11:57 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -285,8 +285,13 @@ CONFIG_BINFMT_ELF=y
+ #
+ # Power management options
+ #
+-# CONFIG_PM is not set
++CONFIG_PM=y
++# CONFIG_PM_LEGACY is not set
++# CONFIG_PM_DEBUG is not set
++CONFIG_PM_SLEEP=y
+ CONFIG_SUSPEND_UP_POSSIBLE=y
++CONFIG_SUSPEND=y
++# CONFIG_APM_EMULATION is not set
+ 
+ #
+ # Networking
+@@ -979,6 +984,8 @@ CONFIG_USB=m
+ # CONFIG_USB_DEVICEFS is not set
+ CONFIG_USB_DEVICE_CLASS=y
+ # CONFIG_USB_DYNAMIC_MINORS is not set
++# CONFIG_USB_SUSPEND is not set
++# CONFIG_USB_PERSIST is not set
+ # CONFIG_USB_OTG is not set
+ 
+ #
+@@ -1021,7 +1028,6 @@ CONFIG_USB_STORAGE=m
+ # CONFIG_USB_STORAGE_SDDR55 is not set
+ # CONFIG_USB_STORAGE_JUMPSHOT is not set
+ # CONFIG_USB_STORAGE_ALAUDA is not set
+-# CONFIG_USB_STORAGE_ONETOUCH is not set
+ # CONFIG_USB_STORAGE_KARMA is not set
+ # CONFIG_USB_LIBUSUAL is not set
+ 
+diff --git a/arch/arm/mach-mx35/Makefile b/arch/arm/mach-mx35/Makefile
+index b30404d..d791fe1 100644
+--- a/arch/arm/mach-mx35/Makefile
++++ b/arch/arm/mach-mx35/Makefile
+@@ -10,3 +10,4 @@ obj-$(CONFIG_MACH_MX35_3DS)	+= mx35_3stack.o mx35_3stack_gpio.o mx35_3stack_cpld
+ obj-$(CONFIG_MACH_MX35EVB)	+= mx35evb.o mx35evb_cpld.o mx35evb_gpio.o
+ 
+ obj-$(CONFIG_MXC_PSEUDO_IRQS)	+= mx35_3stack_irq.o
++obj-$(CONFIG_PM) 		+= pm.o
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index fb2c21e..beca9d3 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -383,6 +383,51 @@ static inline void mxc_init_mmc(void)
+ }
+ #endif
+ 
++#ifdef CONFIG_MXC_PSEUDO_IRQS
++/*! Device Definition for MXC SDHC1 */
++static struct platform_device mxc_pseudo_irq_device = {
++	.name = "mxc_pseudo_irq",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		},
++};
++
++static inline int mxc_init_pseudo_irq(void)
++{
++	return platform_device_register(&mxc_pseudo_irq_device);
++}
++
++late_initcall(mxc_init_pseudo_irq);
++
++/*!
++ * Power Key interrupt handler.
++ */
++static irqreturn_t power_key_int(int irq, void *dev_id)
++{
++	pr_info(KERN_INFO "on-off key pressed\n");
++	return 0;
++}
++
++/*!
++ * Power Key initialization.
++ */
++static int __init mxc_init_power_key(void)
++{
++	/*Set power key as wakeup resource */
++	int irq, ret;
++	irq = MXC_PSEUDO_IRQ_POWER_KEY;
++	set_irq_type(irq, IRQF_TRIGGER_RISING);
++	ret = request_irq(irq, power_key_int, 0, "power_key", 0);
++	if (ret)
++		pr_info("register on-off key interrupt failed\n");
++	else
++		set_irq_wake(irq, 1);
++	return ret;
++}
++
++late_initcall(mxc_init_power_key);
++#endif
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+diff --git a/arch/arm/mach-mx35/mx35_3stack_irq.c b/arch/arm/mach-mx35/mx35_3stack_irq.c
+index b5d3305..5373402 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_irq.c
++++ b/arch/arm/mach-mx35/mx35_3stack_irq.c
+@@ -15,6 +15,7 @@
+ #include <linux/sched.h>
+ #include <linux/interrupt.h>
+ #include <linux/init.h>
++#include <linux/platform_device.h>
+ #include <linux/clk.h>
+ 
+ #include <asm/hardware.h>
+@@ -46,6 +47,7 @@
+ static unsigned long pseudo_irq_pending;
+ static unsigned long pseudo_irq_enable;
+ static unsigned long pseudo_irq_wakeup;
++static unsigned long pseudo_suspend;
+ static atomic_t pseudo_irq_state = ATOMIC_INIT(0);
+ 
+ /*
+@@ -55,12 +57,14 @@ static atomic_t pseudo_irq_state = ATOMIC_INIT(0);
+  */
+ static void mcu_event_handler(struct work_struct *work);
+ static void mcu_state_handler(struct work_struct *work);
++static void mcu_event_delay(unsigned long data);
+ 
+ /*!
+  * The work structure for mcu events.
+  */
+ static DECLARE_WORK(mcu_event_ws, mcu_event_handler);
+ static DECLARE_WORK(mcu_state_ws, mcu_state_handler);
++static DEFINE_TIMER(mcu_delay_timer, mcu_event_delay, HZ, 0);
+ 
+ static inline void mxc_pseudo_irq_ack(void)
+ {
+@@ -148,12 +152,12 @@ static int pseudo_set_wake_irq(u32 irq, u32 enable)
+ 
+ 	if (enable) {
+ 		if (!pseudo_irq_wakeup)
+-			enable_irq_wake(MXC_PSEUDO_PARENT);
++			enable_irq_wake(IOMUX_TO_IRQ(MX35_PIN_GPIO1_0));
+ 		pseudo_irq_wakeup |= (1 << index);
+ 	} else {
+ 		pseudo_irq_wakeup &= ~(1 << index);
+ 		if (!pseudo_irq_wakeup)
+-			disable_irq_wake(MXC_PSEUDO_PARENT);
++			disable_irq_wake(IOMUX_TO_IRQ(MX35_PIN_GPIO1_0));
+ 	}
+ 	return 0;
+ }
+@@ -202,6 +206,11 @@ static void mxc_pseudo_irq_handler(u32 irq, struct irq_desc *desc)
+ 	}
+ }
+ 
++static void mcu_event_delay(unsigned long data)
++{
++	schedule_work(&mcu_event_ws);
++}
++
+ /*!
+  * This function is called when mcu interrupt occurs on the processor.
+  * It is the interrupt handler for the mcu.
+@@ -213,7 +222,11 @@ static void mxc_pseudo_irq_handler(u32 irq, struct irq_desc *desc)
+  */
+ static irqreturn_t mcu_irq_handler(int irq, void *dev_id)
+ {
+-	schedule_work(&mcu_event_ws);
++	disable_irq(IOMUX_TO_IRQ(MX35_PIN_GPIO1_0));
++	if (pseudo_suspend)
++		mod_timer(&mcu_delay_timer, jiffies + HZ);
++	else
++		schedule_work(&mcu_event_ws);
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -253,6 +266,7 @@ static void mcu_event_handler(struct work_struct *work)
+       no_new_events:
+ 	if (pseudo_irq_pending & pseudo_irq_enable)
+ 		mxc_pseudo_irq_trigger();
++	enable_irq(IOMUX_TO_IRQ(MX35_PIN_GPIO1_0));
+ }
+ 
+ static void mcu_state_handler(struct work_struct *work)
+@@ -307,4 +321,51 @@ static int __init mxc_pseudo_init(void)
+ }
+ 
+ fs_initcall_sync(mxc_pseudo_init);
++
++static int mxc_pseudo_irq_suspend(struct platform_device *dev,
++				  pm_message_t mesg)
++{
++	int err, i;
++	unsigned int event1, event2;
++
++	if (!pseudo_irq_wakeup)
++		return 0;
++
++	event1 = pseudo_irq_wakeup & ((1 << MCU_INT_KEYPAD) - 1);
++	event2 = pseudo_irq_wakeup >> MCU_INT_KEYPAD;
++
++	for (i = 0; i < 3; i++) {
++		err = pmic_write_reg(REG_MCU_INT_ENABLE_1, event1, 0xFF);
++		err |= pmic_write_reg(REG_MCU_INT_ENABLE_2, event2, 0xFF);
++		if (err == PMIC_SUCCESS)
++			break;
++	}
++	pseudo_suspend = 1;
++	return err;
++}
++
++static int mxc_pseudo_irq_resume(struct platform_device *dev)
++{
++	if (!pseudo_irq_wakeup)
++		return 0;
++
++	schedule_work(&mcu_state_ws);
++	pseudo_suspend = 0;
++	return 0;
++}
++
++static struct platform_driver mxc_pseudo_irq_driver = {
++	.driver = {
++		   .name = "mxc_pseudo_irq",
++		   },
++	.suspend = mxc_pseudo_irq_suspend,
++	.resume = mxc_pseudo_irq_resume,
++};
++
++static int __init mxc_pseudo_sysinit(void)
++{
++	return platform_driver_register(&mxc_pseudo_irq_driver);
++}
++
++late_initcall(mxc_pseudo_sysinit);
+ #endif				/* CONFIG_MXC_PSEUDO_IRQS */
+diff --git a/arch/arm/mach-mx35/pm.c b/arch/arm/mach-mx35/pm.c
+new file mode 100644
+index 0000000..ad375ce
+--- /dev/null
++++ b/arch/arm/mach-mx35/pm.c
+@@ -0,0 +1,79 @@
++/*
++ *  Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/suspend.h>
++
++/*!
++ * @defgroup MSL_MX35 i.MX35 Machine Specific Layer (MSL)
++ */
++
++/*!
++ * @file mach-mx35/pm.c
++ * @brief This file contains suspend operations
++ *
++ * @ingroup MSL_MX35
++ */
++static int mx35_suspend_enter(suspend_state_t state)
++{
++	switch (state) {
++	case PM_SUSPEND_MEM:
++		mxc_cpu_lp_set(STOP_POWER_OFF);
++		break;
++	case PM_SUSPEND_STANDBY:
++		mxc_cpu_lp_set(STOP_POWER_ON);
++		break;
++	default:
++		return -EINVAL;
++	}
++	/* Executing CP15 (Wait-for-Interrupt) Instruction */
++	cpu_do_idle();
++	return 0;
++}
++
++/*
++ * Called after processes are frozen, but before we shut down devices.
++ */
++static int mx35_suspend_prepare(void)
++{
++	return 0;
++}
++
++/*
++ * Called after devices are re-setup, but before processes are thawed.
++ */
++static void mx35_suspend_finish(void)
++{
++}
++
++static int mx35_pm_valid(suspend_state_t state)
++{
++	return (state > PM_SUSPEND_ON && state <= PM_SUSPEND_MAX);
++}
++
++struct platform_suspend_ops mx35_suspend_ops = {
++	.valid = mx35_pm_valid,
++	.prepare = mx35_suspend_prepare,
++	.enter = mx35_suspend_enter,
++	.finish = mx35_suspend_finish,
++};
++
++static int __init mx35_pm_init(void)
++{
++	pr_info("Static Power Management for Freescale i.MX35\n");
++	suspend_set_ops(&mx35_suspend_ops);
++
++	return 0;
++}
++
++late_initcall(mx35_pm_init);
+diff --git a/arch/arm/mach-mx35/system.c b/arch/arm/mach-mx35/system.c
+index 7841346..2e74b02 100644
+--- a/arch/arm/mach-mx35/system.c
++++ b/arch/arm/mach-mx35/system.c
+@@ -12,11 +12,13 @@
+  */
+ 
+ #include <linux/clk.h>
++#include <linux/module.h>
+ #include <asm/io.h>
+ #include <asm/hardware.h>
+ #include <asm/proc-fns.h>
+ #include <asm/system.h>
+ #include <asm/arch/clock.h>
++#include <asm/hardware.h>
+ #include "crm_regs.h"
+ 
+ /*!
+@@ -30,9 +32,65 @@
+  * @ingroup MSL_MX35
+  */
+ 
++/*!
++* MX35 low-power mode
++*/
++enum mx35_low_pwr_mode {
++	MX35_RUN_MODE,
++	MX35_WAIT_MODE,
++	MX35_DOZE_MODE,
++	MX35_STOP_MODE
++};
++
+ extern int mxc_jtag_enabled;
+ 
+ /*!
++ * This function is used to set cpu low power mode before WFI instruction
++ *
++ * @param  mode         indicates different kinds of power modes
++ */
++void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
++{
++	unsigned int lpm;
++	unsigned long reg;
++
++	/*read CCMR value */
++	reg = __raw_readl(MXC_CCM_CCMR);
++
++	switch (mode) {
++	case WAIT_UNCLOCKED_POWER_OFF:
++		lpm = MX35_DOZE_MODE;
++		break;
++
++	case STOP_POWER_ON:
++	case STOP_POWER_OFF:
++		lpm = MX35_STOP_MODE;
++		/* Enabled Well Bias */
++		reg |= MXC_CCM_CCMR_WBEN;
++		break;
++
++	case WAIT_CLOCKED:
++	case WAIT_UNCLOCKED:
++	default:
++		/* Wait is the default mode used when idle. */
++		lpm = MX35_WAIT_MODE;
++		break;
++	}
++
++	/* program LPM bit */
++	reg = (reg & (~MXC_CCM_CCMR_LPM_MASK)) | lpm << MXC_CCM_CCMR_LPM_OFFSET;
++	/* program Interrupt holdoff bit */
++	reg = reg | MXC_CCM_CCMR_WFI;
++	/* TBD: PMIC has put the voltage back to Normal if the voltage ready */
++	/* counter finished */
++	reg = reg | MXC_CCM_CCMR_STBY_EXIT_SRC;
++
++	__raw_writel(reg, MXC_CCM_CCMR);
++}
++
++EXPORT_SYMBOL(mxc_cpu_lp_set);
++
++/*!
+  * This function puts the CPU into idle mode. It is called by default_idle()
+  * in process.c file.
+  */
+@@ -43,6 +101,13 @@ void arch_idle(void)
+ 	 * and wait for interrupt tricks.
+ 	 */
+ 	if (!mxc_jtag_enabled) {
++#ifdef CONFIG_MX35_DOZE_DURING_IDLE
++		/*set as Doze mode */
++		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++#else
++		/* set as Wait mode */
++		mxc_cpu_lp_set(WAIT_UNCLOCKED);
++#endif
+ 		cpu_do_idle();
+ 	}
+ }
+-- 
+1.5.4.4
+

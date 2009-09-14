@@ -1,0 +1,55 @@
+From f54095785a56789f03dd482f2bf31a3da304e8a9 Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Date: Thu, 29 Jan 2009 11:17:24 +0200
+Subject: [PATCH] UBIFS: sync wbufs after syncing inodes and pages
+
+All writes go through wbufs so they must be sync'd
+after syncing inodes and pages.
+
+Signed-off-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   20 ++++++++++----------
+ 1 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 8730606..150e670 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -449,16 +449,6 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
+ 		return 0;
+ 
+ 	/*
+-	 * Synchronize write buffers, because 'ubifs_run_commit()' does not
+-	 * do this if it waits for an already running commit.
+-	 */
+-	for (i = 0; i < c->jhead_cnt; i++) {
+-		err = ubifs_wbuf_sync(&c->jheads[i].wbuf);
+-		if (err)
+-			return err;
+-	}
+-
+-	/*
+ 	 * VFS calls '->sync_fs()' before synchronizing all dirty inodes and
+ 	 * pages, so synchronize them first, then commit the journal. Strictly
+ 	 * speaking, it is not necessary to commit the journal here,
+@@ -469,6 +459,16 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
+ 	 */
+ 	generic_sync_sb_inodes(sb, &wbc);
+ 
++	/*
++	 * Synchronize write buffers, because 'ubifs_run_commit()' does not
++	 * do this if it waits for an already running commit.
++	 */
++	for (i = 0; i < c->jhead_cnt; i++) {
++		err = ubifs_wbuf_sync(&c->jheads[i].wbuf);
++		if (err)
++			return err;
++	}
++
+ 	err = ubifs_run_commit(c);
+ 	if (err)
+ 		return err;
+-- 
+1.5.4.3
+

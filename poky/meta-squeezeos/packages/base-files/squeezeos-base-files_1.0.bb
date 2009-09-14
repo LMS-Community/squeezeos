@@ -3,12 +3,14 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r34"
+PR = "r105"
 
 SRC_URI = " \
+	file://asound.conf \
 	file://85-mtd.rules \
 	file://85-squeezeos.rules \
 	file://config \
+	file://factoryreset.fb \
 	file://firstboot \
 	file://fstab \
 	file://group \
@@ -34,12 +36,30 @@ SRC_URI = " \
 	file://suspend \
 	file://udhcpc_action \
 	file://zcip_action \
-	file://wlan \
 	file://wpa_action \
 	file://wpa_supplicant.conf \
 	file://dropbear_dss_host_key \
 	file://dropbear_rsa_host_key \
+	file://psall \
+	file://watchdog.conf \
+	file://repair.sh \
 	"
+
+SRC_URI_append_fab4 = " \
+	file://ir_controller_21323.hex \
+	file://blupdate \
+	file://redboot-fab4-0002.bin \
+	file://redboot-fab4-0003.bin \
+	file://redboot-fab4-0004.bin \
+	file://redboot-fab4-0005.bin \
+	"
+
+SRC_URI_append_baby = " \
+	file://blupdate \
+	file://redboot-baby-0001.bin \
+	file://redboot-baby-0002.bin \
+	"
+
 S = "${WORKDIR}"
 
 dirs1777 = "/tmp"
@@ -47,10 +67,11 @@ dirs2775 = ""
 dirs755 = "/bin /dev ${sysconfdir} ${sysconfdir}/default \
 	   ${sysconfdir}/skel /lib /mnt /proc /root /sbin \
 	   ${prefix} ${bindir} ${docdir} \
-	   ${libdir} ${sbindir} ${datadir} \
+	   ${libdir} ${sbindir} ${datadir} ${datadir}/images \
 	   ${localstatedir} \
 	   ${localstatedir}/lib ${localstatedir}/log ${localstatedir}/run \
 	   /sys ${localstatedir}/lib/misc ${localstatedir}/spool \
+	   ${localstatedir}/squeezecenter \
 	   /mnt /mnt/storage /mnt/overlay /media \
 	   ${sysconfdir}/init.d ${sysconfdir}/dropbear \
 	   ${sysconfdir}/udev/rules.d"
@@ -69,6 +90,7 @@ do_install () {
 
 	# linuxrc, mounts overlay filesystem
 	install -m 0755 ${WORKDIR}/linuxrc ${D}/linuxrc
+	install -m 0755 ${WORKDIR}/factoryreset.fb ${D}${datadir}/images/factoryreset.fb
 
 	# base config
 	install -m 0644 ${WORKDIR}/fstab ${D}${sysconfdir}/fstab
@@ -76,7 +98,6 @@ do_install () {
 	install -m 0644 ${WORKDIR}/inittab ${D}${sysconfdir}/inittab
 	install -m 0755 ${WORKDIR}/rcS ${D}${sysconfdir}/init.d/rcS
 	install -m 0755 ${WORKDIR}/squeezeplay ${D}${sysconfdir}/init.d/squeezeplay
-	install -m 0755 ${WORKDIR}/wlan ${D}${sysconfdir}/init.d/wlan
 	install -m 0755 ${WORKDIR}/suspend ${D}${sysconfdir}/init.d/suspend
 	install -m 0644 ${WORKDIR}/issue ${D}${sysconfdir}/issue
 	install -m 0644 ${WORKDIR}/protocols ${D}${sysconfdir}/protocols
@@ -91,6 +112,7 @@ do_install () {
 	install -m 0644 ${WORKDIR}/keep-after-upgrade ${D}${sysconfdir}/keep-after-upgrade
 	install -m 0644 ${WORKDIR}/hostname ${D}${sysconfdir}/hostname
 	ln -sf /proc/mounts ${D}${sysconfdir}/mtab
+	install -m 0644 ${WORKDIR}/asound.conf ${D}${sysconfdir}/asound.conf
 	install -m 0644 ${WORKDIR}/85-mtd.rules ${D}${sysconfdir}/udev/rules.d/85-mtd.rules
 	install -m 0644 ${WORKDIR}/85-squeezeos.rules ${D}${sysconfdir}/udev/rules.d/85-squeezeos.rules
 
@@ -112,6 +134,34 @@ do_install () {
 
 	# wlan config
 	install -m 0644 ${WORKDIR}/wpa_supplicant.conf ${D}${sysconfdir}/wpa_supplicant.conf
+
+	# watchdog
+	install -m 0644 ${WORKDIR}/watchdog.conf ${D}${sysconfdir}/watchdog.conf
+	install -m 0755 ${WORKDIR}/repair.sh ${D}${sbindir}/repair.sh
+
+	# utilities
+	install -m 0755 ${WORKDIR}/psall ${D}${bindir}/psall
+}
+
+do_install_append_fab4() {
+	install -m 0755 -d ${D}${base_libdir}/firmware
+	install -m 0755 ${WORKDIR}/ir_controller_21323.hex ${D}${base_libdir}/firmware/ir_controller_21323.hex
+
+	# bootloader update
+	install -m 0755 ${WORKDIR}/blupdate ${D}${sysconfdir}/init.d/blupdate
+	install -m 0755 ${WORKDIR}/redboot-fab4-0002.bin ${D}${base_libdir}/firmware/redboot-fab4-0002.bin
+	install -m 0755 ${WORKDIR}/redboot-fab4-0003.bin ${D}${base_libdir}/firmware/redboot-fab4-0003.bin
+	install -m 0755 ${WORKDIR}/redboot-fab4-0004.bin ${D}${base_libdir}/firmware/redboot-fab4-0004.bin
+	install -m 0755 ${WORKDIR}/redboot-fab4-0005.bin ${D}${base_libdir}/firmware/redboot-fab4-0005.bin
+}
+
+do_install_append_baby() {
+	install -m 0755 -d ${D}${base_libdir}/firmware
+
+	# bootloader update
+	install -m 0755 ${WORKDIR}/blupdate ${D}${sysconfdir}/init.d/blupdate
+	install -m 0755 ${WORKDIR}/redboot-baby-0001.bin ${D}${base_libdir}/firmware/redboot-baby-0001.bin
+	install -m 0755 ${WORKDIR}/redboot-baby-0002.bin ${D}${base_libdir}/firmware/redboot-baby-0002.bin
 }
 
 PACKAGES = "${PN}-doc ${PN} ${PN}-dev ${PN}-dbg"

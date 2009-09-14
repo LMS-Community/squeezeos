@@ -1,0 +1,317 @@
+Index: linux-2.6.26/.config
+===================================================================
+--- linux-2.6.26.orig/.config	2009-08-14 08:54:37.000000000 -0700
++++ linux-2.6.26/.config	2009-08-14 08:54:38.000000000 -0700
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26.8-rt16
+-# Wed Jul 29 12:23:49 2009
++# Tue Aug 11 10:37:31 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -901,7 +901,61 @@
+ # CONFIG_MMC_IMX_ESDHCI_PIO_MODE is not set
+ # CONFIG_NEW_LEDS is not set
+ CONFIG_RTC_LIB=y
+-# CONFIG_RTC_CLASS is not set
++CONFIG_RTC_CLASS=y
++CONFIG_RTC_HCTOSYS=y
++CONFIG_RTC_HCTOSYS_DEVICE="rtc0"
++# CONFIG_RTC_DEBUG is not set
++
++#
++# RTC interfaces
++#
++CONFIG_RTC_INTF_SYSFS=y
++CONFIG_RTC_INTF_PROC=y
++CONFIG_RTC_INTF_DEV=y
++# CONFIG_RTC_INTF_DEV_UIE_EMUL is not set
++# CONFIG_RTC_DRV_TEST is not set
++
++#
++# I2C RTC drivers
++#
++# CONFIG_RTC_DRV_DS1307 is not set
++# CONFIG_RTC_DRV_DS1374 is not set
++# CONFIG_RTC_DRV_DS1672 is not set
++# CONFIG_RTC_DRV_MAX6900 is not set
++# CONFIG_RTC_DRV_RS5C372 is not set
++# CONFIG_RTC_DRV_ISL1208 is not set
++# CONFIG_RTC_DRV_X1205 is not set
++# CONFIG_RTC_DRV_PCF8563 is not set
++# CONFIG_RTC_DRV_PCF8583 is not set
++# CONFIG_RTC_DRV_M41T80 is not set
++# CONFIG_RTC_DRV_S35390A is not set
++# CONFIG_RTC_DRV_FM3130 is not set
++
++#
++# SPI RTC drivers
++#
++# CONFIG_RTC_DRV_MAX6902 is not set
++# CONFIG_RTC_DRV_R9701 is not set
++# CONFIG_RTC_DRV_RS5C348 is not set
++
++#
++# Platform RTC drivers
++#
++# CONFIG_RTC_DRV_CMOS is not set
++# CONFIG_RTC_DRV_DS1511 is not set
++# CONFIG_RTC_DRV_DS1553 is not set
++# CONFIG_RTC_DRV_DS1742 is not set
++# CONFIG_RTC_DRV_STK17TA8 is not set
++# CONFIG_RTC_DRV_M48T86 is not set
++# CONFIG_RTC_DRV_M48T59 is not set
++# CONFIG_RTC_DRV_V3020 is not set
++
++#
++# on-CPU RTC drivers
++#
++# CONFIG_RTC_MXC is not set
++# CONFIG_RTC_DRV_MXC_V2 is not set
++# CONFIG_RTC_DRV_IMXDI is not set
+ # CONFIG_UIO is not set
+ 
+ #
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2009-08-14 08:54:38.000000000 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-08-14 08:59:10.000000000 -0700
+@@ -15,6 +15,7 @@
+ #include <linux/hwmon-sysfs.h>
+ #include <linux/input.h>
+ #include <linux/pm.h>
++#include <linux/rtc.h>
+ 
+ #include "msp430.h"
+ 
+@@ -172,7 +173,10 @@
+ 			    msp430_i2c_show, msp430_i2c_store, 1, I2C_KILL_REGISTER);
+ 
+ static SENSOR_DEVICE_ATTR_2(time, S_IRUGO | S_IWUSR,
+-			    msp430_i2c_show, msp430_i2c_store, 8, I2C_TIME_REGISTER);
++			    msp430_i2c_show, msp430_i2c_store, 4, I2C_TIME_REGISTER);
++
++static SENSOR_DEVICE_ATTR_2(alarm_time, S_IRUGO | S_IWUSR,
++			    msp430_i2c_show, msp430_i2c_store, 4, I2C_ALARM_REGISTER);
+ 
+ static SENSOR_DEVICE_ATTR_2(test_1,         S_IRUGO | S_IWUSR,
+ 			    msp430_i2c_show, msp430_i2c_store, 1, I2C_TEST_1);
+@@ -198,6 +202,7 @@
+ static SENSOR_DEVICE_ATTR_2(battery_vmon2_voltage,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER	   );
+ static SENSOR_DEVICE_ATTR_2(battery_temperature  ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_TEMP_REGISTER     );
+ static SENSOR_DEVICE_ATTR_2(wall_voltage         ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_DC_JACK_REGISTER  );
++static SENSOR_DEVICE_ATTR_2(charger_state        ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_CHARGER_EVENT_REGISTER );
+ 
+ static SENSOR_DEVICE_ATTR_2(adc_0 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+0 );
+ static SENSOR_DEVICE_ATTR_2(adc_1 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+1 );
+@@ -228,12 +233,14 @@
+                 &sensor_dev_attr_battery_disable.dev_attr.attr,
+                 &sensor_dev_attr_kill.dev_attr.attr,
+                 &sensor_dev_attr_time.dev_attr.attr,
++                &sensor_dev_attr_alarm_time.dev_attr.attr,
+ 		&sensor_dev_attr_battery_voltage.dev_attr.attr,
+ 		&sensor_dev_attr_sys_voltage.dev_attr.attr,
+ 		&sensor_dev_attr_battery_vmon1_voltage.dev_attr.attr,
+ 		&sensor_dev_attr_battery_vmon2_voltage.dev_attr.attr,
+ 		&sensor_dev_attr_battery_temperature.dev_attr.attr,
+ 		&sensor_dev_attr_wall_voltage.dev_attr.attr,
++		&sensor_dev_attr_charger_state.dev_attr.attr,
+ 		&sensor_dev_attr_test_1.dev_attr.attr,
+ 		&sensor_dev_attr_test_2.dev_attr.attr,
+ 		&sensor_dev_attr_test_4.dev_attr.attr,
+@@ -263,7 +270,7 @@
+ 
+ static void msp430_power_off(void)
+ {
+-	unsigned char values[1] = { 1 };
++	unsigned char values[1] = { 0xde };
+ 
+ 	if (!msp430_data) {
+ 		printk(KERN_ERR "No msp430, can't power down\n");
+@@ -284,6 +291,100 @@
+ }
+ 
+ 
++static int msp430_rtc_read_time(struct device *dev, struct rtc_time *tm)
++{
++	unsigned long seconds;
++	unsigned char val[4];
++	int ret;
++
++	ret = i2c_smbus_read_i2c_block_data(msp430_data->client, I2C_TIME_REGISTER, 4, val);
++	if (ret < 0) {
++		return ret;
++	}
++
++	seconds = val[0];
++	seconds |= (val[1] << 8);
++	seconds |= (val[2] << 16);
++	seconds |= (val[3] << 24);
++
++	rtc_time_to_tm(seconds, tm);
++	return 0;
++}
++
++
++static int msp430_rtc_set_time(struct device *dev, struct rtc_time *tm)
++{
++	unsigned long seconds;
++	unsigned char val[4];
++	int ret;
++
++	rtc_tm_to_time(tm, &seconds);
++
++	val[0] = (seconds >> 0) & 0xFF;
++	val[1] = (seconds >> 8) & 0xFF;
++	val[2] = (seconds >> 16) & 0xFF;
++	val[3] = (seconds >> 24) & 0xFF;
++
++	ret = i2c_smbus_write_i2c_block_data(msp430_data->client, I2C_TIME_REGISTER, 4, val);
++	if (ret < 0) {
++		return ret;
++	}
++
++	return 0;
++}
++
++
++static int msp430_rtc_read_alarm(struct device *dev, struct rtc_time *tm)
++{
++	unsigned long seconds;
++	unsigned char val[4];
++	int ret;
++
++	ret = i2c_smbus_read_i2c_block_data(msp430_data->client, I2C_ALARM_REGISTER, 4, val);
++	if (ret < 0) {
++		return ret;
++	}
++
++	seconds = val[0];
++	seconds |= (val[1] << 8);
++	seconds |= (val[2] << 16);
++	seconds |= (val[3] << 24);
++
++	rtc_time_to_tm(seconds, tm);
++	return 0;
++}
++
++
++static int msp430_rtc_set_alarm(struct device *dev, struct rtc_time *tm)
++{
++	unsigned long seconds;
++	unsigned char val[4];
++	int ret;
++
++	rtc_tm_to_time(tm, &seconds);
++
++	val[0] = (seconds >> 0) & 0xFF;
++	val[1] = (seconds >> 8) & 0xFF;
++	val[2] = (seconds >> 16) & 0xFF;
++	val[3] = (seconds >> 24) & 0xFF;
++
++	ret = i2c_smbus_write_i2c_block_data(msp430_data->client, I2C_ALARM_REGISTER, 4, val);
++	if (ret < 0) {
++		return ret;
++	}
++
++	return 0;
++}
++
++
++static const struct rtc_class_ops msp430_rtc_ops = {
++	.read_time = msp430_rtc_read_time,
++	.set_time = msp430_rtc_set_time,
++	.read_alarm = msp430_rtc_read_alarm,
++	.set_alarm = msp430_rtc_set_alarm,
++};
++
++
+ int msp430_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+         struct msp430_i2c_data *data;
+@@ -294,6 +395,7 @@
+                 err = -ENOMEM;
+                 goto err0;
+         }
++	msp430_data = data;
+ 
+         i2c_set_clientdata(client, data);
+ 	data->client = client;
+@@ -321,18 +423,26 @@
+ 		goto err2;
+ 	}
+ 
++	data->rtc = rtc_device_register("msp430", &client->dev,
++				  &msp430_rtc_ops, THIS_MODULE);
++	if (IS_ERR(data->rtc)) {
++		dev_err(&client->dev, "Failed to register RTC\n");
++		goto err3;
++	}
++
++
+ 	err = request_irq(client->irq, msp430_i2c_irq,
+                           IRQF_TRIGGER_LOW | IRQF_SAMPLE_RANDOM,
+                           client->dev.bus_id, data);
+ 
+         if (err != 0) {
+                 dev_err(&client->dev, "Failed to register IRQ %d\n", client->irq);
+-                goto err3;
++                goto err4;
+         }
+ 
+         err = sysfs_create_group(&client->dev.kobj, &msp430_i2c_group);
+         if (err)
+-                goto err4;
++                goto err5;
+ 
+ 	/* initialize the programmer */
+ 	msp430_programmer_probe(client);
+@@ -341,13 +451,14 @@
+ 	msp430_programmer_upgrade(client);
+ 
+ 	/* register power off handler */
+-	msp430_data = data;
+ 	pm_power_off = msp430_power_off;
+ 
+ 	return 0;
+ 
+- err4:
++ err5:
+ 	free_irq(client->irq, data);
++ err4:
++	rtc_device_unregister(data->rtc);
+  err3:
+ 	input_unregister_device(data->input_dev);
+  err2:
+@@ -367,6 +478,7 @@
+ 
+ 	free_irq(client->irq, data);
+ 
++	rtc_device_unregister(data->rtc);
+ 	input_unregister_device(data->input_dev);
+ 	input_free_device(data->input_dev);
+ 
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430.h
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430.h	2009-08-14 08:54:38.000000000 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430.h	2009-08-14 08:55:23.000000000 -0700
+@@ -11,6 +11,7 @@
+ struct msp430_i2c_data {
+         struct i2c_client       *client;
+         struct input_dev        *input_dev;
++	struct rtc_device       *rtc;
+ 
+         struct mutex            lock;
+         struct work_struct      irq_work;
+@@ -59,7 +60,9 @@
+ #define I2C_BATT_VMON2_REGISTER         61
+ #define I2C_BATT_TEMP_REGISTER          62
+ #define I2C_BATT_DC_JACK_REGISTER       63
++#define I2C_CHARGER_EVENT_REGISTER      64
+ #define I2C_TIME_REGISTER               70
++#define I2C_ALARM_REGISTER              71
+ #define I2C_KILL_REGISTER               99
+ 
+ //  Test registers.

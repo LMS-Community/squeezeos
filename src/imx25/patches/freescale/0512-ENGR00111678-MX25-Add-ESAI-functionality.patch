@@ -1,0 +1,247 @@
+From d0b89e3d74661e74385452f14077012d6bbe35fd Mon Sep 17 00:00:00 2001
+From: Xie Xiaobo <X.Xie@freescale.com>
+Date: Mon, 27 Apr 2009 12:06:24 +0800
+Subject: [PATCH] ENGR00111678 MX25: Add ESAI functionality
+
+Enable surround sound playback for imx25-3stack board.
+
+Signed-off-by: York Sun <yorksun@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig |   11 ++++-
+ arch/arm/mach-mx25/devices.c            |   14 +++++++
+ arch/arm/mach-mx25/dma.c                |   64 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx25/mx25_3stack.c        |    6 +++
+ arch/arm/mach-mx25/mx25_3stack_gpio.c   |    4 +-
+ 5 files changed, 95 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index 61f055a..9945967 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Wed Mar 11 16:54:31 2009
++# Mon Apr 27 10:36:58 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -749,6 +749,7 @@ CONFIG_HW_CONSOLE=y
+ # CONFIG_VT_HW_CONSOLE_BINDING is not set
+ CONFIG_DEVKMEM=y
+ # CONFIG_SERIAL_NONSTANDARD is not set
++# CONFIG_MXC_IIM is not set
+ 
+ #
+ # Serial drivers
+@@ -1017,10 +1018,11 @@ CONFIG_SND_VERBOSE_PROCFS=y
+ CONFIG_SND_SOC=y
+ CONFIG_SND_MXC_SOC=y
+ CONFIG_SND_MXC_SOC_SSI=y
++CONFIG_SND_MXC_SOC_ESAI=m
+ # CONFIG_SND_MXC_SOC_IRAM is not set
+ # CONFIG_SND_SOC_IMX_3STACK_WM8350 is not set
+ # CONFIG_SND_SOC_IMX_3STACK_AK4647 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_WM8580 is not set
++CONFIG_SND_SOC_IMX_3STACK_WM8580=m
+ # CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
+ CONFIG_SND_SOC_IMX_3STACK_SGTL5000=y
+ # CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH is not set
+@@ -1032,6 +1034,7 @@ CONFIG_SND_SOC_IMX_3STACK_SGTL5000=y
+ #
+ # SoC Audio for the Texas Instruments OMAP
+ #
++CONFIG_SND_SOC_WM8580=m
+ CONFIG_SND_SOC_SGTL5000=y
+ 
+ #
+@@ -1076,7 +1079,9 @@ CONFIG_USB_OTG=y
+ CONFIG_USB_EHCI_HCD=m
+ CONFIG_USB_EHCI_ARC=y
+ CONFIG_USB_EHCI_ARC_H2=y
++# CONFIG_USB_EHCI_ARC_H2_WAKE_UP is not set
+ CONFIG_USB_EHCI_ARC_OTG=y
++# CONFIG_USB_EHCI_ARC_OTG_WAKE_UP is not set
+ # CONFIG_USB_STATIC_IRAM is not set
+ # CONFIG_USB_EHCI_FSL_MC13783 is not set
+ # CONFIG_USB_EHCI_FSL_1301 is not set
+@@ -1180,6 +1185,7 @@ CONFIG_USB_ARC=m
+ # CONFIG_USB_GADGET_DUMMY_HCD is not set
+ CONFIG_USB_GADGET_DUALSPEED=y
+ CONFIG_USB_GADGET_ARC_OTG=y
++# CONFIG_USB_GADGET_WAKE_UP is not set
+ # CONFIG_USB_GADGET_FSL_MC13783 is not set
+ # CONFIG_USB_GADGET_FSL_1301 is not set
+ # CONFIG_USB_GADGET_FSL_1504 is not set
+@@ -1309,6 +1315,7 @@ CONFIG_MXC_PMIC_CHARDEV=y
+ #
+ # CONFIG_MXC_SECURITY_SCC is not set
+ # CONFIG_MXC_SECURITY_RNG is not set
++# CONFIG_MXC_DRYICE is not set
+ 
+ #
+ # MXC MPEG4 Encoder Kernel module support
+diff --git a/arch/arm/mach-mx25/devices.c b/arch/arm/mach-mx25/devices.c
+index 5b7713b..5311999 100644
+--- a/arch/arm/mach-mx25/devices.c
++++ b/arch/arm/mach-mx25/devices.c
+@@ -542,6 +542,19 @@ static inline void mxc_init_flexcan(void)
+ }
+ #endif
+ 
++static struct platform_device mxc_alsa_surround_device = {
++	.name = "imx-3stack-wm8580",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		},
++};
++
++static void mxc_init_surround_audio(void)
++{
++	platform_device_register(&mxc_alsa_surround_device);
++}
++
+ static int __init mxc_init_devices(void)
+ {
+ 	mxc_init_wdt();
+@@ -549,6 +562,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_i2c();
+ 	mxc_init_dma();
+ 	mxc_init_ssi();
++	mxc_init_surround_audio();
+ 	mxc_init_rtc();
+ 	imx_init_adc();
+ 	mxc_init_flexcan();
+diff --git a/arch/arm/mach-mx25/dma.c b/arch/arm/mach-mx25/dma.c
+index 7d0f83e..25f11eb 100644
+--- a/arch/arm/mach-mx25/dma.c
++++ b/arch/arm/mach-mx25/dma.c
+@@ -31,6 +31,10 @@
+ #define MXC_SSI_TXFIFO_WML        0x4
+ #define MXC_SSI_RXFIFO_WML        0x6
+ 
++#define MXC_ESAI_TX_REG	0x00
++#define MXC_ESAI_RX_REG	0x04
++#define MXC_ESAI_FIFO_WML 0x40
++
+ struct mxc_sdma_info_entry_s {
+ 	mxc_dma_device_t device;
+ 	mxc_sdma_channel_params_t *chnl_info;
+@@ -523,6 +527,62 @@ static mxc_sdma_channel_params_t mxc_sdma_memory_params = {
+ 	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
+ };
+ 
++static mxc_sdma_channel_params_t mxc_sdma_esai_16bit_rx_params = {
++	.chnl_params = {
++			.watermark_level = MXC_ESAI_FIFO_WML,
++			.per_address = ESAI_BASE_ADDR + MXC_ESAI_RX_REG,
++			.peripheral_type = ESAI,
++			.transfer_type = per_2_emi,
++			.event_id = DMA_REQ_ESAI_RX,
++			.bd_number = 32,
++			.word_size = TRANSFER_16BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_ESAI_RX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
++static mxc_sdma_channel_params_t mxc_sdma_esai_16bit_tx_params = {
++	.chnl_params = {
++			.watermark_level = MXC_ESAI_FIFO_WML,
++			.per_address = ESAI_BASE_ADDR + MXC_ESAI_TX_REG,
++			.peripheral_type = ESAI,
++			.transfer_type = soc_trans_type,
++			.event_id = DMA_REQ_ESAI_TX,
++			.bd_number = 32,
++			.word_size = TRANSFER_16BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_ESAI_TX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
++static mxc_sdma_channel_params_t mxc_sdma_esai_24bit_rx_params = {
++	.chnl_params = {
++			.watermark_level = MXC_ESAI_FIFO_WML,
++			.per_address = ESAI_BASE_ADDR + MXC_ESAI_RX_REG,
++			.peripheral_type = ESAI,
++			.transfer_type = per_2_emi,
++			.event_id = DMA_REQ_ESAI_RX,
++			.bd_number = 32,
++			.word_size = TRANSFER_32BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_ESAI_RX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
++static mxc_sdma_channel_params_t mxc_sdma_esai_24bit_tx_params = {
++	.chnl_params = {
++			.watermark_level = MXC_ESAI_FIFO_WML,
++			.per_address = ESAI_BASE_ADDR + MXC_ESAI_TX_REG,
++			.peripheral_type = ESAI,
++			.transfer_type = soc_trans_type,
++			.event_id = DMA_REQ_ESAI_TX,
++			.bd_number = 32,
++			.word_size = TRANSFER_32BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_ESAI_TX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
+ static struct mxc_sdma_info_entry_s mxc_sdma_active_dma_info[] = {
+ 	{MXC_DMA_UART1_RX, &mxc_sdma_uart1_rx_params},
+ 	{MXC_DMA_UART1_TX, &mxc_sdma_uart1_tx_params},
+@@ -558,6 +618,10 @@ static struct mxc_sdma_info_entry_s mxc_sdma_active_dma_info[] = {
+ 	{MXC_DMA_SSI2_16BIT_TX1, &mxc_sdma_ssi2_16bit_tx1_params},
+ 	{MXC_DMA_SSI2_24BIT_RX1, &mxc_sdma_ssi2_24bit_rx1_params},
+ 	{MXC_DMA_SSI2_24BIT_TX1, &mxc_sdma_ssi2_24bit_tx1_params},
++	{MXC_DMA_ESAI_16BIT_RX, &mxc_sdma_esai_16bit_rx_params},
++	{MXC_DMA_ESAI_16BIT_TX, &mxc_sdma_esai_16bit_tx_params},
++	{MXC_DMA_ESAI_24BIT_RX, &mxc_sdma_esai_24bit_rx_params},
++	{MXC_DMA_ESAI_24BIT_TX, &mxc_sdma_esai_24bit_tx_params},
+ 	{MXC_DMA_MEMORY, &mxc_sdma_memory_params},
+ };
+ 
+diff --git a/arch/arm/mach-mx25/mx25_3stack.c b/arch/arm/mach-mx25/mx25_3stack.c
+index 8c94300..5e97606 100644
+--- a/arch/arm/mach-mx25/mx25_3stack.c
++++ b/arch/arm/mach-mx25/mx25_3stack.c
+@@ -218,6 +218,12 @@ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	 .chip_select = 0,
+ 	 .mode = SPI_MODE_2,
+ 	 },
++	{
++	 .modalias = "wm8580_spi",
++	 .max_speed_hz = 8000000,	/* max spi SCK clock speed in HZ */
++	 .bus_num = 1,
++	 .chip_select = 1,
++	 },
+ };
+ 
+ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+diff --git a/arch/arm/mach-mx25/mx25_3stack_gpio.c b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+index ec6f2f3..aed627a 100644
+--- a/arch/arm/mach-mx25/mx25_3stack_gpio.c
++++ b/arch/arm/mach-mx25/mx25_3stack_gpio.c
+@@ -1125,7 +1125,7 @@ EXPORT_SYMBOL(gpio_activate_esai_ports);
+ /*!
+  * Inactivate ESAI ports to disable surround sound I/O
+  */
+-void gpio_inactivate_esai_ports(void)
++void gpio_deactivate_esai_ports(void)
+ {
+ 	mxc_request_gpio(MX25_PIN_CSI_D2); /*SCKR*/
+ 	mxc_request_gpio(MX25_PIN_CSI_D3); /*FSR*/
+@@ -1153,7 +1153,7 @@ void gpio_inactivate_esai_ports(void)
+ 	mxc_free_iomux(MX25_PIN_CSI_HSYNC, MUX_CONFIG_FUNC);
+ 	mxc_free_iomux(MX25_PIN_CSI_PIXCLK, MUX_CONFIG_FUNC);
+ }
+-EXPORT_SYMBOL(gpio_inactivate_esai_ports);
++EXPORT_SYMBOL(gpio_deactivate_esai_ports);
+ 
+ 
+ /*!
+-- 
+1.5.4.4
+

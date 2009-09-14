@@ -1,0 +1,38 @@
+From 8e436760fd9093f3694269dbce744bb67e740c30 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 9 Dec 2008 11:02:51 -0500
+Subject: [PATCH] UBIFS: use PAGE_CACHE_MASK correctly
+
+It has high bits set, not low bits set as the UBIFS code
+assumed.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/file.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/fs/ubifs/file.c b/fs/ubifs/file.c
+index 4aea1ff..8009648 100644
+--- a/fs/ubifs/file.c
++++ b/fs/ubifs/file.c
+@@ -253,7 +253,7 @@ static int write_begin_slow(struct address_space *mapping,
+ 	}
+ 
+ 	if (!PageUptodate(page)) {
+-		if (!(pos & PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
++		if (!(pos & ~PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
+ 			SetPageChecked(page);
+ 		else {
+ 			err = do_readpage(page);
+@@ -443,7 +443,7 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
+ 
+ 	if (!PageUptodate(page)) {
+ 		/* The page is not loaded from the flash */
+-		if (!(pos & PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
++		if (!(pos & ~PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
+ 			/*
+ 			 * We change whole page so no need to load it. But we
+ 			 * have to set the @PG_checked flag to make the further
+-- 
+1.5.4.3
+

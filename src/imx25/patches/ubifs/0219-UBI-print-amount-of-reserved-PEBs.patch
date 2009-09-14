@@ -1,0 +1,43 @@
+From 49d1a9590aea9be67f1e317ea4566edfec0dba90 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 8 Jun 2009 16:52:48 +0300
+Subject: [PATCH] UBI: print amount of reserved PEBs
+
+When marking a PEB as bad, print how many PEBs are left reserved.
+This is very useful information.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/wl.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 7212d51..51182b0 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -1072,10 +1072,9 @@ static int erase_worker(struct ubi_device *ubi, struct ubi_work *wl_wrk,
+ 		ubi_err("no reserved physical eraseblocks");
+ 		goto out_ro;
+ 	}
+-
+ 	spin_unlock(&ubi->volumes_lock);
+-	ubi_msg("mark PEB %d as bad", pnum);
+ 
++	ubi_msg("mark PEB %d as bad", pnum);
+ 	err = ubi_io_mark_bad(ubi, pnum);
+ 	if (err)
+ 		goto out_ro;
+@@ -1085,7 +1084,9 @@ static int erase_worker(struct ubi_device *ubi, struct ubi_work *wl_wrk,
+ 	ubi->bad_peb_count += 1;
+ 	ubi->good_peb_count -= 1;
+ 	ubi_calculate_reserved(ubi);
+-	if (ubi->beb_rsvd_pebs == 0)
++	if (ubi->beb_rsvd_pebs)
++		ubi_msg("%d PEBs left in the reserve", ubi->beb_rsvd_pebs);
++	else
+ 		ubi_warn("last PEB from the reserved pool was used");
+ 	spin_unlock(&ubi->volumes_lock);
+ 
+-- 
+1.5.4.3
+

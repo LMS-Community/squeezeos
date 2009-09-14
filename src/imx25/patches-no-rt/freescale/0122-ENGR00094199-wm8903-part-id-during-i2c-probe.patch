@@ -1,0 +1,120 @@
+From 3ba06b68d65363ca555d0ed2193fffbc42dc326a Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Wed, 1 Oct 2008 15:22:55 -0500
+Subject: [PATCH] ENGR00094199 wm8903: part id during i2c probe
+
+Read codec part id register when initializing i2c.  If the
+wm8903 codec is not id'ed, prevent loading this audio driver.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/codecs/wm8903.c |   49 ++++++++++++++++++++++++++++----------------
+ 1 files changed, 31 insertions(+), 18 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8903.c b/sound/soc/codecs/wm8903.c
+index 108f2ad..dbe6068 100644
+--- a/sound/soc/codecs/wm8903.c
++++ b/sound/soc/codecs/wm8903.c
+@@ -24,6 +24,7 @@
+ #include <linux/pm.h>
+ #include <linux/i2c.h>
+ #include <linux/platform_device.h>
++#include <linux/byteorder/swab.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -251,7 +252,7 @@ static unsigned int wm8903_hw_read(struct snd_soc_codec *codec,
+ 		return 0;
+ 	}
+ 
+-	value = (u16) (((i2c_ret & 0xff) << 8) | ((i2c_ret & 0xff00) >> 8));
++	value = swab16(i2c_ret);
+ 
+ 	dev_dbg(&wm8903_i2c_client->dev,
+ 		"%s : reg=0x%x, val=0x%04x\n", __func__, reg, value);
+@@ -304,7 +305,7 @@ static int wm8903_write(struct snd_soc_codec *codec, unsigned int reg,
+ 
+ 	wm8903_write_reg_cache(codec, reg, value);
+ 
+-	value = ((value & 0xff) << 8) | ((value & 0xff00) >> 8);
++	value = swab16(value);
+ 	if (i2c_smbus_write_word_data(wm8903_i2c_client, reg, value) < 0) {
+ 		pr_err("%s: write reg error : R%02d = 0x%04x\n",
+ 		       __func__, reg, value);
+@@ -1636,11 +1637,8 @@ static int wm8903_codec_io_probe(struct snd_soc_codec *codec,
+ {
+ 	u16 val = 0;
+ 
+-	val = wm8903_hw_read(codec, WM8903_SW_RESET_AND_ID);
+-	if (val != wm8903_reg_defaults[WM8903_SW_RESET_AND_ID]) {
+-		pr_err("Device with ID register %x is not a WM8903\n", val);
++	if (wm8903_i2c_client == NULL)
+ 		return -ENODEV;
+-	}
+ 
+ 	wm8903_reset(codec);
+ 
+@@ -1725,6 +1723,9 @@ static int wm8903_codec_probe(struct device *dev)
+ 	struct wm8903_priv *wm8903;
+ 	u16 val;
+ 
++	if (wm8903_i2c_client == NULL)
++		return -ENODEV;
++
+ 	codec->owner = THIS_MODULE;
+ 	codec->ops = &wm8903_codec_ops;
+ 
+@@ -1803,7 +1804,31 @@ static struct snd_soc_device_driver wm8903_hifi_dai_driver = {
+ 
+ static int wm8903_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
++	int ret;
++	unsigned int val;
++
++	val = i2c_smbus_read_word_data(client, WM8903_SW_RESET_AND_ID);
++	if (val < 0)
++		return -ENODEV;
++
++	val = swab16(val);
++	if (val != wm8903_reg_defaults[WM8903_SW_RESET_AND_ID]) {
++		pr_err("Device with ID register %x is not a WM8903\n", val);
++		return -ENODEV;
++	}
++
+ 	wm8903_i2c_client = client;
++
++	ret = driver_register(&wm8903_codec_driver.driver);
++	if (ret < 0)
++		return ret;
++
++	ret = driver_register(&wm8903_hifi_dai_driver.driver);
++	if (ret < 0) {
++		driver_unregister(&wm8903_codec_driver.driver);
++		return ret;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -1837,18 +1862,6 @@ static __init int wm8903_init(void)
+ 		pr_err("wm8903 i2c driver register failed");
+ 		return ret;
+ 	}
+-	ret = driver_register(&wm8903_codec_driver.driver);
+-	if (ret < 0) {
+-		i2c_del_driver(&wm8903_i2c_driver);
+-		return ret;
+-	}
+-	ret = driver_register(&wm8903_hifi_dai_driver.driver);
+-	if (ret < 0) {
+-		i2c_del_driver(&wm8903_i2c_driver);
+-		driver_unregister(&wm8903_codec_driver.driver);
+-		return ret;
+-	}
+-
+ 	return ret;
+ }
+ 
+-- 
+1.5.4.4
+

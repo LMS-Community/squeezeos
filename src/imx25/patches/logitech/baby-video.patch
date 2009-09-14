@@ -1,0 +1,121 @@
+Index: linux-2.6.26/drivers/video/mxc/mx2fb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/mxc/mx2fb.c	2009-07-21 12:51:43.000000000 +0100
++++ linux-2.6.26/drivers/video/mxc/mx2fb.c	2009-07-21 12:53:35.000000000 +0100
+@@ -297,7 +297,6 @@
+ 			"pixclock set for 60Hz refresh = %u ps\n",
+ 			var->pixclock);
+ 	}
+-
+ 	var->height = -1;
+ 	var->width = -1;
+ 	var->grayscale = 0;
+@@ -716,7 +715,7 @@
+ 	}
+ 
+ 	/* Default Y virtual size is 2x panel size */
+-	/* info->var.yres_virtual = info->var.yres << 1; */
++	info->var.yres_virtual = info->var.yres << 1;
+ 
+ 	if (mx2fbi->type == MX2FB_TYPE_GW)
+ 		mx2fbi->blank = FB_BLANK_NORMAL;
+@@ -727,7 +726,6 @@
+ 		fb_dealloc_cmap(&info->cmap);
+ 		return -EINVAL;
+ 	}
+-
+ 	if (register_framebuffer(info) < 0) {
+ 		_unmap_video_memory(info);
+ 		fb_dealloc_cmap(&info->cmap);
+@@ -1056,6 +1054,8 @@
+ 	pcr |= (var->sync & FB_SYNC_DATA_INVERT) ? 0x01000000 : 0;
+ 	pcr |= (var->sync & FB_SYNC_SHARP_MODE) ? 0x00000040 : 0;
+ 	pcr |= (var->sync & FB_SYNC_OE_LOW_ACT) ? 0x00100000 : 0;
++	pcr |= (var->sync & FB_SYNC_INVERT_HSYNC)? (1 << 22) : 0;
++	pcr |= (var->sync & FB_SYNC_INVERT_VSYNC)? (1 << 23) : 0;
+ 	__raw_writel(pcr, LCDC_REG(LCDC_LPCR));
+ 
+ 	/* Horizontal and vertical configuration register */
+@@ -1293,6 +1293,8 @@
+ 	return platform_driver_register(&mx2fb_driver);
+ }
+ 
++
++
+ /*!
+  * @brief Cleanup
+  */
+Index: linux-2.6.26/drivers/video/mxc/mxcfb_modedb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/mxc/mxcfb_modedb.c	2009-07-21 12:51:42.000000000 +0100
++++ linux-2.6.26/drivers/video/mxc/mxcfb_modedb.c	2009-07-21 12:52:51.000000000 +0100
+@@ -64,6 +64,21 @@
+ 	 "TV-VGA", 60, 640, 480, 40574, 35, 45, 9, 1, 46, 5,
+ 	 0, FB_VMODE_NONINTERLACED, 0,
+ 	 },
++	{
++	  /* Baby Boom Wintek  @ 65 Hz */
++	  "BABY-DISPLAY", 65,
++	  240, 320, /* x, y */
++	  138000,   /* pixclock */
++	  20,       /* left_margin */
++	  20,       /* right_margin */
++	  3,        /* upper_margin */
++	  3,        /* lower_margin */
++	  50,       /* hsync_len */
++	  3,        /* vsync_len */
++	  FB_SYNC_INVERT_HSYNC | FB_SYNC_INVERT_VSYNC | FB_SYNC_OE_LOW_ACT,
++	  FB_VMODE_NONINTERLACED,
++	  0,
++	},
+ };
+ 
+ int mxcfb_modedb_sz = ARRAY_SIZE(mxcfb_modedb);
+Index: linux-2.6.26/arch/arm/mach-mx25/clock.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/clock.c	2009-07-21 12:51:42.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/clock.c	2009-07-21 12:52:51.000000000 +0100
+@@ -333,6 +333,19 @@
+ 	return 0;
+ }
+ 
++static unsigned long _clk_parent_round_rate(struct clk *clk, unsigned long rate)
++{
++        return clk->parent->round_rate(clk->parent, rate);
++}
++
++static int _clk_parent_set_rate(struct clk *clk, unsigned long rate)
++{
++        int ret;
++        if ((ret = clk->parent->set_rate(clk->parent, rate)) == 0)
++                clk->rate = rate;
++        return ret;
++}
++
+ static void _clk_ipg_recalc(struct clk *clk)
+ {
+ 	clk->rate = clk->parent->rate / 2;	/* Always AHB / 2 */
+@@ -1025,7 +1038,9 @@
+ 	 .name = "lcdc_clk",
+ 	 .id = 0,
+ 	 .parent = &per_clk[7],
+-	 .secondary = &lcdc_clk[1],},
++	 .secondary = &lcdc_clk[1],
++         .round_rate = _clk_parent_round_rate,
++         .set_rate = _clk_parent_set_rate,},
+ 	{
+ 	 .name = "lcdc_ipg_clk",
+ 	 .id = 0,
+Index: linux-2.6.26/include/linux/mxcfb.h
+===================================================================
+--- linux-2.6.26.orig/include/linux/mxcfb.h	2009-07-21 12:51:42.000000000 +0100
++++ linux-2.6.26/include/linux/mxcfb.h	2009-07-21 12:52:51.000000000 +0100
+@@ -29,6 +29,8 @@
+ #define FB_SYNC_CLK_IDLE_EN	0x10000000
+ #define FB_SYNC_SHARP_MODE	0x08000000
+ #define FB_SYNC_SWAP_RGB	0x04000000
++#define FB_SYNC_INVERT_HSYNC	0x02000000
++#define FB_SYNC_INVERT_VSYNC	0x01000000
+ 
+ struct mxcfb_gbl_alpha {
+ 	int enable;

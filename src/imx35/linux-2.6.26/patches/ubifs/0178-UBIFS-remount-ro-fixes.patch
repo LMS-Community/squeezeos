@@ -1,0 +1,111 @@
+From 7dfaf7e8165a11c554e278ea41f46f9463c07c0e Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Date: Thu, 29 Jan 2009 12:59:33 +0200
+Subject: [PATCH] UBIFS: remount ro fixes
+
+- preserve the idx_gc list - it will be needed in the same
+state, should UBIFS be remounted rw again
+- prevent remounting ro if we have switched to read only
+mode (due to a fatal error)
+
+Signed-off-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/gc.c    |   18 +++++-------------
+ fs/ubifs/super.c |   14 +++++++-------
+ fs/ubifs/ubifs.h |    2 +-
+ 3 files changed, 13 insertions(+), 21 deletions(-)
+
+diff --git a/fs/ubifs/gc.c b/fs/ubifs/gc.c
+index 38f16fa..cc18a95 100644
+--- a/fs/ubifs/gc.c
++++ b/fs/ubifs/gc.c
+@@ -830,29 +830,21 @@ out:
+  * ubifs_destroy_idx_gc - destroy idx_gc list.
+  * @c: UBIFS file-system description object
+  *
+- * This function destroys the @c->idx_gc list. It is called when unmounting or
+- * remounting read-only so locks are not needed. Returns zero in case of
+- * success and a negative error code in case of failure.
++ * This function destroys the @c->idx_gc list. It is called when unmounting
++ * so locks are not needed. Returns zero in case of success and a negative
++ * error code in case of failure.
+  */
+-int ubifs_destroy_idx_gc(struct ubifs_info *c)
++void ubifs_destroy_idx_gc(struct ubifs_info *c)
+ {
+-	int ret = 0;
+-
+ 	while (!list_empty(&c->idx_gc)) {
+-		int err;
+ 		struct ubifs_gced_idx_leb *idx_gc;
+ 
+ 		idx_gc = list_entry(c->idx_gc.next, struct ubifs_gced_idx_leb,
+ 				    list);
+-		err = ubifs_change_one_lp(c, idx_gc->lnum, LPROPS_NC,
+-					  LPROPS_NC, 0, LPROPS_TAKEN, -1);
+-		if (err && !ret)
+-			ret = err;
++		c->idx_gc_cnt -= 1;
+ 		list_del(&idx_gc->list);
+ 		kfree(idx_gc);
+ 	}
+-
+-	return ret;
+ }
+ 
+ /**
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 150e670..9007e73 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -1685,10 +1685,6 @@ static void ubifs_remount_ro(struct ubifs_info *c)
+ 	if (err)
+ 		ubifs_ro_mode(c, err);
+ 
+-	err = ubifs_destroy_idx_gc(c);
+-	if (err)
+-		ubifs_ro_mode(c, err);
+-
+ 	free_wbufs(c);
+ 	vfree(c->orph_buf);
+ 	c->orph_buf = NULL;
+@@ -1791,15 +1787,19 @@ static int ubifs_remount_fs(struct super_block *sb, int *flags, char *data)
+ 
+ 	if ((sb->s_flags & MS_RDONLY) && !(*flags & MS_RDONLY)) {
+ 		if (c->ro_media) {
+-			ubifs_msg("cannot re-mount R/W, UBIFS is working in "
+-				  "R/O mode");
++			ubifs_msg("cannot re-mount due to prior errors");
+ 			return -EINVAL;
+ 		}
+ 		err = ubifs_remount_rw(c);
+ 		if (err)
+ 			return err;
+-	} else if (!(sb->s_flags & MS_RDONLY) && (*flags & MS_RDONLY))
++	} else if (!(sb->s_flags & MS_RDONLY) && (*flags & MS_RDONLY)) {
++		if (c->ro_media) {
++			ubifs_msg("cannot re-mount due to prior errors");
++			return -EINVAL;
++		}
+ 		ubifs_remount_ro(c);
++	}
+ 
+ 	if (c->bulk_read == 1)
+ 		bu_init(c);
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index ffd64e7..db3dd87 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1589,7 +1589,7 @@ int ubifs_replay_journal(struct ubifs_info *c);
+ int ubifs_garbage_collect(struct ubifs_info *c, int anyway);
+ int ubifs_gc_start_commit(struct ubifs_info *c);
+ int ubifs_gc_end_commit(struct ubifs_info *c);
+-int ubifs_destroy_idx_gc(struct ubifs_info *c);
++void ubifs_destroy_idx_gc(struct ubifs_info *c);
+ int ubifs_get_idx_gc_leb(struct ubifs_info *c);
+ int ubifs_garbage_collect_leb(struct ubifs_info *c, struct ubifs_lprops *lp);
+ 
+-- 
+1.5.4.3
+

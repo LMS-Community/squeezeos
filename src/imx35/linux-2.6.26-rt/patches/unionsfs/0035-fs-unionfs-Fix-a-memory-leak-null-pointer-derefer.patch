@@ -1,0 +1,55 @@
+From 4c91e760ef2e0d5ae5d4f69d9031a433b61545d9 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 2 Mar 2007 13:00:57 -0500
+Subject: [PATCH] fs/unionfs: Fix a memory leak & null pointer dereference
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    9 ++++++---
+ 1 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 379c525..66d6ce9 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -230,7 +230,7 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	unionfs_read_lock(sb);
+ 	if (!unionfs_d_revalidate(dentry, NULL) && !d_deleted(dentry)) {
+ 		err = -ESTALE;
+-		goto out;
++		goto out_nofree;
+ 	}
+ 
+ 	sbgen = atomic_read(&UNIONFS_SB(sb)->generation);
+@@ -286,6 +286,9 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	}
+ 
+ out:
++	if (err)
++		kfree(UNIONFS_F(file)->lower_files);
++out_nofree:
+ 	unionfs_unlock_dentry(dentry);
+ 	unionfs_read_unlock(dentry->d_sb);
+ 	return err;
+@@ -391,7 +394,7 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 	file->private_data = kzalloc(sizeof(struct unionfs_file_info), GFP_KERNEL);
+ 	if (!UNIONFS_F(file)) {
+ 		err = -ENOMEM;
+-		goto out;
++		goto out_nofree;
+ 	}
+ 	fbstart(file) = -1;
+ 	fbend(file) = -1;
+@@ -444,7 +447,7 @@ out:
+ 		kfree(UNIONFS_F(file)->lower_files);
+ 		kfree(UNIONFS_F(file));
+ 	}
+-
++out_nofree:
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

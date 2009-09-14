@@ -1,0 +1,54 @@
+From 84a391edbec132637fabc0d5a38d96df29356927 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 26 Oct 2008 16:58:25 +0200
+Subject: [PATCH] UBIFS: slight compression optimization
+
+If data does not compress, it is better to leave it uncompressed
+because we'll read it faster then. So do not compress data if we
+save less than 64 bytes.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/compress.c    |    6 +++---
+ fs/ubifs/ubifs-media.h |    7 +++++++
+ 2 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/fs/ubifs/compress.c b/fs/ubifs/compress.c
+index a0ada59..6414d50 100644
+--- a/fs/ubifs/compress.c
++++ b/fs/ubifs/compress.c
+@@ -119,10 +119,10 @@ void ubifs_compress(const void *in_buf, int in_len, void *out_buf, int *out_len,
+ 	}
+ 
+ 	/*
+-	 * Presently, we just require that compression results in less data,
+-	 * rather than any defined minimum compression ratio or amount.
++	 * If the data compressed only slightly, it is better to leave it
++	 * uncompressed to improve read speed.
+ 	 */
+-	if (ALIGN(*out_len, 8) >= ALIGN(in_len, 8))
++	if (in_len - *out_len < UBIFS_MIN_COMPRESS_DIFF)
+ 		goto no_compr;
+ 
+ 	return;
+diff --git a/fs/ubifs/ubifs-media.h b/fs/ubifs/ubifs-media.h
+index 0b37804..b25fc36 100644
+--- a/fs/ubifs/ubifs-media.h
++++ b/fs/ubifs/ubifs-media.h
+@@ -51,6 +51,13 @@
+  */
+ #define UBIFS_MIN_COMPR_LEN 128
+ 
++/*
++ * If compressed data length is less than %UBIFS_MIN_COMPRESS_DIFF bytes
++ * shorter than uncompressed data length, UBIFS preferes to leave this data
++ * node uncompress, because it'll be read faster.
++ */
++#define UBIFS_MIN_COMPRESS_DIFF 64
++
+ /* Root inode number */
+ #define UBIFS_ROOT_INO 1
+ 
+-- 
+1.5.4.3
+

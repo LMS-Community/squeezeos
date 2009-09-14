@@ -1,0 +1,1877 @@
+From 8bda2fd7ac710ace9a6d12120732dac13e08e1a3 Mon Sep 17 00:00:00 2001
+From: Xie xiaobo <X.Xie@freescale.com>
+Date: Thu, 30 Apr 2009 19:53:35 +0800
+Subject: [PATCH] ENGR00111693-2 camera: add new capture and viewfinder for i.MX25
+
+Because i.MX25 have no IPU or eMMA, add capture and viewfinder for i.MX25.
+
+Signed-off-by: Guoqing Jiang <b22156@freescale.com>
+---
+ arch/arm/configs/imx25_3stack_defconfig            |   16 +-
+ drivers/media/video/Makefile                       |    1 +
+ drivers/media/video/mxc/capture/Kconfig            |    4 +
+ drivers/media/video/mxc/capture/Makefile           |    5 +
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |  998 ++++++++++++++++++++
+ drivers/media/video/mxc/capture/fsl_csi.c          |  314 ++++++
+ drivers/media/video/mxc/capture/fsl_csi.h          |  189 ++++
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    4 +-
+ drivers/media/video/mxc/capture/ov2640.c           |  174 ++++-
+ drivers/media/video/mxc/capture/sensor_clock.c     |    6 +-
+ 10 files changed, 1704 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/configs/imx25_3stack_defconfig b/arch/arm/configs/imx25_3stack_defconfig
+index b0e43bc..2b849d0 100644
+--- a/arch/arm/configs/imx25_3stack_defconfig
++++ b/arch/arm/configs/imx25_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Tue Apr 28 11:57:01 2009
++# Thu Apr 30 15:00:38 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -904,7 +904,19 @@ CONFIG_VIDEO_CAPTURE_DRIVERS=y
+ # CONFIG_VIDEO_ADV_DEBUG is not set
+ CONFIG_VIDEO_HELPER_CHIPS_AUTO=y
+ # CONFIG_VIDEO_VIVI is not set
+-# CONFIG_VIDEO_MXC_CAMERA is not set
++CONFIG_VIDEO_MXC_CAMERA=m
++
++#
++# MXC Camera/V4L2 PRP Features support
++#
++CONFIG_VIDEO_MXC_CSI_CAMERA=m
++# CONFIG_MXC_CAMERA_MC521DA is not set
++# CONFIG_MXC_EMMA_CAMERA_MICRON111 is not set
++# CONFIG_MXC_CAMERA_OV2640_EMMA is not set
++# CONFIG_MXC_CAMERA_MICRON111 is not set
++CONFIG_MXC_CAMERA_OV2640=m
++# CONFIG_MXC_CAMERA_OV3640 is not set
++# CONFIG_MXC_TVIN_ADV7180 is not set
+ # CONFIG_VIDEO_MXC_OUTPUT is not set
+ # CONFIG_VIDEO_MXC_OPL is not set
+ # CONFIG_VIDEO_CPIA is not set
+diff --git a/drivers/media/video/Makefile b/drivers/media/video/Makefile
+index 2d4ca60..841b724 100644
+--- a/drivers/media/video/Makefile
++++ b/drivers/media/video/Makefile
+@@ -60,6 +60,7 @@ obj-$(CONFIG_VIDEO_VINO) += vino.o indycam.o
+ obj-$(CONFIG_VIDEO_STRADIS) += stradis.o
+ obj-$(CONFIG_VIDEO_MXC_IPU_CAMERA) += mxc/capture/
+ obj-$(CONFIG_VIDEO_MXC_EMMA_CAMERA) += mxc/capture/
++obj-$(CONFIG_VIDEO_MXC_CSI_CAMERA) += mxc/capture/
+ obj-$(CONFIG_VIDEO_MXC_IPU_OUTPUT) += mxc/output/
+ obj-$(CONFIG_VIDEO_MXC_IPUV1_WVGA_OUTPUT) += mxc/output/
+ obj-$(CONFIG_VIDEO_MXC_EMMA_OUTPUT) += mxc/output/
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index 56e5838..cbc9315 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -12,6 +12,10 @@ config VIDEO_MXC_EMMA_CAMERA
+ 	select VIDEO_MXC_OPL
+ 	default y
+ 
++config VIDEO_MXC_CSI_CAMERA
++	tristate "MX25 CSI camera support"
++	depends on !VIDEO_MXC_EMMA_CAMERA
++
+ config VIDEO_MXC_CSI_DMA
+ 	bool "CSI-DMA Still Image Capture support"
+ 	depends on VIDEO_MXC_EMMA_CAMERA
+diff --git a/drivers/media/video/mxc/capture/Makefile b/drivers/media/video/mxc/capture/Makefile
+index 3b6d7c7..ee2ba77 100644
+--- a/drivers/media/video/mxc/capture/Makefile
++++ b/drivers/media/video/mxc/capture/Makefile
+@@ -5,6 +5,11 @@ ifeq ($(CONFIG_VIDEO_MXC_IPU_CAMERA),y)
+ 	obj-$(CONFIG_MXC_IPU_PRP_ENC) += ipu_prp_enc.o ipu_still.o
+ endif
+ 
++ifeq ($(CONFIG_MACH_MX25_3DS),y)
++       obj-$(CONFIG_VIDEO_MXC_CSI_CAMERA) += fsl_csi.o
++       obj-$(CONFIG_VIDEO_MXC_CSI_CAMERA) += csi_v4l2_capture.o
++endif
++
+ mx27_capture-objs := mx27_prphw.o mx27_prpsw.o emma_v4l2_capture.o
+ obj-$(CONFIG_VIDEO_MXC_EMMA_CAMERA) += mx27_csi.o mx27_capture.o
+ 
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+new file mode 100644
+index 0000000..937154f
+--- /dev/null
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -0,0 +1,998 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file drivers/media/video/mxc/capture/csi_v4l2_capture.c
++ * This file is derived from mxc_v4l2_capture.c
++ *
++ * @brief MX25 Video For Linux 2 driver
++ *
++ * @ingroup MXC_V4L2_CAPTURE
++ */
++#include <linux/version.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/ctype.h>
++#include <linux/io.h>
++#include <linux/semaphore.h>
++#include <linux/pagemap.h>
++#include <linux/vmalloc.h>
++#include <linux/types.h>
++#include <linux/fb.h>
++#include <linux/dma-mapping.h>
++#include <media/v4l2-int-device.h>
++#include <linux/mxcfb.h>
++#include "mxc_v4l2_capture.h"
++#include "fsl_csi.h"
++
++static int video_nr = -1;
++static cam_data *g_cam;
++
++static int csi_v4l2_master_attach(struct v4l2_int_device *slave);
++static void csi_v4l2_master_detach(struct v4l2_int_device *slave);
++static u8 camera_power(cam_data *cam, bool cameraOn);
++
++/*! Information about this driver. */
++static struct v4l2_int_master csi_v4l2_master = {
++	.attach = csi_v4l2_master_attach,
++	.detach = csi_v4l2_master_detach,
++};
++
++static struct v4l2_int_device csi_v4l2_int_device = {
++	.module = THIS_MODULE,
++	.name = "csi_v4l2_cap",
++	.type = v4l2_int_type_master,
++	.u = {
++	      .master = &csi_v4l2_master,
++	      },
++};
++
++/*!
++ * Indicates whether the palette is supported.
++ *
++ * @param palette V4L2_PIX_FMT_RGB565, V4L2_PIX_FMT_YUV422P or V4L2_PIX_FMT_YUV420
++ *
++ * @return 0 if failed
++ */
++static inline int valid_mode(u32 palette)
++{
++	return (palette == V4L2_PIX_FMT_RGB565) ||
++	    (palette == V4L2_PIX_FMT_YUV422P) ||
++	    (palette == V4L2_PIX_FMT_YUV420);
++}
++
++/*!
++ * start the viewfinder job
++ *
++ * @param cam      structure cam_data *
++ *
++ * @return status  0 Success
++ */
++static int start_preview(cam_data *cam, unsigned long *addr)
++{
++	unsigned long fb_add = *addr;
++
++	if (fb_add != 0) {
++		__raw_writel(fb_add, CSI_CSIDMASA_FB1);
++		__raw_writel(fb_add, CSI_CSIDMASA_FB2);
++	} else {
++		/* set CSI_CSIDMASA_FB1 and CSI_CSIDMASA_FB2 to default value */
++		__raw_writel(0, CSI_CSIDMASA_FB1);
++		__raw_writel(0, CSI_CSIDMASA_FB2);
++	}
++
++	return 0;
++}
++
++/*!
++ * shut down the viewfinder job
++ *
++ * @param cam      structure cam_data *
++ *
++ * @return status  0 Success
++ */
++static int stop_preview(cam_data *cam)
++{
++	/* set CSI_CSIDMASA_FB1 and CSI_CSIDMASA_FB2 to default value */
++	__raw_writel(0, CSI_CSIDMASA_FB1);
++	__raw_writel(0, CSI_CSIDMASA_FB2);
++
++	return 0;
++}
++
++/***************************************************************************
++ * VIDIOC Functions.
++ **************************************************************************/
++
++/*!
++ *
++ * @param cam         structure cam_data *
++ *
++ * @param f           structure v4l2_format *
++ *
++ * @return  status    0 success, EINVAL failed
++ */
++static int csi_v4l2_g_fmt(cam_data *cam, struct v4l2_format *f)
++{
++	int retval = 0;
++
++	switch (f->type) {
++	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
++		pr_debug("   type is V4L2_BUF_TYPE_VIDEO_CAPTURE\n");
++		f->fmt.pix = cam->v2f.fmt.pix;
++		break;
++	case V4L2_BUF_TYPE_VIDEO_OVERLAY:
++		pr_debug("   type is V4L2_BUF_TYPE_VIDEO_OVERLAY\n");
++		f->fmt.win = cam->win;
++		break;
++	default:
++		pr_debug("   type is invalid\n");
++		retval = -EINVAL;
++	}
++
++	pr_debug("End of %s: v2f pix widthxheight %d x %d\n",
++		 __func__, cam->v2f.fmt.pix.width, cam->v2f.fmt.pix.height);
++
++	return retval;
++}
++
++/*!
++ * V4L2 - csi_v4l2_s_fmt function
++ *
++ * @param cam         structure cam_data *
++ *
++ * @param f           structure v4l2_format *
++ *
++ * @return  status    0 success, EINVAL failed
++ */
++static int csi_v4l2_s_fmt(cam_data *cam, struct v4l2_format *f)
++{
++	int retval = 0;
++	int size = 0;
++	int bytesperline = 0;
++	int *width, *height;
++
++	pr_debug("In MVC: %s\n", __func__);
++
++	switch (f->type) {
++	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
++		pr_debug("   type=V4L2_BUF_TYPE_VIDEO_CAPTURE\n");
++		if (!valid_mode(f->fmt.pix.pixelformat)) {
++			pr_err("ERROR: v4l2 capture: %s: format "
++			       "not supported\n", __func__);
++			return -EINVAL;
++		}
++
++		/* Handle case where size requested is larger than cuurent
++		 * camera setting. */
++		if ((f->fmt.pix.width > cam->crop_bounds.width)
++		    || (f->fmt.pix.height > cam->crop_bounds.height)) {
++			/* Need the logic here, calling vidioc_s_param if
++			 * camera can change. */
++			pr_debug("csi_v4l2_s_fmt size changed\n");
++		}
++		if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
++			height = &f->fmt.pix.width;
++			width = &f->fmt.pix.height;
++		} else {
++			width = &f->fmt.pix.width;
++			height = &f->fmt.pix.height;
++		}
++
++		if ((cam->crop_bounds.width / *width > 8) ||
++		    ((cam->crop_bounds.width / *width == 8) &&
++		     (cam->crop_bounds.width % *width))) {
++			*width = cam->crop_bounds.width / 8;
++			if (*width % 8)
++				*width += 8 - *width % 8;
++			pr_err("ERROR: v4l2 capture: width exceeds limit "
++			       "resize to %d.\n", *width);
++		}
++
++		if ((cam->crop_bounds.height / *height > 8) ||
++		    ((cam->crop_bounds.height / *height == 8) &&
++		     (cam->crop_bounds.height % *height))) {
++			*height = cam->crop_bounds.height / 8;
++			if (*height % 8)
++				*height += 8 - *height % 8;
++			pr_err("ERROR: v4l2 capture: height exceeds limit "
++			       "resize to %d.\n", *height);
++		}
++
++		switch (f->fmt.pix.pixelformat) {
++		case V4L2_PIX_FMT_RGB565:
++			size = f->fmt.pix.width * f->fmt.pix.height * 2;
++			bytesperline = f->fmt.pix.width * 2;
++			break;
++		case V4L2_PIX_FMT_YUV422P:
++			size = f->fmt.pix.width * f->fmt.pix.height * 2;
++			bytesperline = f->fmt.pix.width;
++			break;
++		case V4L2_PIX_FMT_YUV420:
++			size = f->fmt.pix.width * f->fmt.pix.height * 3 / 2;
++			bytesperline = f->fmt.pix.width;
++			break;
++		case V4L2_PIX_FMT_RGB24:
++		case V4L2_PIX_FMT_BGR24:
++		case V4L2_PIX_FMT_BGR32:
++		case V4L2_PIX_FMT_RGB32:
++		case V4L2_PIX_FMT_UYVY:
++		case V4L2_PIX_FMT_NV12:
++		default:
++			pr_debug("   case not supported\n");
++			break;
++		}
++
++		if (f->fmt.pix.bytesperline < bytesperline)
++			f->fmt.pix.bytesperline = bytesperline;
++		else
++			bytesperline = f->fmt.pix.bytesperline;
++
++		if (f->fmt.pix.sizeimage < size)
++			f->fmt.pix.sizeimage = size;
++		else
++			size = f->fmt.pix.sizeimage;
++
++		cam->v2f.fmt.pix = f->fmt.pix;
++		if (cam->still_buf_vaddr == NULL) {
++			cam->still_buf_vaddr = dma_alloc_coherent(0,
++								  PAGE_ALIGN
++								  (cam->v2f.fmt.
++								   pix.
++								   sizeimage),
++								  &cam->
++								  still_buf[0],
++								  GFP_DMA |
++								  GFP_KERNEL);
++			__raw_writel(cam->still_buf[0], CSI_CSIDMASA_FB1);
++			__raw_writel(cam->still_buf[0], CSI_CSIDMASA_FB2);
++		}
++
++		if (cam->v2f.fmt.pix.priv != 0) {
++			if (copy_from_user(&cam->offset,
++					   (void *)cam->v2f.fmt.pix.priv,
++					   sizeof(cam->offset))) {
++				retval = -EFAULT;
++				break;
++			}
++		}
++		break;
++	case V4L2_BUF_TYPE_VIDEO_OVERLAY:
++		pr_debug("   type=V4L2_BUF_TYPE_VIDEO_OVERLAY\n");
++		cam->win = f->fmt.win;
++		break;
++	default:
++		retval = -EINVAL;
++	}
++
++	pr_debug("End of %s: v2f pix widthxheight %d x %d\n",
++		 __func__, cam->v2f.fmt.pix.width, cam->v2f.fmt.pix.height);
++
++	return retval;
++}
++
++/*!
++ * V4L2 - csi_v4l2_s_param function
++ * Allows setting of capturemode and frame rate.
++ *
++ * @param cam         structure cam_data *
++ * @param parm        structure v4l2_streamparm *
++ *
++ * @return  status    0 success, EINVAL failed
++ */
++static int csi_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
++{
++	struct v4l2_ifparm ifparm;
++	struct v4l2_format cam_fmt;
++	struct v4l2_streamparm currentparm;
++	int err = 0;
++
++	pr_debug("In %s\n", __func__);
++
++	if (parm->type != V4L2_BUF_TYPE_VIDEO_CAPTURE) {
++		pr_err(KERN_ERR "%s invalid type\n", __func__);
++		return -EINVAL;
++	}
++
++	/* Stop the viewfinder */
++	if (cam->overlay_on == true)
++		stop_preview(cam);
++
++	currentparm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
++
++	/* First check that this device can support the changes requested. */
++	err = vidioc_int_g_parm(cam->sensor, &currentparm);
++	if (err) {
++		pr_err("%s: vidioc_int_g_parm returned an error %d\n",
++		       __func__, err);
++		goto exit;
++	}
++
++	pr_debug("   Current capabilities are %x\n",
++		 currentparm.parm.capture.capability);
++	pr_debug("   Current capturemode is %d  change to %d\n",
++		 currentparm.parm.capture.capturemode,
++		 parm->parm.capture.capturemode);
++	pr_debug("   Current framerate is %d  change to %d\n",
++		 currentparm.parm.capture.timeperframe.denominator,
++		 parm->parm.capture.timeperframe.denominator);
++	csi_enable_mclk(CSI_MCLK_I2C, true, false);
++
++	vidioc_int_g_ifparm(cam->sensor, &ifparm);
++	cam_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
++	pr_debug("   g_fmt_cap returns widthxheight of input as %d x %d\n",
++		 cam_fmt.fmt.pix.width, cam_fmt.fmt.pix.height);
++
++exit:
++	return err;
++}
++
++/*!
++ * V4L interface - open function
++ *
++ * @param inode        structure inode *
++ * @param file         structure file *
++ *
++ * @return  status    0 success, ENODEV invalid device instance,
++ *                    ENODEV timeout, ERESTARTSYS interrupted by user
++ */
++static int csi_v4l_open(struct inode *inode, struct file *file)
++{
++	struct v4l2_ifparm ifparm;
++	struct v4l2_format cam_fmt;
++	struct video_device *dev = video_devdata(file);
++	cam_data *cam = dev->priv;
++	int err = 0;
++
++	pr_debug("   device name is %s\n", dev->name);
++
++	if (!cam) {
++		pr_err("ERROR: v4l2 capture: Internal error, "
++		       "cam_data not found!\n");
++		return -EBADF;
++	}
++
++	down(&cam->busy_lock);
++	err = 0;
++	if (signal_pending(current))
++		goto oops;
++
++	if (cam->open_count++ == 0) {
++		wait_event_interruptible(cam->power_queue,
++					 cam->low_power == false);
++
++		vidioc_int_g_ifparm(cam->sensor, &ifparm);
++
++		cam_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
++		vidioc_int_init(cam->sensor);
++	}
++
++	file->private_data = dev;
++
++oops:
++	up(&cam->busy_lock);
++	return err;
++}
++
++/*!
++ * V4L interface - close function
++ *
++ * @param inode    struct inode *
++ * @param file     struct file *
++ *
++ * @return         0 success
++ */
++static int csi_v4l_close(struct inode *inode, struct file *file)
++{
++	struct video_device *dev = video_devdata(file);
++	int err = 0;
++	cam_data *cam = dev->priv;
++
++	pr_debug("In MVC:%s\n", __func__);
++
++	if (!cam) {
++		pr_err("ERROR: v4l2 capture: Internal error, "
++		       "cam_data not found!\n");
++		return -EBADF;
++	}
++
++	/* for the case somebody hit the ctrl C */
++	if (cam->overlay_pid == current->pid) {
++		err = stop_preview(cam);
++		cam->overlay_on = false;
++	}
++
++	if (--cam->open_count == 0) {
++		wait_event_interruptible(cam->power_queue,
++					 cam->low_power == false);
++		file->private_data = NULL;
++	}
++
++	if (cam->still_buf_vaddr != NULL) {
++		dma_free_coherent(0, PAGE_ALIGN(cam->v2f.fmt.pix.sizeimage),
++				  cam->still_buf_vaddr, cam->still_buf[0]);
++		cam->still_buf[0] = 0;
++		cam->still_buf_vaddr = NULL;
++	}
++
++	return err;
++}
++
++/*
++ * V4L interface - read function
++ *
++ * @param file       struct file *
++ * @param read buf   char *
++ * @param count      size_t
++ * @param ppos       structure loff_t *
++ *
++ * @return           bytes read
++ */
++static ssize_t csi_v4l_read(struct file *file, char *buf, size_t count,
++			    loff_t *ppos)
++{
++	int err = 0;
++	struct video_device *dev = video_devdata(file);
++	cam_data *cam = dev->priv;
++
++	if (down_interruptible(&cam->busy_lock))
++		return -EINTR;
++
++	wait_event_interruptible(cam->still_queue, cam->still_counter != 0);
++	cam->still_counter--;
++	err = copy_to_user(buf, cam->still_buf_vaddr,
++			   cam->v2f.fmt.pix.sizeimage);
++
++	up(&cam->busy_lock);
++	if (err < 0)
++		return err;
++
++	return cam->v2f.fmt.pix.sizeimage - err;
++}
++
++/*!
++ * V4L interface - ioctl function
++ *
++ * @param inode      struct inode*
++ *
++ * @param file       struct file*
++ *
++ * @param ioctlnr    unsigned int
++ *
++ * @param arg        void*
++ *
++ * @return           0 success, ENODEV for invalid device instance,
++ *                   -1 for other errors.
++ */
++static int csi_v4l_do_ioctl(struct inode *inode, struct file *file,
++			    unsigned int ioctlnr, void *arg)
++{
++	struct video_device *dev = video_devdata(file);
++	cam_data *cam = dev->priv;
++	int retval = 0;
++
++	pr_debug("In MVC: %s, %x\n", __func__, ioctlnr);
++	wait_event_interruptible(cam->power_queue, cam->low_power == false);
++	/* make this _really_ smp-safe */
++	if (down_interruptible(&cam->busy_lock))
++		return -EBUSY;
++
++	switch (ioctlnr) {
++		/*!
++		 * V4l2 VIDIOC_G_FMT ioctl
++		 */
++	case VIDIOC_G_FMT:{
++			struct v4l2_format *gf = arg;
++			pr_debug("   case VIDIOC_G_FMT\n");
++			retval = csi_v4l2_g_fmt(cam, gf);
++			break;
++		}
++
++		/*!
++		 * V4l2 VIDIOC_S_FMT ioctl
++		 */
++	case VIDIOC_S_FMT:{
++			struct v4l2_format *sf = arg;
++			pr_debug("   case VIDIOC_S_FMT\n");
++			retval = csi_v4l2_s_fmt(cam, sf);
++			break;
++		}
++
++		/*!
++		 * V4l2 VIDIOC_OVERLAY ioctl
++		 */
++	case VIDIOC_OVERLAY:{
++			unsigned long *fb_addr;
++			fb_addr = arg;
++			pr_debug("   case VIDIOC_OVERLAY\n");
++			start_preview(cam, fb_addr);
++			break;
++		}
++
++		/*!
++		 * V4l2 VIDIOC_G_FBUF ioctl
++		 */
++	case VIDIOC_G_FBUF:{
++			struct v4l2_framebuffer *fb = arg;
++			*fb = cam->v4l2_fb;
++			fb->capability = V4L2_FBUF_CAP_EXTERNOVERLAY;
++			break;
++		}
++
++		/*!
++		 * V4l2 VIDIOC_S_FBUF ioctl
++		 */
++	case VIDIOC_S_FBUF:{
++			struct v4l2_framebuffer *fb = arg;
++			cam->v4l2_fb = *fb;
++			break;
++		}
++
++	case VIDIOC_G_PARM:{
++			struct v4l2_streamparm *parm = arg;
++			pr_debug("   case VIDIOC_G_PARM\n");
++			vidioc_int_g_parm(cam->sensor, parm);
++			break;
++		}
++
++	case VIDIOC_S_PARM:{
++			struct v4l2_streamparm *parm = arg;
++			pr_debug("   case VIDIOC_S_PARM\n");
++			retval = csi_v4l2_s_param(cam, parm);
++			break;
++		}
++
++	case VIDIOC_QUERYCAP:{
++			struct v4l2_capability *cap = arg;
++			pr_debug("   case VIDIOC_QUERYCAP\n");
++			strcpy(cap->driver, "mxc_v4l2");
++			cap->version = KERNEL_VERSION(0, 1, 11);
++			cap->capabilities = V4L2_CAP_VIDEO_CAPTURE |
++			    V4L2_CAP_VIDEO_OVERLAY |
++			    V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
++			cap->card[0] = '\0';
++			cap->bus_info[0] = '\0';
++			break;
++		}
++
++	case VIDIOC_S_CROP:
++		pr_debug("   case not supported\n");
++		break;
++
++	case VIDIOC_S_CTRL:
++	case VIDIOC_G_STD:
++	case VIDIOC_QBUF:
++	case VIDIOC_QUERYBUF:
++	case VIDIOC_REQBUFS:
++	case VIDIOC_DQBUF:
++	case VIDIOC_G_OUTPUT:
++	case VIDIOC_S_OUTPUT:
++	case VIDIOC_ENUMSTD:
++	case VIDIOC_G_CROP:
++	case VIDIOC_CROPCAP:
++	case VIDIOC_S_STD:
++	case VIDIOC_G_CTRL:
++	case VIDIOC_STREAMOFF:
++	case VIDIOC_STREAMON:
++	case VIDIOC_ENUM_FMT:
++	case VIDIOC_TRY_FMT:
++	case VIDIOC_QUERYCTRL:
++	case VIDIOC_ENUMINPUT:
++	case VIDIOC_G_INPUT:
++	case VIDIOC_S_INPUT:
++	case VIDIOC_G_TUNER:
++	case VIDIOC_S_TUNER:
++	case VIDIOC_G_FREQUENCY:
++	case VIDIOC_S_FREQUENCY:
++	case VIDIOC_ENUMOUTPUT:
++	default:
++		pr_debug("   case not supported\n");
++		retval = -EINVAL;
++		break;
++	}
++
++	up(&cam->busy_lock);
++	return retval;
++}
++
++/*
++ * V4L interface - ioctl function
++ *
++ * @return  None
++ */
++static int csi_v4l_ioctl(struct inode *inode, struct file *file,
++			 unsigned int cmd, unsigned long arg)
++{
++	return video_usercopy(inode, file, cmd, arg, csi_v4l_do_ioctl);
++}
++
++/*!
++ * V4L interface - mmap function
++ *
++ * @param file        structure file *
++ *
++ * @param vma         structure vm_area_struct *
++ *
++ * @return status     0 Success, EINTR busy lock error, ENOBUFS remap_page error
++ */
++static int csi_mmap(struct file *file, struct vm_area_struct *vma)
++{
++	struct video_device *dev = video_devdata(file);
++	unsigned long size;
++	int res = 0;
++	cam_data *cam = dev->priv;
++
++	pr_debug("%s\n", __func__);
++	pr_debug("\npgoff=0x%lx, start=0x%lx, end=0x%lx\n",
++		 vma->vm_pgoff, vma->vm_start, vma->vm_end);
++
++	/* make this _really_ smp-safe */
++	if (down_interruptible(&cam->busy_lock))
++		return -EINTR;
++
++	size = vma->vm_end - vma->vm_start;
++	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
++
++	if (remap_pfn_range(vma, vma->vm_start,
++			    vma->vm_pgoff, size, vma->vm_page_prot)) {
++		pr_err("ERROR: v4l2 capture: %s : "
++		       "remap_pfn_range failed\n", __func__);
++		res = -ENOBUFS;
++		goto csi_mmap_exit;
++	}
++
++	vma->vm_flags &= ~VM_IO;	/* using shared anonymous pages */
++
++csi_mmap_exit:
++	up(&cam->busy_lock);
++	return res;
++}
++
++/*!
++ * This structure defines the functions to be called in this driver.
++ */
++static struct file_operations csi_v4l_fops = {
++	.owner = THIS_MODULE,
++	.open = csi_v4l_open,
++	.release = csi_v4l_close,
++	.read = csi_v4l_read,
++	.ioctl = csi_v4l_ioctl,
++	.mmap = csi_mmap,
++};
++
++static struct video_device csi_v4l_template = {
++	.owner = THIS_MODULE,
++	.name = "Mx25 Camera",
++	.type = 0,
++	.type2 = VID_TYPE_CAPTURE,
++	.fops = &csi_v4l_fops,
++	.release = video_device_release,
++};
++
++/*!
++ * This function can be used to release any platform data on closing.
++ */
++static void camera_platform_release(struct device *device)
++{
++}
++
++/*! Device Definition for csi v4l2 device */
++static struct platform_device csi_v4l2_devices = {
++	.name = "csi_v4l2",
++	.dev = {
++		.release = camera_platform_release,
++		},
++	.id = 0,
++};
++
++/*!
++ * initialize cam_data structure
++ *
++ * @param cam      structure cam_data *
++ *
++ * @return status  0 Success
++ */
++static void init_camera_struct(cam_data *cam)
++{
++	pr_debug("In MVC: %s\n", __func__);
++
++	/* Default everything to 0 */
++	memset(cam, 0, sizeof(cam_data));
++
++	init_MUTEX(&cam->param_lock);
++	init_MUTEX(&cam->busy_lock);
++
++	cam->video_dev = video_device_alloc();
++	if (cam->video_dev == NULL)
++		return;
++
++	*(cam->video_dev) = csi_v4l_template;
++
++	video_set_drvdata(cam->video_dev, cam);
++	dev_set_drvdata(&csi_v4l2_devices.dev, (void *)cam);
++	cam->video_dev->minor = -1;
++
++	init_waitqueue_head(&cam->still_queue);
++
++	cam->streamparm.parm.capture.capturemode = 0;
++
++	cam->standard.index = 0;
++	cam->standard.id = V4L2_STD_UNKNOWN;
++	cam->standard.frameperiod.denominator = 30;
++	cam->standard.frameperiod.numerator = 1;
++	cam->standard.framelines = 480;
++	cam->standard_autodetect = true;
++	cam->streamparm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
++	cam->streamparm.parm.capture.timeperframe = cam->standard.frameperiod;
++	cam->streamparm.parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
++	cam->overlay_on = false;
++	cam->capture_on = false;
++	cam->skip_frame = 0;
++	cam->v4l2_fb.flags = V4L2_FBUF_FLAG_OVERLAY;
++
++	cam->v2f.fmt.pix.sizeimage = 352 * 288 * 3 / 2;
++	cam->v2f.fmt.pix.bytesperline = 288 * 3 / 2;
++	cam->v2f.fmt.pix.width = 288;
++	cam->v2f.fmt.pix.height = 352;
++	cam->v2f.fmt.pix.pixelformat = V4L2_PIX_FMT_YUV420;
++	cam->win.w.width = 160;
++	cam->win.w.height = 160;
++	cam->win.w.left = 0;
++	cam->win.w.top = 0;
++	cam->still_counter = 0;
++
++	csi_set_callback(cam);
++	init_waitqueue_head(&cam->power_queue);
++	spin_lock_init(&cam->int_lock);
++}
++
++/*!
++ * camera_power function
++ *    Turns Sensor power On/Off
++ *
++ * @param       cam           cam data struct
++ * @param       cameraOn      true to turn camera on, false to turn off power.
++ *
++ * @return status
++ */
++static u8 camera_power(cam_data *cam, bool cameraOn)
++{
++	pr_debug("In MVC: %s on=%d\n", __func__, cameraOn);
++
++	if (cameraOn == true) {
++		csi_enable_mclk(CSI_MCLK_I2C, true, true);
++		vidioc_int_s_power(cam->sensor, 1);
++	} else {
++		csi_enable_mclk(CSI_MCLK_I2C, false, false);
++		vidioc_int_s_power(cam->sensor, 0);
++	}
++	return 0;
++}
++
++#if defined(CONFIG_PM)
++/*!
++ * This function is called to put the sensor in a low power state.
++ * Refer to the document driver-model/driver.txt in the kernel source tree
++ * for more information.
++ *
++ * @param   pdev  the device structure used to give information on which I2C
++ *                to suspend
++ * @param   state the power state the device is entering
++ *
++ * @return  The function returns 0 on success and -1 on failure.
++ */
++static int csi_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	cam_data *cam = platform_get_drvdata(pdev);
++
++	pr_debug("In MVC: %s\n", __func__);
++
++	if (cam == NULL)
++		return -1;
++
++	cam->low_power = true;
++
++	if (cam->overlay_on == true)
++		stop_preview(cam);
++
++	camera_power(cam, false);
++
++	return 0;
++}
++#else
++static int csi_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	return 0;
++}
++#endif
++
++#if defined(CONFIG_PM)
++/*!
++ * This function is called to bring the sensor back from a low power state.
++ * Refer to the document driver-model/driver.txt in the kernel source tree
++ * for more information.
++ *
++ * @param   pdev   the device structure
++ *
++ * @return  The function returns 0 on success and -1 on failure
++ */
++static int csi_v4l2_resume(struct platform_device *pdev)
++{
++	cam_data *cam = platform_get_drvdata(pdev);
++
++	pr_debug("In MVC: %s\n", __func__);
++
++	if (cam == NULL)
++		return -1;
++
++	cam->low_power = false;
++	wake_up_interruptible(&cam->power_queue);
++	camera_power(cam, true);
++
++	return 0;
++}
++#else
++static int csi_v4l2_resume(struct platform_device *pdev)
++{
++	return 0;
++}
++#endif
++
++/*!
++ * This structure contains pointers to the power management callback functions.
++ */
++static struct platform_driver csi_v4l2_driver = {
++	.driver = {
++		   .name = "csi_v4l2",
++		   },
++	.probe = NULL,
++	.remove = NULL,
++	.suspend = csi_v4l2_suspend,
++	.resume = csi_v4l2_resume,
++	.shutdown = NULL,
++};
++
++/*!
++ * Initializes the camera driver.
++ */
++static int csi_v4l2_master_attach(struct v4l2_int_device *slave)
++{
++	cam_data *cam = slave->u.slave->master->priv;
++	struct v4l2_format cam_fmt;
++
++	pr_debug("In MVC: %s\n", __func__);
++	pr_debug("   slave.name = %s\n", slave->name);
++	pr_debug("   master.name = %s\n", slave->u.slave->master->name);
++
++	cam->sensor = slave;
++	if (slave == NULL) {
++		pr_err("ERROR: v4l2 capture: slave parameter not valid.\n");
++		return -1;
++	}
++
++	csi_enable_mclk(CSI_MCLK_I2C, true, true);
++	vidioc_int_dev_init(slave);
++	csi_enable_mclk(CSI_MCLK_I2C, false, false);
++	cam_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
++
++	/* Used to detect TV in (type 1) vs. camera (type 0) */
++	cam->device_type = cam_fmt.fmt.pix.priv;
++
++	pr_debug("End of %s: v2f pix widthxheight %d x %d\n",
++		 __func__, cam->v2f.fmt.pix.width, cam->v2f.fmt.pix.height);
++
++	return 0;
++}
++
++/*!
++ * Disconnects the camera driver.
++ */
++static void csi_v4l2_master_detach(struct v4l2_int_device *slave)
++{
++	cam_data *cam = slave->u.slave->master->priv;
++	pr_debug("In MVC: %s\n", __func__);
++	/* vidioc_int_dev_exit(slave); */
++	free_irq(MXC_INT_CSI, cam);
++}
++
++/*!
++ * Entry point for the V4L2
++ *
++ * @return  Error code indicating success or failure
++ */
++static __init int camera_init(void)
++{
++	u8 err = 0;
++
++	/* Register the device driver structure. */
++	err = platform_driver_register(&csi_v4l2_driver);
++	if (err != 0) {
++		pr_err("ERROR: v4l2 capture:camera_init: "
++		       "platform_driver_register failed.\n");
++		return err;
++	}
++
++	/* Create g_cam and initialize it. */
++	g_cam = kmalloc(sizeof(cam_data), GFP_KERNEL);
++	if (g_cam == NULL) {
++		pr_err("ERROR: v4l2 capture: failed to register camera\n");
++		platform_driver_unregister(&csi_v4l2_driver);
++		return -1;
++	}
++	init_camera_struct(g_cam);
++
++	/* Set up the v4l2 device and register it */
++	csi_v4l2_int_device.priv = g_cam;
++	/* This function contains a bug that won't let this be rmmod'd. */
++	v4l2_int_device_register(&csi_v4l2_int_device);
++
++	/* Register the I2C device */
++	err = platform_device_register(&csi_v4l2_devices);
++	if (err != 0) {
++		pr_err("ERROR: v4l2 capture: camera_init: "
++		       "platform_device_register failed.\n");
++		platform_driver_unregister(&csi_v4l2_driver);
++		kfree(g_cam);
++		g_cam = NULL;
++		return err;
++	}
++
++	/* register v4l video device */
++	if (video_register_device(g_cam->video_dev, VFL_TYPE_GRABBER, video_nr)
++	    == -1) {
++		platform_device_unregister(&csi_v4l2_devices);
++		platform_driver_unregister(&csi_v4l2_driver);
++		kfree(g_cam);
++		g_cam = NULL;
++		pr_err("ERROR: v4l2 capture: video_register_device failed\n");
++		return -1;
++	}
++	pr_debug("   Video device registered: %s #%d\n",
++		 g_cam->video_dev->name, g_cam->video_dev->minor);
++
++	return err;
++}
++
++/*!
++ * Exit and cleanup for the V4L2
++ */
++static void __exit camera_exit(void)
++{
++	pr_debug("In MVC: %s\n", __func__);
++
++	if (g_cam->open_count) {
++		pr_err("ERROR: v4l2 capture:camera open "
++		       "-- setting ops to NULL\n");
++	} else {
++		pr_info("V4L2 freeing image input device\n");
++		v4l2_int_device_unregister(&csi_v4l2_int_device);
++		video_unregister_device(g_cam->video_dev);
++		platform_driver_unregister(&csi_v4l2_driver);
++		platform_device_unregister(&csi_v4l2_devices);
++
++		kfree(g_cam);
++		g_cam = NULL;
++	}
++}
++
++module_init(camera_init);
++module_exit(camera_exit);
++
++module_param(video_nr, int, 0444);
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("V4L2 capture driver for Mx25 based cameras");
++MODULE_LICENSE("GPL");
++MODULE_SUPPORTED_DEVICE("video");
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.c b/drivers/media/video/mxc/capture/fsl_csi.c
+new file mode 100644
+index 0000000..29dccc8
+--- /dev/null
++++ b/drivers/media/video/mxc/capture/fsl_csi.c
+@@ -0,0 +1,314 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file fsl_csi.c, this file is derived from mx27_csi.c
++ *
++ * @brief mx25 CMOS Sensor interface functions
++ *
++ * @ingroup CSI
++ */
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/device.h>
++#include <linux/err.h>
++#include <linux/interrupt.h>
++#include <linux/spinlock.h>
++#include <linux/delay.h>
++#include <linux/module.h>
++#include <linux/clk.h>
++#include <asm/arch/clock.h>
++#include <asm/arch/hardware.h>
++
++#include "mxc_v4l2_capture.h"
++#include "fsl_csi.h"
++
++static struct csi_config_t g_csi_cfg;	/* csi hardware configuration */
++static bool gcsi_mclk_on;
++static csi_irq_callback_t g_callback;
++static void *g_callback_data;
++static struct clk csi_mclk;
++
++static irqreturn_t csi_irq_handler(int irq, void *data)
++{
++	cam_data *cam = (cam_data *)data;
++	unsigned long status = __raw_readl(CSI_CSISR);
++	unsigned long cr3 = __raw_readl(CSI_CSICR3);
++
++	cam->still_counter++;
++	wake_up_interruptible(&cam->still_queue);
++	__raw_writel(status, CSI_CSISR);
++	/* reflash the embeded DMA controller */
++	__raw_writel(cr3 | (1 << 14), CSI_CSICR3);
++	if (g_callback)
++		g_callback(g_callback_data, status);
++
++	pr_debug("CSI status = 0x%08lX\n", status);
++
++	return IRQ_HANDLED;
++}
++
++static void csihw_set_config(struct csi_config_t *cfg)
++{
++	unsigned int val = 0;
++
++	/* control reg 1 */
++	val |= cfg->swap16_en ? BIT_SWAP16_EN : 0;
++	val |= cfg->ext_vsync ? BIT_EXT_VSYNC : 0;
++	val |= cfg->eof_int_en ? BIT_EOF_INT_EN : 0;
++	val |= cfg->prp_if_en ? BIT_PRP_IF_EN : 0;
++	val |= cfg->ccir_mode ? BIT_CCIR_MODE : 0;
++	val |= cfg->cof_int_en ? BIT_COF_INT_EN : 0;
++	val |= cfg->sf_or_inten ? BIT_SF_OR_INTEN : 0;
++	val |= cfg->rf_or_inten ? BIT_RF_OR_INTEN : 0;
++	val |= cfg->sff_dma_done_inten ? BIT_SFF_DMA_DONE_INTEN : 0;
++	val |= cfg->statff_inten ? BIT_STATFF_INTEN : 0;
++	val |= cfg->fb2_dma_done_inten ? BIT_FB2_DMA_DONE_INTEN : 0;
++	val |= cfg->fb1_dma_done_inten ? BIT_FB1_DMA_DONE_INTEN : 0;
++	val |= cfg->rxff_inten ? BIT_RXFF_INTEN : 0;
++	val |= cfg->sof_pol ? BIT_SOF_POL : 0;
++	val |= cfg->sof_inten ? BIT_SOF_INTEN : 0;
++	val |= cfg->mclkdiv << SHIFT_MCLKDIV;
++	val |= cfg->hsync_pol ? BIT_HSYNC_POL : 0;
++	val |= cfg->ccir_en ? BIT_CCIR_EN : 0;
++	val |= cfg->mclken ? BIT_MCLKEN : 0;
++	val |= cfg->fcc ? BIT_FCC : 0;
++	val |= cfg->pack_dir ? BIT_PACK_DIR : 0;
++	val |= cfg->gclk_mode ? BIT_GCLK_MODE : 0;
++	val |= cfg->inv_data ? BIT_INV_DATA : 0;
++	val |= cfg->inv_pclk ? BIT_INV_PCLK : 0;
++	val |= cfg->redge ? BIT_REDGE : 0;
++
++	__raw_writel(val, CSI_CSICR1);
++
++	/* control reg 3 */
++	val = 0x0;
++	val |= cfg->dma_reflash_rff ? BIT_DMA_REFLASH_RFF : 0;
++	val |= cfg->dma_reflash_sff ? BIT_DMA_REFLASH_SFF : 0;
++	val |= cfg->dma_req_en_rff ? BIT_DMA_REQ_EN_RFF : 0;
++	val |= cfg->dma_req_en_sff ? BIT_DMA_REQ_EN_SFF : 0;
++	val |= cfg->statff_level ? BIT_STATFF_LEVEL : 0;
++	val |= cfg->hresp_err_en ? BIT_HRESP_ERR_EN : 0;
++	val |= cfg->rxff_level ? BIT_RXFF_LEVEL : 0;
++	val |= cfg->two_8bit_sensor ? BIT_TWO_8BIT_SENSOR : 0;
++	val |= cfg->zero_pack_en ? BIT_ZERO_PACK_EN : 0;
++	val |= cfg->ecc_int_en ? BIT_ECC_INT_EN : 0;
++	val |= cfg->ecc_auto_en ? BIT_ECC_AUTO_EN : 0;
++
++	__raw_writel(val, CSI_CSICR3);
++
++	/* rxfifo counter */
++	__raw_writel(cfg->rxcnt, CSI_CSIRXCNT);
++
++	/* update global config */
++	memcpy(&g_csi_cfg, cfg, sizeof(struct csi_config_t));
++}
++
++static void csihw_reset_frame_count(void)
++{
++	__raw_writel(__raw_readl(CSI_CSICR3) | BIT_FRMCNT_RST, CSI_CSICR3);
++}
++
++static void csihw_reset(void)
++{
++	csihw_reset_frame_count();
++	__raw_writel(CSICR1_RESET_VAL, CSI_CSICR1);
++	__raw_writel(CSICR2_RESET_VAL, CSI_CSICR2);
++	__raw_writel(CSICR3_RESET_VAL, CSI_CSICR3);
++}
++
++/*!
++ * csi_init_interface
++ *    Init csi interface
++ */
++void csi_init_interface(void)
++{
++	unsigned int val = 0;
++	unsigned int imag_para;
++
++	val |= 1 << 9;
++	val |= 0x20000;
++	val |= 0x10000;
++	val |= 0x2;
++	val |= 0x10;
++	val |= 0x800;
++	val |= (1 << 7);
++	val |= 0x100;
++	val |= 0x80000000;
++	__raw_writel(val, CSI_CSICR1);
++
++	imag_para = (640 << 16) | 960;
++	__raw_writel(imag_para, CSI_CSIIMAG_PARA);
++
++	val = 0x1010;
++	val |= 0x4000;
++	__raw_writel(val, CSI_CSICR3);
++}
++EXPORT_SYMBOL(csi_init_interface);
++
++/*!
++ * csi_enable_prpif
++ *    Enable or disable CSI-PrP interface
++ * @param       enable        Non-zero to enable, zero to disable
++ */
++void csi_enable_prpif(uint32_t enable)
++{
++	if (enable) {
++		g_csi_cfg.prp_if_en = 1;
++		g_csi_cfg.sof_inten = 0;
++		g_csi_cfg.pack_dir = 0;
++	} else {
++		g_csi_cfg.prp_if_en = 0;
++		g_csi_cfg.sof_inten = 1;
++		g_csi_cfg.pack_dir = 1;
++	}
++
++	csihw_set_config(&g_csi_cfg);
++}
++EXPORT_SYMBOL(csi_enable_prpif);
++
++/*!
++ * csi_enable_mclk
++ *
++ * @param       src         enum define which source to control the clk
++ *                          CSI_MCLK_VF CSI_MCLK_ENC CSI_MCLK_RAW CSI_MCLK_I2C
++ * @param       flag        true to enable mclk, false to disable mclk
++ * @param       wait        true to wait 100ms make clock stable, false not wait
++ *
++ * @return      0 for success
++ */
++int32_t csi_enable_mclk(int src, bool flag, bool wait)
++{
++	if (flag == true) {
++		clk_enable(&csi_mclk);
++		if (wait == true)
++			msleep(10);
++		pr_debug("Enable csi clock from source %d\n", src);
++		gcsi_mclk_on = true;
++	} else {
++		clk_disable(&csi_mclk);
++		pr_debug("Disable csi clock from source %d\n", src);
++		gcsi_mclk_on = false;
++	}
++
++	return 0;
++}
++EXPORT_SYMBOL(csi_enable_mclk);
++
++/*!
++ * csi_read_mclk_flag
++ *
++ * @return  gcsi_mclk_source
++ */
++int csi_read_mclk_flag(void)
++{
++	return 0;
++}
++EXPORT_SYMBOL(csi_read_mclk_flag);
++
++void csi_set_callback(void *data)
++{
++	cam_data *cam = (cam_data *)data;
++
++	if (request_irq(MXC_INT_CSI, csi_irq_handler, 0, "csi", cam) < 0)
++		pr_debug("CSI error: irq request fail\n");
++
++}
++EXPORT_SYMBOL(csi_set_callback);
++
++static void _mclk_recalc(struct clk *clk)
++{
++	u32 div;
++
++	div = (__raw_readl(CSI_CSICR1) & BIT_MCLKDIV) >> SHIFT_MCLKDIV;
++	div = (div + 1) * 2;
++
++	clk->rate = clk->parent->rate / div;
++}
++
++static unsigned long _mclk_round_rate(struct clk *clk, unsigned long rate)
++{
++	/* Keep CSI divider and change parent clock */
++	if (clk->parent->round_rate)
++		return clk->parent->round_rate(clk->parent, rate * 2);
++
++	return 0;
++}
++
++static int _mclk_set_rate(struct clk *clk, unsigned long rate)
++{
++	int ret = -EINVAL;
++
++	/* Keep CSI divider and change parent clock */
++	if (clk->parent->set_rate) {
++		ret = clk->parent->set_rate(clk->parent, rate * 2);
++		if (ret == 0)
++			clk->rate = clk->parent->rate / 2;
++	}
++
++	return ret;
++}
++
++static int _mclk_enable(struct clk *clk)
++{
++	__raw_writel(__raw_readl(CSI_CSICR1) | BIT_MCLKEN, CSI_CSICR1);
++	return 0;
++}
++
++static void _mclk_disable(struct clk *clk)
++{
++	__raw_writel(__raw_readl(CSI_CSICR1) & ~BIT_MCLKEN, CSI_CSICR1);
++}
++
++static struct clk csi_mclk = {
++	.name = "csi_clk",
++	.recalc = _mclk_recalc,
++	.round_rate = _mclk_round_rate,
++	.set_rate = _mclk_set_rate,
++	.enable = _mclk_enable,
++	.disable = _mclk_disable,
++};
++
++int32_t __init csi_init_module(void)
++{
++	int ret = 0;
++	struct clk *per_clk;
++
++	per_clk = clk_get(NULL, "csi_clk");
++	if (IS_ERR(per_clk))
++		return PTR_ERR(per_clk);
++
++	clk_put(per_clk);
++	csi_mclk.parent = per_clk;
++	clk_register(&csi_mclk);
++	clk_enable(per_clk);
++	csi_mclk.recalc(&csi_mclk);
++
++	csihw_reset();
++	csi_init_interface();
++
++	return ret;
++}
++
++void __exit csi_cleanup_module(void)
++{
++	clk_disable(&csi_mclk);
++	clk_unregister(&csi_mclk);
++}
++
++module_init(csi_init_module);
++module_exit(csi_cleanup_module);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("fsl CSI driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.h b/drivers/media/video/mxc/capture/fsl_csi.h
+new file mode 100644
+index 0000000..fc8c1e3
+--- /dev/null
++++ b/drivers/media/video/mxc/capture/fsl_csi.h
+@@ -0,0 +1,189 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file fsl_csi.h
++ *
++ * @brief mx25 CMOS Sensor interface functions
++ *
++ * @ingroup CSI
++ */
++
++#ifndef MX25_CSI_H
++#define MX25_CSI_H
++
++/* reset values */
++#define CSICR1_RESET_VAL	0x40000800
++#define CSICR2_RESET_VAL	0x0
++#define CSICR3_RESET_VAL	0x0
++
++/* csi control reg 1 */
++#define BIT_SWAP16_EN		(0x1 << 31)
++#define BIT_EXT_VSYNC		(0x1 << 30)
++#define BIT_EOF_INT_EN		(0x1 << 29)
++#define BIT_PRP_IF_EN		(0x1 << 28)
++#define BIT_CCIR_MODE		(0x1 << 27)
++#define BIT_COF_INT_EN		(0x1 << 26)
++#define BIT_SF_OR_INTEN		(0x1 << 25)
++#define BIT_RF_OR_INTEN		(0x1 << 24)
++#define BIT_SFF_DMA_DONE_INTEN  (0x1 << 22)
++#define BIT_STATFF_INTEN	(0x1 << 21)
++#define BIT_FB2_DMA_DONE_INTEN  (0x1 << 20)
++#define BIT_FB1_DMA_DONE_INTEN  (0x1 << 19)
++#define BIT_RXFF_INTEN		(0x1 << 18)
++#define BIT_SOF_POL		(0x1 << 17)
++#define BIT_SOF_INTEN		(0x1 << 16)
++#define BIT_MCLKDIV		(0xF << 12)
++#define BIT_HSYNC_POL		(0x1 << 11)
++#define BIT_CCIR_EN		(0x1 << 10)
++#define BIT_MCLKEN		(0x1 << 9)
++#define BIT_FCC			(0x1 << 8)
++#define BIT_PACK_DIR		(0x1 << 7)
++#define BIT_CLR_STATFIFO	(0x1 << 6)
++#define BIT_CLR_RXFIFO		(0x1 << 5)
++#define BIT_GCLK_MODE		(0x1 << 4)
++#define BIT_INV_DATA		(0x1 << 3)
++#define BIT_INV_PCLK		(0x1 << 2)
++#define BIT_REDGE		(0x1 << 1)
++#define BIT_PIXEL_BIT		(0x1 << 0)
++
++#define SHIFT_MCLKDIV		12
++
++/* control reg 3 */
++#define BIT_FRMCNT		(0xFFFF << 16)
++#define BIT_FRMCNT_RST		(0x1 << 15)
++#define BIT_DMA_REFLASH_RFF	(0x1 << 14)
++#define BIT_DMA_REFLASH_SFF	(0x1 << 13)
++#define BIT_DMA_REQ_EN_RFF	(0x1 << 12)
++#define BIT_DMA_REQ_EN_SFF	(0x1 << 11)
++#define BIT_STATFF_LEVEL	(0x7 << 8)
++#define BIT_HRESP_ERR_EN	(0x1 << 7)
++#define BIT_RXFF_LEVEL		(0x7 << 4)
++#define BIT_TWO_8BIT_SENSOR	(0x1 << 3)
++#define BIT_ZERO_PACK_EN	(0x1 << 2)
++#define BIT_ECC_INT_EN		(0x1 << 1)
++#define BIT_ECC_AUTO_EN		(0x1 << 0)
++
++#define SHIFT_FRMCNT		16
++
++/* csi status reg */
++#define BIT_SFF_OR_INT		(0x1 << 25)
++#define BIT_RFF_OR_INT		(0x1 << 24)
++#define BIT_DMA_TSF_DONE_SFF	(0x1 << 22)
++#define BIT_STATFF_INT		(0x1 << 21)
++#define BIT_DMA_TSF_DONE_FB2	(0x1 << 20)
++#define BIT_DMA_TSF_DONE_FB1	(0x1 << 19)
++#define BIT_RXFF_INT		(0x1 << 18)
++#define BIT_EOF_INT		(0x1 << 17)
++#define BIT_SOF_INT		(0x1 << 16)
++#define BIT_F2_INT		(0x1 << 15)
++#define BIT_F1_INT		(0x1 << 14)
++#define BIT_COF_INT		(0x1 << 13)
++#define BIT_HRESP_ERR_INT	(0x1 << 7)
++#define BIT_ECC_INT		(0x1 << 1)
++#define BIT_DRDY		(0x1 << 0)
++
++#define CSI_MCLK_VF		1
++#define CSI_MCLK_ENC		2
++#define CSI_MCLK_RAW		4
++#define CSI_MCLK_I2C		8
++#endif
++
++#define CSI_CSICR1		(IO_ADDRESS(CSI_BASE_ADDR))
++#define CSI_CSICR2		(IO_ADDRESS(CSI_BASE_ADDR + 0x4))
++#define CSI_CSICR3		(IO_ADDRESS(CSI_BASE_ADDR + 0x8))
++#define CSI_STATFIFO		(IO_ADDRESS(CSI_BASE_ADDR + 0xC))
++#define CSI_CSIRXFIFO		(IO_ADDRESS(CSI_BASE_ADDR + 0x10))
++#define CSI_CSIRXCNT		(IO_ADDRESS(CSI_BASE_ADDR + 0x14))
++#define CSI_CSISR		(IO_ADDRESS(CSI_BASE_ADDR + 0x18))
++
++#define CSI_CSIDBG		(IO_ADDRESS(CSI_BASE_ADDR + 0x1C))
++#define CSI_CSIDMASA_STATFIFO	(IO_ADDRESS(CSI_BASE_ADDR + 0x20))
++#define CSI_CSIDMATS_STATFIFO	(IO_ADDRESS(CSI_BASE_ADDR + 0x24))
++#define CSI_CSIDMASA_FB1	(IO_ADDRESS(CSI_BASE_ADDR + 0x28))
++#define CSI_CSIDMASA_FB2	(IO_ADDRESS(CSI_BASE_ADDR + 0x2C))
++#define CSI_CSIFBUF_PARA	(IO_ADDRESS(CSI_BASE_ADDR + 0x30))
++#define CSI_CSIIMAG_PARA	(IO_ADDRESS(CSI_BASE_ADDR + 0x34))
++
++#define CSI_CSIRXFIFO_PHYADDR	(CSI_BASE_ADDR + 0x10)
++
++static inline void csi_clear_status(unsigned long status)
++{
++	__raw_writel(status, CSI_CSISR);
++}
++
++struct csi_signal_cfg_t {
++	unsigned data_width:3;
++	unsigned clk_mode:2;
++	unsigned ext_vsync:1;
++	unsigned Vsync_pol:1;
++	unsigned Hsync_pol:1;
++	unsigned pixclk_pol:1;
++	unsigned data_pol:1;
++	unsigned sens_clksrc:1;
++};
++
++struct csi_config_t {
++	/* control reg 1 */
++	unsigned int swap16_en:1;
++	unsigned int ext_vsync:1;
++	unsigned int eof_int_en:1;
++	unsigned int prp_if_en:1;
++	unsigned int ccir_mode:1;
++	unsigned int cof_int_en:1;
++	unsigned int sf_or_inten:1;
++	unsigned int rf_or_inten:1;
++	unsigned int sff_dma_done_inten:1;
++	unsigned int statff_inten:1;
++	unsigned int fb2_dma_done_inten:1;
++	unsigned int fb1_dma_done_inten:1;
++	unsigned int rxff_inten:1;
++	unsigned int sof_pol:1;
++	unsigned int sof_inten:1;
++	unsigned int mclkdiv:4;
++	unsigned int hsync_pol:1;
++	unsigned int ccir_en:1;
++	unsigned int mclken:1;
++	unsigned int fcc:1;
++	unsigned int pack_dir:1;
++	unsigned int gclk_mode:1;
++	unsigned int inv_data:1;
++	unsigned int inv_pclk:1;
++	unsigned int redge:1;
++	unsigned int pixel_bit:1;
++
++	/* control reg 3 */
++	unsigned int frmcnt:16;
++	unsigned int frame_reset:1;
++	unsigned int dma_reflash_rff:1;
++	unsigned int dma_reflash_sff:1;
++	unsigned int dma_req_en_rff:1;
++	unsigned int dma_req_en_sff:1;
++	unsigned int statff_level:3;
++	unsigned int hresp_err_en:1;
++	unsigned int rxff_level:3;
++	unsigned int two_8bit_sensor:1;
++	unsigned int zero_pack_en:1;
++	unsigned int ecc_int_en:1;
++	unsigned int ecc_auto_en:1;
++	/* fifo counter */
++	unsigned int rxcnt;
++};
++
++typedef void (*csi_irq_callback_t) (void *data, unsigned long status);
++
++int32_t csi_enable_mclk(int src, bool flag, bool wait);
++void csi_init_interface(void);
++int csi_read_mclk_flag(void);
++void csi_set_callback(void *data);
++void csi_enable_prpif(uint32_t enable);
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 5ba2d0b..f2fdd70 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -192,7 +192,9 @@ typedef struct _cam_data {
+ 	struct v4l2_int_device *sensor;
+ } cam_data;
+ 
+-#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA)
++#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA) \
++			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA_MODULE) \
++			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA)
+ void set_mclk_rate(uint32_t *p_mclk_freq);
+ #else
+ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi);
+diff --git a/drivers/media/video/mxc/capture/ov2640.c b/drivers/media/video/mxc/capture/ov2640.c
+index ccee3cf..69048b9 100644
+--- a/drivers/media/video/mxc/capture/ov2640.c
++++ b/drivers/media/video/mxc/capture/ov2640.c
+@@ -45,6 +45,11 @@ enum ov2640_mode {
+ };
+ */
+ 
++enum ov2640_mode {
++	ov2640_mode_640_480 = 0,
++	ov2640_mode_1280_960 = 1
++};
++
+ struct reg_value {
+ 	u8 reg;
+ 	u8 value;
+@@ -102,6 +107,57 @@ static struct reg_value ov2640_setting_1600_1120[] = {
+ };
+ 
+ static struct reg_value ov2640_setting_800_600[] = {
++#ifdef CONFIG_MACH_MX25_3DS
++	{0xff, 0x01, 0}, {0x12, 0x80, 5}, {0xff, 0x00, 0}, {0x2c, 0xff, 0},
++	{0x2e, 0xdf, 0}, {0xff, 0x01, 0}, {0x3c, 0x32, 0}, {0x11, 0x01, 0},
++	{0x09, 0x02, 0}, {0x04, 0x28, 0}, {0x13, 0xe5, 0}, {0x14, 0x48, 0},
++	{0x2c, 0x0c, 0}, {0x33, 0x78, 0}, {0x3a, 0x33, 0}, {0x3b, 0xfb, 0},
++	{0x3e, 0x00, 0}, {0x43, 0x11, 0}, {0x16, 0x10, 0}, {0x39, 0x92, 0},
++	{0x35, 0xda, 0}, {0x22, 0x1a, 0}, {0x37, 0xc3, 0}, {0x23, 0x00, 0},
++	{0x34, 0xc0, 0}, {0x36, 0x1a, 0}, {0x06, 0x88, 0}, {0x07, 0xc0, 0},
++	{0x0d, 0x87, 0}, {0x0e, 0x41, 0}, {0x4c, 0x00, 0},
++	{0x48, 0x00, 0}, {0x5b, 0x00, 0}, {0x42, 0x03, 0}, {0x4a, 0x81, 0},
++	{0x21, 0x99, 0}, {0x24, 0x40, 0}, {0x25, 0x38, 0}, {0x26, 0x82, 0},
++	{0x5c, 0x00, 0}, {0x63, 0x00, 0}, {0x46, 0x22, 0}, {0x0c, 0x3c, 0},
++	{0x61, 0x70, 0}, {0x62, 0x80, 0}, {0x7c, 0x05, 0}, {0x20, 0x80, 0},
++	{0x28, 0x30, 0}, {0x6c, 0x00, 0}, {0x6d, 0x80, 0}, {0x6e, 0x00, 0},
++	{0x70, 0x02, 0}, {0x71, 0x94, 0}, {0x73, 0xc1, 0}, {0x12, 0x40, 0},
++	{0x17, 0x11, 0}, {0x18, 0x43, 0}, {0x19, 0x00, 0}, {0x1a, 0x4b, 0},
++	{0x32, 0x09, 0}, {0x37, 0xc0, 0}, {0x4f, 0xca, 0}, {0x50, 0xa8, 0},
++	{0x5a, 0x23, 0}, {0x6d, 0x00, 0}, {0x3d, 0x38, 0}, {0xff, 0x00, 0},
++	{0xe5, 0x7f, 0}, {0xf9, 0xc0, 0}, {0x41, 0x24, 0}, {0xe0, 0x14, 0},
++	{0x76, 0xff, 0}, {0x33, 0xa0, 0}, {0x42, 0x20, 0}, {0x43, 0x18, 0},
++	{0x4c, 0x00, 0}, {0x87, 0xd5, 0}, {0x88, 0x3f, 0}, {0xd7, 0x03, 0},
++	{0xd9, 0x10, 0}, {0xd3, 0x82, 0}, {0xc8, 0x08, 0}, {0xc9, 0x80, 0},
++	{0x7c, 0x00, 0}, {0x7d, 0x00, 0}, {0x7c, 0x03, 0}, {0x7d, 0x48, 0},
++	{0x7d, 0x48, 0}, {0x7c, 0x08, 0}, {0x7d, 0x20, 0}, {0x7d, 0x10, 0},
++	{0x7d, 0x0e, 0}, {0x90, 0x00, 0}, {0x91, 0x0e, 0}, {0x91, 0x1a, 0},
++	{0x91, 0x31, 0}, {0x91, 0x5a, 0}, {0x91, 0x69, 0}, {0x91, 0x75, 0},
++	{0x91, 0x7e, 0}, {0x91, 0x88, 0}, {0x91, 0x8f, 0}, {0x91, 0x96, 0},
++	{0x91, 0xa3, 0}, {0x91, 0xaf, 0}, {0x91, 0xc4, 0}, {0x91, 0xd7, 0},
++	{0x91, 0xe8, 0}, {0x91, 0x20, 0}, {0x92, 0x00, 0}, {0x93, 0x06, 0},
++	{0x93, 0xe3, 0}, {0x93, 0x05, 0}, {0x93, 0x05, 0}, {0x93, 0x00, 0},
++	{0x93, 0x04, 0}, {0x93, 0x00, 0}, {0x93, 0x00, 0}, {0x93, 0x00, 0},
++	{0x93, 0x00, 0}, {0x93, 0x00, 0}, {0x93, 0x00, 0}, {0x93, 0x00, 0},
++	{0x96, 0x00, 0}, {0x97, 0x08, 0}, {0x97, 0x19, 0}, {0x97, 0x02, 0},
++	{0x97, 0x0c, 0}, {0x97, 0x24, 0}, {0x97, 0x30, 0}, {0x97, 0x28, 0},
++	{0x97, 0x26, 0}, {0x97, 0x02, 0}, {0x97, 0x98, 0}, {0x97, 0x80, 0},
++	{0x97, 0x00, 0}, {0x97, 0x00, 0}, {0xc3, 0xed, 0}, {0xa4, 0x00, 0},
++	{0xa8, 0x00, 0}, {0xc5, 0x11, 0}, {0xc6, 0x51, 0}, {0xbf, 0x80, 0},
++	{0xc7, 0x10, 0}, {0xb6, 0x66, 0}, {0xb8, 0xa5, 0}, {0xb7, 0x64, 0},
++	{0xb9, 0x7c, 0}, {0xb3, 0xaf, 0}, {0xb4, 0x97, 0}, {0xb5, 0xff, 0},
++	{0xb0, 0xc5, 0}, {0xb1, 0x94, 0}, {0xb2, 0x0f, 0}, {0xc4, 0x5c, 0},
++	{0xc0, 0x64, 0}, {0xc1, 0x4b, 0}, {0x8c, 0x00, 0}, {0x86, 0x3d, 0},
++	{0x50, 0x00, 0}, {0x51, 0xc8, 0}, {0x52, 0x96, 0}, {0x53, 0x00, 0},
++	{0x54, 0x00, 0}, {0x55, 0x00, 0}, {0x5a, 0xc8, 0}, {0x5b, 0x96, 0},
++	{0x5c, 0x00, 0}, {0xd3, 0x82, 0}, {0xc3, 0xed, 0}, {0x7f, 0x00, 0},
++	{0xda, 0x08, 0}, {0xe5, 0x1f, 0}, {0xe1, 0x67, 0}, {0xe0, 0x00, 0},
++	{0xdd, 0x7f, 0}, {0x05, 0x00, 0}, {0xff, 0x00, 0}, {0xe0, 0x04, 0},
++	{0xc0, 0x64, 0}, {0xc1, 0x4b, 0}, {0x8c, 0x00, 0}, {0x86, 0x3d, 0},
++	{0x50, 0x00, 0}, {0x51, 0xc8, 0}, {0x52, 0x96, 0}, {0x53, 0x00, 0},
++	{0x54, 0x00, 0}, {0x55, 0x00, 0}, {0x5a, 0xa0, 0}, {0x5b, 0x78, 0},
++	{0x5c, 0x00, 0}, {0xd3, 0x82, 0}, {0xe0, 0x00, 1000}
++#else
+ 	{0xff, 0, 0}, {0xff, 1, 0}, {0x12, 0x80, 1}, {0xff, 00, 0},
+ 	{0x2c, 0xff, 0}, {0x2e, 0xdf, 0}, {0xff, 0x1, 0}, {0x3c, 0x32, 0},
+ 	{0x11, 0x01, 0}, {0x09, 0x00, 0}, {0x04, 0x28, 0}, {0x13, 0xe5, 0},
+@@ -151,6 +207,7 @@ static struct reg_value ov2640_setting_800_600[] = {
+ 	{0x57, 0x00, 0}, {0x5a, 0xc8, 0}, {0x5b, 0x96, 0}, {0x5c, 0x00, 0},
+ 	{0xc3, 0xef, 0}, {0x7f, 0x00, 0}, {0xda, 0x01, 0}, {0xe5, 0x1f, 0},
+ 	{0xe1, 0x67, 0}, {0xe0, 0x00, 0}, {0xdd, 0x7f, 0}, {0x05, 0x00, 0}
++#endif
+ };
+ 
+ /*!
+@@ -199,7 +256,7 @@ const static struct v4l2_fmtdesc ov2640_formats[] = {
+ 
+ static int ov2640_init_mode(struct sensor *s)
+ {
+-	int ret;
++	int ret = 0;
+ 	struct reg_value *setting;
+ 	int i, num;
+ 
+@@ -439,6 +496,119 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
+ }
+ 
+ /*!
++ * ioctl_s_fmt_cap - V4L2 sensor interface handler for ioctl_s_fmt_cap
++ * 		     set camera output format and resolution format
++ *
++ * @s: pointer to standard V4L2 device structure
++ * @arg: pointer to parameter, according this to set camera
++ *
++ * Returns 0 if set succeed, else return -1
++ */
++static int ioctl_s_fmt_cap(struct v4l2_int_device *s, int *arg)
++{
++	struct sensor *sensor = s->priv;
++
++	switch (*arg) {
++	case V4L2_PIX_FMT_RGB565:
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xff, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xda, 0x08) < 0)
++			goto err;
++		break;
++	case V4L2_PIX_FMT_YUV422P:
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xff, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xda, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xd7, 0x01) < 0)
++			goto err;
++		break;
++	case V4L2_PIX_FMT_YUV420:
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xff, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xda, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xd7, 0x1d) < 0)
++			goto err;
++		break;
++	case ov2640_mode_640_480:
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xff, 0x01) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++					0x3d, 0x38) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x11, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x12, 0x40) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x17, 0x11) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x18, 0x43) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x19, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x1a, 0x4b) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x32, 0x09) < 0)
++			goto err;
++		break;
++	case ov2640_mode_1280_960:
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0xff, 0x01) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x3d, 0x34) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x11, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x12, 0x00) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x17, 0x11) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x18, 0x75) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x19, 0x01) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x1a, 0x97) < 0)
++			goto err;
++		if (i2c_smbus_write_byte_data(sensor->i2c_client,
++						0x32, 0x36) < 0)
++			goto err;
++		break;
++	default:
++			pr_debug("case not supported\n");
++			break;
++	}
++
++	return 0;
++err:
++	pr_err("In ov2640: %s, set camera format failed\n", __func__);
++	return -1;
++}
++
++/*!
+  * ioctl_g_fmt_cap - V4L2 sensor interface handler for ioctl_g_fmt_cap
+  * @s: pointer to standard V4L2 device structure
+  * @f: pointer to standard V4L2 v4l2_format structure
+@@ -650,7 +820,7 @@ static struct v4l2_int_ioctl_desc ov2640_ioctl_desc[] = {
+ /*	{vidioc_int_try_fmt_cap_num,
+ 				(v4l2_int_ioctl_func *)ioctl_try_fmt_cap}, */
+ 	{vidioc_int_g_fmt_cap_num, (v4l2_int_ioctl_func *)ioctl_g_fmt_cap},
+-/*	{vidioc_int_s_fmt_cap_num, (v4l2_int_ioctl_func *)ioctl_s_fmt_cap}, */
++	{vidioc_int_s_fmt_cap_num, (v4l2_int_ioctl_func*)ioctl_s_fmt_cap},
+ 	{vidioc_int_g_parm_num, (v4l2_int_ioctl_func *)ioctl_g_parm},
+ 	{vidioc_int_s_parm_num, (v4l2_int_ioctl_func *)ioctl_s_parm},
+ /*	{vidioc_int_queryctrl_num, (v4l2_int_ioctl_func *)ioctl_queryctrl}, */
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index f861464..c15cf27 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -24,7 +24,9 @@
+ #include <linux/device.h>
+ #include <linux/clk.h>
+ 
+-#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA)
++#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA) \
++			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA_MODULE) \
++			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA)
+ /*
+  * set_mclk_rate
+  *
+-- 
+1.5.4.4
+

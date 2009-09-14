@@ -1,0 +1,42 @@
+From 37e18beef724c1f6ccff8370dbab533a67d04a39 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 18 Dec 2007 13:17:24 +0200
+Subject: [PATCH] UBI: improve comment
+
+Explain better the purpose of thie 'move_to_put' stuff.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/wl.c |    9 ++++++---
+ 1 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index a405d40..36aa097 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -793,7 +793,7 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 		e1 = rb_entry(rb_first(&ubi->scrub), struct ubi_wl_entry, rb);
+ 		e2 = find_wl_entry(&ubi->free, WL_FREE_MAX_DIFF);
+ 		paranoid_check_in_wl_tree(e1, &ubi->scrub);
+-	rb_erase(&e1->rb, &ubi->scrub);
++		rb_erase(&e1->rb, &ubi->scrub);
+ 		dbg_wl("scrub PEB %d to PEB %d", e1->pnum, e2->pnum);
+ 	}
+ 
+@@ -1139,8 +1139,11 @@ int ubi_wl_put_peb(struct ubi_device *ubi, int pnum, int torture)
+ 		/*
+ 		 * User is putting the physical eraseblock which was selected
+ 		 * as the target the data is moved to. It may happen if the EBA
+-		 * unit already re-mapped the LEB but the WL unit did has not
+-		 * put the PEB to the "used" tree.
++		 * unit already re-mapped the LEB in 'ubi_eba_copy_leb()' but
++		 * the WL unit has not put the PEB to the "used" tree yet, but
++		 * it is about to do this. So we just set a flag which will
++		 * tell the WL worker that the PEB is not needed anymore and
++		 * should be sheduled for erasure.
+ 		 */
+ 		dbg_wl("PEB %d is the target of data moving", pnum);
+ 		ubi_assert(!ubi->move_to_put);
+-- 
+1.5.6.3
+

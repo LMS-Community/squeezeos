@@ -1,0 +1,105 @@
+From dbdce00735b0e9be2387f7604a47663c9aa40a3e Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 31 Oct 2008 12:49:30 +0800
+Subject: [PATCH] ENGR00097157 mx37:add cpu high freq support
+
+Add cpu high freq 600MHz workpoint.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx37/cpufreq.c                 |   17 +++++++++++++++++
+ arch/arm/mach-mx37/mx37_3stack.c             |    9 ++++++++-
+ arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c |    2 +-
+ 3 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/cpufreq.c b/arch/arm/mach-mx37/cpufreq.c
+index c080eba..3b4973a 100644
+--- a/arch/arm/mach-mx37/cpufreq.c
++++ b/arch/arm/mach-mx37/cpufreq.c
+@@ -41,8 +41,10 @@
+  */
+ #define CPU_FREQUENCY_200000_KHZ		200000
+ #define CPU_FREQUENCY_532000_KHZ		532000
++#define CPU_FREQUENCY_600000_KHZ		600000
+ #define ARM_LPM_CLK  200000000
+ #define ARM_NORMAL_CLK  532000000
++#define ARM_HIGH_CLK  600000000
+ 
+ #define LP_LPM_CLK  24000000
+ #define LP_NORMAL_CLK  133000000
+@@ -50,6 +52,7 @@
+ #define LP_LPM_VOLTAGE 1000000
+ #define GP_NORMAL_VOLTAGE 1000000
+ #define LP_NORMAL_VOLTAGE 1200000
++#define GP_HIGH_VOLTAGE 1200000
+ 
+ int low_bus_freq_mode;
+ int high_bus_freq_mode;
+@@ -77,6 +80,7 @@ static struct regulator *lp_regulator;
+ static struct cpufreq_frequency_table imx37_freq_table[] = {
+ 	{0x01, CPU_FREQUENCY_200000_KHZ},
+ 	{0x02, CPU_FREQUENCY_532000_KHZ},
++	{0x02, CPU_FREQUENCY_600000_KHZ},
+ 	{0, CPUFREQ_TABLE_END},
+ };
+ 
+@@ -116,6 +120,19 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
+ 			return ret;
+ 		}
++	} else if (freq == ARM_HIGH_CLK) {
++		/* Set the voltage to 1.2v for the GP domain. */
++		ret = regulator_set_voltage(gp_regulator, GP_HIGH_VOLTAGE);
++		if (ret < 0) {
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
++			return ret;
++		}
++
++		ret = clk_set_rate(cpu_clk, ARM_HIGH_CLK);
++		if (ret != 0) {
++			printk(KERN_DEBUG "cannot set CPU clock rate\n");
++			return ret;
++		}
+ 	}
+ 	return ret;
+ }
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index c4371a3..fda9b2f 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -79,11 +79,18 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .mfi = 8,
+ 	 .mfd = 2,
+ 	 .mfn = 1,},
++	{
++	 .pll_rate = 600000000,
++	 .cpu_rate = 600000000,
++	 .pdf = 0,
++	 .mfi = 6,
++	 .mfd = 3,
++	 .mfn = 1,},
+ };
+ 
+ struct cpu_wp *get_cpu_wp(int *wp)
+ {
+-	*wp = 2;
++	*wp = 3;
+ 	return cpu_wp_auto;
+ }
+ 
+diff --git a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+index 576b01c..423341f 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
++++ b/arch/arm/mach-mx37/mx37_3stack_pmic_wm8350.c
+@@ -238,7 +238,7 @@ struct regulation_constraints led_regulation_constraints = {
+ };
+ struct regulation_constraints dcdc1_regulation_constraints = {
+ 	.min_uV = mV_to_uV(850),
+-	.max_uV = mV_to_uV(1000),
++	.max_uV = mV_to_uV(1200),
+ 	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE | REGULATOR_CHANGE_MODE,
+ };
+ struct regulation_constraints dcdc4_regulation_constraints = {
+-- 
+1.5.4.4
+

@@ -1,0 +1,242 @@
+From 5bf81ff327e185baf19d9dfac5cecdc61293e355 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Fri, 17 Oct 2008 16:57:00 +0800
+Subject: [PATCH] ENGR00092358 Add AP Lite PMIC driver for mx37
+
+Include Power management, backlight and touchscreen.
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |   22 +++++++-
+ arch/arm/mach-mx37/mx37_3stack.c        |   80 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx37/mx37_3stack_gpio.c   |   16 ++++++
+ 3 files changed, 115 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 5fbfee5..5031fd3 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Thu Sep 25 09:32:52 2008
++# Fri Oct 17 16:29:22 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -173,13 +173,14 @@ CONFIG_ARCH_MX37=y
+ # CONFIG_ARCH_MX51 is not set
+ # CONFIG_ARCH_MX3 is not set
+ # CONFIG_ARCH_MX27 is not set
++# CONFIG_ARCH_MX25 is not set
+ # CONFIG_ARCH_MX21 is not set
+ CONFIG_I2C_MXC_SELECT1=y
+ CONFIG_I2C_MXC_SELECT2=y
+ CONFIG_MXC_SDMA_API=y
++# CONFIG_I2C_MXC_SELECT3 is not set
+ CONFIG_SDMA_IRAM=y
+ CONFIG_SDMA_IRAM_SIZE=0x1000
+-# CONFIG_I2C_MXC_SELECT3 is not set
+ 
+ #
+ # MX37 Options
+@@ -544,6 +545,7 @@ CONFIG_MTD_NAND_MXC_V3=y
+ CONFIG_REGULATOR_API=y
+ CONFIG_REGULATOR=y
+ # CONFIG_REGULATOR_DEBUG is not set
++CONFIG_REGULATOR_MC13892=y
+ CONFIG_REGULATOR_WM8350=y
+ 
+ #
+@@ -715,6 +717,7 @@ CONFIG_INPUT_TOUCHSCREEN=y
+ # CONFIG_TOUCHSCREEN_ELO is not set
+ # CONFIG_TOUCHSCREEN_MTOUCH is not set
+ # CONFIG_TOUCHSCREEN_MK712 is not set
++CONFIG_TOUCHSCREEN_MXC=y
+ # CONFIG_TOUCHSCREEN_PENMOUNT is not set
+ # CONFIG_TOUCHSCREEN_TOUCHRIGHT is not set
+ # CONFIG_TOUCHSCREEN_TOUCHWIN is not set
+@@ -1016,6 +1019,7 @@ CONFIG_BACKLIGHT_LCD_SUPPORT=y
+ CONFIG_BACKLIGHT_CLASS_DEVICE=y
+ # CONFIG_BACKLIGHT_CORGI is not set
+ CONFIG_BACKLIGHT_MXC=y
++CONFIG_BACKLIGHT_MXC_MC13892=y
+ CONFIG_BACKLIGHT_WM8350=y
+ 
+ #
+@@ -1373,9 +1377,21 @@ CONFIG_MXC_IPU_V3=y
+ #
+ # MXC PMIC support
+ #
++CONFIG_MXC_PMIC=y
+ # CONFIG_MXC_PMIC_MC13783 is not set
+-# CONFIG_MXC_PMIC_MC13892 is not set
++CONFIG_MXC_PMIC_MC13892=y
+ # CONFIG_MXC_PMIC_MC9SDZ60 is not set
++# CONFIG_MXC_PMIC_CHARDEV is not set
++
++#
++# MXC PMIC Client Drivers
++#
++CONFIG_MXC_MC13892_ADC=y
++CONFIG_MXC_MC13892_RTC=y
++CONFIG_MXC_MC13892_LIGHT=y
++CONFIG_MXC_MC13892_BATTERY=y
++# CONFIG_MXC_MC13892_CONNECTIVITY is not set
++CONFIG_MXC_MC13892_POWER=y
+ 
+ #
+ # Advanced Power Management devices
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index b1a85d3..669366c 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -25,6 +25,7 @@
+ #include <linux/spi/spi.h>
+ #include <linux/i2c.h>
+ #include <linux/ata.h>
++#include <linux/regulator/regulator.h>
+ #if defined(CONFIG_MTD) || defined(CONFIG_MTD_MODULE)
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/map.h>
+@@ -86,6 +87,63 @@ struct cpu_wp *get_cpu_wp(int *wp)
+ 	return cpu_wp_auto;
+ }
+ 
++static void mc13892_reg_int(void)
++{
++	int i = 0;
++	struct regulator *regulator;
++	char *reg_name[] = {
++		"SW1",
++		"SW2",
++		"SW3",
++		"SW4",
++		"SW1_STBY",
++		"SW2_STBY",
++		"SW3_STBY",
++		"SW4_STBY",
++		"SW1_DVS",
++		"SW2_DVS",
++		"SWBST",
++		"VIOHI",
++		"VPLL",
++		"VDIG",
++		"VSD",
++		"VUSB2",
++		"VVIDEO",
++		"VAUDIO",
++		"VCAM",
++		"VGEN1",
++		"VGEN2",
++		"VGEN3",
++		"USB",
++		"GPO1",
++		"GPO2",
++		"GPO3",
++		"GPO4",
++	};
++
++	for (i = 0; i < ARRAY_SIZE(reg_name); i++) {
++		regulator = regulator_get(NULL, reg_name[i]);
++		if (regulator != ERR_PTR(-ENOENT)) {
++			regulator_enable(regulator);
++			regulator_put(regulator, NULL);
++		}
++	}
++	for (i = 0; i < ARRAY_SIZE(reg_name); i++) {
++		if ((strcmp(reg_name[i], "VIOHI") == 0) ||
++			(strcmp(reg_name[i], "VPLL") == 0) ||
++			(strcmp(reg_name[i], "VDIG") == 0) ||
++			(strcmp(reg_name[i], "VGEN2") == 0))
++			continue;
++		regulator = regulator_get(NULL, reg_name[i]);
++		if (regulator != ERR_PTR(-ENOENT)) {
++			regulator_disable(regulator);
++			regulator_put(regulator, NULL);
++		}
++	}
++}
++
++late_initcall(mc13892_reg_int);
++
+ static void mxc_nop_release(struct device *dev)
+ {
+ 	/* Nothing */
+@@ -222,6 +280,15 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	 .irq = IOMUX_TO_IRQ(MX37_PIN_GPIO1_3),
+ 	 },
+ };
++static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
++	{
++	 .type = "mc13892",
++	 .addr = 0x08,
++	 .platform_data = (void *)MX37_PIN_GPIO1_4,
++	 },
++};
++
++
+ static struct spi_board_info mxc_spi_board_info[] __initdata = {
+ 	{
+ 	 .modalias = "cpld_spi",
+@@ -278,6 +345,15 @@ static inline void mxc_init_fb(void)
+ }
+ #endif
+ 
++static struct platform_device mxcbl_device = {
++	.name = "mxc_mc13892_bl",
++};
++
++static inline void mxc_init_bl(void)
++{
++	platform_device_register(&mxcbl_device);
++}
++
+ #if defined(CONFIG_TOUCHSCREEN_TSC2007) || defined(CONFIG_TOUCHSCREEN_TSC2007_MODULE)
+ 
+ static int __init mxc_init_touchscreen(void)
+@@ -531,12 +607,16 @@ static void __init mxc_board_init(void)
+ 	i2c_register_board_info(0, mxc_i2c0_board_info,
+ 				ARRAY_SIZE(mxc_i2c0_board_info));
+ 
++	i2c_register_board_info(1, mxc_i2c1_board_info,
++				ARRAY_SIZE(mxc_i2c1_board_info));
++
+ 	spi_register_board_info(mxc_spi_board_info,
+ 				ARRAY_SIZE(mxc_spi_board_info));
+ 	mxc_init_nand_mtd();
+ 	mxc_init_mmc();
+ 	mxc_init_pata();
+ 	mxc_init_fb();
++	mxc_init_bl();
+ 	mxc_init_touchscreen();
+ 	mxc_init_bluetooth();
+ }
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index b7f3738..2824f31 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -760,3 +760,19 @@ void gpio_spdif_inactive(void)
+ }
+ 
+ EXPORT_SYMBOL(gpio_spdif_inactive);
++
++void gpio_pmic_active(void)
++{
++	mxc_request_iomux(MX37_PIN_GPIO1_4, IOMUX_CONFIG_GPIO
++			  | IOMUX_CONFIG_SION);
++	mxc_iomux_set_pad(MX37_PIN_GPIO1_4, PAD_CTL_SRE_SLOW |
++			  PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_DRV_MEDIUM |
++			  PAD_CTL_100K_PU |
++			  PAD_CTL_HYS_ENABLE |
++			  PAD_CTL_DRV_VOT_HIGH | PAD_CTL_DDR_INPUT_CMOS);
++	mxc_set_gpio_direction(MX37_PIN_GPIO1_4, 1);
++}
++
++EXPORT_SYMBOL(gpio_pmic_active);
++
+-- 
+1.5.4.4
+

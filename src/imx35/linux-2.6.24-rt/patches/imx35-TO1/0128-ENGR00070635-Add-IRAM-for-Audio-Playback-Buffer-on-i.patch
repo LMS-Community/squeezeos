@@ -1,0 +1,537 @@
+From 4434dc2c5d8040ab373916b60fad986f70c9718b Mon Sep 17 00:00:00 2001
+From: Laura Lawrence <Laura.Lawrence@freescale.com>
+Date: Tue, 15 Apr 2008 23:07:17 -0500
+Subject: [PATCH] ENGR00070635 Add IRAM for Audio Playback Buffer on i.MX37
+
+Map IRAM playback buffer to user space for power saving
+Map SDMA buffer descriptors to IRAM
+
+Signed-off-by: Laura Lawrence <Laura.Lawrence@freescale.com>
+---
+ arch/arm/mach-mx37/Kconfig      |   18 +++
+ arch/arm/mach-mx37/dma.c        |    7 +-
+ include/asm-arm/arch-mxc/mx37.h |   16 +++
+ sound/soc/imx/Kconfig           |    5 +
+ sound/soc/imx/imx-pcm.c         |  227 +++++++++++++++++++++------------------
+ sound/soc/imx/imx-ssi.c         |    3 +-
+ 6 files changed, 171 insertions(+), 105 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/Kconfig b/arch/arm/mach-mx37/Kconfig
+index 9a37866..445fff8 100644
+--- a/arch/arm/mach-mx37/Kconfig
++++ b/arch/arm/mach-mx37/Kconfig
+@@ -15,6 +15,24 @@ config MXC_SDMA_API
+            This selects the Freescale MXC SDMA API.
+            If unsure, say N.
+ 
++menu "SDMA options"
++        depends on MXC_SDMA_API
++
++config SDMA_IRAM
++        bool "Use Internal RAM for SDMA transfer"
++        default n
++	help
++           Support Internal RAM as SDMA buffer or control structures
++
++config SDMA_IRAM_SIZE
++        hex "Reserved bytes of IRAM for SDMA (0x800-0x1000)"
++        range 0x800 0x1000
++        depends on SDMA_IRAM
++        default "0x1000"
++        help
++           Set the size of IRAM for SDMA. It must be a multiple of 512bytes.
++endmenu
++
+ config ARCH_MXC_HAS_NFC_V3
+         bool "MXC NFC Hardware Version 3"
+         depends on ARCH_MX37
+diff --git a/arch/arm/mach-mx37/dma.c b/arch/arm/mach-mx37/dma.c
+index 9efda68..c68a540 100644
+--- a/arch/arm/mach-mx37/dma.c
++++ b/arch/arm/mach-mx37/dma.c
+@@ -511,6 +511,7 @@ static mxc_sdma_channel_params_t mxc_sdma_ssi2_24bit_tx1_params = {
+ 			.word_size = TRANSFER_32BIT,
+ 			},
+ 	.channel_num = MXC_DMA_CHANNEL_SSI2_TX,
++	.chnl_priority = 2,
+ };
+ 
+ static mxc_sdma_channel_params_t mxc_sdma_memory_params = {
+@@ -654,7 +655,11 @@ mxc_sdma_channel_params_t *mxc_sdma_get_channel_params(mxc_dma_device_t
+  */
+ void mxc_get_static_channels(mxc_dma_channel_t * chnl)
+ {
+-	/* No channels statically allocated for MX37 */
++#ifdef CONFIG_SDMA_IRAM
++	int i;
++	for (i = MXC_DMA_CHANNEL_IRAM; i < MAX_DMA_CHANNELS; i++)
++		chnl[i].dynamic = 0;
++#endif
+ }
+ 
+ EXPORT_SYMBOL(mxc_sdma_get_channel_params);
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index e654835..356a362 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -72,6 +72,17 @@
+ #define IRAM_BASE_ADDR_VIRT	0xF8000000
+ #define IRAM_SIZE			(9*SZ_8K)	/* 72KB */
+ 
++#ifndef CONFIG_SDMA_IRAM
++#define CONFIG_SDMA_IRAM_SIZE 0
++#endif
++#ifdef CONFIG_SND_MXC_SOC_IRAM
++#define SND_RAM_SIZE 0x3000
++#else
++#define SND_RAM_SIZE 0
++#endif
++
++#define SND_RAM_BASE_ADDR	(IRAM_BASE_ADDR + CONFIG_SDMA_IRAM_SIZE)
++
+ /*
+  * NFC
+  */
+@@ -167,6 +178,7 @@
+ /*!
+  * Defines for modules using static and dynamic DMA channels
+  */
++#define MXC_DMA_CHANNEL_IRAM         30
+ #define MXC_DMA_CHANNEL_SPDIF_TX        MXC_DMA_DYNAMIC_CHANNEL
+ #define MXC_DMA_CHANNEL_UART1_RX	MXC_DMA_DYNAMIC_CHANNEL
+ #define MXC_DMA_CHANNEL_UART1_TX	MXC_DMA_DYNAMIC_CHANNEL
+@@ -179,7 +191,11 @@
+ #define MXC_DMA_CHANNEL_SSI1_RX		MXC_DMA_DYNAMIC_CHANNEL
+ #define MXC_DMA_CHANNEL_SSI1_TX		MXC_DMA_DYNAMIC_CHANNEL
+ #define MXC_DMA_CHANNEL_SSI2_RX		MXC_DMA_DYNAMIC_CHANNEL
++#ifdef CONFIG_SDMA_IRAM
++#define MXC_DMA_CHANNEL_SSI2_TX  (MXC_DMA_CHANNEL_IRAM + 1)
++#else				/*CONFIG_SDMA_IRAM */
+ #define MXC_DMA_CHANNEL_SSI2_TX		MXC_DMA_DYNAMIC_CHANNEL
++#endif				/*CONFIG_SDMA_IRAM */
+ #define MXC_DMA_CHANNEL_CSPI1_RX	MXC_DMA_DYNAMIC_CHANNEL
+ #define MXC_DMA_CHANNEL_CSPI1_TX	MXC_DMA_DYNAMIC_CHANNEL
+ #define MXC_DMA_CHANNEL_CSPI2_RX	MXC_DMA_DYNAMIC_CHANNEL
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+index c5285aa..f1b0f02 100644
+--- a/sound/soc/imx/Kconfig
++++ b/sound/soc/imx/Kconfig
+@@ -10,6 +10,11 @@ config SND_MXC_SOC
+ config SND_MXC_SOC_SSI
+  tristate
+ 
++config SND_MXC_SOC_IRAM
++ bool "Locate Audio DMA playback buffers in IRAM"
++ help 
++   Say Y if you don't want Audio playback buffers in external ram
++ 
+ config SND_SOC_IMX_3STACK_WM8350
+  tristate "SoC Audio support for IMX - WM8350"
+  select SND_MXC_SOC_SSI
+diff --git a/sound/soc/imx/imx-pcm.c b/sound/soc/imx/imx-pcm.c
+index 3f358a7..bd6c4e3 100644
+--- a/sound/soc/imx/imx-pcm.c
++++ b/sound/soc/imx/imx-pcm.c
+@@ -34,6 +34,12 @@
+ #include "imx-pcm.h"
+ #include "imx-ssi.h"
+ 
++#ifdef CONFIG_SND_MXC_SOC_IRAM
++static bool UseIram = 1;
++#else
++static bool UseIram;
++#endif
++
+ /* debug */
+ #define IMX_PCM_DEBUG 0
+ #if IMX_PCM_DEBUG
+@@ -42,13 +48,6 @@
+ #define dbg(format, arg...)
+ #endif
+ 
+-/*
+- * Coherent DMA memory is used by default, although Freescale have used 
+- * bounce buffers in all their drivers for i.MX31 to date. If you have any 
+- * issues, please select bounce buffers. 
+- */
+-#define IMX31_DMA_BOUNCE 0
+-
+ static const struct snd_pcm_hardware imx_pcm_hardware = {
+ 	.info = (SNDRV_PCM_INFO_INTERLEAVED |
+ 		 SNDRV_PCM_INFO_BLOCK_TRANSFER |
+@@ -56,9 +55,14 @@ static const struct snd_pcm_hardware imx_pcm_hardware = {
+ 		 SNDRV_PCM_INFO_MMAP_VALID |
+ 		 SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME),
+ 	.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE,
++#ifdef CONFIG_SND_MXC_SOC_IRAM
++	.buffer_bytes_max = SND_RAM_SIZE,
++	.period_bytes_max = SND_RAM_SIZE / 4,
++#else
+ 	.buffer_bytes_max = 32 * 1024,
+-	.period_bytes_min = 64,
+ 	.period_bytes_max = 8 * 1024,
++#endif
++	.period_bytes_min = 64,
+ 	.periods_min = 2,
+ 	.periods_max = 255,
+ 	.fifo_size = 0,
+@@ -66,15 +70,82 @@ static const struct snd_pcm_hardware imx_pcm_hardware = {
+ 
+ struct mxc_runtime_data {
+ 	int dma_ch;
+-	struct imx_pcm_dma_param *dma_params;
+ 	spinlock_t dma_lock;
+ 	int active, period, periods;
+ 	int dma_wchannel;
+ 	int dma_active;
+-	int old_offset;
+ 	int dma_alloc;
+ };
+ 
++static uint32_t audio_iram_phys_base_addr;
++static void *audio_iram_virt_base_addr;
++
++static struct vm_operations_struct snd_mxc_audio_playback_vm_ops = {
++	.open = snd_pcm_mmap_data_open,
++	.close = snd_pcm_mmap_data_close,
++};
++
++/*
++	enable user space access to iram buffer
++*/
++static int imx_iram_audio_playback_mmap(struct snd_pcm_substream *substream,
++					struct vm_area_struct *area)
++{
++	unsigned long off;
++	unsigned long phys;
++	unsigned long size;
++	int ret = 0;
++
++	area->vm_ops = &snd_mxc_audio_playback_vm_ops;
++	area->vm_private_data = substream;
++
++	off = area->vm_pgoff << PAGE_SHIFT;
++	phys = audio_iram_phys_base_addr + off;
++	size = area->vm_end - area->vm_start;
++
++	if (off + size > SND_RAM_SIZE)
++		return -EINVAL;
++
++	area->vm_page_prot = pgprot_nonshareddev(area->vm_page_prot);
++	area->vm_flags |= VM_IO;
++	ret =
++	    remap_pfn_range(area, area->vm_start, phys >> PAGE_SHIFT,
++			    size, area->vm_page_prot);
++	if (ret == 0)
++		area->vm_ops->open(area);
++
++	return ret;
++}
++
++/*
++     Map nbytes in virtual space
++     bytes -audio iram iram partition size
++     phys_addr - physical address of iram buffer
++     returns - virtual address of the iram buffer or NULL if fail
++*/
++static void *imx_iram_init(dma_addr_t *phys_addr, size_t bytes)
++{
++	void *iram_base;
++
++	iram_base = (void *)ioremap((uint32_t) SND_RAM_BASE_ADDR, bytes);
++
++	audio_iram_virt_base_addr = iram_base;
++	audio_iram_phys_base_addr = (uint32_t) SND_RAM_BASE_ADDR;
++	*phys_addr = (dma_addr_t) SND_RAM_BASE_ADDR;
++
++	return (audio_iram_virt_base_addr);
++
++}
++
++/*
++     destroy the virtual mapping of the iram buffer
++*/
++
++static void imx_iram_free(void)
++{
++	iounmap(audio_iram_virt_base_addr);
++}
++
+ static int imx_get_sdma_transfer(int format, int dai_port, int stream_type)
+ {
+ 	int transfer = -1;
+@@ -125,13 +196,6 @@ static void audio_stop_dma(struct snd_pcm_substream *substream)
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct mxc_runtime_data *prtd = runtime->private_data;
+ 	unsigned long flags;
+-#if IMX31_DMA_BOUNCE
+-	unsigned int dma_size;
+-	unsigned int offset;
+-
+-	dma_size = frames_to_bytes(runtime, runtime->period_size);
+-	offset = dma_size * prtd->periods;
+-#endif
+ 
+ 	/* stops the dma channel and clears the buffer ptrs */
+ 	spin_lock_irqsave(&prtd->dma_lock, flags);
+@@ -139,15 +203,6 @@ static void audio_stop_dma(struct snd_pcm_substream *substream)
+ 	prtd->period = 0;
+ 	prtd->periods = 0;
+ 	mxc_dma_disable(prtd->dma_wchannel);
+-
+-#if IMX31_DMA_BOUNCE
+-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+-		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+-				 DMA_TO_DEVICE);
+-	else
+-		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+-				 DMA_FROM_DEVICE);
+-#endif
+ 	spin_unlock_irqrestore(&prtd->dma_lock, flags);
+ }
+ 
+@@ -162,7 +217,7 @@ static int dma_new_period(struct snd_pcm_substream *substream)
+ 
+ 	if (!prtd->active)
+ 		return 0;
+-	//printk(KERN_EMERG"In func %s \n",__FUNCTION__);               
++
+ 	memset(&sdma_request, 0, sizeof(mxc_dma_requestbuf_t));
+ 
+ 	dbg("period pos  ALSA %x DMA %x\n", runtime->periods, prtd->period);
+@@ -171,22 +226,6 @@ static int dma_new_period(struct snd_pcm_substream *substream)
+ 	    offset, dma_size);
+ 	dbg("DMA addr %x\n", runtime->dma_addr + offset);
+ 
+-#if IMX31_DMA_BOUNCE
+-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+-		sdma_request.src_addr = (dma_addr_t) (dma_map_single(NULL,
+-								     runtime->
+-								     dma_area +
+-								     offset,
+-								     dma_size,
+-								     DMA_TO_DEVICE));
+-	else
+-		sdma_request.dst_addr = (dma_addr_t) (dma_map_single(NULL,
+-								     runtime->
+-								     dma_area +
+-								     offset,
+-								     dma_size,
+-								     DMA_FROM_DEVICE));
+-#else
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+ 		sdma_request.src_addr =
+ 		    (dma_addr_t) (runtime->dma_addr + offset);
+@@ -194,7 +233,6 @@ static int dma_new_period(struct snd_pcm_substream *substream)
+ 		sdma_request.dst_addr =
+ 		    (dma_addr_t) (runtime->dma_addr + offset);
+ 
+-#endif
+ 	sdma_request.num_of_bytes = dma_size;
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+@@ -219,27 +257,13 @@ static void audio_dma_irq(void *data)
+ 	struct snd_pcm_substream *substream = (struct snd_pcm_substream *)data;
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct mxc_runtime_data *prtd = runtime->private_data;
+-#if IMX31_DMA_BOUNCE
+-	unsigned int dma_size = frames_to_bytes(runtime, runtime->period_size);
+-	unsigned int offset = dma_size * prtd->periods;
+-#endif
+ 
+-	//printk(KERN_EMERG"In func %s \n",__FUNCTION__);               
+ 	prtd->dma_active = 0;
+ 	prtd->periods++;
+ 	prtd->periods %= runtime->periods;
+ 
+ 	dbg("irq per %d offset %x\n", prtd->periods,
+ 	    frames_to_bytes(runtime, runtime->period_size) * prtd->periods);
+-#if IMX31_DMA_BOUNCE
+-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+-		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+-				 DMA_TO_DEVICE);
+-	else
+-		dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+-				 DMA_FROM_DEVICE);
+-
+-#endif
+ 
+ 	if (prtd->active)
+ 		snd_pcm_period_elapsed(substream);
+@@ -303,18 +327,14 @@ static int imx_pcm_hw_params(struct snd_pcm_substream *substream,
+ 		//      dma->params.callback = audio_dma_irq;
+ 
+ 	}
+-#if IMX31_DMA_BOUNCE
+-	ret = snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(params));
+-	if (ret < 0) {
+-		printk(KERN_ERR "imx-pcm: failed to malloc pcm pages\n");
+-		if (channel)
+-			mxc_dma_free(channel);
+-		return ret;
+-	}
+-	runtime->dma_addr = virt_to_phys(runtime->dma_area);
+-#else
++
+ 	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
+-#endif
++
++	dbg("-imx_pcm_hw_params:"
++	    "UseIram=%d buf->addr=%x buf->area=%p buf->bytes=%d\n",
++	    UseIram, (unsigned int)runtime->dma_addr,
++	    runtime->dma_area, runtime->dma_bytes);
++
+ 	return ret;
+ }
+ 
+@@ -328,9 +348,7 @@ static int imx_pcm_hw_free(struct snd_pcm_substream *substream)
+ 		prtd->dma_wchannel = 0;
+ 		prtd->dma_alloc = 0;
+ 	}
+-#if IMX31_DMA_BOUNCE
+-	snd_pcm_lib_free_pages(substream);
+-#endif
++
+ 	return 0;
+ }
+ 
+@@ -365,10 +383,8 @@ static int imx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		prtd->active = 1;
+-		if (prtd->old_offset) {
+-			prtd->dma_active = 0;
+-			ret = dma_new_period(substream);
+-		}
++		prtd->dma_active = 0;
++		ret = dma_new_period(substream);
+ 		break;
+ 	default:
+ 		ret = -EINVAL;
+@@ -434,9 +450,21 @@ static int
+ imx_pcm_mmap(struct snd_pcm_substream *substream, struct vm_area_struct *vma)
+ {
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+-	return dma_mmap_writecombine(substream->pcm->card->dev, vma,
+-				     runtime->dma_area,
+-				     runtime->dma_addr, runtime->dma_bytes);
++	int ret = 0;
++
++	dbg("+imx_pcm_mmap:"
++	    "UseIram=%d dma_addr=%x dma_area=%x dma_bytes=%d\n",
++	    UseIram, (unsigned int)runtime->dma_addr,
++	    runtime->dma_area, runtime->dma_bytes);
++
++	if ((substream->stream == SNDRV_PCM_STREAM_CAPTURE) || !UseIram) {
++		ret = dma_mmap_writecombine(substream->pcm->card->dev, vma,
++					    runtime->dma_area,
++					    runtime->dma_addr,
++					    runtime->dma_bytes);
++		return ret;
++	} else
++		return imx_iram_audio_playback_mmap(substream, vma);
+ }
+ 
+ struct snd_pcm_ops imx_pcm_ops = {
+@@ -459,12 +487,19 @@ static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
+ 	buf->dev.type = SNDRV_DMA_TYPE_DEV;
+ 	buf->dev.dev = pcm->card->dev;
+ 	buf->private_data = NULL;
+-	buf->area = dma_alloc_writecombine(pcm->card->dev, size,
+-					   &buf->addr, GFP_KERNEL);
++
++	if ((stream == SNDRV_PCM_STREAM_CAPTURE) || !UseIram) {
++		buf->area = dma_alloc_writecombine(pcm->card->dev, size,
++						   &buf->addr, GFP_KERNEL);
++	} else {
++		buf->area = imx_iram_init(&buf->addr, size);
++	}
+ 	if (!buf->area)
+ 		return -ENOMEM;
+-
+ 	buf->bytes = size;
++	printk(KERN_INFO "DMA Sound Buffers Allocated:"
++	       "UseIram=%d buf->addr=%x buf->area=%p size=%d\n",
++	       UseIram, buf->addr, buf->area, size);
+ 	return 0;
+ }
+ 
+@@ -483,8 +518,11 @@ static void imx_pcm_free_dma_buffers(struct snd_pcm *pcm)
+ 		if (!buf->area)
+ 			continue;
+ 
+-		dma_free_writecombine(pcm->card->dev, buf->bytes,
+-				      buf->area, buf->addr);
++		if ((stream == SNDRV_PCM_STREAM_CAPTURE) || !UseIram) {
++			dma_free_writecombine(pcm->card->dev, buf->bytes,
++					      buf->area, buf->addr);
++		} else
++			imx_iram_free();
+ 		buf->area = NULL;
+ 	}
+ }
+@@ -501,20 +539,7 @@ static int imx_pcm_new(struct snd_soc_platform *platform,
+ 		card->dev->dma_mask = &imx_pcm_dmamask;
+ 	if (!card->dev->coherent_dma_mask)
+ 		card->dev->coherent_dma_mask = 0xffffffff;
+-#if IMX31_DMA_BOUNCE
+-	ret = snd_pcm_lib_preallocate_pages_for_all(pcm,
+-						    SNDRV_DMA_TYPE_CONTINUOUS,
+-						    snd_dma_continuous_data
+-						    (GFP_KERNEL),
+-						    imx_pcm_hardware.
+-						    buffer_bytes_max * 2,
+-						    imx_pcm_hardware.
+-						    buffer_bytes_max * 2);
+-	if (ret < 0) {
+-		printk(KERN_ERR "imx-pcm: failed to preallocate pages\n");
+-		goto out;
+-	}
+-#else
++
+ 	if (playback) {
+ 		ret = imx_pcm_preallocate_dma_buffer(pcm,
+ 						     SNDRV_PCM_STREAM_PLAYBACK);
+@@ -528,18 +553,14 @@ static int imx_pcm_new(struct snd_soc_platform *platform,
+ 		if (ret)
+ 			goto out;
+ 	}
+-#endif
++
+       out:
+ 	return ret;
+ }
+ 
+ static const struct snd_soc_platform_ops imx_platform_ops = {
+ 	.pcm_new = imx_pcm_new,
+-#if IMX31_DMA_BOUNCE
+-	.pcm_free = NULL,
+-#else
+ 	.pcm_free = imx_pcm_free_dma_buffers,
+-#endif
+ };
+ 
+ static int imx_pcm_probe(struct device *dev)
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 8520cde..f00aa8f 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -574,13 +574,14 @@ static void imx_ssi_shutdown(struct snd_pcm_substream *substream)
+ 
+ 			SSI1_SCR = 0;
+ 
++			clk_disable(ssi_clk);
+ 			clk_put(ssi_clk);
+ 
+ 		} else {
+ 			if (--ssi_active[SSI2_PORT])
+ 				return;
+ 			SSI2_SCR = 0;
+-
++			clk_disable(ssi_clk);
+ 			clk_put(ssi_clk);
+ 		}
+ 	}
+-- 
+1.5.4.4
+

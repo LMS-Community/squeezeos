@@ -1,0 +1,232 @@
+From 37e5a78026d59d1737a233f8e94a05fb11eb24b8 Mon Sep 17 00:00:00 2001
+From: Guoxing Wu <b02248@freescale.com>
+Date: Mon, 8 Sep 2008 15:17:20 -0500
+Subject: [PATCH] ENGR00069696-2 mx51: add hs-i2c mach support
+
+mx51: add hs-i2c mach support
+
+Signed-off-by: Guoxing Wu <b02248@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |    1 +
+ arch/arm/mach-mx51/clock.c              |   36 +++++++++++++++++++++++++
+ arch/arm/mach-mx51/crm_regs.h           |    4 +-
+ arch/arm/mach-mx51/devices.c            |   44 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx51/mx51_3stack.c        |   10 +++++-
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |   19 +++++++++++++
+ 6 files changed, 110 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index c5cef7a..56e957c 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -734,6 +734,7 @@ CONFIG_I2C_CHARDEV=y
+ #
+ # CONFIG_I2C_ELEKTOR is not set
+ CONFIG_I2C_MXC=y
++CONFIG_I2C_MXC_HS=y
+ # CONFIG_I2C_OCORES is not set
+ # CONFIG_I2C_PARPORT_LIGHT is not set
+ # CONFIG_I2C_SIMTEC is not set
+diff --git a/arch/arm/mach-mx51/clock.c b/arch/arm/mach-mx51/clock.c
+index 13055f6..4d1fa8b 100644
+--- a/arch/arm/mach-mx51/clock.c
++++ b/arch/arm/mach-mx51/clock.c
+@@ -871,6 +871,40 @@ static struct clk i2c_clk[] = {
+ 	 },
+ };
+ 
++static void _clk_hsi2c_serial_recalc(struct clk *clk)
++{
++	u32 reg, prediv, podf;
++
++	reg = __raw_readl(MXC_CCM_CSCDR3);
++	prediv = ((reg & MXC_CCM_CSCDR3_HSI2C_CLK_PRED_MASK) >>
++		  MXC_CCM_CSCDR3_HSI2C_CLK_PRED_OFFSET) + 1;
++	podf = ((reg & MXC_CCM_CSCDR3_HSI2C_CLK_PODF_MASK) >>
++		MXC_CCM_CSCDR3_HSI2C_CLK_PODF_OFFSET) + 1;
++
++	clk->rate = clk->parent->rate / (prediv * podf);
++}
++
++static struct clk hsi2c_serial_clk = {
++	.name = "hsi2c_serial_clk",
++	.id = 0,
++	.parent = &pll3_sw_clk,
++	.enable_reg = MXC_CCM_CCGR1,
++	.enable_shift = MXC_CCM_CCGR1_CG11_OFFSET,
++	.recalc = _clk_hsi2c_serial_recalc,
++	.enable = _clk_enable,
++	.disable = _clk_disable,
++};
++
++static struct clk hsi2c_clk = {
++	.name = "hsi2c_clk",
++	.id = 0,
++	.parent = &ipg_perclk,
++	.enable_reg = MXC_CCM_CCGR1,
++	.enable_shift = MXC_CCM_CCGR1_CG12_OFFSET,
++	.enable = _clk_enable,
++	.disable = _clk_disable,
++};
++
+ static void _clk_cspi_recalc(struct clk *clk)
+ {
+ 	u32 reg, prediv, podf;
+@@ -1818,6 +1852,8 @@ static struct clk *mxc_clks[] = {
+ 	&i2c_clk[0],
+ 	&i2c_clk[1],
+ 	&i2c_clk[2],
++	&hsi2c_clk,
++	&hsi2c_serial_clk,
+ 	&gpt_clk[0],
+ 	&gpt_clk[1],
+ 	&gpt_clk[2],
+diff --git a/arch/arm/mach-mx51/crm_regs.h b/arch/arm/mach-mx51/crm_regs.h
+index e13a12f..30ae1c4 100644
+--- a/arch/arm/mach-mx51/crm_regs.h
++++ b/arch/arm/mach-mx51/crm_regs.h
+@@ -331,8 +331,8 @@
+ 
+ /* Define the bits in register CSCDR3 */
+ #define MXC_CCM_CSCDR3_HSI2C_CLK_PRED_OFFSET	(16)
+-#define MXC_CCM_CSCDR3_H2I2C_CLK_PRED_MASK		(0x7 << 16)
+-#define MXC_CCM_CSCDR3_H2I2C_CLK_PODF_OFFSET	(9)
++#define MXC_CCM_CSCDR3_HSI2C_CLK_PRED_MASK		(0x7 << 16)
++#define MXC_CCM_CSCDR3_HSI2C_CLK_PODF_OFFSET	(9)
+ #define MXC_CCM_CSCDR3_HSI2C_CLK_PODF_MASK		(0x3F << 9)
+ #define MXC_CCM_CSCDR3_FIRI_CLK_PRED_OFFSET		(6)
+ #define MXC_CCM_CSCDR3_FIRI_CLK_PRED_MASK		(0x7 << 6)
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 0ddcc11..0f22671 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -528,6 +528,49 @@ static inline void mxc_init_i2c(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_I2C_MXC_HS) || defined(CONFIG_I2C_MXC_HS_MODULE)
++
++static struct resource mxci2c_hs_resources[] = {
++	[0] = {
++	       .start = HSI2C_DMA_BASE_ADDR,
++	       .end = HSI2C_DMA_BASE_ADDR + SZ_16K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_HS_I2C,
++	       .end = MXC_INT_HS_I2C,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Platform Data for MXC I2C */
++static struct mxc_i2c_platform_data mxci2c_hs_data = {
++	.i2c_clk = 400000,
++};
++
++static struct platform_device mxci2c_hs_device = {
++	.name = "mxc_i2c_hs",
++	.id = 3,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxci2c_hs_data,
++		},
++	.num_resources = ARRAY_SIZE(mxci2c_hs_resources),
++	.resource = mxci2c_hs_resources
++};
++
++static inline void mxc_init_i2c_hs(void)
++{
++	if (platform_device_register(&mxci2c_hs_device) < 0)
++		dev_err(&mxci2c_hs_device.dev,
++			"Unable to register High Speed I2C device\n");
++}
++#else
++static inline void mxc_init_i2c_hs(void)
++{
++}
++#endif
++
+ struct mxc_gpio_port mxc_gpio_ports[GPIO_PORT_NUM] = {
+ 	{
+ 	 .num = 0,
+@@ -603,6 +646,7 @@ static int __init mxc_init_devices(void)
+ 	mxc_init_wdt();
+ 	mxc_init_spi();
+ 	mxc_init_i2c();
++	mxc_init_i2c_hs();
+ 	mxc_init_rtc();
+ 	mxc_init_dma();
+ 	mxc_init_owire();
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 686f888..83c86ce 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -272,7 +272,6 @@ static inline void mxc_init_bl(void)
+ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ };
+ #endif
+-
+ #ifdef CONFIG_I2C_MXC_SELECT2
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	{
+@@ -286,6 +285,10 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	 },
+ };
+ #endif
++#ifdef CONFIG_I2C_MXC_HS
++static struct i2c_board_info mxc_i2c_hs_board_info[] __initdata = {
++};
++#endif
+ 
+ #endif
+ 
+@@ -685,11 +688,14 @@ static void __init mxc_board_init(void)
+ 	i2c_register_board_info(0, mxc_i2c0_board_info,
+ 				ARRAY_SIZE(mxc_i2c0_board_info));
+ #endif
+-
+ #ifdef CONFIG_I2C_MXC_SELECT2
+ 	i2c_register_board_info(1, mxc_i2c1_board_info,
+ 				ARRAY_SIZE(mxc_i2c1_board_info));
+ #endif
++#ifdef CONFIG_I2C_MXC_HS
++	i2c_register_board_info(3, mxc_i2c_hs_board_info,
++				ARRAY_SIZE(mxc_i2c_hs_board_info));
++#endif
+ 
+ #endif
+ 
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 636fb7a..9aa55ba 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -457,6 +457,25 @@ void gpio_i2c_inactive(int i2c_num)
+ 
+ EXPORT_SYMBOL(gpio_i2c_inactive);
+ 
++void gpio_i2c_hs_active()
++{
++	mxc_request_iomux(MX51_PIN_I2C1_CLK,
++			  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++	mxc_iomux_set_pad(MX51_PIN_I2C1_CLK, 0x1E4);
++
++	mxc_request_iomux(MX51_PIN_I2C1_DAT,
++			  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++	mxc_iomux_set_pad(MX51_PIN_I2C1_DAT, 0x1E4);
++}
++
++EXPORT_SYMBOL(gpio_i2c_hs_active);
++
++void gpio_i2c_hs_inactive()
++{
++}
++
++EXPORT_SYMBOL(gpio_i2c_hs_inactive);
++
+ void gpio_pmic_active(void)
+ {
+ 	mxc_request_iomux(MX51_PIN_GPIO1_5, IOMUX_CONFIG_GPIO
+-- 
+1.5.4.4
+

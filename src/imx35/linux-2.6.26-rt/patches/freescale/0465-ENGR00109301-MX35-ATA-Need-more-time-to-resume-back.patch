@@ -1,0 +1,78 @@
+From 4dd36c14553ab50514c787206cfe56c5fc164173 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 12 Mar 2009 13:07:41 +0800
+Subject: [PATCH] ENGR00109301 [MX35]ATA:Need more time to resume back
+
+Add the suspend/resume support for libata protocol.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+(cherry picked from commit 3f550a0b9b481f5ee8975ff1aa08824fcdd68e9d)
+---
+ arch/arm/mach-mx35/mx35_3stack_gpio.c |   12 ++++++------
+ drivers/ata/pata_fsl.c                |    6 +++++-
+ 2 files changed, 11 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 5d5daa7..eec99bf 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -966,6 +966,12 @@ void gpio_ata_active(void)
+ {
+ 	unsigned int ata_ctl_pad_cfg, ata_dat_pad_cfg;
+ 
++	/* HDD_ENBALE */
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 3, 0);
++	/* Power On the HDD */
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 4, 1);
++	msleep(300);
++
+ 	/*IOMUX Settings */
+ 	/*PATA_DIOR */
+ 	mxc_request_iomux(MX35_PIN_ATA_DIOR, MUX_CONFIG_FUNC);
+@@ -1072,12 +1078,6 @@ void gpio_ata_active(void)
+ 	mxc_iomux_set_pad(MX35_PIN_ATA_DA1, ata_ctl_pad_cfg);
+ 	mxc_iomux_set_pad(MX35_PIN_ATA_DA2, ata_ctl_pad_cfg);
+ 	mxc_iomux_set_pad(MX35_PIN_ATA_BUFF_EN, ata_ctl_pad_cfg);
+-
+-	/* HDD_ENBALE */
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 3, 0);
+-	/* Power On the HDD */
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_GPIO_CONTROL_1, 4, 1);
+-	msleep(300);
+ }
+ 
+ EXPORT_SYMBOL(gpio_ata_active);
+diff --git a/drivers/ata/pata_fsl.c b/drivers/ata/pata_fsl.c
+index 987b591..601e1de 100644
+--- a/drivers/ata/pata_fsl.c
++++ b/drivers/ata/pata_fsl.c
+@@ -3,7 +3,7 @@
+  */
+ 
+ /*
+- * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -959,6 +959,8 @@ static int pata_fsl_suspend(struct platform_device *pdev, pm_message_t state)
+ 	    pdev->dev.platform_data;
+ 	u8 *ata_regs = priv->fsl_ata_regs;
+ 
++	ata_host_suspend(host, state);
++
+ 	/* Disable interrupts. */
+ 	__raw_writel(0, ata_regs + FSL_ATA_INT_EN);
+ 
+@@ -1001,6 +1003,8 @@ static int pata_fsl_resume(struct platform_device *pdev)
+ 		__raw_writel(FSL_ATA_INTR_ATA_INTRQ2,
+ 			     ata_regs + FSL_ATA_INT_EN);
+ 
++	ata_host_resume(host);
++
+ 	return 0;
+ }
+ #endif
+-- 
+1.5.4.4
+

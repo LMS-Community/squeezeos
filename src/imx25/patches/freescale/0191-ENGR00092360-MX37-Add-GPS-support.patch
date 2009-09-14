@@ -1,0 +1,255 @@
+From a7dbd75240c538edeaacdf56cc49802d772c6ef3 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Thu, 30 Oct 2008 14:42:09 +0800
+Subject: [PATCH] ENGR00092360 MX37 Add GPS support
+
+Add Broadcom GPS ioctrl support for i.MX37 3DS.
+This patch is only for 2.0 CPU board.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx37/board-mx37_3stack.h |    2 +-
+ arch/arm/mach-mx37/mx37_3stack.c       |   25 +++++++++-
+ arch/arm/mach-mx37/mx37_3stack_gpio.c  |   90 +++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx37/serial.h            |    2 +-
+ drivers/mxc/gps_ioctrl/Kconfig         |    2 +-
+ drivers/mxc/gps_ioctrl/agpsgpiodev.c   |   16 ++++--
+ 6 files changed, 128 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index 98bafac..744db9e 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -73,7 +73,7 @@
+ #define UART2_IR                NO_IRDA
+ #define UART2_ENABLED           1
+ /* UART 3 configuration */
+-#define UART3_MODE              MODE_DTE
++#define UART3_MODE              MODE_DCE
+ #define UART3_IR                NO_IRDA
+ #define UART3_ENABLED           1
+ 
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index fda9b2f..5f3c906 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -623,7 +623,6 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
+-
+ /*!
+  * fixup for mx37 3stack board v1.1(wm8350)
+  */
+@@ -641,6 +640,29 @@ static void mx37_3stack_fixup_for_board_v1(void)
+ 	mxc_init_touchscreen();
+ }
+ 
++#if defined(CONFIG_GPS_IOCTRL) || defined(CONFIG_GPS_IOCTRL_MODULE)
++static struct mxc_gps_platform_data gps_data = {
++	.core_reg = "VIOHI",
++	.analog_reg = "SW3",
++};
++
++static struct platform_device mxc_gps_device = {
++	.name = "gps_ioctrl",
++	.id = 0,
++	.dev = {
++		.platform_data = &gps_data,
++		},
++};
++
++static void __init mxc_init_gps(void)
++{
++	(void)platform_device_register(&mxc_gps_device);
++}
++#else
++static void __init mxc_init_gps(void)
++{
++}
++#endif
+ 
+ /*!
+  * Board specific initialization.
+@@ -667,6 +689,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_fb();
+ 	mxc_init_bl();
+ 	mxc_init_bluetooth();
++	mxc_init_gps();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index 4e8c50d..6106fef 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -87,6 +87,24 @@ void gpio_uart_active(int port, int no_irda)
+ 				  PAD_CTL_DRV_HIGH);
+ 		break;
+ 	case 2:
++		mxc_request_iomux(MX37_PIN_AUD3_BB_TXD, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_AUD3_BB_TXD, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_input(MUX_IN_UART3_UART_RXD_MUX, INPUT_CTL_PATH0);
++		mxc_request_iomux(MX37_PIN_AUD3_BB_RXD, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_AUD3_BB_RXD, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++		mxc_request_iomux(MX37_PIN_AUD3_BB_CK, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_AUD3_BB_CK, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH);
++		mxc_iomux_set_input(MUX_IN_UART3_UART_RTS_B, INPUT_CTL_PATH0);
++		mxc_request_iomux(MX37_PIN_AUD3_BB_FS, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_AUD3_BB_FS, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH);
+ 		break;
+ 	default:
+ 		break;
+@@ -101,7 +119,25 @@ void gpio_uart_active(int port, int no_irda)
+  */
+ void gpio_uart_inactive(int port, int no_irda)
+ {
+-
++	/*
++	 * Configure the IOMUX control registers for the UART signals
++	 * and disable the UART transceivers
++	 */
++	switch (port) {
++		/* UART 3 IOMUX Configs */
++	case 2:
++		mxc_request_iomux(MX37_PIN_AUD3_BB_TXD, IOMUX_CONFIG_GPIO);
++		mxc_free_iomux(MX37_PIN_AUD3_BB_TXD, IOMUX_CONFIG_GPIO);
++		mxc_request_iomux(MX37_PIN_AUD3_BB_RXD, IOMUX_CONFIG_GPIO);
++		mxc_free_iomux(MX37_PIN_AUD3_BB_RXD, IOMUX_CONFIG_GPIO);
++		mxc_request_iomux(MX37_PIN_AUD3_BB_CK, IOMUX_CONFIG_GPIO);
++		mxc_free_iomux(MX37_PIN_AUD3_BB_CK, IOMUX_CONFIG_GPIO);
++		mxc_request_iomux(MX37_PIN_AUD3_BB_FS, IOMUX_CONFIG_GPIO);
++		mxc_free_iomux(MX37_PIN_AUD3_BB_FS, IOMUX_CONFIG_GPIO);
++		break;
++	default:
++		break;
++	}
+ }
+ 
+ /*!
+@@ -792,3 +828,55 @@ void gpio_pmic_active(void)
+ 
+ EXPORT_SYMBOL(gpio_pmic_active);
+ 
++void gpio_gps_active(void)
++{
++	/* PWR_EN */
++	mxc_request_iomux(MX37_PIN_EIM_OE, IOMUX_CONFIG_GPIO);
++	mxc_iomux_set_pad(MX37_PIN_EIM_OE, PAD_CTL_100K_PU |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_HYS_NONE |
++			  PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++	mxc_set_gpio_direction(MX37_PIN_EIM_OE, 0);
++
++	/* RESET */
++	mxc_request_iomux(MX37_PIN_EIM_BCLK, IOMUX_CONFIG_GPIO);
++	mxc_iomux_set_pad(MX37_PIN_EIM_BCLK, PAD_CTL_DRV_HIGH |
++			  PAD_CTL_HYS_NONE | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++	mxc_set_gpio_direction(MX37_PIN_EIM_BCLK, 0);
++
++	mxc_set_gpio_dataout(MX37_PIN_EIM_OE, 0);
++	mxc_set_gpio_dataout(MX37_PIN_EIM_BCLK, 0);
++
++	msleep(5);
++	mxc_set_gpio_dataout(MX37_PIN_EIM_BCLK, 1);
++
++	msleep(5);
++}
++
++EXPORT_SYMBOL(gpio_gps_active);
++
++int gpio_gps_access(int para)
++{
++	iomux_pin_name_t pin;
++	pin = (para & 0x1) ? MX37_PIN_EIM_OE : MX37_PIN_EIM_BCLK;
++
++	if (para & 0x4)
++		return mxc_get_gpio_datain(pin);
++	else if (para & 0x2)
++		mxc_set_gpio_dataout(pin, 1);
++	else
++		mxc_set_gpio_dataout(pin, 0);
++
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_gps_access);
++
++void gpio_gps_inactive(void)
++{
++	mxc_free_iomux(MX37_PIN_EIM_BCLK, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX37_PIN_EIM_OE, IOMUX_CONFIG_GPIO);
++}
++
++EXPORT_SYMBOL(gpio_gps_inactive);
+diff --git a/arch/arm/mach-mx37/serial.h b/arch/arm/mach-mx37/serial.h
+index 2404715..e2ec604 100644
+--- a/arch/arm/mach-mx37/serial.h
++++ b/arch/arm/mach-mx37/serial.h
+@@ -65,7 +65,7 @@
+ /* UART 3 configuration */
+ #define UART3_HW_FLOW           1
+ #define UART3_UCR4_CTSTL        16
+-#define UART3_DMA_ENABLE        1
++#define UART3_DMA_ENABLE        0
+ #define UART3_DMA_RXBUFSIZE     1024
+ #define UART3_UFCR_RXTL         16
+ #define UART3_UFCR_TXTL         16
+diff --git a/drivers/mxc/gps_ioctrl/Kconfig b/drivers/mxc/gps_ioctrl/Kconfig
+index d59ef8e..cb2698d 100644
+--- a/drivers/mxc/gps_ioctrl/Kconfig
++++ b/drivers/mxc/gps_ioctrl/Kconfig
+@@ -6,7 +6,7 @@ menu "Broadcom GPS ioctrl support"
+ 
+ config GPS_IOCTRL
+ 	tristate "GPS ioctrl support"
+-	depends on MACH_MX31_3DS || MACH_MX35_3DS
++	depends on MACH_MX31_3DS || MACH_MX35_3DS || MACH_MX37_3DS
+ 	default m
+ 	---help---
+ 	  Say Y to enable Broadcom GPS ioctrl on MXC platform.
+diff --git a/drivers/mxc/gps_ioctrl/agpsgpiodev.c b/drivers/mxc/gps_ioctrl/agpsgpiodev.c
+index bd5bbc3..62388f9 100644
+--- a/drivers/mxc/gps_ioctrl/agpsgpiodev.c
++++ b/drivers/mxc/gps_ioctrl/agpsgpiodev.c
+@@ -192,16 +192,24 @@ static int __init gps_ioctrl_probe(struct platform_device *pdev)
+ 	if (mxc_gps_ioctrl_data->core_reg != NULL) {
+ 		gps_regu =
+ 		    regulator_get(&(pdev->dev), mxc_gps_ioctrl_data->core_reg);
+-		regulator_enable(gps_regu);
+-		regulator_put(gps_regu, &(pdev->dev));
++		if (!IS_ERR_VALUE((u32)gps_regu)) {
++			regulator_enable(gps_regu);
++			regulator_put(gps_regu, &(pdev->dev));
++		} else {
++			return -1;
++		}
+ 	}
+ 	/* open GPS GPO1 2v8 for GL gps support */
+ 	if (mxc_gps_ioctrl_data->analog_reg != NULL) {
+ 		gps_regu =
+ 		    regulator_get(&(pdev->dev),
+ 				  mxc_gps_ioctrl_data->analog_reg);
+-		regulator_enable(gps_regu);
+-		regulator_put(gps_regu, &(pdev->dev));
++		if (!IS_ERR_VALUE((u32)gps_regu)) {
++			regulator_enable(gps_regu);
++			regulator_put(gps_regu, &(pdev->dev));
++		} else {
++			return -1;
++		}
+ 	}
+ 	gpio_gps_active();
+ 
+-- 
+1.5.4.4
+

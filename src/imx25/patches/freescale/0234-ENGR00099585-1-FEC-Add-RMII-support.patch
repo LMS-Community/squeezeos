@@ -1,0 +1,150 @@
+From 6783efd8c890599c35786e681d23f4133f7d396f Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Wed, 22 Oct 2008 14:55:43 -0600
+Subject: [PATCH] ENGR00099585-1 FEC: Add RMII support
+
+Add RMII support to the FEC driver
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ drivers/net/Kconfig |    2 +-
+ drivers/net/fec.c   |   50 +++++++++++++++++++++++++++++++++++++++++++-------
+ drivers/net/fec.h   |    4 ++++
+ 3 files changed, 48 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
+index 8076679..5e23db7 100644
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -1855,7 +1855,7 @@ config 68360_ENET
+ 
+ config FEC
+ 	tristate "FEC ethernet controller"
+-	depends on M523x || M527x || M5272 || M528x || M520x || ARCH_MX27 || ARCH_MX37 || ARCH_MX35 || ARCH_MX51
++	depends on M523x || M527x || M5272 || M528x || M520x || ARCH_MX27 || ARCH_MX37 || ARCH_MX35 || ARCH_MX51 || ARCH_MX25
+ 	help
+ 	  Say Y here if you want to use the built-in 10/100 Fast ethernet
+ 	  controller on some Motorola/Freescale processors.
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index bd71061..134e0ba 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -1438,7 +1438,7 @@ static void __inline__ fec_phy_ack_intr(void)
+ 	*icrp = 0x0d000000;
+ }
+ 
+-static void __inline__ fec_localhw_setup(void)
++static void __inline__ fec_localhw_setup(struct net_device *dev)
+ {
+ }
+ 
+@@ -1641,7 +1641,7 @@ static void __inline__ fec_phy_ack_intr(void)
+ {
+ }
+ 
+-static void __inline__ fec_localhw_setup(void)
++static void __inline__ fec_localhw_setup(struct net_device *dev)
+ {
+ }
+ /*
+@@ -1800,7 +1800,7 @@ static void __inline__ fec_phy_ack_intr(void)
+ {
+ }
+ 
+-static void __inline__ fec_localhw_setup(void)
++static void __inline__ fec_localhw_setup(struct net_device *dev)
+ {
+ }
+ 
+@@ -1985,7 +1985,7 @@ static void __inline__ fec_phy_ack_intr(void)
+ {
+ }
+ 
+-static void __inline__ fec_localhw_setup(void)
++static void __inline__ fec_localhw_setup(struct net_device *dev)
+ {
+ }
+ 
+@@ -2175,9 +2175,45 @@ static void __inline__ fec_phy_ack_intr(void)
+ 		disable_irq(expio_intr_fec);
+ }
+ 
+-static void __inline__ fec_localhw_setup(void)
++#ifdef CONFIG_ARCH_MX25
++/*
++ * i.MX25 allows RMII mode to be configured via a gasket
++ */
++#define FEC_MIIGSK_CFGR_FRCONT (1 << 6)
++#define FEC_MIIGSK_CFGR_LBMODE (1 << 4)
++#define FEC_MIIGSK_CFGR_EMODE (1 << 3)
++#define FEC_MIIGSK_CFGR_IF_MODE_MASK (3 << 0)
++#define FEC_MIIGSK_CFGR_IF_MODE_MII (0 << 0)
++#define FEC_MIIGSK_CFGR_IF_MODE_RMII (1 << 0)
++
++#define FEC_MIIGSK_ENR_READY (1 << 2)
++#define FEC_MIIGSK_ENR_EN (1 << 1)
++
++static void __inline__ fec_localhw_setup(struct net_device *dev)
++{
++	struct fec_enet_private *fep = netdev_priv(dev);
++	volatile fec_t *fecp = fep->hwp;
++	/*
++	 * Set up the MII gasket for RMII mode
++	 */
++	printk("%s: enable RMII gasket\n", dev->name);
++
++	/* disable the gasket and wait */
++	fecp->fec_miigsk_enr = 0;
++	while (fecp->fec_miigsk_enr & FEC_MIIGSK_ENR_READY)
++		udelay(1);
++
++	/* configure the gasket for RMII, 50 MHz, no loopback, no echo */
++	fecp->fec_miigsk_cfgr = FEC_MIIGSK_CFGR_IF_MODE_RMII;
++
++	/* re-enable the gasket */
++	fecp->fec_miigsk_enr = FEC_MIIGSK_ENR_EN;
++}
++#else
++static void __inline__ fec_localhw_setup(struct net_device *dev)
+ {
+ }
++#endif
+ 
+ /*
+  * invalidate dcache related with the virtual memory range(start, end)
+@@ -2325,7 +2361,7 @@ static void __inline__ fec_phy_ack_intr(void)
+ {
+ }
+ 
+-static void __inline__ fec_localhw_setup(void)
++static void __inline__ fec_localhw_setup(struct net_device *dev)
+ {
+ 	volatile fec_t *fecp;
+ 
+@@ -2988,7 +3024,7 @@ fec_restart(struct net_device *dev, int duplex)
+ 	*/
+ 	fecp->fec_r_buff_size = PKT_MAXBLR_SIZE;
+ 
+-	fec_localhw_setup();
++	fec_localhw_setup(dev);
+ 
+ 	/* Set receive and transmit descriptor base.
+ 	*/
+diff --git a/drivers/net/fec.h b/drivers/net/fec.h
+index 504b8f9..cb21ef1 100644
+--- a/drivers/net/fec.h
++++ b/drivers/net/fec.h
+@@ -56,6 +56,10 @@ typedef struct fec {
+ 	unsigned long	fec_r_des_start;	/* Receive descriptor ring */
+ 	unsigned long	fec_x_des_start;	/* Transmit descriptor ring */
+ 	unsigned long	fec_r_buff_size;	/* Maximum receive buff size */
++	unsigned long	fec_reserved12[93];
++	unsigned long	fec_miigsk_cfgr;	/* MIIGSK config register */
++	unsigned long	fec_reserved13;
++	unsigned long	fec_miigsk_enr;		/* MIIGSK enable register */
+ } fec_t;
+ 
+ #else
+-- 
+1.5.4.4
+

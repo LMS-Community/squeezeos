@@ -1,0 +1,162 @@
+From 2d2a08296487dc2356bf866f429c2eddfb8b1579 Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Fri, 19 Sep 2008 10:55:01 +0800
+Subject: [PATCH] ENGR00090992 Add color space convert in v4l2 output and ipu
+
+Add color space convert in v4l2 output and ipu.
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |    7 +++
+ drivers/mxc/ipu3/ipu_common.c                    |    6 ++
+ drivers/mxc/ipu3/ipu_disp.c                      |   60 ++++++++++++++++-----
+ drivers/mxc/ipu3/ipu_prv.h                       |    1 +
+ include/asm-arm/arch-mxc/ipu.h                   |    1 +
+ 5 files changed, 60 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index ca374c2..3ab8bb9 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -323,6 +323,7 @@ static irqreturn_t mxc_v4l2out_pp_in_irq_handler(int irq, void *dev_id)
+ 	unsigned long timeout;
+ 	unsigned long lock_flags = 0;
+ 	vout_data *vout = dev_id;
++	int param[5][3];
+ 
+ 	spin_lock_irqsave(&g_lock, lock_flags);
+ 
+@@ -338,6 +339,12 @@ static irqreturn_t mxc_v4l2out_pp_in_irq_handler(int irq, void *dev_id)
+ 		wake_up_interruptible(&vout->v4l_bufq);
+ 		/* printk("pp_irq: buf %d done\n", vout->next_done_ipu_buf); */
+ 		vout->next_done_ipu_buf = !vout->next_done_ipu_buf;
++		if (vout->v4l2_bufs[last_buf].reserved)
++			if (!copy_from_user(&param[0][0],
++					    (void *)vout->v4l2_bufs[last_buf]
++					    .reserved, sizeof(param)))
++				ipu_set_csc_coefficients(vout->display_ch,
++							 param);
+ 	}
+ 
+ 	if (vout->state == STATE_STREAM_STOPPING) {
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index d6979f2..dfe4912 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -1462,6 +1462,12 @@ ipu_color_space_t format_to_colorspace(uint32_t fmt)
+ 	return RGB;
+ }
+ 
++void ipu_set_csc_coefficients(ipu_channel_t channel, int32_t param[][3])
++{
++	_ipu_dp_set_csc_coefficients(channel, param);
++}
++EXPORT_SYMBOL(ipu_set_csc_coefficients);
++
+ static int ipu_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	mxc_pg_enable(pdev);
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index bfeca2c..84a493a 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -273,21 +273,7 @@ int _ipu_dp_init(ipu_channel_t channel, uint32_t in_pixel_fmt,
+ 			coeff = &rgb2ycbcr_coeff;
+ 		else
+ 			coeff = &ycbcr2rgb_coeff;
+-
+-		__raw_writel(mask_a((*coeff)[0][0]) |
+-			     (mask_a((*coeff)[0][1]) << 16), DP_CSC_A_0(dp));
+-		__raw_writel(mask_a((*coeff)[0][2]) |
+-			     (mask_a((*coeff)[1][0]) << 16), DP_CSC_A_1(dp));
+-		__raw_writel(mask_a((*coeff)[1][1]) |
+-			     (mask_a((*coeff)[1][2]) << 16), DP_CSC_A_2(dp));
+-		__raw_writel(mask_a((*coeff)[2][0]) |
+-			     (mask_a((*coeff)[2][1]) << 16), DP_CSC_A_3(dp));
+-		__raw_writel(mask_a((*coeff)[2][2]) |
+-			     (mask_b((*coeff)[3][0]) << 16) |
+-			     ((*coeff)[4][0] << 30), DP_CSC_0(dp));
+-		__raw_writel(mask_b((*coeff)[3][1]) | ((*coeff)[4][1] << 14) |
+-			     (mask_b((*coeff)[3][2]) << 16) |
+-			     ((*coeff)[4][2] << 30), DP_CSC_1(dp));
++		_ipu_dp_set_csc_coefficients(channel, (void *) *coeff);
+ 	}
+ 
+ 	reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
+@@ -582,6 +568,50 @@ int _ipu_pixfmt_to_map(uint32_t fmt)
+ }
+ 
+ /*!
++ * This function sets the colorspace for of dp.
++ * modes.
++ *
++ * @param       channel         Input parameter for the logical channel ID.
++ *
++ * @param       param         	If it's not NULL, update the csc table
++ *                              with this parameter.
++ *
++ * @return      N/A
++ */
++void _ipu_dp_set_csc_coefficients(ipu_channel_t channel, int32_t param[][3])
++{
++	u32 reg;
++	int dp;
++
++	if (channel == MEM_FG_SYNC)
++		dp = DP_SYNC;
++	else if (channel == MEM_BG_SYNC)
++		dp = DP_SYNC;
++	else if (channel == MEM_BG_ASYNC0)
++		dp = DP_ASYNC0;
++	else
++		return;
++
++	__raw_writel(mask_a(param[0][0]) |
++		     (mask_a(param[0][1]) << 16), DP_CSC_A_0(dp));
++	__raw_writel(mask_a(param[0][2]) |
++		     (mask_a(param[1][0]) << 16), DP_CSC_A_1(dp));
++	__raw_writel(mask_a(param[1][1]) |
++		     (mask_a(param[1][2]) << 16), DP_CSC_A_2(dp));
++	__raw_writel(mask_a(param[2][0]) |
++		     (mask_a(param[2][1]) << 16), DP_CSC_A_3(dp));
++	__raw_writel(mask_a(param[2][2]) |
++		     (mask_b(param[3][0]) << 16) |
++		     (param[4][0] << 30), DP_CSC_0(dp));
++	__raw_writel(mask_b(param[3][1]) | (param[4][1] << 14) |
++		     (mask_b(param[3][2]) << 16) |
++		     (param[4][2] << 30), DP_CSC_1(dp));
++
++	reg = __raw_readl(IPU_SRM_PRI2) | 0x8;
++	__raw_writel(reg, IPU_SRM_PRI2);
++}
++
++/*!
+  * This function is called to initialize a synchronous LCD panel.
+  *
+  * @param       disp            The DI the panel is attached to.
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index cecabdb..d4eadec 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -74,5 +74,6 @@ void _ipu_ic_init_rotate_pp(ipu_channel_params_t *params);
+ void _ipu_ic_uninit_rotate_pp(void);
+ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ 		      int burst_size, ipu_rotate_mode_t rot);
++void _ipu_dp_set_csc_coefficients(ipu_channel_t channel, int32_t param[][3]);
+ 
+ #endif				/* __INCLUDE_IPU_PRV_H__ */
+diff --git a/include/asm-arm/arch-mxc/ipu.h b/include/asm-arm/arch-mxc/ipu.h
+index b4647da..517430b 100644
+--- a/include/asm-arm/arch-mxc/ipu.h
++++ b/include/asm-arm/arch-mxc/ipu.h
+@@ -822,6 +822,7 @@ int ipu_request_irq(uint32_t irq,
+ 		    uint32_t irq_flags, const char *devname, void *dev_id);
+ void ipu_free_irq(uint32_t irq, void *dev_id);
+ bool ipu_get_irq_status(uint32_t irq);
++void ipu_set_csc_coefficients(ipu_channel_t channel, int32_t param[][3]);
+ 
+ /* SDC API */
+ int32_t ipu_sdc_init_panel(ipu_panel_t panel,
+-- 
+1.5.4.4
+

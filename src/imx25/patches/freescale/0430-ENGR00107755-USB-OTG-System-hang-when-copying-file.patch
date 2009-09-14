@@ -1,0 +1,41 @@
+From 0c57e4a3cbe6d1bd24c91fd69d00596abc9d27fc Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Thu, 19 Feb 2009 15:03:48 -0600
+Subject: [PATCH] ENGR00107755 USB OTG: System hang when copying file to USB HOST
+
+Remove while() loop in an ISR routine which will hang the system
+because the jiffies value is never update in an ISR context.
+
+This issue is resolved by updating to version 200904_P1 of Redboot.
+This Redboot fixes a deadlock condition that was occuring during a
+data transfer.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   10 ----------
+ 1 files changed, 0 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 88a7c79..1c32fcf 100644
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1939,16 +1939,6 @@ static void reset_irq(struct fsl_udc *udc)
+ 	temp = fsl_readl(&dr_regs->endptcomplete);
+ 	fsl_writel(temp, &dr_regs->endptcomplete);
+ 
+-	timeout = jiffies + 100;
+-	while (fsl_readl(&dr_regs->endpointprime)) {
+-		/* Wait until all endptprime bits cleared */
+-		if (time_after(jiffies, timeout)) {
+-			ERR("Timeout for reset\n");
+-			break;
+-		}
+-		cpu_relax();
+-	}
+-
+ 	/* Write 1s to the flush register */
+ 	fsl_writel(0xffffffff, &dr_regs->endptflush);
+ 
+-- 
+1.5.4.4
+

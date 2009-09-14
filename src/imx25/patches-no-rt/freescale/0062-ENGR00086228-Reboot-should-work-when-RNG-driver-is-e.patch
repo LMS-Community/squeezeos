@@ -1,0 +1,98 @@
+From 8cce3062f7e97cc9850222366132b32a082075be Mon Sep 17 00:00:00 2001
+From: Yan Wang <r65094@freescale.com>
+Date: Wed, 27 Aug 2008 15:18:50 +0800
+Subject: [PATCH] ENGR00086228 Reboot should work when RNG driver is enabled
+
+This CR is required to resolve RNGC on-hold issue when hot reset
+
+Signed-off-by: Yan Wang <r65094@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig          |    2 +-
+ drivers/mxc/security/rng/include/rng_internals.h |    3 ---
+ drivers/mxc/security/rng/rng_driver.c            |    8 +++++---
+ 3 files changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 5d9017d..f34d961 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1297,7 +1297,7 @@ CONFIG_MXC_MC9SDZ60_POWER=y
+ #
+ CONFIG_MXC_SECURITY_SCC=y
+ # CONFIG_SCC_DEBUG is not set
+-# CONFIG_MXC_SECURITY_RNG is not set
++CONFIG_MXC_SECURITY_RNG=y 
+ CONFIG_MXC_SECURITY_RTIC=y
+ # CONFIG_MXC_RTIC_TEST_DEBUG is not set
+ CONFIG_MXC_SECURITY_CORE=y
+diff --git a/drivers/mxc/security/rng/include/rng_internals.h b/drivers/mxc/security/rng/include/rng_internals.h
+index 7704458..b781ab3 100644
+--- a/drivers/mxc/security/rng/include/rng_internals.h
++++ b/drivers/mxc/security/rng/include/rng_internals.h
+@@ -349,7 +349,6 @@ inline static void RNG_ADD_WORK_ENTRY(rng_work_entry_t * work)
+ /* Return non-zero if RESEED Required */
+ #define RNG_RESEED() 1
+ 
+-
+ /** Return non-zero if Seeding is done */
+ #define RNG_SEED_DONE()  1
+ 
+@@ -485,7 +484,6 @@ inline static void RNG_ADD_WORK_ENTRY(rng_work_entry_t * work)
+ #define RNG_CHECK_SEED_ERR()                                                 \
+         (RNG_READ_REGISTER(RNGC_ERROR) & RNGC_ERROR_STATUS_STAT_ERR)
+ 
+-/** Configure RNG for Self Test */
+ #define RNG_SELF_TEST()                                                       \
+ {                                                                             \
+     register uint32_t command = RNG_READ_REGISTER(RNGC_COMMAND);              \
+@@ -500,7 +498,6 @@ inline static void RNG_ADD_WORK_ENTRY(rng_work_entry_t * work)
+                                     | RNGC_COMMAND_CLEAR_ERROR);              \
+ }
+ 
+-
+ /** Return non-zero if Self Test Done */
+ #define RNG_SELF_TEST_DONE()                                                  \
+          (RNG_READ_REGISTER(RNGC_STATUS) & RNGC_STATUS_ST_DONE)
+diff --git a/drivers/mxc/security/rng/rng_driver.c b/drivers/mxc/security/rng/rng_driver.c
+index 8ed2da9..501d6de 100644
+--- a/drivers/mxc/security/rng/rng_driver.c
++++ b/drivers/mxc/security/rng/rng_driver.c
+@@ -192,7 +192,7 @@ OS_DEV_INIT(rng_init)
+ 
+ 	clk = clk_get(NULL, "rng_clk");
+ 
+-	/* Check that the clock was found*/
++	/* Check that the clock was found */
+ 	if (IS_ERR(clk)) {
+ #ifdef RNG_DEBUG
+ 		LOG_KDIAG("RNG: Failed to find rng_clock.");
+@@ -270,6 +270,8 @@ OS_DEV_INIT(rng_init)
+ 		/* Self Testing For RNG */
+ 		do {
+ 			RNG_CLEAR_ERR();
++			/* wait for Clearing Erring finished */
++			msleep(1);
+ 			RNG_UNMASK_ALL_INTERRUPTS();
+ 			RNG_SELF_TEST();
+ #if defined(FSL_HAVE_RNGC)
+@@ -297,7 +299,7 @@ OS_DEV_INIT(rng_init)
+ #ifndef RNG_NO_FORCE_HIGH_ASSURANCE
+ #ifdef RNG_DEBUG
+ 			LOG_KDIAG
+-		    ("RNG Driver: RNG could not be put in High Assurance mode");
++			("RNG Driver: RNG could not be put in High Assurance mode");
+ #endif
+ #endif				/* RNG_NO_FORCE_HIGH_ASSURANCE */
+ 			rng_availability = RNG_STATUS_FAILED;
+@@ -969,7 +971,7 @@ static fsl_shw_return_t rng_drain_fifo(uint32_t * random_p, int count_words)
+ 			wait_for_completion(&rng_seed_done);
+ 			if (count_for_reseed == 3) {
+ 				os_printk(KERN_ALERT
+-				  "Device was not able to enter RESEED Mode\n");
++					"Device was not able to enter RESEED Mode\n");
+ 				code = FSL_RETURN_INTERNAL_ERROR_S;
+ 			}
+ 			count_for_reseed++;
+-- 
+1.5.4.4
+

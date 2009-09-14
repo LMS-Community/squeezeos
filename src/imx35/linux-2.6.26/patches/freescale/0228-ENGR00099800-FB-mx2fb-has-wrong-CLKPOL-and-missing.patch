@@ -1,0 +1,46 @@
+From bd12f99050d2cadfae32714fd7f74df236382d47 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Thu, 20 Nov 2008 17:04:15 -0700
+Subject: [PATCH] ENGR00099800 FB: mx2fb has wrong CLKPOL and missing PIXPOL
+
+In mx2fb.c, the implementation of FB_SYNC_CLK_INVERT
+actually inverts the pixel data instead of the pixel clock.
+And, FB_SYNC_DATA_INVERT was not implemented at all.
+
+Note that due to differences in the LCDC on MX2 and MX3,
+the CLKPOL bit in the LPCR register has opposite meanings.
+
+Since the mxcfb_modedb table is shared across mx2 and mxc
+platforms, this fix provides an FB_SYNC_CLK_INVERT mode that's
+compatible with the mxcfb.c interpretation of the mode tables.
+It also implements the missing FB_SYNC_DATA_INVERT mode.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ drivers/video/mxc/mx2fb.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mx2fb.c b/drivers/video/mxc/mx2fb.c
+index 48908df..fbb5b93 100644
+--- a/drivers/video/mxc/mx2fb.c
++++ b/drivers/video/mxc/mx2fb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1052,7 +1052,8 @@ static void _update_lcdc(struct fb_info *info)
+ 
+ 	/* Panel configuration register */
+ 	pcr = 0xFA008B80 | pcd;
+-	pcr |= (var->sync & FB_SYNC_CLK_INVERT) ? 0x01000000 : 0;
++	pcr |= (var->sync & FB_SYNC_CLK_INVERT) ? 0 : 0x00200000;
++	pcr |= (var->sync & FB_SYNC_DATA_INVERT) ? 0x01000000 : 0;
+ 	pcr |= (var->sync & FB_SYNC_SHARP_MODE) ? 0x00000040 : 0;
+ 	pcr |= (var->sync & FB_SYNC_OE_ACT_HIGH) ? 0 : 0x00100000;
+ 	__raw_writel(pcr, LCDC_REG(LCDC_LPCR));
+-- 
+1.5.4.4
+

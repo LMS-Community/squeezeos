@@ -1,0 +1,56 @@
+From bdfbc2dfdd98796e603c3dadfb7b2d659555eb03 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 22 Jul 2008 11:52:52 +0300
+Subject: [PATCH] UBIFS: do not write orphans back
+
+Orphan inodes are deleted inodes which will disappear after FS
+re-mount. There is not need to write orphan inodes back, because
+they are not needed on the flash media.
+
+So optimize orphans a little by not writing them back. Just mark
+them as clean, free the budget, and report success to VFS.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   18 +++++++++++++-----
+ 1 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 41b02cf..82cb927 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -287,7 +287,7 @@ static void ubifs_destroy_inode(struct inode *inode)
+  */
+ static int ubifs_write_inode(struct inode *inode, int wait)
+ {
+-	int err;
++	int err = 0;
+ 	struct ubifs_info *c = inode->i_sb->s_fs_info;
+ 	struct ubifs_inode *ui = ubifs_inode(inode);
+ 
+@@ -308,10 +308,18 @@ static int ubifs_write_inode(struct inode *inode, int wait)
+ 		return 0;
+ 	}
+ 
+-	dbg_gen("inode %lu, mode %#x", inode->i_ino, (int)inode->i_mode);
+-	err = ubifs_jnl_write_inode(c, inode, 0);
+-	if (err)
+-		ubifs_err("can't write inode %lu, error %d", inode->i_ino, err);
++	/*
++	 * As an optimization, do not write orphan inodes to the media just
++	 * because this is not needed.
++	 */
++	dbg_gen("inode %lu, mode %#x, nlink %u",
++		inode->i_ino, (int)inode->i_mode, inode->i_nlink);
++	if (inode->i_nlink) {
++		err = ubifs_jnl_write_inode(c, inode, 0);
++		if (err)
++			ubifs_err("can't write inode %lu, error %d",
++				  inode->i_ino, err);
++	}
+ 
+ 	ui->dirty = 0;
+ 	mutex_unlock(&ui->ui_mutex);
+-- 
+1.5.6.3
+

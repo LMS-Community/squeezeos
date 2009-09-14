@@ -1,0 +1,46 @@
+From 70374bbe85d0f31342723078661338a5f08d9364 Mon Sep 17 00:00:00 2001
+From: Adrian Brunyate <abrunyate@yahoo.com>
+Date: Thu, 26 Apr 2007 18:51:09 -0400
+Subject: [PATCH] Unionfs: Accept MS_SILENT during remount
+
+[jsipek: whitespace cleanup]
+Signed-off-by: Adrian Brunyate <abrunyate@yahoo.com>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/super.c |   12 +++++++-----
+ 1 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index e6a6cc1..ee12d03 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -425,11 +425,12 @@ static int unionfs_remount_fs(struct super_block *sb, int *flags,
+ 	unionfs_write_lock(sb);
+ 
+ 	/*
+-	 * The VFS will take care of "ro" and "rw" flags, so anything else
+-	 * is an error.  So we need to check if any other flags may have
+-	 * been passed (none are allowed/supported as of now).
++	 * The VFS will take care of "ro" and "rw" flags, and we can safely
++	 * ignore MS_SILENT, but anything else left over is an error.  So we
++	 * need to check if any other flags may have been passed (none are
++	 * allowed/supported as of now).
+ 	 */
+-	if ((*flags & ~MS_RDONLY) != 0) {
++	if ((*flags & ~(MS_RDONLY | MS_SILENT)) != 0) {
+ 		printk(KERN_WARNING
+ 		       "unionfs: remount flags 0x%x unsupported\n", *flags);
+ 		err = -EINVAL;
+@@ -731,7 +732,8 @@ out_no_change:
+ 	i = atomic_inc_return(&UNIONFS_SB(sb)->generation);
+ 	atomic_set(&UNIONFS_D(sb->s_root)->generation, i);
+ 	atomic_set(&UNIONFS_I(sb->s_root->d_inode)->generation, i);
+-	printk("unionfs: new generation number %d\n", i);
++	if (!(*flags & MS_SILENT)) 
++		printk("unionfs: new generation number %d\n", i);
+ 	err = 0;		/* reset to success */
+ 
+ 	/*
+-- 
+1.5.4.3
+

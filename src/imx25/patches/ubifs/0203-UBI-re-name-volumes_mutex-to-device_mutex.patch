@@ -1,0 +1,199 @@
+From c33f3f205ffb252985ed97807af99ba1e98be8fc Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 7 May 2009 11:46:49 +0300
+Subject: [PATCH] UBI: re-name volumes_mutex to device_mutex
+
+The mutex essencially protects the entire UBI device, so the
+old @volumes_mutex name is a little misleading.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    2 +-
+ drivers/mtd/ubi/cdev.c  |   22 +++++++++++-----------
+ drivers/mtd/ubi/ubi.h   |    8 ++++----
+ drivers/mtd/ubi/upd.c   |    8 ++++----
+ drivers/mtd/ubi/vmt.c   |    6 +++---
+ 5 files changed, 23 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 9e1f39a..4eb7944 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -806,7 +806,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 
+ 	mutex_init(&ubi->buf_mutex);
+ 	mutex_init(&ubi->ckvol_mutex);
+-	mutex_init(&ubi->volumes_mutex);
++	mutex_init(&ubi->device_mutex);
+ 	spin_lock_init(&ubi->volumes_lock);
+ 
+ 	ubi_msg("attaching mtd%d to ubi%d", mtd->index, ubi_num);
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 8087b04..1024c10 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -558,7 +558,7 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
+ 		break;
+ 	}
+ 
+-	/* Set volume property command*/
++	/* Set volume property command */
+ 	case UBI_IOCSETPROP:
+ 	{
+ 		struct ubi_set_prop_req req;
+@@ -571,9 +571,9 @@ static long vol_cdev_ioctl(struct file *file, unsigned int cmd,
+ 		}
+ 		switch (req.property) {
+ 		case UBI_PROP_DIRECT_WRITE:
+-			mutex_lock(&ubi->volumes_mutex);
++			mutex_lock(&ubi->device_mutex);
+ 			desc->vol->direct_writes = !!req.value;
+-			mutex_unlock(&ubi->volumes_mutex);
++			mutex_unlock(&ubi->device_mutex);
+ 			break;
+ 		default:
+ 			err = -EINVAL;
+@@ -810,7 +810,9 @@ static int rename_volumes(struct ubi_device *ubi,
+ 			re->desc->vol->vol_id, re->desc->vol->name);
+ 	}
+ 
++	mutex_lock(&ubi->device_mutex);
+ 	err = ubi_rename_volumes(ubi, &rename_list);
++	mutex_unlock(&ubi->device_mutex);
+ 
+ out_free:
+ 	list_for_each_entry_safe(re, re1, &rename_list, list) {
+@@ -854,9 +856,9 @@ static long ubi_cdev_ioctl(struct file *file, unsigned int cmd,
+ 		if (err)
+ 			break;
+ 
+-		mutex_lock(&ubi->volumes_mutex);
++		mutex_lock(&ubi->device_mutex);
+ 		err = ubi_create_volume(ubi, &req);
+-		mutex_unlock(&ubi->volumes_mutex);
++		mutex_unlock(&ubi->device_mutex);
+ 		if (err)
+ 			break;
+ 
+@@ -885,9 +887,9 @@ static long ubi_cdev_ioctl(struct file *file, unsigned int cmd,
+ 			break;
+ 		}
+ 
+-		mutex_lock(&ubi->volumes_mutex);
++		mutex_lock(&ubi->device_mutex);
+ 		err = ubi_remove_volume(desc, 0);
+-		mutex_unlock(&ubi->volumes_mutex);
++		mutex_unlock(&ubi->device_mutex);
+ 
+ 		/*
+ 		 * The volume is deleted (unless an error occurred), and the
+@@ -924,9 +926,9 @@ static long ubi_cdev_ioctl(struct file *file, unsigned int cmd,
+ 		pebs = div_u64(req.bytes + desc->vol->usable_leb_size - 1,
+ 			       desc->vol->usable_leb_size);
+ 
+-		mutex_lock(&ubi->volumes_mutex);
++		mutex_lock(&ubi->device_mutex);
+ 		err = ubi_resize_volume(desc, pebs);
+-		mutex_unlock(&ubi->volumes_mutex);
++		mutex_unlock(&ubi->device_mutex);
+ 		ubi_close_volume(desc);
+ 		break;
+ 	}
+@@ -950,9 +952,7 @@ static long ubi_cdev_ioctl(struct file *file, unsigned int cmd,
+ 			break;
+ 		}
+ 
+-		mutex_lock(&ubi->volumes_mutex);
+ 		err = rename_volumes(ubi, req);
+-		mutex_unlock(&ubi->volumes_mutex);
+ 		kfree(req);
+ 		break;
+ 	}
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index 485c73f..76ec79b 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -305,9 +305,9 @@ struct ubi_wl_entry;
+  * @vtbl_slots: how many slots are available in the volume table
+  * @vtbl_size: size of the volume table in bytes
+  * @vtbl: in-RAM volume table copy
+- * @volumes_mutex: protects on-flash volume table and serializes volume
+- *                 changes, like creation, deletion, update, re-size,
+- *                 re-name and set property
++ * @device_mutex: protects on-flash volume table and serializes volume
++ *                creation, deletion, update, re-size, re-name and set
++ *                property
+  *
+  * @max_ec: current highest erase counter value
+  * @mean_ec: current mean erase counter value
+@@ -388,7 +388,7 @@ struct ubi_device {
+ 	int vtbl_slots;
+ 	int vtbl_size;
+ 	struct ubi_vtbl_record *vtbl;
+-	struct mutex volumes_mutex;
++	struct mutex device_mutex;
+ 
+ 	int max_ec;
+ 	/* Note, mean_ec is not updated run-time - should be fixed */
+diff --git a/drivers/mtd/ubi/upd.c b/drivers/mtd/ubi/upd.c
+index 6b4d1ae..dce1d92 100644
+--- a/drivers/mtd/ubi/upd.c
++++ b/drivers/mtd/ubi/upd.c
+@@ -68,9 +68,9 @@ static int set_update_marker(struct ubi_device *ubi, struct ubi_volume *vol)
+ 	       sizeof(struct ubi_vtbl_record));
+ 	vtbl_rec.upd_marker = 1;
+ 
+-	mutex_lock(&ubi->volumes_mutex);
++	mutex_lock(&ubi->device_mutex);
+ 	err = ubi_change_vtbl_record(ubi, vol->vol_id, &vtbl_rec);
+-	mutex_unlock(&ubi->volumes_mutex);
++	mutex_unlock(&ubi->device_mutex);
+ 	vol->upd_marker = 1;
+ 	return err;
+ }
+@@ -109,9 +109,9 @@ static int clear_update_marker(struct ubi_device *ubi, struct ubi_volume *vol,
+ 			vol->last_eb_bytes = vol->usable_leb_size;
+ 	}
+ 
+-	mutex_lock(&ubi->volumes_mutex);
++	mutex_lock(&ubi->device_mutex);
+ 	err = ubi_change_vtbl_record(ubi, vol->vol_id, &vtbl_rec);
+-	mutex_unlock(&ubi->volumes_mutex);
++	mutex_unlock(&ubi->device_mutex);
+ 	vol->upd_marker = 0;
+ 	return err;
+ }
+diff --git a/drivers/mtd/ubi/vmt.c b/drivers/mtd/ubi/vmt.c
+index 545f3bc..86f2e5b 100644
+--- a/drivers/mtd/ubi/vmt.c
++++ b/drivers/mtd/ubi/vmt.c
+@@ -198,7 +198,7 @@ static void volume_sysfs_close(struct ubi_volume *vol)
+  * %UBI_VOL_NUM_AUTO, this function automatically assign ID to the new volume
+  * and saves it in @req->vol_id. Returns zero in case of success and a negative
+  * error code in case of failure. Note, the caller has to have the
+- * @ubi->volumes_mutex locked.
++ * @ubi->device_mutex locked.
+  */
+ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
+ {
+@@ -403,7 +403,7 @@ out_unlock:
+  *
+  * This function removes volume described by @desc. The volume has to be opened
+  * in "exclusive" mode. Returns zero in case of success and a negative error
+- * code in case of failure. The caller has to have the @ubi->volumes_mutex
++ * code in case of failure. The caller has to have the @ubi->device_mutex
+  * locked.
+  */
+ int ubi_remove_volume(struct ubi_volume_desc *desc, int no_vtbl)
+@@ -485,7 +485,7 @@ out_unlock:
+  *
+  * This function re-sizes the volume and returns zero in case of success, and a
+  * negative error code in case of failure. The caller has to have the
+- * @ubi->volumes_mutex locked.
++ * @ubi->device_mutex locked.
+  */
+ int ubi_resize_volume(struct ubi_volume_desc *desc, int reserved_pebs)
+ {
+-- 
+1.5.4.3
+

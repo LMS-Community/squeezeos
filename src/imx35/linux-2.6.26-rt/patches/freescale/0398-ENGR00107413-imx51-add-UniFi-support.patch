@@ -1,0 +1,229 @@
+From 9a2fabe67619a5a423ad7b3f5f19135d8cbc71cf Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Tue, 10 Feb 2009 10:54:22 +0800
+Subject: [PATCH] ENGR00107413 imx51: add UniFi support
+
+Config mmc2 iomux, Add UniFi platform data.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |    8 +++-
+ arch/arm/mach-mx51/mx51_3stack.c        |   45 ++++++++++++++++----
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |   69 ++++++++++++++++++++++++++++++-
+ drivers/mmc/card/Kconfig                |    2 +-
+ 4 files changed, 112 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index 332d71f..5b827cc 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Mon Feb  2 13:31:57 2009
++# Tue Feb 10 10:52:50 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1362,6 +1362,7 @@ CONFIG_MMC_BLOCK=y
+ CONFIG_MMC_BLOCK_BOUNCE=y
+ # CONFIG_SDIO_UART is not set
+ # CONFIG_MMC_TEST is not set
++CONFIG_SDIO_UNIFI_FS=m
+ 
+ #
+ # MMC/SD Host Controller Drivers
+@@ -1531,6 +1532,11 @@ CONFIG_MXC_BLUETOOTH=m
+ #
+ 
+ #
++# i.MX ADC support
++#
++# CONFIG_IMX_ADC is not set
++
++#
+ # File systems
+ #
+ CONFIG_EXT2_FS=y
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index d492e43..340f44e 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -953,16 +953,7 @@ static inline void mxc_sgtl5000_init(void)
+ 
+ static void bt_reset(void)
+ {
+-	int err;
+-
+-	err = mxc_request_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_GPIO);
+-	if (err) {
+-		printk(KERN_ERR "Error: bt reset request gpio failed!\n");
+-		return;
+-	}
+ 	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, 1);
+-	mxc_set_gpio_direction(MX51_PIN_EIM_D19, 0);
+-	mxc_free_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_GPIO);
+ }
+ 
+ static struct mxc_bt_platform_data mxc_bt_data = {
+@@ -987,6 +978,34 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
++#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
++static void mxc_unifi_hardreset(void)
++{
++	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, 0);
++	msleep(100);
++	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, 1);
++}
++
++static struct mxc_unifi_platform_data unifi_data = {
++	.hardreset = mxc_unifi_hardreset,
++	.reg_vdd_vpa = "VSD",
++	.reg_1v5_dd = "VGEN1",
++	.host_id = 1,
++};
++
++struct mxc_unifi_platform_data *get_unifi_plat_data(void)
++{
++	return &unifi_data;
++}
++#else
++struct mxc_unifi_platform_data *get_unifi_plat_data(void)
++{
++	return NULL;
++}
++#endif
++
++EXPORT_SYMBOL(get_unifi_plat_data);
++
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -1019,6 +1038,8 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+  */
+ static void __init mxc_board_init(void)
+ {
++	int err;
++
+ 	mxc_cpu_common_init();
+ 	mxc_clocks_init();
+ 	mxc_gpio_init();
+@@ -1056,6 +1077,12 @@ static void __init mxc_board_init(void)
+ 
+ 	mxc_sgtl5000_init();
+ 	mxc_init_bluetooth();
++
++	err = mxc_request_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_GPIO);
++	if (err)
++		printk(KERN_ERR "Error: bt reset request gpio failed!\n");
++	else
++		mxc_set_gpio_direction(MX51_PIN_EIM_D19, 0);
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 8a90b12..7f9c075 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -607,6 +607,49 @@ void gpio_sdhc_active(int module)
+ 		mxc_set_gpio_direction(MX51_PIN_GPIO1_1, 1);
+ 		break;
+ 	case 1:
++		mxc_request_iomux(MX51_PIN_SD2_CMD,
++				  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_request_iomux(MX51_PIN_SD2_CLK,
++				  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++
++		mxc_request_iomux(MX51_PIN_SD2_DATA0,
++				  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_request_iomux(MX51_PIN_SD2_DATA1,
++				  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_request_iomux(MX51_PIN_SD2_DATA2,
++				  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_request_iomux(MX51_PIN_SD2_DATA3,
++				  IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_iomux_set_pad(MX51_PIN_SD2_CMD,
++				  PAD_CTL_DRV_MAX | PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_ENABLE | PAD_CTL_47K_PU |
++				  PAD_CTL_PUE_PULL |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_pad(MX51_PIN_SD2_CLK,
++				  PAD_CTL_DRV_MAX | PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_NONE | PAD_CTL_47K_PU |
++				  PAD_CTL_PUE_PULL |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA0,
++				  PAD_CTL_DRV_MAX | PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_ENABLE | PAD_CTL_47K_PU |
++				  PAD_CTL_PUE_PULL |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA1,
++				  PAD_CTL_DRV_MAX | PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_ENABLE | PAD_CTL_47K_PU |
++				  PAD_CTL_PUE_PULL |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA2,
++				  PAD_CTL_DRV_MAX | PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_ENABLE | PAD_CTL_47K_PU |
++				  PAD_CTL_PUE_PULL |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA3,
++				  PAD_CTL_DRV_MAX | PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_ENABLE | PAD_CTL_100K_PD |
++				  PAD_CTL_PUE_PULL |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_SRE_FAST);
+ 		break;
+ 	default:
+ 		break;
+@@ -656,7 +699,31 @@ void gpio_sdhc_inactive(int module)
+ 				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
+ 		break;
+ 	case 1:
+-		/* TODO:what are the pins for SDHC2? */
++		mxc_free_iomux(MX51_PIN_SD2_CMD,
++			       IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_free_iomux(MX51_PIN_SD2_CLK,
++			       IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_free_iomux(MX51_PIN_SD2_DATA0,
++			       IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_free_iomux(MX51_PIN_SD2_DATA1,
++			       IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_free_iomux(MX51_PIN_SD2_DATA2,
++			       IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++		mxc_free_iomux(MX51_PIN_SD2_DATA3,
++			       IOMUX_CONFIG_ALT0 | IOMUX_CONFIG_SION);
++
++		mxc_iomux_set_pad(MX51_PIN_SD2_CLK,
++				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX51_PIN_SD2_CMD,
++				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA0,
++				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA1,
++				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA2,
++				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX51_PIN_SD2_DATA3,
++				  (PAD_CTL_DRV_LOW | PAD_CTL_SRE_SLOW));
+ 		break;
+ 	default:
+ 		break;
+diff --git a/drivers/mmc/card/Kconfig b/drivers/mmc/card/Kconfig
+index d9f54a0..47d5c42 100644
+--- a/drivers/mmc/card/Kconfig
++++ b/drivers/mmc/card/Kconfig
+@@ -55,7 +55,7 @@ config MMC_TEST
+ config SDIO_UNIFI_FS
+ 	tristate "UniFi SDIO glue for Freescale MMC/SDIO"
+ 	depends on (MMC_MXC || MMC_IMX_ESDHCI)
+-	depends on (MACH_MX31_3DS || MACH_MX35_3DS || MACH_MX37_3DS)
++	depends on (MACH_MX31_3DS || MACH_MX35_3DS || MACH_MX37_3DS || MACH_MX51_3DS)
+ 	help
+ 	  This provides an interface between the CSR UniFi WiFi
+ 	  driver and the Freescale MMC/SDIO interface.
+-- 
+1.5.4.4
+

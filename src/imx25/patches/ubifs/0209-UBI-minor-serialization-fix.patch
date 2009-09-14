@@ -1,0 +1,41 @@
+From f94cfa314dc23e9cb866ab38ae7d5d6d6af86e14 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 13 May 2009 17:05:11 +0300
+Subject: [PATCH] UBI: minor serialization fix
+
+The @vol->upd_marker should be protected by the @ubi->device_mutex,
+otherwise 'paranoid_check_volume()' complains sometimes because
+vol->upd_marker is 1 while vtbl_rec->upd_marker is 0.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/upd.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/ubi/upd.c b/drivers/mtd/ubi/upd.c
+index dce1d92..74fdc40 100644
+--- a/drivers/mtd/ubi/upd.c
++++ b/drivers/mtd/ubi/upd.c
+@@ -70,8 +70,8 @@ static int set_update_marker(struct ubi_device *ubi, struct ubi_volume *vol)
+ 
+ 	mutex_lock(&ubi->device_mutex);
+ 	err = ubi_change_vtbl_record(ubi, vol->vol_id, &vtbl_rec);
+-	mutex_unlock(&ubi->device_mutex);
+ 	vol->upd_marker = 1;
++	mutex_unlock(&ubi->device_mutex);
+ 	return err;
+ }
+ 
+@@ -111,8 +111,8 @@ static int clear_update_marker(struct ubi_device *ubi, struct ubi_volume *vol,
+ 
+ 	mutex_lock(&ubi->device_mutex);
+ 	err = ubi_change_vtbl_record(ubi, vol->vol_id, &vtbl_rec);
+-	mutex_unlock(&ubi->device_mutex);
+ 	vol->upd_marker = 0;
++	mutex_unlock(&ubi->device_mutex);
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

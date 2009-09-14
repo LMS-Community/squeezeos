@@ -1,0 +1,113 @@
+From b0d992b45d8b9cbebbf058b2a68d00a52a9b788d Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 8 Jun 2009 19:28:18 +0300
+Subject: [PATCH] UBI: fix multiple spelling typos
+
+Some of the typos were indicated by Adrian Hunter,
+some by 'aspell'.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c |    2 +-
+ drivers/mtd/ubi/io.c  |    2 +-
+ drivers/mtd/ubi/ubi.h |    4 ++--
+ drivers/mtd/ubi/wl.c  |   14 +++++++-------
+ 4 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index e56a6a1..2a21c76 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -951,7 +951,7 @@ write_error:
+  * physical eraseblock @to. The @vid_hdr buffer may be changed by this
+  * function. Returns:
+  *   o %0 in case of success;
+- *   o %MOVE_CANCEL_RACE, %MOVE_TARGET_WR_ERR, or %MOVE_CANCEL_BITFLIPS;
++ *   o %MOVE_CANCEL_RACE, %MOVE_TARGET_WR_ERR, %MOVE_CANCEL_BITFLIPS, etc;
+  *   o a negative error code in case of failure.
+  */
+ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+diff --git a/drivers/mtd/ubi/io.c b/drivers/mtd/ubi/io.c
+index f14424e..227ec06 100644
+--- a/drivers/mtd/ubi/io.c
++++ b/drivers/mtd/ubi/io.c
+@@ -899,7 +899,7 @@ bad:
+  * o %UBI_IO_BITFLIPS if the CRC is correct, but bit-flips were detected
+  *   and corrected by the flash driver; this is harmless but may indicate that
+  *   this eraseblock may become bad soon;
+- * o %UBI_IO_BAD_VID_HRD if the volume identifier header is corrupted (a CRC
++ * o %UBI_IO_BAD_VID_HDR if the volume identifier header is corrupted (a CRC
+  *   error detected);
+  * o %UBI_IO_PEB_FREE if the physical eraseblock is free (i.e., there is no VID
+  *   header there);
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index 82da62b..70ce48b 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -333,8 +333,8 @@ struct ubi_wl_entry;
+  *      protected from the wear-leveling worker)
+  * @pq_head: protection queue head
+  * @wl_lock: protects the @used, @free, @pq, @pq_head, @lookuptbl, @move_from,
+- * 	     @move_to, @move_to_put @erase_pending, @wl_scheduled, @works and
+- * 	     @erroneous_peb_count fields
++ * 	     @move_to, @move_to_put @erase_pending, @wl_scheduled, @works,
++ * 	     @erroneous, and @erroneous_peb_count fields
+  * @move_mutex: serializes eraseblock moves
+  * @work_sem: synchronizes the WL worker with use tasks
+  * @wl_scheduled: non-zero if the wear-leveling was scheduled
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 1c65f73..0ae00e1 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -83,7 +83,7 @@
+  * used. The former state corresponds to the @wl->free tree. The latter state
+  * is split up on several sub-states:
+  * o the WL movement is allowed (@wl->used tree);
+- * o the WL movement is disallowed (@wl->erroneous) becouse the PEB is
++ * o the WL movement is disallowed (@wl->erroneous) because the PEB is
+  *   erroneous - e.g., there was a read error;
+  * o the WL movement is temporarily prohibited (@wl->pq queue);
+  * o scrubbing is needed (@wl->scrub tree).
+@@ -744,8 +744,8 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 			 * given, so we have a situation when it has not yet
+ 			 * had a chance to write it, because it was preempted.
+ 			 * So add this PEB to the protection queue so far,
+-			 * because presubably more data will be written there
+-			 * (including the missin VID header), and then we'll
++			 * because presumably more data will be written there
++			 * (including the missing VID header), and then we'll
+ 			 * move it.
+ 			 */
+ 			dbg_wl("PEB %d has no VID header", e1->pnum);
+@@ -790,8 +790,8 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
+ 			 * not switch to R/O mode in this case, and give the
+ 			 * upper layers a possibility to recover from this,
+ 			 * e.g. by unmapping corresponding LEB. Instead, just
+-			 * put thie PEB to the @ubi->erroneus list to prevent
+-			 * UBI from trying to move the over and over again.
++			 * put this PEB to the @ubi->erroneous list to prevent
++			 * UBI from trying to move it over and over again.
+ 			 */
+ 			if (ubi->erroneous_peb_count > ubi->max_erroneous) {
+ 				ubi_err("too many erroneous eraseblocks (%d)",
+@@ -1045,7 +1045,7 @@ static int erase_worker(struct ubi_device *ubi, struct ubi_work *wl_wrk,
+ 		/*
+ 		 * If this is not %-EIO, we have no idea what to do. Scheduling
+ 		 * this physical eraseblock for erasure again would cause
+-		 * errors again and again. Well, lets switch to RO mode.
++		 * errors again and again. Well, lets switch to R/O mode.
+ 		 */
+ 		goto out_ro;
+ 	}
+@@ -1161,7 +1161,7 @@ retry:
+ 			rb_erase(&e->u.rb, &ubi->erroneous);
+ 			ubi->erroneous_peb_count -= 1;
+ 			ubi_assert(ubi->erroneous_peb_count >= 0);
+-			/* Erronious PEBs should be tortured */
++			/* Erroneous PEBs should be tortured */
+ 			torture = 1;
+ 		} else {
+ 			err = prot_queue_del(ubi, e->pnum);
+-- 
+1.5.4.3
+

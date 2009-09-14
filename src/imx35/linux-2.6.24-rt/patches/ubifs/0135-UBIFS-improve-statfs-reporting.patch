@@ -1,0 +1,227 @@
+From d1af83cd13e89d40468944b1e93a102b750ac28a Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 25 Aug 2008 16:15:56 +0300
+Subject: [PATCH] UBIFS: improve statfs reporting
+
+Make free space calculation less pessimistic and more realistic,
+which in turn improves 'statfs()' reports. Now it lies by 10%-20%,
+instead of 20%-30% (10% more honest).
+
+Results of "freespace" test (120MiB volume, 16KiB LEB size,
+512 bytes page size). Before the change:
+
+freespace: Test 1: fill the space we have 3 times
+freespace: was free: 78274560 bytes 74.6 MiB, wrote: 96489472 bytes 92.0 MiB, delta: 18214912 bytes 17.4 MiB, wrote 23.3% more than predicted
+freespace: was free: 76754944 bytes 73.2 MiB, wrote: 96493568 bytes 92.0 MiB, delta: 19738624 bytes 18.8 MiB, wrote 25.7% more than predicted
+freespace: was free: 76759040 bytes 73.2 MiB, wrote: 96489472 bytes 92.0 MiB, delta: 19730432 bytes 18.8 MiB, wrote 25.7% more than predicted
+freespace: Test 1 finished
+
+freespace: Test 2: gradually lessen amount of free space and fill the FS
+freespace: do 10 steps, lessen free space by 6977722 bytes 6.7 MiB each time
+freespace: was free: 72273920 bytes 68.9 MiB, wrote: 88891392 bytes 84.8 MiB, delta: 16617472 bytes 15.8 MiB, wrote 23.0% more than predicted
+freespace: was free: 66154496 bytes 63.1 MiB, wrote: 81506304 bytes 77.7 MiB, delta: 15351808 bytes 14.6 MiB, wrote 23.2% more than predicted
+freespace: was free: 58732544 bytes 56.0 MiB, wrote: 72572928 bytes 69.2 MiB, delta: 13840384 bytes 13.2 MiB, wrote 23.6% more than predicted
+freespace: was free: 51552256 bytes 49.2 MiB, wrote: 63754240 bytes 60.8 MiB, delta: 12201984 bytes 11.6 MiB, wrote 23.7% more than predicted
+freespace: was free: 44404736 bytes 42.3 MiB, wrote: 54943744 bytes 52.4 MiB, delta: 10539008 bytes 10.1 MiB, wrote 23.7% more than predicted
+freespace: was free: 37285888 bytes 35.6 MiB, wrote: 46161920 bytes 44.0 MiB, delta: 8876032 bytes 8.5 MiB, wrote 23.8% more than predicted
+freespace: was free: 30171136 bytes 28.8 MiB, wrote: 37384192 bytes 35.7 MiB, delta: 7213056 bytes 6.9 MiB, wrote 23.9% more than predicted
+freespace: was free: 23048192 bytes 22.0 MiB, wrote: 28606464 bytes 27.3 MiB, delta: 5558272 bytes 5.3 MiB, wrote 24.1% more than predicted
+freespace: was free: 15941632 bytes 15.2 MiB, wrote: 19828736 bytes 18.9 MiB, delta: 3887104 bytes 3.7 MiB, wrote 24.4% more than predicted
+freespace: was free: 8830976 bytes 8.4 MiB, wrote: 11063296 bytes 10.6 MiB, delta: 2232320 bytes 2.1 MiB, wrote 25.3% more than predicted
+freespace: Test 2 finished
+
+freespace: Test 3: gradually lessen amount of free space by trashing and fill the FS
+freespace: do 10 steps, lessen free space by 6985541 bytes 6.7 MiB each time
+freespace: trashing: was free: 76840960 bytes 73.3 MiB, need free: 6985550 bytes 6.7 MiB, files created: 248311, delete 225737 (90.9% of them)
+freespace: was free: 65228800 bytes 62.2 MiB, wrote: 82530304 bytes 78.7 MiB, delta: 17301504 bytes 16.5 MiB, wrote 26.5% more than predicted
+freespace: trashing: was free: 74485760 bytes 71.0 MiB, need free: 13971091 bytes 13.3 MiB, files created: 248712, delete 202061 (81.2% of them)
+freespace: was free: 55025664 bytes 52.5 MiB, wrote: 71925760 bytes 68.6 MiB, delta: 16900096 bytes 16.1 MiB, wrote 30.7% more than predicted
+freespace: trashing: was free: 75550720 bytes 72.1 MiB, need free: 20956632 bytes 20.0 MiB, files created: 248849, delete 179822 (72.3% of them)
+freespace: was free: 46669824 bytes 44.5 MiB, wrote: 63197184 bytes 60.3 MiB, delta: 16527360 bytes 15.8 MiB, wrote 35.4% more than predicted
+freespace: trashing: was free: 76214272 bytes 72.7 MiB, need free: 27942173 bytes 26.6 MiB, files created: 248789, delete 157576 (63.3% of them)
+freespace: was free: 39129088 bytes 37.3 MiB, wrote: 55164928 bytes 52.6 MiB, delta: 16035840 bytes 15.3 MiB, wrote 41.0% more than predicted
+freespace: trashing: was free: 77398016 bytes 73.8 MiB, need free: 34927714 bytes 33.3 MiB, files created: 248711, delete 136474 (54.9% of them)
+freespace: was free: 32325632 bytes 30.8 MiB, wrote: 48234496 bytes 46.0 MiB, delta: 15908864 bytes 15.2 MiB, wrote 49.2% more than predicted
+freespace: trashing: was free: 75796480 bytes 72.3 MiB, need free: 41913255 bytes 40.0 MiB, files created: 248674, delete 111164 (44.7% of them)
+freespace: was free: 25079808 bytes 23.9 MiB, wrote: 40775680 bytes 38.9 MiB, delta: 15695872 bytes 15.0 MiB, wrote 62.6% more than predicted
+freespace: trashing: was free: 78209024 bytes 74.6 MiB, need free: 48898796 bytes 46.6 MiB, files created: 248708, delete 93207 (37.5% of them)
+freespace: was free: 20582400 bytes 19.6 MiB, wrote: 34844672 bytes 33.2 MiB, delta: 14262272 bytes 13.6 MiB, wrote 69.3% more than predicted
+freespace: trashing: was free: 77328384 bytes 73.7 MiB, need free: 55884337 bytes 53.3 MiB, files created: 248644, delete 68951 (27.7% of them)
+freespace: was free: 14368768 bytes 13.7 MiB, wrote: 28278784 bytes 27.0 MiB, delta: 13910016 bytes 13.3 MiB, wrote 96.8% more than predicted
+freespace: trashing: was free: 77434880 bytes 73.8 MiB, need free: 62869878 bytes 60.0 MiB, files created: 248640, delete 46767 (18.8% of them)
+freespace: was free: 8286208 bytes 7.9 MiB, wrote: 21811200 bytes 20.8 MiB, delta: 13524992 bytes 12.9 MiB, wrote 163.2% more than predicted
+freespace: trashing: was free: 77856768 bytes 74.2 MiB, need free: 69855419 bytes 66.6 MiB, files created: 248576, delete 25546 (10.3% of them)
+freespace: was free: 5570560 bytes 5.3 MiB, wrote: 8187904 bytes 7.8 MiB, delta: 2617344 bytes 2.5 MiB, wrote 47.0% more than predicted
+freespace: Test 3 finished
+
+freespace: finished successfully
+
+After the change:
+
+freespace: Test 1: fill the space we have 3 times
+freespace: was free: 85204992 bytes 81.3 MiB, wrote: 96489472 bytes 92.0 MiB, delta: 11284480 bytes 10.8 MiB, wrote 13.2% more than predicted
+freespace: was free: 83554304 bytes 79.7 MiB, wrote: 96489472 bytes 92.0 MiB, delta: 12935168 bytes 12.3 MiB, wrote 15.5% more than predicted
+freespace: was free: 83554304 bytes 79.7 MiB, wrote: 96493568 bytes 92.0 MiB, delta: 12939264 bytes 12.3 MiB, wrote 15.5% more than predicted
+freespace: Test 1 finished
+
+freespace: Test 2: gradually lessen amount of free space and fill the FS
+freespace: do 10 steps, lessen free space by 7596218 bytes 7.2 MiB each time
+freespace: was free: 78675968 bytes 75.0 MiB, wrote: 88903680 bytes 84.8 MiB, delta: 10227712 bytes 9.8 MiB, wrote 13.0% more than predicted
+freespace: was free: 72015872 bytes 68.7 MiB, wrote: 81514496 bytes 77.7 MiB, delta: 9498624 bytes 9.1 MiB, wrote 13.2% more than predicted
+freespace: was free: 63938560 bytes 61.0 MiB, wrote: 72589312 bytes 69.2 MiB, delta: 8650752 bytes 8.2 MiB, wrote 13.5% more than predicted
+freespace: was free: 56127488 bytes 53.5 MiB, wrote: 63762432 bytes 60.8 MiB, delta: 7634944 bytes 7.3 MiB, wrote 13.6% more than predicted
+freespace: was free: 48336896 bytes 46.1 MiB, wrote: 54935552 bytes 52.4 MiB, delta: 6598656 bytes 6.3 MiB, wrote 13.7% more than predicted
+freespace: was free: 40587264 bytes 38.7 MiB, wrote: 46157824 bytes 44.0 MiB, delta: 5570560 bytes 5.3 MiB, wrote 13.7% more than predicted
+freespace: was free: 32841728 bytes 31.3 MiB, wrote: 37384192 bytes 35.7 MiB, delta: 4542464 bytes 4.3 MiB, wrote 13.8% more than predicted
+freespace: was free: 25100288 bytes 23.9 MiB, wrote: 28618752 bytes 27.3 MiB, delta: 3518464 bytes 3.4 MiB, wrote 14.0% more than predicted
+freespace: was free: 17342464 bytes 16.5 MiB, wrote: 19841024 bytes 18.9 MiB, delta: 2498560 bytes 2.4 MiB, wrote 14.4% more than predicted
+freespace: was free: 9605120 bytes 9.2 MiB, wrote: 11063296 bytes 10.6 MiB, delta: 1458176 bytes 1.4 MiB, wrote 15.2% more than predicted
+freespace: Test 2 finished
+
+freespace: Test 3: gradually lessen amount of free space by trashing and fill the FS
+freespace: do 10 steps, lessen free space by 7606272 bytes 7.3 MiB each time
+freespace: trashing: was free: 83668992 bytes 79.8 MiB, need free: 7606272 bytes 7.3 MiB, files created: 248297, delete 225724 (90.9% of them)
+freespace: was free: 70803456 bytes 67.5 MiB, wrote: 82485248 bytes 78.7 MiB, delta: 11681792 bytes 11.1 MiB, wrote 16.5% more than predicted
+freespace: trashing: was free: 81080320 bytes 77.3 MiB, need free: 15212544 bytes 14.5 MiB, files created: 248711, delete 202047 (81.2% of them)
+freespace: was free: 59867136 bytes 57.1 MiB, wrote: 71897088 bytes 68.6 MiB, delta: 12029952 bytes 11.5 MiB, wrote 20.1% more than predicted
+freespace: trashing: was free: 82243584 bytes 78.4 MiB, need free: 22818816 bytes 21.8 MiB, files created: 248866, delete 179817 (72.3% of them)
+freespace: was free: 50905088 bytes 48.5 MiB, wrote: 63168512 bytes 60.2 MiB, delta: 12263424 bytes 11.7 MiB, wrote 24.1% more than predicted
+freespace: trashing: was free: 83402752 bytes 79.5 MiB, need free: 30425088 bytes 29.0 MiB, files created: 248920, delete 158114 (63.5% of them)
+freespace: was free: 42651648 bytes 40.7 MiB, wrote: 55406592 bytes 52.8 MiB, delta: 12754944 bytes 12.2 MiB, wrote 29.9% more than predicted
+freespace: trashing: was free: 84402176 bytes 80.5 MiB, need free: 38031360 bytes 36.3 MiB, files created: 248709, delete 136641 (54.9% of them)
+freespace: was free: 35233792 bytes 33.6 MiB, wrote: 48250880 bytes 46.0 MiB, delta: 13017088 bytes 12.4 MiB, wrote 36.9% more than predicted
+freespace: trashing: was free: 82530304 bytes 78.7 MiB, need free: 45637632 bytes 43.5 MiB, files created: 248778, delete 111208 (44.7% of them)
+freespace: was free: 27287552 bytes 26.0 MiB, wrote: 40267776 bytes 38.4 MiB, delta: 12980224 bytes 12.4 MiB, wrote 47.6% more than predicted
+freespace: trashing: was free: 85114880 bytes 81.2 MiB, need free: 53243904 bytes 50.8 MiB, files created: 248508, delete 93052 (37.4% of them)
+freespace: was free: 22437888 bytes 21.4 MiB, wrote: 35328000 bytes 33.7 MiB, delta: 12890112 bytes 12.3 MiB, wrote 57.4% more than predicted
+freespace: trashing: was free: 84103168 bytes 80.2 MiB, need free: 60850176 bytes 58.0 MiB, files created: 248637, delete 68743 (27.6% of them)
+freespace: was free: 15536128 bytes 14.8 MiB, wrote: 28319744 bytes 27.0 MiB, delta: 12783616 bytes 12.2 MiB, wrote 82.3% more than predicted
+freespace: trashing: was free: 84357120 bytes 80.4 MiB, need free: 68456448 bytes 65.3 MiB, files created: 248567, delete 46852 (18.8% of them)
+freespace: was free: 9015296 bytes 8.6 MiB, wrote: 22044672 bytes 21.0 MiB, delta: 13029376 bytes 12.4 MiB, wrote 144.5% more than predicted
+freespace: trashing: was free: 84942848 bytes 81.0 MiB, need free: 76062720 bytes 72.5 MiB, files created: 248636, delete 25993 (10.5% of them)
+freespace: was free: 6086656 bytes 5.8 MiB, wrote: 8331264 bytes 7.9 MiB, delta: 2244608 bytes 2.1 MiB, wrote 36.9% more than predicted
+freespace: Test 3 finished
+
+freespace: finished successfully
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |   45 +++++++++++++++++++++++++++++++++++++++++++++
+ fs/ubifs/misc.h   |   32 --------------------------------
+ fs/ubifs/ubifs.h  |    1 +
+ 3 files changed, 46 insertions(+), 32 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index 558b57b..eb84c62 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -711,6 +711,51 @@ void ubifs_release_dirty_inode_budget(struct ubifs_info *c,
+ }
+ 
+ /**
++ * ubifs_reported_space - calculate reported free space.
++ * @c: the UBIFS file-system description object
++ * @free: amount of free space
++ *
++ * This function calculates amount of free space which will be reported to
++ * user-space. User-space application tend to expect that if the file-system
++ * (e.g., via the 'statfs()' call) reports that it has N bytes available, they
++ * are able to write a file of size N. UBIFS attaches node headers to each data
++ * node and it has to write indexind nodes as well. This introduces additional
++ * overhead, and UBIFS it has to report sligtly less free space to meet the
++ * above expectetion.
++ *
++ * This function assumes free space is made up of uncompressed data nodes and
++ * full index nodes (one per data node, tripled because we always allow enough
++ * space to write the index thrice).
++ *
++ * Note, the calculation is pessimistic, which means that most of the time
++ * UBIFS reports less space than it actually has.
++ */
++long long ubifs_reported_space(const struct ubifs_info *c, uint64_t free)
++{
++	int divisor, factor;
++
++	/*
++	 * Reported space size is @free * X, where X is UBIFS block size
++	 * divided by UBIFS block size + all overhead one data block
++	 * introduces. The overhead is the node header + indexing overhead.
++	 *
++	 * Indexing overhead is calculations are based on the following
++	 * formula: I = N/(f - 1) + 1, where I - number of indexing nodes, N -
++	 * number of data nodes, f - fanout. Because effective UBIFS fanout is
++	 * twice as less than maximum fanout, we assume that each data node
++	 * introduces 3 * @c->max_idx_node_sz / (@c->fanout/2 - 1) bytes.
++	 * Note, the multiplier 3 is because UBIFS reseves thrice as more space
++	 * for the index.
++	 */
++	factor = UBIFS_BLOCK_SIZE;
++	divisor = UBIFS_MAX_DATA_NODE_SZ;
++	divisor += (c->max_idx_node_sz * 3) / ((c->fanout >> 1) - 1);
++	free *= factor;
++	do_div(free, divisor);
++	return free;
++}
++
++/**
+  * ubifs_budg_get_free_space - return amount of free space.
+  * @c: UBIFS file-system description object
+  *
+diff --git a/fs/ubifs/misc.h b/fs/ubifs/misc.h
+index 87ced4c..4c12a92 100644
+--- a/fs/ubifs/misc.h
++++ b/fs/ubifs/misc.h
+@@ -284,38 +284,6 @@ static inline void *ubifs_idx_key(const struct ubifs_info *c,
+ }
+ 
+ /**
+- * ubifs_reported_space - calculate reported free space.
+- * @c: the UBIFS file-system description object
+- * @free: amount of free space
+- *
+- * This function calculates amount of free space which will be reported to
+- * user-space. User-space application tend to expect that if the file-system
+- * (e.g., via the 'statfs()' call) reports that it has N bytes available, they
+- * are able to write a file of size N. UBIFS attaches node headers to each data
+- * node and it has to write indexind nodes as well. This introduces additional
+- * overhead, and UBIFS it has to report sligtly less free space to meet the
+- * above expectetion.
+- *
+- * This function assumes free space is made up of uncompressed data nodes and
+- * full index nodes (one per data node, doubled because we always allow enough
+- * space to write the index twice).
+- *
+- * Note, the calculation is pessimistic, which means that most of the time
+- * UBIFS reports less space than it actually has.
+- */
+-static inline long long ubifs_reported_space(const struct ubifs_info *c,
+-					     uint64_t free)
+-{
+-	int divisor, factor;
+-
+-	divisor = UBIFS_MAX_DATA_NODE_SZ + (c->max_idx_node_sz * 3);
+-	factor = UBIFS_MAX_DATA_NODE_SZ - UBIFS_DATA_NODE_SZ;
+-	do_div(free, divisor);
+-
+-	return free * factor;
+-}
+-
+-/**
+  * ubifs_current_time - round current time to time granularity.
+  * @inode: inode
+  */
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 5065980..859483b 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1445,6 +1445,7 @@ void ubifs_cancel_ino_op(struct ubifs_info *c, struct inode *inode,
+ long long ubifs_budg_get_free_space(struct ubifs_info *c);
+ int ubifs_calc_min_idx_lebs(struct ubifs_info *c);
+ void ubifs_convert_page_budget(struct ubifs_info *c);
++long long ubifs_reported_space(const struct ubifs_info *c, uint64_t free);
+ long long ubifs_calc_available(const struct ubifs_info *c, int min_idx_lebs);
+ 
+ /* find.c */
+-- 
+1.5.6.3
+

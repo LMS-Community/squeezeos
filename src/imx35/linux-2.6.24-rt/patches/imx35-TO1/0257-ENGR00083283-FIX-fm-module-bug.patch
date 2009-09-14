@@ -1,0 +1,127 @@
+From c82a7db46091a558861caeb183de7fe9f7603e0b Mon Sep 17 00:00:00 2001
+From: Shen Yong <b00984@freescale.com>
+Date: Wed, 16 Jul 2008 10:29:11 +0800
+Subject: [PATCH] ENGR00083283 FIX fm module bug
+
+This bug may cause system halt on mx35
+
+Signed-off-by: Kevin Shen <b00984@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c |    2 +-
+ drivers/char/mxc_si4702.c        |   51 ++++++++++++++++++++++++++-----------
+ 2 files changed, 37 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 9ff9aa1..0b4d70a 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -296,7 +296,7 @@ static void si4702_gpio_put(void)
+ 
+ static struct mxc_fm_platform_data si4702_data = {
+ 	.reg_vio = "SW1",
+-	.reg_vdd = "SW2",
++	.reg_vdd = "SW1",
+ 	.gpio_get = si4702_gpio_get,
+ 	.gpio_put = si4702_gpio_put,
+ 	.reset = si4702_reset,
+diff --git a/drivers/char/mxc_si4702.c b/drivers/char/mxc_si4702.c
+index ee1f7b6..6b5641e 100644
+--- a/drivers/char/mxc_si4702.c
++++ b/drivers/char/mxc_si4702.c
+@@ -141,14 +141,17 @@ static int __devinit si4702_probe(struct i2c_client *client)
+ 	}
+ 
+ 	/*enable power supply */
+-	/*shall i check the return value */
+ 	reg_vio = regulator_get(&client->dev, data->reg_vio);
+-	reg_vdd = regulator_get(&client->dev, data->reg_vdd);
+-	if (reg_vio == ERR_PTR(-ENOENT) || reg_vdd == ERR_PTR(-ENOENT))
++	if (reg_vio == ERR_PTR(-ENOENT))
+ 		return -ENOENT;
+ 	regulator_enable(reg_vio);	/*shall i check the return value */
+-	regulator_enable(reg_vdd);
++	regulator_put(reg_vio, &client->dev);
+ 
++	reg_vdd = regulator_get(&client->dev, data->reg_vdd);
++	if (reg_vdd == ERR_PTR(-ENOENT))
++		return -ENOENT;
++	regulator_enable(reg_vdd);
++	regulator_put(reg_vdd, &client->dev);
+ 	/*attach client and check device id */
+ 	if (SI4702_DEVICE_ID != si4702_id_detect(client)) {
+ 		dev_info(&client->dev, "id wrong.\n");
+@@ -207,18 +210,25 @@ static int __devinit si4702_probe(struct i2c_client *client)
+ 	/*User interface end */
+ 
+ 	return 0;
+-class_remove:
++      class_remove:
+ 	class_destroy(radio_class);
+-char_dev_remove:
++      char_dev_remove:
+ 	cdev_del(&si4702_dev);
+-device_file_remove:
++      device_file_remove:
+ 	device_remove_file(&client->dev, &si4702_dev_attr);
+-gpio_put:
++      gpio_put:
+ 	plat_data->gpio_put();
+-disable_power:
+-	regulator_disable(reg_vio);	/*shall I check the return value */
+-	regulator_disable(reg_vdd);
++      disable_power:
++	reg_vio = regulator_get(&client->dev, data->reg_vio);
++	if (reg_vio == ERR_PTR(-ENOENT))
++		return -ENOENT;
++	regulator_disable(reg_vio);	/*shall i check the return value */
+ 	regulator_put(reg_vio, &client->dev);
++
++	reg_vdd = regulator_get(&client->dev, data->reg_vdd);
++	if (reg_vdd == ERR_PTR(-ENOENT))
++		return -ENOENT;
++	regulator_disable(reg_vdd);
+ 	regulator_put(reg_vdd, &client->dev);
+ 
+ 	return 0;
+@@ -226,14 +236,26 @@ disable_power:
+ 
+ static int __devexit si4702_remove(struct i2c_client *client)
+ {
++	struct mxc_fm_platform_data *data;
++
++	data = (struct mxc_fm_platform_data *)client->dev.platform_data;
++
+ 	class_device_destroy(radio_class, MKDEV(dev_major, dev_minor));
+ 	class_destroy(radio_class);
+ 	cdev_del(&si4702_dev);
+ 	device_remove_file(&client->dev, &si4702_dev_attr);
+ 	plat_data->gpio_put();
+-	regulator_disable(reg_vio);	/*shall I check the return value */
+-	regulator_disable(reg_vdd);
++
++	reg_vio = regulator_get(&client->dev, data->reg_vio);
++	if (reg_vio == ERR_PTR(-ENOENT))
++		return -ENOENT;
++	regulator_disable(reg_vio);	/*shall i check the return value */
+ 	regulator_put(reg_vio, &client->dev);
++
++	reg_vdd = regulator_get(&client->dev, data->reg_vdd);
++	if (reg_vdd == ERR_PTR(-ENOENT))
++		return -ENOENT;
++	regulator_disable(reg_vdd);
+ 	regulator_put(reg_vdd, &client->dev);
+ 
+ 	return 0;
+@@ -723,8 +745,7 @@ static int ioctl_si4702(struct inode *inode, struct file *file,
+ 		break;
+ 	case SI4702_GETVOLUME:
+ 		/* just copy volume value to user */
+-		if (copy_to_user(argp, &dev_info.volume,
+-				sizeof(unsigned int))) {
++		if (copy_to_user(argp, &dev_info.volume, sizeof(unsigned int))) {
+ 			dev_err(&si4702_client->dev,
+ 				"ioctl, copy to user failed\n");
+ 			return -EFAULT;
+-- 
+1.5.4.4
+

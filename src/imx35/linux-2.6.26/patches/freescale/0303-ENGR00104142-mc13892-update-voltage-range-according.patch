@@ -1,0 +1,291 @@
+From 836503fb3d12e7044bcd52eb13773e888d2ae378 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Wed, 7 Jan 2009 09:51:19 +0800
+Subject: [PATCH] ENGR00104142 mc13892 update voltage range according to new spec
+
+mc13892: update voltage range according to new spec
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/regulator/mc13892/reg-mc13892.c |   93 +++++++++++++++++-------------
+ 1 files changed, 53 insertions(+), 40 deletions(-)
+
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index c29d0bf..a5cb631 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -69,8 +69,8 @@ enum {
+ enum {
+ 	VGEN1_1_2V = 0,
+ 	VGEN1_1_5V,
+-	VGEN1_1_8V,
+ 	VGEN1_2_775V,
++	VGEN1_3_15V,
+ } regulator_voltage_vgen1;
+ 
+ enum {
+@@ -80,8 +80,8 @@ enum {
+ 	VGEN2_1_8V,
+ 	VGEN2_2_7V,
+ 	VGEN2_2_8V,
+-	VGEN2_2_9V,
+ 	VGEN2_3_0V,
++	VGEN2_3_15V,
+ } regulator_voltage_vgen2;
+ 
+ enum {
+@@ -110,8 +110,8 @@ enum {
+ enum {
+ 	VAUDIO_2_3V,
+ 	VAUDIO_2_5V,
+-	VAUDIO_2_7V,
+ 	VAUDIO_2_775V,
++	VAUDIO_3V,
+ } regulator_voltage_vaudio;
+ 
+ enum {
+@@ -276,6 +276,11 @@ enum {
+ #define PWGT2SPI_EN_ENABLE	0
+ #define PWGT2SPI_EN_DISABLE	1
+ 
++#define SWXHI_LSH	23
++#define SWXHI_WID	1
++#define SWXHI_ON	1
++#define SWXHI_OFF	0
++
+ static int mc13892_get_sw_hi_bit(int sw)
+ {
+ 	unsigned int register_val = 0;
+@@ -302,7 +307,7 @@ static int mc13892_get_sw_hi_bit(int sw)
+ 	return register_val & 0x800000;
+ }
+ 
+-static int mc13892_get_voltage_value(int hi, int mV)
++static int mc13892_get_voltage_value(int *hi, int mV)
+ {
+ 	int voltage;
+ 
+@@ -311,15 +316,15 @@ static int mc13892_get_voltage_value(int hi, int mV)
+ 	if (mV > 1850)
+ 		mV = 1850;
+ 
+-	if (hi == 0) {
+-		if (mV > 1375)
+-			mV = 1375;
++	if (mV > 1375)
++		*hi = 1;
++	if (mV < 1100)
++		*hi = 0;
++
++	if (*hi == 0)
+ 		voltage = (mV - 600) / 25;
+-	} else {
+-		if (mV < 1100)
+-			mV = 1100;
++	else
+ 		voltage = (mV - 1100) / 25;
+-	}
+ 
+ 	return voltage;
+ }
+@@ -343,7 +348,7 @@ static int mc13892_sw_set_voltage(struct regulator *reg, int uV)
+ 	int voltage, sw = reg->id, mV = uV / 1000, hi;
+ 
+ 	hi = mc13892_get_sw_hi_bit(sw);
+-	voltage = mc13892_get_voltage_value(hi, mV);
++	voltage = mc13892_get_voltage_value(&hi, mV);
+ 
+ 	switch (sw) {
+ 	case MC13892_SW1:
+@@ -370,6 +375,9 @@ static int mc13892_sw_set_voltage(struct regulator *reg, int uV)
+ 		return -EINVAL;
+ 	}
+ 
++	register_val |= (hi << SWXHI_LSH);
++	register_mask |= (1 << SWXHI_LSH);
++
+ 	return (pmic_write_reg(register1, register_val, register_mask));
+ }
+ 
+@@ -416,7 +424,7 @@ static int mc13892_sw_stby_set_voltage(struct regulator *reg, int uV)
+ 	int voltage, sw = reg->id, mV = uV / 1000, hi;
+ 
+ 	hi = mc13892_get_sw_hi_bit(sw);
+-	voltage = mc13892_get_voltage_value(hi, mV);
++	voltage = mc13892_get_voltage_value(&hi, mV);
+ 
+ 	switch (sw) {
+ 	case MC13892_SW1:
+@@ -443,6 +451,9 @@ static int mc13892_sw_stby_set_voltage(struct regulator *reg, int uV)
+ 		return -EINVAL;
+ 	}
+ 
++	register_val |= (hi << SWXHI_LSH);
++	register_mask |= (1 << SWXHI_LSH);
++
+ 	return (pmic_write_reg(register1, register_val, register_mask));
+ }
+ 
+@@ -489,7 +500,7 @@ static int mc13892_sw_dvs_set_voltage(struct regulator *reg, int uV)
+ 	int voltage, sw = reg->id, mV = uV / 1000, hi;
+ 
+ 	hi = mc13892_get_sw_hi_bit(sw);
+-	voltage = mc13892_get_voltage_value(hi, mV);
++	voltage = mc13892_get_voltage_value(&hi, mV);
+ 
+ 	switch (sw) {
+ 	case MC13892_SW1:
+@@ -506,6 +517,9 @@ static int mc13892_sw_dvs_set_voltage(struct regulator *reg, int uV)
+ 		return -EINVAL;
+ 	}
+ 
++	register_val |= (hi << SWXHI_LSH);
++	register_mask |= (1 << SWXHI_LSH);
++
+ 	return (pmic_write_reg(register1, register_val, register_mask));
+ }
+ 
+@@ -763,12 +777,12 @@ static int mc13892_vaudio_set_voltage(struct regulator *reg, int uV)
+ 
+ 	if ((mV >= 2300) && (mV < 2500))
+ 		voltage = VAUDIO_2_3V;
+-	else if ((mV >= 2500) && (mV < 2700))
++	else if ((mV >= 2500) && (mV < 2775))
+ 		voltage = VAUDIO_2_5V;
+-	else if ((mV >= 2700) && (mV < 2775))
+-		voltage = VAUDIO_2_7V;
+-	else
++	else if ((mV >= 2775) && (mV < 3000))
+ 		voltage = VAUDIO_2_775V;
++	else
++		voltage = VAUDIO_3V;
+ 
+ 	register_val = BITFVAL(VAUDIO, voltage);
+ 	register_mask = BITFMASK(VAUDIO);
+@@ -792,12 +806,11 @@ static int mc13892_vaudio_get_voltage(struct regulator *reg)
+ 	case VAUDIO_2_5V:
+ 		mV = 2500;
+ 		break;
+-	case VAUDIO_2_7V:
+-		mV = 2700;
+-		break;
+ 	case VAUDIO_2_775V:
+ 		mV = 2775;
+ 		break;
++	case VAUDIO_3V:
++		mV = 3000;
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -1161,7 +1174,7 @@ static int mc13892_vcam_set_mode(struct regulator *reg, unsigned int mode)
+ 	default:
+ 		return -EINVAL;
+ 	}
+-	register_mask = BITFMASK(VCAM_EN);
++	register_mask = BITFMASK(VCAM_CONFIG);
+ 	register1 = REG_MODE_1;
+ 
+ 	return (pmic_write_reg(register1, register_val, register_mask));
+@@ -1196,12 +1209,12 @@ static int mc13892_vgen1_set_voltage(struct regulator *reg, int uV)
+ 
+ 	if ((mV >= 1200) && (mV < 1500))
+ 		voltage = VGEN1_1_2V;
+-	else if ((mV >= 1500) && (mV < 1800))
++	else if ((mV >= 1500) && (mV < 2775))
+ 		voltage = VGEN1_1_5V;
+-	else if ((mV >= 1800) && (mV < 2775))
+-		voltage = VGEN1_1_8V;
+-	else
++	else if ((mV >= 2775) && (mV < 3150))
+ 		voltage = VGEN1_2_775V;
++	else
++		voltage = VGEN1_3_15V;
+ 
+ 	register_val = BITFVAL(VGEN1, voltage);
+ 	register_mask = BITFMASK(VGEN1);
+@@ -1225,12 +1238,12 @@ static int mc13892_vgen1_get_voltage(struct regulator *reg)
+ 	case VGEN1_1_5V:
+ 		mV = 1500;
+ 		break;
+-	case VGEN1_1_8V:
+-		mV = 1800;
+-		break;
+ 	case VGEN1_2_775V:
+ 		mV = 2775;
+ 		break;
++	case VGEN1_3_15V:
++		mV = 3150;
++		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1278,12 +1291,12 @@ static int mc13892_vgen2_set_voltage(struct regulator *reg, int uV)
+ 		voltage = VGEN2_1_8V;
+ 	else if ((mV >= 2700) && (mV < 2800))
+ 		voltage = VGEN2_2_7V;
+-	else if ((mV >= 2800) && (mV < 2900))
++	else if ((mV >= 2800) && (mV < 3000))
+ 		voltage = VGEN2_2_8V;
+-	else if ((mV >= 2900) && (mV < 3000))
+-		voltage = VGEN2_2_9V;
+-	else
++	else if ((mV >= 3000) && (mV < 3150))
+ 		voltage = VGEN2_3_0V;
++	else
++		voltage = VGEN2_3_15V;
+ 
+ 	register_val = BITFVAL(VGEN2, voltage);
+ 	register_mask = BITFMASK(VGEN2);
+@@ -1319,12 +1332,12 @@ static int mc13892_vgen2_get_voltage(struct regulator *reg)
+ 	case VGEN2_2_8V:
+ 		mV = 2800;
+ 		break;
+-	case VGEN2_2_9V:
+-		mV = 2900;
+-		break;
+ 	case VGEN2_3_0V:
+ 		mV = 3000;
+ 		break;
++	case VGEN2_3_15V:
++		mV = 3150;
++		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1642,7 +1655,7 @@ static struct regulator_ops mc13892_vaudio_ops = {
+ 
+ struct regulation_constraints vaudio_regulation_constraints = {
+ 	.min_uV = mV_to_uV(2300),
+-	.max_uV = mV_to_uV(2775),
++	.max_uV = mV_to_uV(3000),
+ 	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+ };
+ 
+@@ -1684,7 +1697,7 @@ static struct regulator_ops mc13892_vgen1_ops = {
+ 
+ struct regulation_constraints vgen1_regulation_constraints = {
+ 	.min_uV = mV_to_uV(1200),
+-	.max_uV = mV_to_uV(2775),
++	.max_uV = mV_to_uV(3150),
+ 	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+ };
+ 
+@@ -1697,7 +1710,7 @@ static struct regulator_ops mc13892_vgen2_ops = {
+ 
+ struct regulation_constraints vgen2_regulation_constraints = {
+ 	.min_uV = mV_to_uV(1200),
+-	.max_uV = mV_to_uV(3000),
++	.max_uV = mV_to_uV(3150),
+ 	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
+ };
+ 
+-- 
+1.5.4.4
+

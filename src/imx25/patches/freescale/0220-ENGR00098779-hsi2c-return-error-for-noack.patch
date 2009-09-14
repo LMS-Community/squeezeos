@@ -1,0 +1,69 @@
+From d047e3ec78f01a6f7f6a4e5eb4aabc70356258ec Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b02248@freescale.com>
+Date: Thu, 13 Nov 2008 17:34:39 +0800
+Subject: [PATCH] ENGR00098779 hsi2c return error for noack
+
+hsi2c return error for noack
+
+Signed-off-by: Wu Guoxing <b02248@freescale.com>
+---
+ drivers/i2c/busses/mxc_i2c_hs.c |   19 ++++++++++++++-----
+ 1 files changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/i2c/busses/mxc_i2c_hs.c b/drivers/i2c/busses/mxc_i2c_hs.c
+index c0a2576..b913235 100644
+--- a/drivers/i2c/busses/mxc_i2c_hs.c
++++ b/drivers/i2c/busses/mxc_i2c_hs.c
+@@ -320,10 +320,11 @@ static int mxci2c_hs_write(mxc_i2c_hs *i2c_hs, int repeat_start,
+ 
+ 	reg_clear_mask(i2c_hs, HICR, HICR_HIIEN);
+ 
+-	 /*TDCR*/
+-	    reg_write(i2c_hs, HITDCR, HITDCR_TDC_EN | HITDCR_TDC(msg->len));
++	/* TDCR */
++	reg_write(i2c_hs, HITDCR, HITDCR_TDC_EN | HITDCR_TDC(msg->len));
+ 
+-	 /*FIFO*/ reg_set_mask(i2c_hs, HITFR, HITFR_TFEN);
++	/* FIFO */
++	reg_set_mask(i2c_hs, HITFR, HITFR_TFEN);
+ 	reg_set_mask(i2c_hs, HITFR, HITFR_TFLSH);
+ 
+ 	if (msg->len > HITFR_MAX_COUNT)
+@@ -350,6 +351,8 @@ static int mxci2c_hs_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+ 			  int num)
+ {
+ 	int i;
++	int ret = -EIO;
++
+ 	mxc_i2c_hs *i2c_hs = (mxc_i2c_hs *) (i2c_get_adapdata(adap));
+ 
+ 	if (i2c_hs->low_power) {
+@@ -365,17 +368,23 @@ static int mxci2c_hs_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[],
+ 
+ 	for (i = 0; i < num; i++) {
+ 		if (msgs[i].flags & I2C_M_RD) {
+-			if (mxci2c_hs_read(i2c_hs, 0, &msgs[i]) < 0)
++			ret = mxci2c_hs_read(i2c_hs, 0, &msgs[i]);
++			if (ret < 0)
+ 				break;
+ 		} else {
+-			if (mxci2c_hs_write(i2c_hs, 0, &msgs[i]) < 0)
++			ret = mxci2c_hs_write(i2c_hs, 0, &msgs[i]);
++			if (ret < 0)
+ 				break;
+ 		}
+ 		mxci2c_hs_stop(i2c_hs);
+ 	}
++	mxci2c_hs_stop(i2c_hs);
+ 
+ 	mxci2c_hs_disable(i2c_hs);
+ 
++	if (ret < 0)
++		return ret;
++
+ 	return i;
+ }
+ 
+-- 
+1.5.4.4
+

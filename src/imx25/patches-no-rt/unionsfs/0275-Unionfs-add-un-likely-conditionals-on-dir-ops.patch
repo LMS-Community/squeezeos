@@ -1,0 +1,233 @@
+From 63df265cc670cda2e2dcb38f4896ecf63edeb33e Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 24 Sep 2007 01:09:14 -0400
+Subject: [PATCH] Unionfs: add un/likely conditionals on dir ops
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dirfops.c   |   22 +++++++++++-----------
+ fs/unionfs/dirhelper.c |   30 +++++++++++++++---------------
+ 2 files changed, 26 insertions(+), 26 deletions(-)
+
+diff --git a/fs/unionfs/dirfops.c b/fs/unionfs/dirfops.c
+index c923e58..fa2df88 100644
+--- a/fs/unionfs/dirfops.c
++++ b/fs/unionfs/dirfops.c
+@@ -63,7 +63,7 @@ static int unionfs_filldir(void *dirent, const char *name, int namelen,
+ 		off_t pos = rdstate2offset(buf->rdstate);
+ 		u64 unionfs_ino = ino;
+ 
+-		if (!err) {
++		if (likely(!err)) {
+ 			err = buf->filldir(buf->dirent, name, namelen, pos,
+ 					   unionfs_ino, d_type);
+ 			buf->rdstate->offset++;
+@@ -74,7 +74,7 @@ static int unionfs_filldir(void *dirent, const char *name, int namelen,
+ 	 * If we did fill it, stuff it in our hash, otherwise return an
+ 	 * error.
+ 	 */
+-	if (err) {
++	if (unlikely(err)) {
+ 		buf->filldir_error = err;
+ 		goto out;
+ 	}
+@@ -99,7 +99,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 
+ 	unionfs_read_lock(file->f_path.dentry->d_sb);
+ 
+-	if ((err = unionfs_file_revalidate(file, false)))
++	if (unlikely((err = unionfs_file_revalidate(file, false))))
+ 		goto out;
+ 
+ 	inode = file->f_path.dentry->d_inode;
+@@ -110,7 +110,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 			goto out;
+ 		} else if (file->f_pos > 0) {
+ 			uds = find_rdstate(inode, file->f_pos);
+-			if (!uds) {
++			if (unlikely(!uds)) {
+ 				err = -ESTALE;
+ 				goto out;
+ 			}
+@@ -124,7 +124,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 
+ 	while (uds->bindex <= bend) {
+ 		lower_file = unionfs_lower_file_idx(file, uds->bindex);
+-		if (!lower_file) {
++		if (unlikely(!lower_file)) {
+ 			uds->bindex++;
+ 			uds->dirpos = 0;
+ 			continue;
+@@ -141,7 +141,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 
+ 		/* Read starting from where we last left off. */
+ 		offset = vfs_llseek(lower_file, uds->dirpos, SEEK_SET);
+-		if (offset < 0) {
++		if (unlikely(offset < 0)) {
+ 			err = offset;
+ 			goto out;
+ 		}
+@@ -149,7 +149,7 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 
+ 		/* Save the position for when we continue. */
+ 		offset = vfs_llseek(lower_file, 0, SEEK_CUR);
+-		if (offset < 0) {
++		if (unlikely(offset < 0)) {
+ 			err = offset;
+ 			goto out;
+ 		}
+@@ -158,10 +158,10 @@ static int unionfs_readdir(struct file *file, void *dirent, filldir_t filldir)
+ 		/* Copy the atime. */
+ 		fsstack_copy_attr_atime(inode, lower_file->f_path.dentry->d_inode);
+ 
+-		if (err < 0)
++		if (unlikely(err < 0))
+ 			goto out;
+ 
+-		if (buf.filldir_error)
++		if (unlikely(buf.filldir_error))
+ 			break;
+ 
+ 		if (!buf.entries_written) {
+@@ -201,7 +201,7 @@ static loff_t unionfs_dir_llseek(struct file *file, loff_t offset, int origin)
+ 
+ 	unionfs_read_lock(file->f_path.dentry->d_sb);
+ 
+-	if ((err = unionfs_file_revalidate(file, false)))
++	if (unlikely((err = unionfs_file_revalidate(file, false))))
+ 		goto out;
+ 
+ 	rdstate = UNIONFS_F(file)->rdstate;
+@@ -241,7 +241,7 @@ static loff_t unionfs_dir_llseek(struct file *file, loff_t offset, int origin)
+ 			} else {
+ 				rdstate = find_rdstate(file->f_path.dentry->d_inode,
+ 						       offset);
+-				if (rdstate) {
++				if (likely(rdstate)) {
+ 					UNIONFS_F(file)->rdstate = rdstate;
+ 					err = rdstate->offset;
+ 				} else
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index a72f711..d481ba4 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -43,7 +43,7 @@ int do_delete_whiteouts(struct dentry *dentry, int bindex,
+ 
+ 	err = -ENOMEM;
+ 	name = __getname();
+-	if (!name)
++	if (unlikely(!name))
+ 		goto out;
+ 	strcpy(name, UNIONFS_WHPFX);
+ 	p = name + UNIONFS_WHLEN;
+@@ -65,14 +65,14 @@ int do_delete_whiteouts(struct dentry *dentry, int bindex,
+ 				lookup_one_len(name, lower_dir_dentry,
+ 					       cursor->namelen +
+ 					       UNIONFS_WHLEN);
+-			if (IS_ERR(lower_dentry)) {
++			if (unlikely(IS_ERR(lower_dentry))) {
+ 				err = PTR_ERR(lower_dentry);
+ 				break;
+ 			}
+-			if (lower_dentry->d_inode)
++			if (likely(lower_dentry->d_inode))
+ 				err = vfs_unlink(lower_dir, lower_dentry);
+ 			dput(lower_dentry);
+-			if (err)
++			if (unlikely(err))
+ 				break;
+ 		}
+ 	}
+@@ -102,7 +102,7 @@ int delete_whiteouts(struct dentry *dentry, int bindex,
+ 	BUG_ON(bindex < dbstart(dentry));
+ 	BUG_ON(bindex > dbend(dentry));
+ 	err = is_robranch_super(sb, bindex);
+-	if (err)
++	if (unlikely(err))
+ 		goto out;
+ 
+ 	lower_dir_dentry = unionfs_lower_dentry_idx(dentry, bindex);
+@@ -160,7 +160,7 @@ static int readdir_util_callback(void *dirent, const char *name, int namelen,
+ 
+ 	found = find_filldir_node(buf->rdstate, name, namelen);
+ 	/* If it was found in the table there was a previous whiteout. */
+-	if (found)
++	if (likely(found))
+ 		goto out;
+ 
+ 	/*
+@@ -168,7 +168,7 @@ static int readdir_util_callback(void *dirent, const char *name, int namelen,
+ 	 * empty.
+ 	 */
+ 	err = -ENOTEMPTY;
+-	if ((buf->mode == RD_CHECK_EMPTY) && !whiteout)
++	if (unlikely((buf->mode == RD_CHECK_EMPTY) && !whiteout))
+ 		goto out;
+ 
+ 	err = add_filldir_node(buf->rdstate, name, namelen,
+@@ -194,7 +194,7 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 
+ 	BUG_ON(!S_ISDIR(dentry->d_inode->i_mode));
+ 
+-	if ((err = unionfs_partial_lookup(dentry)))
++	if (unlikely((err = unionfs_partial_lookup(dentry))))
+ 		goto out;
+ 
+ 	bstart = dbstart(dentry);
+@@ -204,14 +204,14 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 		bend = bopaque;
+ 
+ 	buf = kmalloc(sizeof(struct unionfs_rdutil_callback), GFP_KERNEL);
+-	if (!buf) {
++	if (unlikely(!buf)) {
+ 		err = -ENOMEM;
+ 		goto out;
+ 	}
+ 	buf->err = 0;
+ 	buf->mode = RD_CHECK_EMPTY;
+ 	buf->rdstate = alloc_rdstate(dentry->d_inode, bstart);
+-	if (!buf->rdstate) {
++	if (unlikely(!buf->rdstate)) {
+ 		err = -ENOMEM;
+ 		goto out;
+ 	}
+@@ -233,7 +233,7 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 			dentry_open(lower_dentry,
+ 				    unionfs_lower_mnt_idx(dentry, bindex),
+ 				    O_RDONLY);
+-		if (IS_ERR(lower_file)) {
++		if (unlikely(IS_ERR(lower_file))) {
+ 			err = PTR_ERR(lower_file);
+ 			dput(lower_dentry);
+ 			branchput(sb, bindex);
+@@ -245,7 +245,7 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 			buf->rdstate->bindex = bindex;
+ 			err = vfs_readdir(lower_file,
+ 					  readdir_util_callback, buf);
+-			if (buf->err)
++			if (unlikely(buf->err))
+ 				err = buf->err;
+ 		} while ((err >= 0) && buf->filldir_called);
+ 
+@@ -253,15 +253,15 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 		fput(lower_file);
+ 		branchput(sb, bindex);
+ 
+-		if (err < 0)
++		if (unlikely(err < 0))
+ 			goto out;
+ 	}
+ 
+ out:
+-	if (buf) {
++	if (likely(buf)) {
+ 		if (namelist && !err)
+ 			*namelist = buf->rdstate;
+-		else if (buf->rdstate)
++		else if (likely(buf->rdstate))
+ 			free_rdstate(buf->rdstate);
+ 		kfree(buf);
+ 	}
+-- 
+1.5.4.3
+

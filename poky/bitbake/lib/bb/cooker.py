@@ -25,7 +25,6 @@
 import sys, os, getopt, glob, copy, os.path, re, time
 import bb
 from bb import utils, data, parse, event, cache, providers, taskdata, runqueue
-from sets import Set
 import itertools, sre_constants
 
 parsespin = itertools.cycle( r'|/-\\' )
@@ -281,13 +280,13 @@ class BBCooker:
                     print >> depends_file, '"%s" -> "%s"' % (pn, depend)
                 rdepends = self.status.rundeps[fn]
                 for package in rdepends:
-                    for rdepend in rdepends[package]:
-                        print >> depends_file, '"%s" -> "%s" [style=dashed]' % (package, rdepend)
+                    for rdepend in re.findall("([\w.-]+)(\ \(.+\))?", rdepends[package]):
+                        print >> depends_file, '"%s" -> "%s%s" [style=dashed]' % (package, rdepend[0], rdepend[1])
                     packages.append(package)
                 rrecs = self.status.runrecs[fn]
                 for package in rrecs:
-                    for rdepend in rrecs[package]:
-                        print >> depends_file, '"%s" -> "%s" [style=dashed]' % (package, rdepend)
+                    for rdepend in re.findall("([\w.-]+)(\ \(.+\))?", rrecs[package]):
+                        print >> depends_file, '"%s" -> "%s%s" [style=dashed]' % (package, rdepend[0], rdepend[1])
                     if not package in packages:
                         packages.append(package)
                 for package in packages:
@@ -404,8 +403,8 @@ class BBCooker:
 
             bb.event.fire(bb.event.ConfigParsed(self.configuration.data))
 
-        except IOError:
-            bb.msg.fatal(bb.msg.domain.Parsing, "Unable to open %s" % afile )
+        except IOError, e:
+            bb.msg.fatal(bb.msg.domain.Parsing, "IO Error: %s" % str(e) )
         except bb.parse.ParseError, details:
             bb.msg.fatal(bb.msg.domain.Parsing, "Unable to parse %s (%s)" % (afile, details) )
 
@@ -475,17 +474,14 @@ class BBCooker:
         if not fn:
             return False
 
-        # Load data into the cache for fn
+        # Load data into the cache for fn and parse the loaded cache data
         self.bb_cache = bb.cache.init(self)
-        self.bb_cache.loadData(fn, self.configuration.data)
-
-        # Parse the loaded cache data
         self.status = bb.cache.CacheData()
-        self.bb_cache.handle_data(fn, self.status)
+        self.bb_cache.loadData(fn, self.configuration.data, self.status)
 
         # Tweak some variables
         item = self.bb_cache.getVar('PN', fn, True)
-        self.status.ignored_dependencies = Set()
+        self.status.ignored_dependencies = set()
         self.status.bbfile_priority[fn] = 1
 
         # Remove external dependencies
@@ -577,7 +573,7 @@ class BBCooker:
         self.status = bb.cache.CacheData()
 
         ignore = bb.data.getVar("ASSUME_PROVIDED", self.configuration.data, 1) or ""
-        self.status.ignored_dependencies = Set( ignore.split() )
+        self.status.ignored_dependencies = set( ignore.split() )
 
         self.handleCollections( bb.data.getVar("BBFILE_COLLECTIONS", self.configuration.data, 1) )
 
@@ -691,7 +687,11 @@ class BBCooker:
                 if dirfiles:
                     newfiles += dirfiles
                     continue
-            newfiles += glob.glob(f) or [ f ]
+            else:
+                globbed = glob.glob(f)
+                if not globbed and os.path.exists(f):
+                    globbed = [f]
+                newfiles += globbed
 
         bbmask = bb.data.getVar('BBMASK', self.configuration.data, 1)
 
@@ -704,9 +704,8 @@ class BBCooker:
             bb.msg.fatal(bb.msg.domain.Collection, "BBMASK is not a valid regular expression.")
 
         finalfiles = []
-        for i in xrange( len( newfiles ) ):
-            f = newfiles[i]
-            if bbmask and bbmask_compiled.search(f):
+        for f in newfiles:
+            if bbmask_compiled.search(f):
                 bb.msg.debug(1, bb.msg.domain.Collection, "skipping masked file %s" % f)
                 masked += 1
                 continue
@@ -723,7 +722,7 @@ class BBCooker:
 
             # read a file's metadata
             try:
-                fromCache, skip = self.bb_cache.loadData(f, self.configuration.data)
+                fromCache, skip = self.bb_cache.loadData(f, self.configuration.data, self.status)
                 if skip:
                     skipped += 1
                     bb.msg.debug(2, bb.msg.domain.Collection, "skipping %s" % f)
@@ -731,7 +730,6 @@ class BBCooker:
                     continue
                 elif fromCache: cached += 1
                 else: parsed += 1
-                deps = None
 
                 # Disabled by RP as was no longer functional
                 # allow metadata files to add items to BBFILES
@@ -743,8 +741,6 @@ class BBCooker:
                 #            if not os.path.isabs(aof):
                 #                aof = os.path.join(os.path.dirname(f),aof)
                 #            files.append(aof)
-
-                self.bb_cache.handle_data(f, self.status)
 
                 # now inform the caller
                 if progressCallback is not None:

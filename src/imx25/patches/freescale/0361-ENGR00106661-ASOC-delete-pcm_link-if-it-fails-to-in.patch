@@ -1,0 +1,46 @@
+From cac71d3133216ea1992a3aa8c55b99fb515e7c62 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Thu, 29 Jan 2009 17:41:02 -0600
+Subject: [PATCH] ENGR00106661 ASOC: delete pcm_link if it fails to initialize
+
+If a codec is not present, the pcm_link that was created by its
+driver was left lingering.  This caused problems during resume.
+This fix deletes any pcm_links that don't get fully initialized.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/soc-core.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/soc-core.c b/sound/soc/soc-core.c
+index ccd1729..962e262 100644
+--- a/sound/soc/soc-core.c
++++ b/sound/soc/soc-core.c
+@@ -1898,6 +1898,7 @@ int snd_soc_pcm_link_attach(struct snd_soc_pcm_link *pcm_link)
+ 	struct snd_soc_codec *codec;
+ 	struct snd_soc_dai *codec_dai, *cpu_dai;
+ 	struct snd_soc_platform *platform;	
++	struct snd_soc_pcm_link *pcm_link_from_list, *tmp;
+ 	
+ 	snd_assert(pcm_link->machine->pdev != NULL, return -EINVAL);
+ 	parent = &pcm_link->machine->pdev->dev;
+@@ -1937,6 +1938,16 @@ codec_dai_new_err:
+ 	if (platform->usecount <= 0)
+ 		device_unregister(&platform->dev);
+ platform_new_err:
++	/* pcm_link may have been deleted by soc_remove_components.
++	   so pointer pcm_link may no longer be invalid. */
++	list_for_each_entry_safe(pcm_link_from_list, tmp,
++	   &soc_pcm_link_list, all_list) {
++		if (pcm_link == pcm_link_from_list) {
++			list_del(&pcm_link->all_list);
++			kfree(pcm_link);
++			break;
++		}
++	}
+ 	printk(KERN_ERR "asoc: failed to create pcm link\n");
+ 	return -ENODEV;
+ }
+-- 
+1.5.4.4
+

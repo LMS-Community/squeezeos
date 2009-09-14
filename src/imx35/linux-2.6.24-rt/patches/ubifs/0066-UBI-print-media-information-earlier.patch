@@ -1,0 +1,58 @@
+From f3f43ff12bdc9f3bc3830179c8a8d3c556871059 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Sun, 20 Apr 2008 18:00:33 +0300
+Subject: [PATCH] UBI: print media information earlier
+
+Print information about logicale eraseblock size, sub-page
+size and so on at early stage, befor an attempt to attach
+the MTD device was made. This is more convenient to do so
+because the attempt to attach may fail, and the information
+is never printed then.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |   19 ++++++++++---------
+ 1 files changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 1e0e4e6..e8578ca 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -606,8 +606,16 @@ static int io_init(struct ubi_device *ubi)
+ 		ubi->ro_mode = 1;
+ 	}
+ 
+-	dbg_msg("leb_size         %d", ubi->leb_size);
+-	dbg_msg("ro_mode          %d", ubi->ro_mode);
++	ubi_msg("physical eraseblock size:   %d bytes (%d KiB)",
++		ubi->peb_size, ubi->peb_size >> 10);
++	ubi_msg("logical eraseblock size:    %d bytes", ubi->leb_size);
++	ubi_msg("smallest flash I/O unit:    %d", ubi->min_io_size);
++	if (ubi->hdrs_min_io_size != ubi->min_io_size)
++		ubi_msg("sub-page size:              %d",
++			ubi->hdrs_min_io_size);
++	ubi_msg("VID header offset:          %d (aligned %d)",
++		ubi->vid_hdr_offset, ubi->vid_hdr_aloffset);
++	ubi_msg("data offset:                %d", ubi->leb_start);
+ 
+ 	/*
+ 	 * Note, ideally, we have to initialize ubi->bad_peb_count here. But
+@@ -804,15 +812,8 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 	ubi_msg("attached mtd%d to ubi%d", mtd->index, ubi_num);
+ 	ubi_msg("MTD device name:            \"%s\"", mtd->name);
+ 	ubi_msg("MTD device size:            %llu MiB", ubi->flash_size >> 20);
+-	ubi_msg("physical eraseblock size:   %d bytes (%d KiB)",
+-		ubi->peb_size, ubi->peb_size >> 10);
+-	ubi_msg("logical eraseblock size:    %d bytes", ubi->leb_size);
+ 	ubi_msg("number of good PEBs:        %d", ubi->good_peb_count);
+ 	ubi_msg("number of bad PEBs:         %d", ubi->bad_peb_count);
+-	ubi_msg("smallest flash I/O unit:    %d", ubi->min_io_size);
+-	ubi_msg("VID header offset:          %d (aligned %d)",
+-		ubi->vid_hdr_offset, ubi->vid_hdr_aloffset);
+-	ubi_msg("data offset:                %d", ubi->leb_start);
+ 	ubi_msg("max. allowed volumes:       %d", ubi->vtbl_slots);
+ 	ubi_msg("wear-leveling threshold:    %d", CONFIG_MTD_UBI_WL_THRESHOLD);
+ 	ubi_msg("number of internal volumes: %d", UBI_INT_VOL_COUNT);
+-- 
+1.5.6.3
+

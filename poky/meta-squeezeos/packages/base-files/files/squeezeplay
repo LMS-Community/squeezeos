@@ -2,6 +2,12 @@
 
 case "$1" in
     start)
+	if [ -s /var/run/squeezeplay.pid ] && kill -0 $(cat /var/run/squeezeplay.pid)
+	then
+		echo "SqueezePlay is already running"
+		exit 1
+	fi
+
 	echo "Starting SqueezePlay"
 
 	export SDL_NOMOUSE=1
@@ -16,27 +22,38 @@ case "$1" in
 	done
 	export LUA_PATH
 
-	cd /usr/bin
-	/usr/bin/jive &
+	(cd /usr/bin; /usr/bin/jive) &
+	echo $! > /var/run/squeezeplay.pid
 	;;
 
     stop)
 	echo "Stopping SqueezePlay"
 
-	killall -q jive
+	if [ -s /var/run/squeezeplay.pid ]; then
+		/bin/kill $(cat /var/run/squeezeplay.pid)
+
+		/bin/rm /var/run/squeezeplay.pid
+		/bin/rm /var/run/squeezeplay.wdog
+	fi
 	;;
 
     stopwdog)
 	echo "Stopping SqueezePlay (keeping watchdog alive)"
 
-	killall -q jive
-	sleep 2
-	watchdog -t 2 /dev/watchdog
+	if [ -s /var/run/squeezeplay.pid ]; then
+		/bin/kill $(cat /var/run/squeezeplay.pid)
+
+		/bin/rm /var/run/squeezeplay.pid
+		/bin/rm /var/run/squeezeplay.wdog
+	fi
+
+	# Prevent watchdog failure (for one hour)
+	/bin/sleep 1h &
+	echo $! > /var/run/squeezeplay.pid
 	;;
 
     restart)
 	$0 stop
-	sleep 2
 	$0 start
 	;;
 

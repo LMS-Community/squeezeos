@@ -1,0 +1,263 @@
+From 43d46fa4d9ce314cb6f39f64c1b89f976a7e893c Mon Sep 17 00:00:00 2001
+From: Lionel.Xu <r63889@freescale.com>
+Date: Tue, 13 Jan 2009 19:26:03 +0800
+Subject: [PATCH] ENGR00094882 ASOC: Update driver support for codec sgtl5000
+
+1. Add driver support for audio codec sgtl5000 on mx35 TO2 platform.
+2. Add speaker endpoint and amp control to support speaker output.
+
+Signed-off-by: Lionel Xu <r63889@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |    6 ++-
+ arch/arm/mach-mx35/devices.c            |    4 +-
+ arch/arm/mach-mx35/mx35_3stack.c        |   75 +++++++++++++++++++++++++++++++
+ sound/soc/imx/imx-3stack-sgtl5000.c     |   47 +++++++++++++++----
+ 4 files changed, 119 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index e3b81f7..b7b5893 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Tue Dec 23 10:13:23 2008
++# Tue Jan 13 16:12:26 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -554,6 +554,7 @@ CONFIG_REGULATOR=y
+ # CONFIG_REGULATOR_DEBUG is not set
+ CONFIG_REGULATOR_MC13892=y
+ CONFIG_REGULATOR_MAX8660=y
++CONFIG_REGULATOR_MC9SDZ60=y
+ # CONFIG_REGULATOR_WM8350 is not set
+ # CONFIG_PARPORT is not set
+ CONFIG_BLK_DEV=y
+@@ -1112,7 +1113,7 @@ CONFIG_SND_MXC_SOC_IRAM=y
+ CONFIG_SND_SOC_IMX_3STACK_AK4647=y
+ CONFIG_SND_SOC_IMX_3STACK_WM8580=y
+ # CONFIG_SND_SOC_IMX_3STACK_WM8903 is not set
+-# CONFIG_SND_SOC_IMX_3STACK_SGTL5000 is not set
++CONFIG_SND_SOC_IMX_3STACK_SGTL5000=y
+ CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH=y
+ 
+ #
+@@ -1124,6 +1125,7 @@ CONFIG_SND_SOC_IMX_3STACK_BLUETOOTH=y
+ #
+ CONFIG_SND_SOC_AK4647=y
+ CONFIG_SND_SOC_WM8580=y
++CONFIG_SND_SOC_SGTL5000=y
+ CONFIG_SND_SOC_BLUETOOTH=y
+ 
+ #
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index fb80c5f..b028098 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -572,6 +572,8 @@ static struct platform_device mxc_alsa_device = {
+ 
+ static void mxc_init_audio(void)
+ {
++	if (board_is_mx35(BOARD_REV_2))
++		return;
+ 	mxc_audio_data.ssi_num = 1;
+ 	mxc_audio_data.src_port = 1;
+ 	mxc_audio_data.ext_port = 4;
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 012d12e..9f02af0 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -408,6 +408,10 @@ static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
+ 	 .platform_data = (void *)&camera_data,
+ 	 },
+ 	{
++	.type = "sgtl5000-i2c",
++	.addr = 0x0a,
++	 },
++	{
+ 	 .type = "ak4647-i2c",
+ 	 .addr = 0x12,
+ 	 },
+@@ -777,6 +781,76 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
++#if defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) \
++    || defined(CONFIG_SND_SOC_IMX_3STACK_SGTL5000_MODULE)
++
++unsigned int headphone_det_status(void)
++{
++	int ret = 0;
++	if (0 != pmic_gpio_get_designation_bit_val(0, &ret))
++		printk(KERN_ERR "Get headphone status error.");
++	return ret;
++}
++
++static struct mxc_sgtl5000_platform_data sgtl5000_data = {
++	.ssi_num = 1,
++	.src_port = 1,
++	.ext_port = 4,
++	.hp_irq = MXC_PSEUDO_IRQ_HEADPHONE,
++	.hp_status = headphone_det_status,
++	.vddio_reg = NULL,
++	.vdda_reg = "VCAM",
++	.amp_gpo = "SPKR",
++	.vddio = 0,
++	.vdda = 3000000,
++	.vddd = 0,
++	.sysclk = 12000000,
++};
++
++static struct platform_device sgtl5000_device = {
++	.name = "sgtl5000-imx",
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &sgtl5000_data,
++		} ,
++};
++
++static void mxc_sgtl5000_init(void)
++{
++	int err;
++	struct clk *cko1, *parent;
++	unsigned long rate;
++
++	/* for board v1.1 do nothing*/
++	if (!board_is_mx35(BOARD_REV_2))
++		return;
++
++	cko1 = clk_get(NULL, "cko1_clk");
++	if (IS_ERR(cko1))
++		return;
++	parent = clk_get(NULL, "ckih");
++	if (IS_ERR(parent))
++		return;
++	clk_set_parent(cko1, parent);
++	rate = clk_round_rate(cko1, 12000000);
++	if (rate < 8000000 || rate > 27000000) {
++		printk(KERN_ERR "Error: SGTL5000 mclk freq %d out of range!\n",
++			rate);
++		clk_put(parent);
++		clk_put(cko1);
++		return;
++		}
++	clk_set_rate(cko1, rate);
++	clk_enable(cko1);
++	sgtl5000_data.sysclk = rate;
++	platform_device_register(&sgtl5000_device);
++}
++#else
++static void mxc_sgtl5000_init(void)
++{
++}
++#endif
++
+ #if defined(CONFIG_CAN_FLEXCAN) || defined(CONFIG_CAN_FLEXCAN_MODULE)
+ static void flexcan_xcvr_enable(int id, int en)
+ {
+@@ -868,6 +942,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_lcd();
+ 	mxc_init_fb();
+ 	mxc_init_bl();
++	mxc_sgtl5000_init();
+ 
+ 	i2c_register_board_info(0, mxc_i2c_board_info,
+ 				ARRAY_SIZE(mxc_i2c_board_info));
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index f2e06d2..95b4f6b 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -1,7 +1,7 @@
+ /*
+  * imx-3stack-sgtl5000.c  --  i.MX 3Stack Driver for Freescale SGTL5000 Codec
+  *
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  *  This program is free software; you can redistribute  it and/or modify it
+  *  under  the terms of  the GNU General  Public License as published by the
+@@ -226,14 +226,6 @@ static const struct snd_soc_pcm_link_ops imx_3stack_pcm_ops = {
+ 	.free = imx_3stack_pcm_free,
+ };
+ 
+-/* imx_3stack machine dapm widgets */
+-static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
+-	SND_SOC_DAPM_MIC("Mic Jack", NULL),
+-	SND_SOC_DAPM_LINE("Line In Jack", NULL),
+-	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
+-	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+-};
+-
+ /* imx_3stack machine audio map */
+ static const char *audio_map[][3] = {
+ 
+@@ -249,6 +241,9 @@ static const char *audio_map[][3] = {
+ 	/* LINE_OUT --> Line Out Jack */
+ 	{"Line Out Jack", NULL, "LINE_OUT"},
+ 
++	/* LINE_OUT --> Ext Speaker */
++	{"Ext Spk", NULL, "LINE_OUT"},
++
+ 	{NULL, NULL, NULL},
+ };
+ 
+@@ -382,6 +377,39 @@ static int sgtl5000_set_spk(struct snd_kcontrol *kcontrol,
+ 	return 1;
+ }
+ 
++static int spk_amp_event(struct snd_soc_dapm_widget *w,
++			 struct snd_kcontrol *kcontrol, int event) {
++	int hp_status;
++	struct mxc_sgtl5000_platform_data *plat;
++	struct imx_3stack_priv *priv;
++	priv = sgtl5000_3stack_pcm_link->machine->platform_data;
++	plat = sgtl5000_3stack_pcm_link->machine->pdev->dev.platform_data;
++	hp_status = plat->hp_status();
++	if (SND_SOC_DAPM_EVENT_ON(event)) {
++		if (hp_status) {
++			regulator_disable(priv->reg_amp_gpo);
++			regulator_set_mode(priv->reg_vdda,
++					REGULATOR_MODE_NORMAL);
++		} else {
++			regulator_enable(priv->reg_amp_gpo);
++			regulator_set_mode(priv->reg_vdda, REGULATOR_MODE_FAST);
++		}
++	} else {
++		regulator_disable(priv->reg_amp_gpo);
++		regulator_set_mode(priv->reg_vdda, REGULATOR_MODE_NORMAL);
++	}
++	return 0;
++}
++
++/* imx_3stack machine dapm widgets */
++static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
++	SND_SOC_DAPM_MIC("Mic Jack", NULL),
++	SND_SOC_DAPM_LINE("Line In Jack", NULL),
++	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
++	SND_SOC_DAPM_SPK("Ext Spk", spk_amp_event),
++	SND_SOC_DAPM_HP("Headphone Jack", NULL),
++};
++
+ static const struct snd_kcontrol_new sgtl5000_machine_controls[] = {
+ 	SOC_ENUM_EXT("Jack Function", sgtl5000_enum[0], sgtl5000_get_jack,
+ 		     sgtl5000_set_jack),
+@@ -443,7 +471,6 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 		regulator_set_voltage(priv->reg_vddio, plat->vddio);
+ 		regulator_enable(priv->reg_vddio);
+ 	}
+-	regulator_enable(priv->reg_amp_gpo);
+ 
+ 	codec_data->vddio = plat->vddio / 1000; /* uV to mV */
+ 	codec_data->vdda = plat->vdda / 1000;
+-- 
+1.5.4.4
+

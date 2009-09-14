@@ -1,0 +1,163 @@
+From 389ba12b92ea8d64af2401b2f0a5e127606c7f7e Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Mon, 16 Mar 2009 09:56:57 +0200
+Subject: [PATCH] UBIFS: introduce a helpful variable
+
+This patch introduces a helpful @c->idx_leb_size variable.
+The patch also fixes some spelling issues and makes comments
+use "LEB" instead of "eraseblock", which is more correct.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |   33 +++++++++++++++------------------
+ fs/ubifs/sb.c     |    1 -
+ fs/ubifs/super.c  |    3 +++
+ fs/ubifs/ubifs.h  |    7 +++++--
+ 4 files changed, 23 insertions(+), 21 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index 071bfca..d1e19de 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -194,29 +194,26 @@ static int make_free_space(struct ubifs_info *c)
+ }
+ 
+ /**
+- * ubifs_calc_min_idx_lebs - calculate amount of eraseblocks for the index.
++ * ubifs_calc_min_idx_lebs - calculate amount of LEBs for the index.
+  * @c: UBIFS file-system description object
+  *
+- * This function calculates and returns the number of eraseblocks which should
+- * be kept for index usage.
++ * This function calculates and returns the number of LEBs which should be kept
++ * for index usage.
+  */
+ int ubifs_calc_min_idx_lebs(struct ubifs_info *c)
+ {
+-	int idx_lebs, eff_leb_size = c->leb_size - c->max_idx_node_sz;
++	int idx_lebs;
+ 	long long idx_size;
+ 
+ 	idx_size = c->old_idx_sz + c->budg_idx_growth + c->budg_uncommitted_idx;
+-
+ 	/* And make sure we have thrice the index size of space reserved */
+-	idx_size = idx_size + (idx_size << 1);
+-
++	idx_size += idx_size << 1;
+ 	/*
+ 	 * We do not maintain 'old_idx_size' as 'old_idx_lebs'/'old_idx_bytes'
+ 	 * pair, nor similarly the two variables for the new index size, so we
+ 	 * have to do this costly 64-bit division on fast-path.
+ 	 */
+-	idx_size += eff_leb_size - 1;
+-	idx_lebs = div_u64(idx_size, eff_leb_size);
++	idx_lebs = div_u64(idx_size + c->idx_leb_size - 1, c->idx_leb_size);
+ 	/*
+ 	 * The index head is not available for the in-the-gaps method, so add an
+ 	 * extra LEB to compensate.
+@@ -310,15 +307,15 @@ static int can_use_rp(struct ubifs_info *c)
+  * do_budget_space - reserve flash space for index and data growth.
+  * @c: UBIFS file-system description object
+  *
+- * This function makes sure UBIFS has enough free eraseblocks for index growth
+- * and data.
++ * This function makes sure UBIFS has enough free LEBs for index growth and
++ * data.
+  *
+  * When budgeting index space, UBIFS reserves thrice as many LEBs as the index
+  * would take if it was consolidated and written to the flash. This guarantees
+  * that the "in-the-gaps" commit method always succeeds and UBIFS will always
+  * be able to commit dirty index. So this function basically adds amount of
+  * budgeted index space to the size of the current index, multiplies this by 3,
+- * and makes sure this does not exceed the amount of free eraseblocks.
++ * and makes sure this does not exceed the amount of free LEBs.
+  *
+  * Notes about @c->min_idx_lebs and @c->lst.idx_lebs variables:
+  * o @c->lst.idx_lebs is the number of LEBs the index currently uses. It might
+@@ -695,12 +692,12 @@ long long ubifs_reported_space(const struct ubifs_info *c, long long free)
+  * This function calculates amount of free space to report to user-space.
+  *
+  * Because UBIFS may introduce substantial overhead (the index, node headers,
+- * alignment, wastage at the end of eraseblocks, etc), it cannot report real
+- * amount of free flash space it has (well, because not all dirty space is
+- * reclaimable, UBIFS does not actually know the real amount). If UBIFS did so,
+- * it would bread user expectations about what free space is. Users seem to
+- * accustomed to assume that if the file-system reports N bytes of free space,
+- * they would be able to fit a file of N bytes to the FS. This almost works for
++ * alignment, wastage at the end of LEBs, etc), it cannot report real amount of
++ * free flash space it has (well, because not all dirty space is reclaimable,
++ * UBIFS does not actually know the real amount). If UBIFS did so, it would
++ * bread user expectations about what free space is. Users seem to accustomed
++ * to assume that if the file-system reports N bytes of free space, they would
++ * be able to fit a file of N bytes to the FS. This almost works for
+  * traditional file-systems, because they have way less overhead than UBIFS.
+  * So, to keep users happy, UBIFS tries to take the overhead into account.
+  */
+diff --git a/fs/ubifs/sb.c b/fs/ubifs/sb.c
+index e070c64..0dec47c 100644
+--- a/fs/ubifs/sb.c
++++ b/fs/ubifs/sb.c
+@@ -623,7 +623,6 @@ int ubifs_read_superblock(struct ubifs_info *c)
+ 	c->main_lebs = c->leb_cnt - UBIFS_SB_LEBS - UBIFS_MST_LEBS;
+ 	c->main_lebs -= c->log_lebs + c->lpt_lebs + c->orph_lebs;
+ 	c->main_first = c->leb_cnt - c->main_lebs;
+-	c->report_rp_size = ubifs_reported_space(c, c->rp_size);
+ 
+ 	err = validate_sb(c, sup);
+ out:
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 60c9aed..bb6871a 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -698,6 +698,8 @@ static int init_constants_sb(struct ubifs_info *c)
+ 	if (err)
+ 		return err;
+ 
++	/* Initialize effective LEB size used in budgeting calculations */
++	c->idx_leb_size = c->leb_size - c->max_idx_node_sz;
+ 	return 0;
+ }
+ 
+@@ -714,6 +716,7 @@ static void init_constants_master(struct ubifs_info *c)
+ 	long long tmp64;
+ 
+ 	c->min_idx_lebs = ubifs_calc_min_idx_lebs(c);
++	c->report_rp_size = ubifs_reported_space(c, c->rp_size);
+ 
+ 	/*
+ 	 * Calculate total amount of FS blocks. This number is not used
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index cd18f18..e93790a 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1011,6 +1011,8 @@ struct ubifs_debug_info;
+  * @min_io_shift: number of bits in @min_io_size minus one
+  * @leb_size: logical eraseblock size in bytes
+  * @half_leb_size: half LEB size
++ * @idx_leb_size: how many bytes of an LEB are effectively available when it is
++ *                used to store indexing nodes (@leb_size - @max_idx_node_sz)
+  * @leb_cnt: count of logical eraseblocks
+  * @max_leb_cnt: maximum count of logical eraseblocks
+  * @old_leb_cnt: count of logical eraseblocks before re-size
+@@ -1128,8 +1130,8 @@ struct ubifs_debug_info;
+  *             previous commit start
+  * @uncat_list: list of un-categorized LEBs
+  * @empty_list: list of empty LEBs
+- * @freeable_list: list of freeable non-index LEBs (free + dirty == leb_size)
+- * @frdi_idx_list: list of freeable index LEBs (free + dirty == leb_size)
++ * @freeable_list: list of freeable non-index LEBs (free + dirty == @leb_size)
++ * @frdi_idx_list: list of freeable index LEBs (free + dirty == @leb_size)
+  * @freeable_cnt: number of freeable LEBs in @freeable_list
+  *
+  * @ltab_lnum: LEB number of LPT's own lprops table
+@@ -1249,6 +1251,7 @@ struct ubifs_info {
+ 	int min_io_shift;
+ 	int leb_size;
+ 	int half_leb_size;
++	int idx_leb_size;
+ 	int leb_cnt;
+ 	int max_leb_cnt;
+ 	int old_leb_cnt;
+-- 
+1.5.4.3
+

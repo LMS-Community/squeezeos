@@ -1,0 +1,65 @@
+From 99dbdaf9fbd7a710807165730ac95b6ced2659b3 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 19 Dec 2007 16:03:17 +0200
+Subject: [PATCH] UBI: fix comment
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/vtbl.c |    5 ++---
+ drivers/mtd/ubi/wl.c   |    9 +++------
+ 2 files changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mtd/ubi/vtbl.c b/drivers/mtd/ubi/vtbl.c
+index a37dc7a..7a1a8a1 100644
+--- a/drivers/mtd/ubi/vtbl.c
++++ b/drivers/mtd/ubi/vtbl.c
+@@ -115,9 +115,8 @@ int ubi_change_vtbl_record(struct ubi_device *ubi, int idx,
+ }
+ 
+ /**
+- * vol_til_check - check if volume table is not corrupted and contains sensible
+- * data.
+- *
++ * vtbl_check - check if volume table is not corrupted and contains sensible
++ *              data.
+  * @ubi: UBI device description object
+  * @vtbl: volume table
+  *
+diff --git a/drivers/mtd/ubi/wl.c b/drivers/mtd/ubi/wl.c
+index 8421c7a..7d32f71 100644
+--- a/drivers/mtd/ubi/wl.c
++++ b/drivers/mtd/ubi/wl.c
+@@ -259,7 +259,6 @@ static int do_work(struct ubi_device *ubi)
+ 	 */
+ 	down_read(&ubi->work_sem);
+ 	spin_lock(&ubi->wl_lock);
+-
+ 	if (list_empty(&ubi->works)) {
+ 		spin_unlock(&ubi->wl_lock);
+ 		up_read(&ubi->work_sem);
+@@ -268,6 +267,8 @@ static int do_work(struct ubi_device *ubi)
+ 
+ 	wrk = list_entry(ubi->works.next, struct ubi_work, list);
+ 	list_del(&wrk->list);
++	ubi->works_count -= 1;
++	ubi_assert(ubi->works_count >= 0);
+ 	spin_unlock(&ubi->wl_lock);
+ 
+ 	/*
+@@ -278,12 +279,8 @@ static int do_work(struct ubi_device *ubi)
+ 	err = wrk->func(ubi, wrk, 0);
+ 	if (err)
+ 		ubi_err("work failed with error code %d", err);
+-
+-	spin_lock(&ubi->wl_lock);
+-	ubi->works_count -= 1;
+-	ubi_assert(ubi->works_count >= 0);
+-	spin_unlock(&ubi->wl_lock);
+ 	up_read(&ubi->work_sem);
++
+ 	return err;
+ }
+ 
+-- 
+1.5.6.3
+

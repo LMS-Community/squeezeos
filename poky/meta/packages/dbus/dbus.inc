@@ -9,10 +9,10 @@ SRC_URI = "\
   file://cross.patch;patch=1 \
   file://tmpdir.patch;patch=1 \
   file://dbus-1.init \
+  file://99_dbus \
 "
-S = "${WORKDIR}/dbus-${PV}"
 
-inherit autotools pkgconfig update-rc.d gettext
+inherit autotools pkgconfig gettext
 
 INITSCRIPT_NAME = "dbus-1"
 INITSCRIPT_PARAMS = "start 02 5 2 . stop 20 0 1 6 ."
@@ -79,7 +79,11 @@ do_stage() {
 	install -m 0644 dbus/dbus-arch-deps.h ${STAGING_LIBDIR}/dbus-1.0/include/dbus/
 }
 
-do_install_append() {
+do_install() {
+	autotools_do_install
+	install -d ${D}/etc/default/volatiles
+	install -m 0644 ${WORKDIR}/99_dbus ${D}/etc/default/volatiles/
+
 	install -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/dbus-1.init ${D}${sysconfdir}/init.d/dbus-1
 	# the stock install seems to install the libtool wrapper script, so we have to copy this manually :M:

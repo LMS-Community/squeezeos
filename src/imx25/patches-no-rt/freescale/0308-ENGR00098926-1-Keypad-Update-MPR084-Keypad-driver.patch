@@ -1,0 +1,106 @@
+From c7666796a81cd259ab622f1510dfe88ca295801e Mon Sep 17 00:00:00 2001
+From: Raj Rajasekaran <b10872@freescale.com>
+Date: Wed, 7 Jan 2009 12:13:46 -0600
+Subject: [PATCH] ENGR00098926-1 Keypad: Update MPR084 Keypad driver.
+
+Added support to enable/disable Keypad regulator.
+
+Signed-off-by: Raj Rajasekaran <b10872@freescale.com>
+---
+ drivers/input/keyboard/mpr084.c |   33 ++++++++++++++++++++++++++++++---
+ 1 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/keyboard/mpr084.c b/drivers/input/keyboard/mpr084.c
+index 4dd6beb..3e0973b 100644
+--- a/drivers/input/keyboard/mpr084.c
++++ b/drivers/input/keyboard/mpr084.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -33,6 +33,7 @@
+ #include <linux/kthread.h>
+ #include <linux/input.h>
+ #include <linux/delay.h>
++#include <linux/regulator/regulator.h>
+ #include <asm/mach/irq.h>
+ #include <asm/arch/gpio.h>
+ 
+@@ -92,6 +93,7 @@ struct mpr084_data {
+ static int kpstatus[KEY_COUNT];
+ static struct mxc_keyp_platform_data *keypad;
+ static const unsigned short *mxckpd_keycodes;
++static struct regulator *vdd_reg;
+ 
+ static int mpr084_read_register(struct mpr084_data *data,
+ 				unsigned char regaddr, int *value)
+@@ -261,6 +263,13 @@ static int mpr084_i2c_remove(struct i2c_client *client)
+ 	input_unregister_device(d->idev);
+ 	if (keypad->inactive)
+ 		keypad->inactive();
++
++	/*Disable the Regulator*/
++	if (keypad->vdd_reg) {
++		regulator_disable(vdd_reg);
++		regulator_put(vdd_reg, &client->dev);
++	}
++
+ 	err = i2c_detach_client(client);
+ 	if (err) {
+ 		dev_err(&client->dev, "Client deregistration failed, "
+@@ -353,8 +362,10 @@ err:
+ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	struct mpr084_data *data;
+-	int err = 0, i = 0, regValue = 0;
+-
++	int err = 0, i = 0;
++#if DEBUG
++	int regValue = 0;
++#endif
+ 	data = kzalloc(sizeof(struct mpr084_data), GFP_KERNEL);
+ 	if (data == NULL)
+ 		return -ENOMEM;
+@@ -367,6 +378,15 @@ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_i
+ 	keypad = (struct mxc_keyp_platform_data *)(client->dev).platform_data;
+ 	if (keypad->active)
+ 		keypad->active();
++
++	/*Enable the Regulator*/
++	if (keypad && keypad->vdd_reg) {
++		vdd_reg = regulator_get(&client->dev, keypad->vdd_reg);
++		if (vdd_reg)
++			regulator_enable(vdd_reg);
++	} else
++		vdd_reg = NULL;
++
+ 	mxckpd_keycodes = keypad->matrix;
+ 	data->idev->keycode = &mxckpd_keycodes;
+ 	data->idev->keycodesize = sizeof(unsigned char);
+@@ -381,6 +401,7 @@ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_i
+ 		input_unregister_device(data->idev);
+ 		goto exit_free;
+ 	}
++
+ #if DEBUG
+ 	for (i = MPR084_ADDR_MINI; i <= MPR084_ADDR_MAX; i++) {
+ 		err = mpr084_read_register(data, i, &regValue);
+@@ -398,6 +419,12 @@ static int mpr084_i2c_probe(struct i2c_client *client, const struct i2c_device_i
+ 	printk(KERN_INFO "%s: Device Attached\n", __func__);
+ 	return 0;
+ exit_free:
++	/*disable the Regulator*/
++	if (vdd_reg) {
++		regulator_disable(vdd_reg);
++		regulator_put(vdd_reg, &client->dev);
++		vdd_reg = NULL;
++	}
+ 	kfree(data);
+ 	return err;
+ }
+-- 
+1.5.4.4
+

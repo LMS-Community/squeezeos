@@ -1,0 +1,65 @@
+#!/bin/sh
+
+case "$1" in
+    start)
+	echo "Starting bridging"
+
+	ipaddr=`/sbin/ifconfig wlan0 | sed -ne 's/.*addr:\([0-9]*\.[0-9]*\.[0-9]*\.[0-9]*\).*/\1/p'`
+	if [ "x${ipaddr}" == "x" ]
+		then
+		echo "You need to be connected via wireless to use bridging."
+		exit 0
+	fi
+
+	/sbin/ifconfig eth0 0.0.0.0
+
+	# Clone wlan0 ip address and use for eth0
+	if [ "x${ipaddr}" != "x" ]
+		then
+		echo "Setting eth0 ipaddr: ${ipaddr}"
+		/sbin/ifconfig eth0 ${ipaddr} netmask 255.255.255.0
+	fi
+
+	# Remove incorrect route
+	routeaddr=`/sbin/ifconfig eth0 | sed -ne 's/.*addr:\([0-9]*\.[0-9]*\.[0-9]*\.\).*/\1/p'`
+	routeaddr="${routeaddr}0"
+	if [ "x${routeaddr}" != "x" ]
+	    then
+	    echo "Delete eth0 route: ${routeaddr}"
+	    route del -net ${routeaddr} netmask 255.255.255.0 dev eth0
+	fi
+            
+	# Restart dhcp forwarder
+	killall -q dhcp-fwd
+	dhcp-fwd
+
+	# Enable proxy arp
+	echo 1 > /proc/sys/net/ipv4/conf/wlan0/proxy_arp
+	echo 1 > /proc/sys/net/ipv4/conf/eth0/proxy_arp
+	echo 1 > /proc/sys/net/ipv4/ip_forward
+	;;
+
+    stop)
+	echo "Stopping bridging"
+
+	echo 0 > /proc/sys/net/ipv4/conf/wlan0/proxy_arp
+	echo 0 > /proc/sys/net/ipv4/conf/eth0/proxy_arp
+	echo 0 > /proc/sys/net/ipv4/ip_forward
+
+	killall -q dhcp-fwd
+
+	/sbin/ifconfig eth0 0.0.0.0
+	;;
+
+    restart)
+	$0 stop
+	sleep 2
+	$0 start
+	;;
+
+    *)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit 0

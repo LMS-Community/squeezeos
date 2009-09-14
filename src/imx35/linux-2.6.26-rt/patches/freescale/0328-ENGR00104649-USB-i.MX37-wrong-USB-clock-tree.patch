@@ -1,0 +1,230 @@
+From 16740be5cb010662918bbe283257d7d5f69f39c8 Mon Sep 17 00:00:00 2001
+From: Albert Chen <R65187@freescale.com>
+Date: Tue, 20 Jan 2009 15:21:37 +0800
+Subject: [PATCH] ENGR00104649 USB: i.MX37 wrong USB clock tree.
+
+Wrong clock tree with USB clocks.
+
+Signed-off-by: Albert Chen <r65187@freescale.com>
+---
+ arch/arm/mach-mx37/clock.c  |   94 ++++++++++++++++++-------------------------
+ arch/arm/mach-mx37/usb_dr.c |   25 +++++------
+ 2 files changed, 50 insertions(+), 69 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/clock.c b/arch/arm/mach-mx37/clock.c
+index 7b5a06a..563e7ff 100644
+--- a/arch/arm/mach-mx37/clock.c
++++ b/arch/arm/mach-mx37/clock.c
+@@ -59,27 +59,6 @@ extern void board_ref_clk_rate(unsigned long *ckil, unsigned long *osc,
+ 			       unsigned long *ckih);
+ static int cpu_clk_set_wp(int wp);
+ 
+-
+-static int _clk_enable_normal(struct clk *clk)
+-{
+-	u32 reg;
+-
+-	reg = __raw_readl(clk->enable_reg);
+-	reg |= 1 << clk->enable_shift;
+-	__raw_writel(reg, clk->enable_reg);
+-
+-	return 0;
+-}
+-
+-static void _clk_disable_normal(struct clk *clk)
+-{
+-	u32 reg;
+-
+-	reg = __raw_readl(clk->enable_reg);
+-	reg &= ~(1 << clk->enable_shift);
+-	__raw_writel(reg, clk->enable_reg);
+-}
+-
+ static int _clk_enable(struct clk *clk)
+ {
+ 	u32 reg;
+@@ -1776,18 +1755,11 @@ static int _clk_usboh2_set_parent(struct clk *clk, struct clk *parent)
+ 	return 0;
+ }
+ 
+-static struct clk usboh2_clk[] = {
+-	{
+-	 .name = "usboh2_clk",
+-	 .parent = &pll3_sw_clk,
+-	 .set_parent = _clk_usboh2_set_parent,
+-	 .recalc = _clk_usboh2_recalc,
+-	 .enable = _clk_enable,
+-	 .enable_reg = MXC_CCM_CCGR2,
+-	 .enable_shift = MXC_CCM_CCGR2_CG12_OFFSET,
+-	 .disable = _clk_disable,
+-	 .secondary = &usboh2_clk[1],
+-	 },
++/*
++ * This is USB core clock.
++ ** need access DDR/iram, TMAX
++ */
++static struct clk usb_core_clk[] = {
+ 	{
+ 	 .name = "usb_ahb_clk",
+ 	 .parent = &ipg_clk,
+@@ -1795,15 +1767,39 @@ static struct clk usboh2_clk[] = {
+ 	 .enable_reg = MXC_CCM_CCGR2,
+ 	 .enable_shift = MXC_CCM_CCGR2_CG11_OFFSET,
+ 	 .disable = _clk_disable,
+-	 .secondary = &usboh2_clk[2],
++	 .secondary = &usb_core_clk[1],
+ 	 },
+ 	{
+-	 .name = "usb_sec_clk",
++	 .name = "usb_tmax_clk",
+ 	 .parent = &tmax1_clk,
+-	 .secondary = &emi_fast_clk,
++	 .secondary = &usb_core_clk[2],
++	 },
++	{
++	 .name = "usb_ddr_clk",
++	 .parent = &emi_fast_clk,
++#if defined CONFIG_USB_STATIC_IRAM_PPH || defined CONFIG_USB_STATIC_IRAM
++	.secondary = &usb_core_clk[3],
++#endif
++	 },
++	/* iram patch, need access internal ram */
++	{
++	 .name = "usb_iram_clk",
++	 .parent = &emi_intr_clk,
+ 	 },
+ };
+ 
++/* used for connecting external PHY */
++static struct clk usboh2_clk = {
++	.name = "usboh2_clk",
++	.parent = &pll3_sw_clk,
++	.set_parent = _clk_usboh2_set_parent,
++	.recalc = _clk_usboh2_recalc,
++	.enable = _clk_enable,
++	.enable_reg = MXC_CCM_CCGR2,
++	.enable_shift = MXC_CCM_CCGR2_CG12_OFFSET,
++	.disable = _clk_disable,
++};
++
+ static void _clk_usb_phy_recalc(struct clk *clk)
+ {
+ 	u32 reg, prediv, podf;
+@@ -1839,14 +1835,13 @@ static int _clk_usb_phy_set_parent(struct clk *clk, struct clk *parent)
+ 
+ static struct clk usb_phy_clk = {
+ 	.name = "usb_phy_clk",
+-	.parent = &pll3_sw_clk,
++	.parent = &osc_clk,
+ 	.set_parent = _clk_usb_phy_set_parent,
+ 	.recalc = _clk_usb_phy_recalc,
+ 	.enable = _clk_enable,
+ 	.enable_reg = MXC_CCM_CCGR0,
+ 	.enable_shift = MXC_CCM_CCGR0_CG6_OFFSET,
+ 	.disable = _clk_disable,
+-	.secondary = &tmax1_clk,
+ };
+ 
+ static struct clk esdhc_dep_clks = {
+@@ -2476,19 +2471,6 @@ static struct clk usb_clk = {
+ 	.rate = 60000000,
+ };
+ 
+-static struct clk usb_utmi_clk = {
+-	.name = "usb_utmi_clk",
+-#if defined CONFIG_USB_STATIC_IRAM_PPH || defined CONFIG_USB_STATIC_IRAM
+-	.secondary = &emi_intr_clk,
+-#else
+-	.secondary = &emi_fast_clk,
+-#endif
+-	.enable = _clk_enable_normal,
+-	.enable_reg = MXC_CCM_CSCMR1,
+-	.enable_shift = MXC_CCM_CSCMR1_USB_PHY_CLK_SEL_OFFSET,
+-	.disable = _clk_disable_normal,
+-};
+-
+ static struct clk rtc_clk = {
+ 	.name = "rtc_clk",
+ 	.parent = &ckil_clk,
+@@ -2684,11 +2666,12 @@ static struct clk *mxc_clks[] = {
+ 	&tmax2_clk,
+ 	&ahbmux1_clk,
+ 	&ahbmux2_clk,
+-	&usboh2_clk[0],
+-	&usboh2_clk[1],
+-	&usboh2_clk[2],
++	&usb_core_clk[0],
++	&usb_core_clk[1],
++	&usb_core_clk[2],
++	&usb_core_clk[3],
++	&usboh2_clk,
+ 	&usb_phy_clk,
+-	&usb_utmi_clk,
+ 	&usb_clk,
+ 	&esdhc1_clk[0],
+ 	&esdhc1_clk[1],
+@@ -2896,6 +2879,7 @@ int __init mxc_clocks_init(void)
+ 	clk_set_parent(&arm_axi_clk, &emi_core_clk);
+ 	clk_set_parent(&vpu_clk[0], &emi_core_clk);
+ 	clk_set_parent(&vpu_clk[1], &emi_core_clk);
++	clk_set_parent(&usb_phy_clk, &osc_clk);
+ 
+ 	clk_set_parent(&cko1_clk, &ipg_perclk);
+ 
+diff --git a/arch/arm/mach-mx37/usb_dr.c b/arch/arm/mach-mx37/usb_dr.c
+index c70bc69..4d25abe 100644
+--- a/arch/arm/mach-mx37/usb_dr.c
++++ b/arch/arm/mach-mx37/usb_dr.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -76,32 +76,29 @@ static struct platform_device dr_udc_device = {
+ /* Notes: configure USB clock*/
+ static int usbotg_init_ext(struct platform_device *pdev)
+ {
+-	struct clk *usb_clk;
++	struct clk *usb_clk, *usboh2_clk;
++	int ret;
+ 
+-	usb_clk = clk_get(NULL, "usboh2_clk");
+-	clk_enable(usb_clk);
+-	clk_put(usb_clk);
++	usboh2_clk = clk_get(NULL, "usboh2_clk");
++	clk_enable(usboh2_clk);
+ 
+ 	usb_clk = clk_get(NULL, "usb_phy_clk");
+ 	clk_enable(usb_clk);
+ 	clk_put(usb_clk);
+ 
+-	/*derive clock from oscillator */
+-	usb_clk = clk_get(NULL, "usb_utmi_clk");
+-	clk_disable(usb_clk);
+-	clk_put(usb_clk);
++	ret = usbotg_init(pdev);
+ 
+-	return usbotg_init(pdev);
++	/* this clock is no use after set portsc PTS bit */
++	clk_disable(usboh2_clk);
++	clk_put(usboh2_clk);
++
++	return ret;
+ }
+ 
+ static void usbotg_uninit_ext(struct fsl_usb2_platform_data *pdata)
+ {
+ 	struct clk *usb_clk;
+ 
+-	usb_clk = clk_get(NULL, "usboh2_clk");
+-	clk_disable(usb_clk);
+-	clk_put(usb_clk);
+-
+ 	usb_clk = clk_get(NULL, "usb_phy_clk");
+ 	clk_disable(usb_clk);
+ 	clk_put(usb_clk);
+-- 
+1.5.4.4
+

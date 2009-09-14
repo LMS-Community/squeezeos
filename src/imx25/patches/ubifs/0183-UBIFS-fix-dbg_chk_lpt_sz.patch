@@ -1,0 +1,95 @@
+From 69827777e1e0a6d22023908d1b33300eff62feef Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Date: Thu, 5 Feb 2009 13:08:11 +0200
+Subject: [PATCH] UBIFS: fix dbg_chk_lpt_sz()
+
+The debugging function dbg_chk_lpt_sz() was not working
+correctly for small min_io_unit size e.g. NOR flash.
+
+Signed-off-by: Adrian Hunter <ext-adrian.hunter@nokia.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/lpt_commit.c |   21 +++++++++++++--------
+ 1 files changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/fs/ubifs/lpt_commit.c b/fs/ubifs/lpt_commit.c
+index 3216a1f..27c97a1 100644
+--- a/fs/ubifs/lpt_commit.c
++++ b/fs/ubifs/lpt_commit.c
+@@ -229,7 +229,7 @@ static int layout_cnodes(struct ubifs_info *c)
+ 		while (offs + len > c->leb_size) {
+ 			alen = ALIGN(offs, c->min_io_size);
+ 			upd_ltab(c, lnum, c->leb_size - alen, alen - offs);
+-			dbg_chk_lpt_sz(c, 2, alen - offs);
++			dbg_chk_lpt_sz(c, 2, c->leb_size - offs);
+ 			err = alloc_lpt_leb(c, &lnum);
+ 			if (err)
+ 				goto no_space;
+@@ -272,7 +272,7 @@ static int layout_cnodes(struct ubifs_info *c)
+ 		if (offs + c->lsave_sz > c->leb_size) {
+ 			alen = ALIGN(offs, c->min_io_size);
+ 			upd_ltab(c, lnum, c->leb_size - alen, alen - offs);
+-			dbg_chk_lpt_sz(c, 2, alen - offs);
++			dbg_chk_lpt_sz(c, 2, c->leb_size - offs);
+ 			err = alloc_lpt_leb(c, &lnum);
+ 			if (err)
+ 				goto no_space;
+@@ -292,7 +292,7 @@ static int layout_cnodes(struct ubifs_info *c)
+ 		if (offs + c->ltab_sz > c->leb_size) {
+ 			alen = ALIGN(offs, c->min_io_size);
+ 			upd_ltab(c, lnum, c->leb_size - alen, alen - offs);
+-			dbg_chk_lpt_sz(c, 2, alen - offs);
++			dbg_chk_lpt_sz(c, 2, c->leb_size - offs);
+ 			err = alloc_lpt_leb(c, &lnum);
+ 			if (err)
+ 				goto no_space;
+@@ -416,9 +416,8 @@ static int write_cnodes(struct ubifs_info *c)
+ 						       alen, UBI_SHORTTERM);
+ 				if (err)
+ 					return err;
+-				dbg_chk_lpt_sz(c, 4, alen - wlen);
+ 			}
+-			dbg_chk_lpt_sz(c, 2, 0);
++			dbg_chk_lpt_sz(c, 2, c->leb_size - offs);
+ 			err = realloc_lpt_leb(c, &lnum);
+ 			if (err)
+ 				goto no_space;
+@@ -477,7 +476,7 @@ static int write_cnodes(struct ubifs_info *c)
+ 					      UBI_SHORTTERM);
+ 			if (err)
+ 				return err;
+-			dbg_chk_lpt_sz(c, 2, alen - wlen);
++			dbg_chk_lpt_sz(c, 2, c->leb_size - offs);
+ 			err = realloc_lpt_leb(c, &lnum);
+ 			if (err)
+ 				goto no_space;
+@@ -504,7 +503,7 @@ static int write_cnodes(struct ubifs_info *c)
+ 					      UBI_SHORTTERM);
+ 			if (err)
+ 				return err;
+-			dbg_chk_lpt_sz(c, 2, alen - wlen);
++			dbg_chk_lpt_sz(c, 2, c->leb_size - offs);
+ 			err = realloc_lpt_leb(c, &lnum);
+ 			if (err)
+ 				goto no_space;
+@@ -1756,10 +1755,16 @@ int dbg_chk_lpt_free_spc(struct ubifs_info *c)
+ /**
+  * dbg_chk_lpt_sz - check LPT does not write more than LPT size.
+  * @c: the UBIFS file-system description object
+- * @action: action
++ * @action: what to do
+  * @len: length written
+  *
+  * This function returns %0 on success and a negative error code on failure.
++ * The @action argument may be one of:
++ *   o %0 - LPT debugging checking starts, initialize debugging variables;
++ *   o %1 - wrote an LPT node, increase LPT size by @len bytes;
++ *   o %2 - switched to a different LEB and wasted @len bytes;
++ *   o %3 - check that we've written the right number of bytes.
++ *   o %4 - wasted @len bytes;
+  */
+ int dbg_chk_lpt_sz(struct ubifs_info *c, int action, int len)
+ {
+-- 
+1.5.4.3
+

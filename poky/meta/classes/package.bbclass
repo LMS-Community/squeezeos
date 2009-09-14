@@ -2,6 +2,8 @@
 # General packaging help functions
 #
 
+inherit packagedata
+
 PKGDEST = "${WORKDIR}/install"
 
 def legitimize_package_name(s):
@@ -21,7 +23,7 @@ def legitimize_package_name(s):
 	# Remaining package name validity fixes
 	return s.lower().replace('_', '-').replace('@', '+').replace(',', '+').replace('/', '-')
 
-def do_split_packages(d, root, file_regex, output_pattern, description, postinst=None, recursive=False, hook=None, extra_depends=None, aux_files_pattern=None, postrm=None, allow_dirs=False, prepend=False, match_path=False, aux_files_pattern_verbatim=None):
+def do_split_packages(d, root, file_regex, output_pattern, description, postinst=None, recursive=False, hook=None, extra_depends=None, aux_files_pattern=None, postrm=None, allow_dirs=False, prepend=False, match_path=False, aux_files_pattern_verbatim=None, allow_links=False):
 	"""
 	Used in .bb files to split up dynamically generated subpackages of a 
 	given package, usually plugins or modules.
@@ -70,7 +72,7 @@ def do_split_packages(d, root, file_regex, output_pattern, description, postinst
 			continue
 		f = os.path.join(dvar + root, o)
 		mode = os.lstat(f).st_mode
-		if not (stat.S_ISREG(mode) or (allow_dirs and stat.S_ISDIR(mode))):
+		if not (stat.S_ISREG(mode) or (allow_links and stat.S_ISLNK(mode)) or (allow_dirs and stat.S_ISDIR(mode))):
 			continue
 		on = legitimize_package_name(m.group(1))
 		pkg = output_pattern % on
@@ -79,6 +81,8 @@ def do_split_packages(d, root, file_regex, output_pattern, description, postinst
 				packages = [pkg] + packages
 			else:
 				packages.append(pkg)
+		oldfiles = bb.data.getVar('FILES_' + pkg, d, 1)
+		if not oldfiles:
 			the_files = [os.path.join(root, o)]
 			if aux_files_pattern:
 				if type(aux_files_pattern) is list:
@@ -106,9 +110,6 @@ def do_split_packages(d, root, file_regex, output_pattern, description, postinst
 			if postrm:
 				bb.data.setVar('pkg_postrm_' + pkg, postrm, d)
 		else:
-			oldfiles = bb.data.getVar('FILES_' + pkg, d, 1)
-			if not oldfiles:
-				bb.fatal("Package '%s' exists but has no files" % pkg)
 			bb.data.setVar('FILES_' + pkg, oldfiles + " " + os.path.join(root, o), d)
 		if callable(hook):
 			hook(f, pkg, file_regex, output_pattern, m.group(1))
@@ -209,7 +210,7 @@ def runtime_mapping_rename (varname, d):
 	#bb.note("%s before: %s" % (varname, bb.data.getVar(varname, d, 1)))	
 
 	new_depends = []
-	for depend in explode_deps(bb.data.getVar(varname, d, 1) or ""):
+	for depend in bb.utils.explode_deps(bb.data.getVar(varname, d, 1) or ""):
 		# Have to be careful with any version component of the depend
 		split_depend = depend.split(' (')
 		new_depend = get_package_mapping(split_depend[0].strip(), d)
@@ -439,7 +440,7 @@ python populate_packages () {
 					dangling_links[pkg].append(os.path.normpath(target))
 
 	for pkg in package_list:
-		rdepends = explode_deps(bb.data.getVar('RDEPENDS_' + pkg, d, 1) or bb.data.getVar('RDEPENDS', d, 1) or "")
+		rdepends = bb.utils.explode_deps(bb.data.getVar('RDEPENDS_' + pkg, d, 1) or bb.data.getVar('RDEPENDS', d, 1) or "")
 		for l in dangling_links[pkg]:
 			found = False
 			bb.debug(1, "%s contains dangling link %s" % (pkg, l))
@@ -471,6 +472,11 @@ python emit_pkgdata() {
 		val = bb.data.getVar('%s_%s' % (var, pkg), d, 1)
 		if val:
 			f.write('%s_%s: %s\n' % (var, pkg, encode(val)))
+			return
+		val = bb.data.getVar('%s' % (var), d, 1)
+		if val:
+			f.write('%s: %s\n' % (var, encode(val)))
+		return
 
 	packages = bb.data.getVar('PACKAGES', d, True)
 	pkgdatadir = bb.data.getVar('PKGDATA_DIR', d, True)
@@ -491,6 +497,7 @@ python emit_pkgdata() {
 		subdata_file = pkgdatadir + "/runtime/%s" % pkg
 		sf = open(subdata_file, 'w')
 		write_if_exists(sf, pkg, 'PN')
+		write_if_exists(sf, pkg, 'PV')
 		write_if_exists(sf, pkg, 'PR')
 		write_if_exists(sf, pkg, 'DESCRIPTION')
 		write_if_exists(sf, pkg, 'RDEPENDS')
@@ -659,6 +666,8 @@ python package_do_shlibs() {
 			for file in files:
 				soname = None
 				path = os.path.join(root, file)
+				if os.path.islink(path):
+					continue
 				if targetos == "darwin" or targetos == "darwin8":
 					darwin_so(root, dirs, file)
 				elif os.access(path, os.X_OK) or lib_re.match(file):
@@ -861,7 +870,7 @@ python package_do_pkgconfig () {
 python read_shlibdeps () {
 	packages = bb.data.getVar('PACKAGES', d, 1).split()
 	for pkg in packages:
-		rdepends = explode_deps(bb.data.getVar('RDEPENDS_' + pkg, d, 0) or bb.data.getVar('RDEPENDS', d, 0) or "")
+		rdepends = bb.utils.explode_deps(bb.data.getVar('RDEPENDS_' + pkg, d, 0) or bb.data.getVar('RDEPENDS', d, 0) or "")
 		for extension in ".shlibdeps", ".pcdeps", ".clilibdeps":
 			depsfile = bb.data.expand("${PKGDEST}/" + pkg + extension, d)
 			if os.access(depsfile, os.R_OK):
@@ -894,7 +903,7 @@ python package_depchains() {
 	def pkg_adddeprrecs(pkg, base, suffix, getname, depends, d):
 
 		#bb.note('depends for %s is %s' % (base, depends))
-		rreclist = explode_deps(bb.data.getVar('RRECOMMENDS_' + pkg, d, 1) or bb.data.getVar('RRECOMMENDS', d, 1) or "")
+		rreclist = bb.utils.explode_deps(bb.data.getVar('RRECOMMENDS_' + pkg, d, 1) or bb.data.getVar('RRECOMMENDS', d, 1) or "")
 
 		for depend in depends:
 			if depend.find('-native') != -1 or depend.find('-cross') != -1 or depend.startswith('virtual/'):
@@ -915,14 +924,18 @@ python package_depchains() {
 	def pkg_addrrecs(pkg, base, suffix, getname, rdepends, d):
 
 		#bb.note('rdepends for %s is %s' % (base, rdepends))
-		rreclist = explode_deps(bb.data.getVar('RRECOMMENDS_' + pkg, d, 1) or bb.data.getVar('RRECOMMENDS', d, 1) or "")
+		rreclist = bb.utils.explode_deps(bb.data.getVar('RRECOMMENDS_' + pkg, d, 1) or bb.data.getVar('RRECOMMENDS', d, 1) or "")
 
 		for depend in rdepends:
+			if depend.find('virtual-locale-') != -1:
+				#bb.note("Skipping %s" % depend)
+				continue
 			if depend.endswith('-dev'):
 				depend = depend.replace('-dev', '')
 			if depend.endswith('-dbg'):
 				depend = depend.replace('-dbg', '')
 			pkgname = getname(depend, suffix)
+			#bb.note("Adding %s for %s" % (pkgname, depend))
 			if not pkgname in rreclist:
 				rreclist.append(pkgname)
 
@@ -935,15 +948,15 @@ python package_depchains() {
 			list.append(dep)
 
 	depends = []
-	for dep in explode_deps(bb.data.getVar('DEPENDS', d, 1) or ""):
+	for dep in bb.utils.explode_deps(bb.data.getVar('DEPENDS', d, 1) or ""):
 		add_dep(depends, dep)
 
 	rdepends = []
-	for dep in explode_deps(bb.data.getVar('RDEPENDS', d, 1) or ""):
+	for dep in bb.utils.explode_deps(bb.data.getVar('RDEPENDS', d, 1) or ""):
 		add_dep(rdepends, dep)
 
 	for pkg in packages.split():
-		for dep in explode_deps(bb.data.getVar('RDEPENDS_' + pkg, d, 1) or ""):
+		for dep in bb.utils.explode_deps(bb.data.getVar('RDEPENDS_' + pkg, d, 1) or ""):
 			add_dep(rdepends, dep)
 
 	#bb.note('rdepends is %s' % rdepends)
@@ -976,7 +989,7 @@ python package_depchains() {
 				pkg_addrrecs(pkg, base, suffix, func, rdepends, d)
 			else:
 				rdeps = []
-				for dep in explode_deps(bb.data.getVar('RDEPENDS_' + base, d, 1) or bb.data.getVar('RDEPENDS', d, 1) or ""):
+				for dep in bb.utils.explode_deps(bb.data.getVar('RDEPENDS_' + base, d, 1) or bb.data.getVar('RDEPENDS', d, 1) or ""):
 					add_dep(rdeps, dep)
 				pkg_addrrecs(pkg, base, suffix, func, rdeps, d)
 }

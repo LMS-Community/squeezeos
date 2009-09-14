@@ -1,0 +1,44 @@
+From 135a25ba5a9c3d593f84086ad89b0aca9f770f96 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 9 Jan 2009 21:02:37 +0200
+Subject: [PATCH] UBIFS: do not commit twice
+
+VFS calls '->sync_fs()' twice - first time with @wait = 0, second
+time with @wait = 1. As a result, we may commit and synchronize
+write-buffers twice. Avoid doing this by returning immediatelly if
+@wait = 0.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/super.c |   10 +++++++++-
+ 1 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index eb13980..817df1c 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -430,12 +430,20 @@ static int ubifs_sync_fs(struct super_block *sb, int wait)
+ 	int i, err;
+ 	struct ubifs_info *c = sb->s_fs_info;
+ 	struct writeback_control wbc = {
+-		.sync_mode   = wait ? WB_SYNC_ALL : WB_SYNC_HOLD,
++		.sync_mode   = WB_SYNC_ALL,
+ 		.range_start = 0,
+ 		.range_end   = LLONG_MAX,
+ 		.nr_to_write = LONG_MAX,
+ 	};
+ 
++  	/*
++	 * Zero @wait is just an advisory thing to help the file system shove
++	 * lots of data into the queues, and there will be the second
++	 * '->sync_fs()' call, with non-zero @wait.
++	 */
++	if (!wait)
++		return 0;
++
+ 	if (sb->s_flags & MS_RDONLY)
+ 		return 0;
+ 
+-- 
+1.5.4.3
+

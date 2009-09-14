@@ -1,0 +1,51 @@
+From ef2459e529cbe60444abca3d8b633762389e44a1 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Tue, 16 Sep 2008 16:57:05 +0800
+Subject: [PATCH] ENGR00089984 USB OTG Host copy to ata issue in imx35
+
+When usb works in INCR8 mode, OTG HOST DATAIN working with ADMA ATA
+makes usb turnaround errors. Due to imx35 usb has IC issues in
+INCR8 mode, so this patch change it to be INCR mode.
+
+Signed-off-by: Jun Li <r65092@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c        |    1 +
+ include/asm-arm/arch-mxc/fsl_usb.h |   13 +++++++++++++
+ 2 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 95d3d8a..c82bacd 100644
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -231,6 +231,7 @@ static int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 	}
+ #endif
+ 
++	fsl_platform_set_ahb_burst(hcd);
+ 	ehci_testmode_init(hcd_to_ehci(hcd));
+ 	return retval;
+ 
+diff --git a/include/asm-arm/arch-mxc/fsl_usb.h b/include/asm-arm/arch-mxc/fsl_usb.h
+index 1444a29..625a668 100644
+--- a/include/asm-arm/arch-mxc/fsl_usb.h
++++ b/include/asm-arm/arch-mxc/fsl_usb.h
+@@ -55,3 +55,16 @@ fsl_platform_set_vbus_power(struct fsl_usb2_platform_data *pdata, int on)
+ 	if (pdata->xcvr_ops && pdata->xcvr_ops->set_vbus_power)
+ 		pdata->xcvr_ops->set_vbus_power(pdata->xcvr_ops, pdata, on);
+ }
++
++/* Set USB AHB burst length for host */
++static inline void
++fsl_platform_set_ahb_burst(struct usb_hcd *hcd)
++{
++	if (cpu_is_mx35()) {
++		unsigned int temp;
++
++		temp = readl(hcd->regs + 0x90);
++		/* usb should work in INCR mode in i.MX35 */
++		writel(temp & (~(0x7)), hcd->regs + 0x90);
++	}
++}
+-- 
+1.5.4.4
+

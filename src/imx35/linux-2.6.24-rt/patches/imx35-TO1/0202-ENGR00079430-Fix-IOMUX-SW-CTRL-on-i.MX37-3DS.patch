@@ -1,0 +1,83 @@
+From 49db8d0406c46c1105d36fdaeaf19a5962058b56 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Tue, 10 Jun 2008 14:43:29 -0500
+Subject: [PATCH] ENGR00079430 Fix IOMUX SW CTRL on i.MX37 3DS
+
+Verified IOMUX is working with Redboot 200824. Needed to add IOMUX for
+SPI and IPU modules, the rest of the HW is set at the default settings
+and would be up to each individual HW block to setup the IOMUX if the
+setting is other than the default.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ arch/arm/mach-mx37/mx37_3stack.c      |    2 ++
+ arch/arm/mach-mx37/mx37_3stack_gpio.c |   11 +++++++++--
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 46473ea..0eacd63 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -52,6 +52,7 @@
+  *
+  * @ingroup MSL_MX37
+  */
++extern void gpio_lcd_active();
+ extern void mxc_map_io(void);
+ extern void mxc_init_irq(void);
+ extern void mxc_cpu_init(void) __init;
+@@ -242,6 +243,7 @@ static void mxc_init_fb(void)
+ 	(void)platform_device_register(&mxc_fb_device[0]);
+ 	(void)platform_device_register(&mxc_fb_device[1]);
+ 	(void)platform_device_register(&mxc_fb_device[2]);
++	gpio_lcd_active();
+ }
+ #else
+ static inline void mxc_init_fb(void)
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index ddb0cc5..e277d0b 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -127,6 +127,9 @@ void gpio_spi_active(int cspi_mod)
+ 		mxc_iomux_set_pad(MX37_PIN_CSPI2_SCLK, PAD_CTL_HYS_ENABLE |
+ 				  PAD_CTL_SRE_FAST);
+ 
++		mxc_request_iomux(MX37_PIN_CSPI2_SS1, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX37_PIN_CSPI2_SS1, PAD_CTL_SRE_FAST);
++
+ 		mxc_request_iomux(MX37_PIN_CSPI2_SS0, IOMUX_CONFIG_ALT0);
+ 		mxc_iomux_set_pad(MX37_PIN_CSPI2_SS0, PAD_CTL_SRE_FAST);
+ 		mxc_iomux_set_pad(MX37_PIN_GRP_H10, PAD_CTL_HYS_ENABLE);
+@@ -400,7 +403,10 @@ EXPORT_SYMBOL(sdhc_init_card_det);
+  */
+ void gpio_lcd_active(void)
+ {
+- /*TODO*/}
++	mxc_request_iomux(MX37_PIN_DI1_PIN2, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX37_PIN_PAD_DI1_PIN3, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX37_PIN_DISP_CLK, IOMUX_CONFIG_ALT0);
++}
+ 
+ /*!
+  * Setup GPIO for LCD to be inactive
+@@ -623,8 +629,8 @@ void gpio_keypad_active(void)
+ 
+ 	mxc_set_gpio_direction(MX37_PIN_DISP1_DAT18, 0);
+ 	mxc_set_gpio_direction(MX37_PIN_GPIO1_3, 1);
+-
+ }
++
+ EXPORT_SYMBOL(gpio_keypad_active);
+ 
+ /*!
+@@ -638,6 +644,7 @@ void gpio_keypad_inactive(void)
+ 	/*KEY_WAKE */
+ 	mxc_request_iomux(MX37_PIN_DISP1_DAT18, IOMUX_CONFIG_ALT0);
+ }
++
+ EXPORT_SYMBOL(gpio_keypad_inactive);
+ 
+ /*
+-- 
+1.5.4.4
+

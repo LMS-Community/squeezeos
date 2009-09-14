@@ -1,0 +1,105 @@
+From 2bb07df7f533daffa3b092b935d7f032ad4ec2f0 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Wed, 3 Dec 2008 14:54:11 +0200
+Subject: [PATCH] UBIFS: remove broken NFS support
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/compat.h |    4 ----
+ fs/ubifs/super.c  |   53 -----------------------------------------------------
+ 2 files changed, 0 insertions(+), 57 deletions(-)
+
+diff --git a/fs/ubifs/compat.h b/fs/ubifs/compat.h
+index 8f2c93e..6d42bcf 100644
+--- a/fs/ubifs/compat.h
++++ b/fs/ubifs/compat.h
+@@ -58,8 +58,4 @@ struct retries_info;
+ void ubifs_hexdump(const void *ptr, int size);
+ #endif
+ 
+-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,24))
+-#define UBIFS_COMPAT_SUPPORT_NFS
+-#endif
+-
+ #endif /* !__UBIFS_COMPAT_H__ */
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 2c7a323..d9f8793 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -34,9 +34,6 @@
+ #include <linux/parser.h>
+ #include <linux/seq_file.h>
+ #include <linux/mount.h>
+-#ifdef UBIFS_COMPAT_SUPPORT_NFS
+-#include <linux/exportfs.h>
+-#endif
+ #include "ubifs.h"
+ 
+ /*
+@@ -1733,53 +1730,6 @@ struct super_operations ubifs_super_operations = {
+ 	.sync_fs       = ubifs_sync_fs,
+ };
+ 
+-#ifdef UBIFS_COMPAT_SUPPORT_NFS
+-/*
+- * Note, since UBIFS doesn't re-use inode numbers at the moment, we do not check
+- * the generation number in this function.
+- */
+-static struct dentry *ubifs_fh_to_dentry(struct super_block *sb,
+-					 struct fid *fid,
+-					 int fh_len, int fh_type)
+-{
+-	ino_t inum;
+-	struct inode *inode;
+-	struct dentry *dent;
+-
+-	switch (fh_type) {
+-	case FILEID_INO32_GEN:
+-	case FILEID_INO32_GEN_PARENT:
+-		inum = fid->i32.ino;
+-		break;
+-	default:
+-		dbg_err("unsupported file handle type %d", fh_type);
+-		return ERR_PTR(-EINVAL);
+-	}
+-
+-	inode = ubifs_iget(sb, inum);
+-	if (IS_ERR(inode)) {
+-		if (PTR_ERR(inode) == -ENOENT)
+-			return ERR_PTR(-ESTALE);
+-		return ERR_CAST(inode);
+-	}
+-
+-	dent = d_alloc_anon(inode);
+-	if (!dent) {
+-		iput(inode);
+-		return ERR_PTR(-ENOMEM);
+-	}
+-	return dent;
+-}
+-
+-/*
+- * Probably NFS support could be faster if other export operations were
+- * implemented, but '->fh_to_dentry()' is enough.
+- */
+-static struct export_operations ubifs_export_ops = {
+-	.fh_to_dentry = ubifs_fh_to_dentry,
+-};
+-#endif /* UBIFS_COMPAT_SUPPORT_NFS */
+-
+ /**
+  * open_ubi - parse UBI device name string and open the UBI device.
+  * @name: UBI volume name
+@@ -1915,9 +1865,6 @@ static int ubifs_fill_super(struct super_block *sb, void *data, int silent)
+ 	if (c->max_inode_sz > MAX_LFS_FILESIZE)
+ 		sb->s_maxbytes = c->max_inode_sz = MAX_LFS_FILESIZE;
+ 	sb->s_op = &ubifs_super_operations;
+-#ifdef UBIFS_COMPAT_SUPPORT_NFS
+-	sb->s_export_op = &ubifs_export_ops;
+-#endif
+ 
+ 	mutex_lock(&c->umount_mutex);
+ 	err = mount_ubifs(c);
+-- 
+1.5.6.3
+

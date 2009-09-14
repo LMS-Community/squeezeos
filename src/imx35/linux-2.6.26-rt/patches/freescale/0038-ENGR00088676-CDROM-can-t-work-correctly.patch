@@ -1,0 +1,56 @@
+From 59e89335be3d6e039a37e19f18ce16440a3c2684 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 21 Aug 2008 18:25:37 +0800
+Subject: [PATCH] ENGR00088676 CDROM can't work correctly
+
+The ATAPI DMA shouldn't be supported.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c |    4 ----
+ drivers/ata/pata_fsl.c           |    6 ++++++
+ 2 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index cc64f5a..229db10 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -554,11 +554,7 @@ static void ata_exit(void)
+ 
+ static struct fsl_ata_platform_data ata_data = {
+ 	.adma_flag = 1,		/* 0:smart dma, 1:ADMA */
+-#if defined(CONFIG_BLK_DEV_SR)
+-	.udma_mask = 0xF,
+-#else
+ 	.udma_mask = 0x3F,
+-#endif
+ 	.mwdma_mask = 0x1F,
+ 	.pio_mask = ATA_PIO4,
+ 	.fifo_alarm = MXC_IDE_DMA_WATERMARK / 2,
+diff --git a/drivers/ata/pata_fsl.c b/drivers/ata/pata_fsl.c
+index 114d094..ca2fe0c 100644
+--- a/drivers/ata/pata_fsl.c
++++ b/drivers/ata/pata_fsl.c
+@@ -462,6 +462,11 @@ static irqreturn_t pata_fsl_adma_intr(int irq, void *dev_instance)
+ 	return IRQ_RETVAL(handled);
+ }
+ 
++static int pata_fsl_check_atapi_dma(struct ata_queued_cmd *qc)
++{
++	return 1;		/* ATAPI DMA not yet supported */
++}
++
+ static void pata_fsl_bmdma_setup(struct ata_queued_cmd *qc)
+ {
+ 	int chan, i;
+@@ -690,6 +695,7 @@ static struct ata_port_operations pata_fsl_port_ops = {
+ 	.set_piomode = pata_fsl_set_piomode,
+ 	.set_dmamode = pata_fsl_set_dmamode,
+ 
++	.check_atapi_dma = pata_fsl_check_atapi_dma,
+ 	.cable_detect = ata_cable_unknown,
+ 
+ 	.bmdma_setup = pata_fsl_bmdma_setup,
+-- 
+1.5.4.4
+

@@ -1,0 +1,149 @@
+From cb653303975f8618e7b94793f3a0bffa5f9aeed7 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 31 Jul 2007 03:53:47 -0400
+Subject: [PATCH] Unionfs: xattr copyup fixes
+
+Rewrote xattr copyup code more cleanly; documented it better; eliminate one
+possible leak in error path; and ignore another impossible copyup-time error
+which caused fanout invariant violations under memory-pressure conditions.
+
+Don't use vmalloc when allocating xattr buffers, as the VFS no longer does
+so (just use kmalloc).  Eliminate unionfs_xattr_free which is now just plain
+kfree.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |   34 +++++++++++++++++++++++-----------
+ fs/unionfs/union.h  |    1 -
+ fs/unionfs/xattr.c  |   16 ++--------------
+ 3 files changed, 25 insertions(+), 26 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 868923a..f13702d 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -34,25 +34,37 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 	char *attr_value = NULL;
+ 	char *name_list_orig = NULL;
+ 
++	/* query the actual size of the xattr list */
+ 	list_size = vfs_listxattr(old_lower_dentry, NULL, 0);
+-
+ 	if (list_size <= 0) {
+ 		err = list_size;
+ 		goto out;
+ 	}
+ 
++	/* allocate space for the actual list */
+ 	name_list = unionfs_xattr_alloc(list_size + 1, XATTR_LIST_MAX);
+ 	if (!name_list || IS_ERR(name_list)) {
+ 		err = PTR_ERR(name_list);
+ 		goto out;
+ 	}
++
++	name_list_orig = name_list; /* save for kfree at end */
++
++	/* now get the actual xattr list of the source file */
+ 	list_size = vfs_listxattr(old_lower_dentry, name_list, list_size);
++	if (list_size <= 0) {
++		err = list_size;
++		goto out;
++	}
++
++	/* allocate space to hold each xattr's value */
+ 	attr_value = unionfs_xattr_alloc(XATTR_SIZE_MAX, XATTR_SIZE_MAX);
+ 	if (!attr_value || IS_ERR(attr_value)) {
+ 		err = PTR_ERR(name_list);
+ 		goto out;
+ 	}
+-	name_list_orig = name_list;
++
++	/* in a loop, get and set each xattr from src to dst file */
+ 	while (*name_list) {
+ 		ssize_t size;
+ 
+@@ -65,7 +77,6 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 			err = size;
+ 			goto out;
+ 		}
+-
+ 		if (size > XATTR_SIZE_MAX) {
+ 			err = -E2BIG;
+ 			goto out;
+@@ -73,20 +84,21 @@ static int copyup_xattrs(struct dentry *old_lower_dentry,
+ 		/* Don't lock here since vfs_setxattr does it for us. */
+ 		err = vfs_setxattr(new_lower_dentry, name_list, attr_value,
+ 				   size, 0);
+-
+ 		if (err < 0)
+ 			goto out;
+ 		name_list += strlen(name_list) + 1;
+ 	}
+ out:
+-	name_list = name_list_orig;
+-
+-	if (name_list)
+-		unionfs_xattr_free(name_list, list_size + 1);
++	if (name_list_orig)
++		kfree(name_list_orig);
+ 	if (attr_value)
+-		unionfs_xattr_free(attr_value, XATTR_SIZE_MAX);
+-	/* It is no big deal if this fails, we just roll with the punches. */
+-	if (err == -ENOTSUPP || err == -EOPNOTSUPP)
++		kfree(attr_value);
++	/*
++	 * Ignore if xattr isn't supported.  Also ignore EPERM because that
++	 * requires CAP_SYS_ADMIN for security.* xattrs, but copyup happens
++	 * as normal users.
++	 */
++	if (err == -ENOTSUPP || err == -EOPNOTSUPP || err == -EPERM)
+ 		err = 0;
+ 	return err;
+ }
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 50f7f83..eb881b0 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -344,7 +344,6 @@ extern struct dentry *unionfs_interpose(struct dentry *this_dentry,
+ #ifdef CONFIG_UNION_FS_XATTR
+ /* Extended attribute functions. */
+ extern void *unionfs_xattr_alloc(size_t size, size_t limit);
+-extern void unionfs_xattr_free(void *ptr, size_t size);
+ 
+ extern ssize_t unionfs_getxattr(struct dentry *dentry, const char *name,
+ 				void *value, size_t size);
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index d6f4d53..ee7da13 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -28,25 +28,13 @@ void *unionfs_xattr_alloc(size_t size, size_t limit)
+ 
+ 	if (!size)		/* size request, no buffer is needed */
+ 		return NULL;
+-	else if (size <= PAGE_SIZE)
+-		ptr = kmalloc(size, GFP_KERNEL);
+-	else
+-		ptr = vmalloc(size);
++
++	ptr = kmalloc(size, GFP_KERNEL);
+ 	if (!ptr)
+ 		return ERR_PTR(-ENOMEM);
+ 	return ptr;
+ }
+ 
+-void unionfs_xattr_free(void *ptr, size_t size)
+-{
+-	if (!size)		/* size request, no buffer was needed */
+-		return;
+-	else if (size <= PAGE_SIZE)
+-		kfree(ptr);
+-	else
+-		vfree(ptr);
+-}
+-
+ /*
+  * BKL held by caller.
+  * dentry->d_inode->i_mutex locked
+-- 
+1.5.4.3
+

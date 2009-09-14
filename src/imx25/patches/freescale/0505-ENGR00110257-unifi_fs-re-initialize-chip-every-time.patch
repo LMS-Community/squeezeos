@@ -1,0 +1,357 @@
+From c1e6e4683a2b707995aedff2223ff35427eb3b5a Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Thu, 26 Mar 2009 20:02:35 +0800
+Subject: [PATCH] ENGR00110257 unifi_fs: re-initialize chip every time insert module
+
+When rmmod, driver will try to poweroff wifi chip, so it may be in a wrong
+state when insmod it again.
+When insert unifi_sdio module, it will first pull down reset pin to remove
+sdio device if it exists and add sdio device, init it again.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack.c    |    6 +--
+ arch/arm/mach-mx35/mx35_3stack.c  |   13 +------
+ arch/arm/mach-mx37/mx37_3stack.c  |   22 +++--------
+ arch/arm/mach-mx51/mx51_3stack.c  |   13 +------
+ drivers/mmc/card/unifi_fs/fs_lx.c |   69 +++++++++++++++---------------------
+ drivers/mmc/host/mx_sdhci.c       |    2 -
+ include/asm-arm/arch-mxc/mxc.h    |    2 +-
+ 7 files changed, 42 insertions(+), 85 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 7d5b98a..40325c4 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -915,11 +915,9 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
+-static void mxc_unifi_hardreset(void)
++static void mxc_unifi_hardreset(int pin_level)
+ {
+-	mxc_set_gpio_dataout(MX31_PIN_DCD_DCE1, 0);
+-	msleep(100);
+-	mxc_set_gpio_dataout(MX31_PIN_DCD_DCE1, 1);
++	mxc_set_gpio_dataout(MX31_PIN_DCD_DCE1, pin_level & 0x01);
+ }
+ 
+ static struct mxc_unifi_platform_data unifi_data = {
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index a97c1e1..8e5b180 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -303,12 +303,9 @@ static inline void mxc_init_mlb(void)
+ }
+ #endif
+ 
+-#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+-static void mxc_unifi_hardreset(void)
++static void mxc_unifi_hardreset(int pin_level)
+ {
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 1, 0);
+-	msleep(100);
+-	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 1, 1);
++	pmic_gpio_set_bit_val(MCU_GPIO_REG_RESET_1, 1, pin_level & 0x01);
+ }
+ 
+ static void mxc_unifi_enable(int en)
+@@ -335,12 +332,6 @@ struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+ {
+ 	return &unifi_data;
+ }
+-#else
+-struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+-{
+-	return NULL;
+-}
+-#endif
+ 
+ EXPORT_SYMBOL(get_unifi_plat_data);
+ 
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 2f0dd26..a486bb3 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -556,19 +556,21 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ #endif
+ }
+ 
+-#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+-static void mxc_unifi_hardreset(void)
++static void mxc_unifi_hardreset(int pin_level)
+ {
+ 	struct regulator *gpo4;
+ 
+ 	if (board_is_mx37(BOARD_REV_2)) {
+ 		gpo4 = regulator_get(NULL, "GPO4");
+ 		if (!IS_ERR(gpo4))
+-			regulator_enable(gpo4);
++			if (pin_level & 0x01)
++				regulator_enable(gpo4);
++			else
++				regulator_disable(gpo4);
+ 		regulator_put(gpo4, NULL);
+ 	} else {
+ 		mxc_request_iomux(MX37_PIN_AUD5_RXC, IOMUX_CONFIG_GPIO);
+-		mxc_set_gpio_dataout(MX37_PIN_AUD5_RXC, 1);
++		mxc_set_gpio_dataout(MX37_PIN_AUD5_RXC, pin_level & 0x01);
+ 		mxc_set_gpio_direction(MX37_PIN_AUD5_RXC, 0);
+ 		mxc_free_iomux(MX37_PIN_AUD5_RXC, IOMUX_CONFIG_GPIO);
+ 	}
+@@ -587,12 +589,6 @@ struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+ {
+ 	return &unifi_data;
+ }
+-#else
+-struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+-{
+-	return NULL;
+-}
+-#endif
+ 
+ EXPORT_SYMBOL(get_unifi_plat_data);
+ 
+@@ -641,7 +637,6 @@ static struct platform_device mxcsdhc1_device = {
+ 	.resource = mxcsdhc1_resources,
+ };
+ 
+-#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+ static struct mxc_mmc_platform_data mmc1_data = {
+ 	.ocr_mask = MMC_VDD_27_28 | MMC_VDD_28_29 | MMC_VDD_29_30 |
+ 	    MMC_VDD_31_32,
+@@ -682,7 +677,6 @@ static struct platform_device mxcsdhc2_device = {
+ 	.num_resources = ARRAY_SIZE(mxcsdhc2_resources),
+ 	.resource = mxcsdhc2_resources,
+ };
+-#endif
+ 
+ static inline void mxc_init_mmc(void)
+ {
+@@ -696,7 +690,6 @@ static inline void mxc_init_mmc(void)
+ 
+ 	spba_take_ownership(SPBA_SDHC1, SPBA_MASTER_A | SPBA_MASTER_C);
+ 	(void)platform_device_register(&mxcsdhc1_device);
+-#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+ 	cd_irq = sdhc_init_card_det(1);
+ 	if (cd_irq) {
+ 		mxcsdhc2_device.resource[2].start = cd_irq;
+@@ -704,7 +697,6 @@ static inline void mxc_init_mmc(void)
+ 	}
+ 	spba_take_ownership(SPBA_SDHC2, SPBA_MASTER_A | SPBA_MASTER_C);
+ 	(void)platform_device_register(&mxcsdhc2_device);
+-#endif
+ }
+ #else
+ static inline void mxc_init_mmc(void)
+@@ -881,11 +873,9 @@ static void mx37_3stack_fixup_for_board_v1(void)
+ 	mxc_bt_data.bt_vdd = "DCDC3";
+ 	mxc_bt_data.bt_vusb = "DCDC6";
+ 	mxc_init_touchscreen();
+-#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+ 	unifi_data.reg_1v5_ana_bb = NULL;	/* VMAIN is used on v1 board */
+ 	unifi_data.reg_vdd_vpa = NULL;
+ 	unifi_data.reg_1v5_dd = NULL;
+-#endif
+ #if defined(CONFIG_KEYBOARD_MPR084) || defined(CONFIG_KEYBOARD_MPR084_MODULE)
+ 	keypad_data.vdd_reg = "DCDC3";
+ #endif
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index ae76d44..3eb2df1 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -1113,12 +1113,9 @@ static void mxc_init_bluetooth(void)
+ 	(void)platform_device_register(&mxc_bt_device);
+ }
+ 
+-#if defined(CONFIG_SDIO_UNIFI_FS) || defined(CONFIG_SDIO_UNIFI_FS_MODULE)
+-static void mxc_unifi_hardreset(void)
++static void mxc_unifi_hardreset(int pin_level)
+ {
+-	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, 0);
+-	msleep(100);
+-	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, 1);
++	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, pin_level & 0x01);
+ }
+ 
+ static struct mxc_unifi_platform_data unifi_data = {
+@@ -1132,12 +1129,6 @@ struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+ {
+ 	return &unifi_data;
+ }
+-#else
+-struct mxc_unifi_platform_data *get_unifi_plat_data(void)
+-{
+-	return NULL;
+-}
+-#endif
+ 
+ EXPORT_SYMBOL(get_unifi_plat_data);
+ 
+diff --git a/drivers/mmc/card/unifi_fs/fs_lx.c b/drivers/mmc/card/unifi_fs/fs_lx.c
+index 15f1722..743415a 100644
+--- a/drivers/mmc/card/unifi_fs/fs_lx.c
++++ b/drivers/mmc/card/unifi_fs/fs_lx.c
+@@ -245,7 +245,7 @@ EXPORT_SYMBOL(fs_sdio_set_block_size);
+  *
+  * ---------------------------------------------------------------------------
+  */
+-static void fs_unifi_power_on(int check_card)
++static void fs_unifi_power_on(void)
+ {
+ 	struct regulator_unifi *reg_unifi;
+ 	unsigned int tmp;
+@@ -282,11 +282,6 @@ static void fs_unifi_power_on(int check_card)
+ 		regulator_enable(reg_unifi->reg_1v5_dd);
+ 	}
+ 	msleep(10);
+-	if (check_card) {
+-		do_sdio_hard_reset(NULL);
+-		msleep(500);
+-		mxc_mmc_force_detect(plat_data->host_id);
+-	}
+ }
+ 
+ /*
+@@ -296,7 +291,7 @@ static void fs_unifi_power_on(int check_card)
+  *
+  * ---------------------------------------------------------------------------
+  */
+-static void fs_unifi_power_off(int check_card)
++static void fs_unifi_power_off(void)
+ {
+ 	struct regulator_unifi *reg_unifi;
+ 
+@@ -317,10 +312,6 @@ static void fs_unifi_power_off(int check_card)
+ 
+ 	if (reg_unifi->reg_gpo1)
+ 		regulator_disable(reg_unifi->reg_gpo1);
+-
+-	if (check_card)
+-		mxc_mmc_force_detect(plat_data->host_id);
+-
+ }
+ 
+ /* This should be made conditional on being slot 2 too - so we can
+@@ -332,12 +323,6 @@ int fs_sdio_hard_reset(struct sdio_dev *fdev)
+ }
+ EXPORT_SYMBOL(fs_sdio_hard_reset);
+ 
+-static int do_sdio_hard_reset(struct sdio_dev *fdev)
+-{
+-	plat_data->hardreset();
+-	return 0;
+-}
+-
+ static const struct sdio_device_id fs_sdio_ids[] = {
+ 	{SDIO_DEVICE(0x032a, 0x0001)},
+ 	{ /* end: all zeroes */	},
+@@ -356,11 +341,32 @@ static struct sdio_driver sdio_unifi_driver = {
+ 
+ int fs_sdio_register_driver(struct fs_driver *driver)
+ {
+-	int ret;
++	int ret, retry;
+ 
+ 	/* Switch us on, sdio device may exist if power is on by default. */
+-	fs_unifi_power_on(available_sdio_dev ? 0 : 1);
+-
++	plat_data->hardreset(0);
++	mxc_mmc_force_detect(plat_data->host_id);
++	/* Wait for card removed */
++	for (retry = 0; retry < 100; retry++) {
++		if (!available_sdio_dev)
++			break;
++		msleep(100);
++	}
++	if (retry == 100)
++		printk(KERN_ERR "fs_sdio_register_driver: sdio device exists, "
++				"timeout for card removed");
++	fs_unifi_power_on();
++	plat_data->hardreset(1);
++	msleep(500);
++	mxc_mmc_force_detect(plat_data->host_id);
++	for (retry = 0; retry < 100; retry++) {
++		if (available_sdio_dev)
++			break;
++		msleep(50);
++	}
++	if (retry == 1000)
++		printk(KERN_ERR "fs_sdio_register_driver: Timeout waiting"
++				" for card added\n");
+ 	/* Store the context to the device driver to the global */
+ 	available_driver = driver;
+ 
+@@ -390,6 +396,7 @@ EXPORT_SYMBOL(fs_sdio_register_driver);
+ 
+ void fs_sdio_unregister_driver(struct fs_driver *driver)
+ {
++	int retry;
+ 	/*
+ 	 * If available_sdio_dev is not NULL, probe has been called,
+ 	 * so pass the remove to the registered driver to clean up.
+@@ -419,9 +426,8 @@ void fs_sdio_unregister_driver(struct fs_driver *driver)
+ 	/* invalidate the context to the device driver to the global */
+ 	available_driver = NULL;
+ 	/* Power down the UniFi */
+-	fs_unifi_power_off(-1);
+-	/* Wait for card removed */
+-	msleep(100);
++	fs_unifi_power_off();
++
+ }
+ EXPORT_SYMBOL(fs_sdio_unregister_driver);
+ 
+@@ -486,23 +492,6 @@ static int fs_sdio_probe(struct sdio_func *func,
+ 	printk(KERN_INFO "fs_sdio_probe: Add glue driver\n");
+ 	sdio_set_drvdata(func, fdev);
+ 
+-	/* TODO: If a device driver is registered, call it's probe here */
+-	if (available_driver) {
+-		/* Store the context to the device driver */
+-		fdev->driver = available_driver;
+-
+-		printk(KERN_INFO "fs_sdio_probe: Add device driver and "
+-		       "register IRQ\n");
+-		available_driver->probe(fdev);
+-
+-		/* Register the IRQ handler to the SDIO IRQ. */
+-		sdio_claim_host(fdev->func);
+-		ret = sdio_claim_irq(func, fs_sdio_irq);
+-		sdio_release_host(fdev->func);
+-		if (ret)
+-			return ret;
+-	}
+-
+ 	return 0;
+ }
+ 
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index 1608360..6e8978a 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -129,8 +129,6 @@ void mxc_mmc_force_detect(int id)
+ 	if (!mxc_fix_chips[id])
+ 		return;
+ 	host = mxc_fix_chips[id]->hosts[0];
+-	if (host->flags & SDHCI_CD_PRESENT)
+-		return;
+ 	if (host->detect_irq)
+ 		return;
+ 
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index b018b5b..70c9e15 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -267,7 +267,7 @@ struct mxc_keyp_platform_data {
+ };
+ 
+ struct mxc_unifi_platform_data {
+-	void (*hardreset) (void);
++	void (*hardreset) (int pin_level);
+ 	void (*enable) (int en);
+ 	/* power parameters */
+ 	char *reg_gpo1;
+-- 
+1.5.4.4
+

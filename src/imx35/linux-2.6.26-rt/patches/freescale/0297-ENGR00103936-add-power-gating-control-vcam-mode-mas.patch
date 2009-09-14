@@ -1,0 +1,143 @@
+From 9a51eba0f5764d26a41fd6b767a2eeff7ed5a1d7 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Sun, 4 Jan 2009 14:55:53 +0800
+Subject: [PATCH] ENGR00103936 add power gating control &vcam mode mask
+
+add power gating control &vcam mode mask
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/regulator/mc13892/reg-mc13892.c |   82 ++++++++++++++++++++++++++++++-
+ 1 files changed, 81 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index f4f2b3f..c29d0bf 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -47,6 +47,8 @@ enum {
+ 	MC13892_GPO2,
+ 	MC13892_GPO3,
+ 	MC13892_GPO4,
++	MC13892_PWGT1,
++	MC13892_PWGT2,
+ 	MC13892_REG_NUM,
+ } MC13892_regulator;
+ 
+@@ -264,6 +266,16 @@ enum {
+ #define GPO4_ADIN_ENABLE	1
+ #define GPO4_ADIN_DISABLE	0
+ 
++#define PWGT1SPI_EN_LSH	15
++#define PWGT1SPI_EN_WID	1
++#define PWGT1SPI_EN_ENABLE	0
++#define PWGT1SPI_EN_DISABLE	1
++
++#define PWGT2SPI_EN_LSH	16
++#define PWGT2SPI_EN_WID	1
++#define PWGT2SPI_EN_ENABLE	0
++#define PWGT2SPI_EN_DISABLE	1
++
+ static int mc13892_get_sw_hi_bit(int sw)
+ {
+ 	unsigned int register_val = 0;
+@@ -1473,6 +1485,54 @@ static int mc13892_gpo_disable(struct regulator *reg)
+ 	return (pmic_write_reg(register1, register_val, register_mask));
+ }
+ 
++static int mc13892_power_gating_enable(struct regulator *reg)
++{
++	unsigned int register_val = 0, register_mask = 0;
++	unsigned int register1;
++	int gpo = reg->id;
++
++	switch (gpo) {
++	case MC13892_PWGT1:
++		register_val = BITFVAL(PWGT1SPI_EN, PWGT1SPI_EN_ENABLE);
++		register_mask = BITFMASK(PWGT1SPI_EN);
++		break;
++	case MC13892_PWGT2:
++		register_val = BITFVAL(PWGT2SPI_EN, PWGT2SPI_EN_ENABLE);
++		register_mask = BITFMASK(PWGT2SPI_EN);
++		break;
++	default:
++		return -EINVAL;
++	};
++
++	register1 = REG_POWER_MISC;
++
++	return (pmic_write_reg(register1, register_val, register_mask));
++}
++
++static int mc13892_power_gating_disable(struct regulator *reg)
++{
++	unsigned int register_val = 0, register_mask = 0;
++	unsigned int register1;
++	int gpo = reg->id;
++
++	switch (gpo) {
++	case MC13892_PWGT1:
++		register_val = BITFVAL(PWGT1SPI_EN, PWGT1SPI_EN_DISABLE);
++		register_mask = BITFMASK(PWGT1SPI_EN);
++		break;
++	case MC13892_PWGT2:
++		register_val = BITFVAL(PWGT2SPI_EN, PWGT2SPI_EN_DISABLE);
++		register_mask = BITFMASK(PWGT2SPI_EN);
++		break;
++	default:
++		return -EINVAL;
++	};
++
++	register1 = REG_POWER_MISC;
++
++	return (pmic_write_reg(register1, register_val, register_mask));
++}
++
+ static struct regulator_ops mc13892_sw_ops = {
+ 	.set_voltage = mc13892_sw_set_voltage,
+ 	.get_voltage = mc13892_sw_get_voltage,
+@@ -1611,7 +1671,8 @@ static struct regulator_ops mc13892_vcam_ops = {
+ struct regulation_constraints vcam_regulation_constraints = {
+ 	.min_uV = mV_to_uV(2500),
+ 	.max_uV = mV_to_uV(3000),
+-	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE | REGULATOR_CHANGE_MODE,
++	.valid_modes_mask = REGULATOR_MODE_FAST | REGULATOR_MODE_NORMAL,
+ };
+ 
+ static struct regulator_ops mc13892_vgen1_ops = {
+@@ -1658,6 +1719,11 @@ static struct regulator_ops mc13892_gpo_ops = {
+ 	.disable = mc13892_gpo_disable,
+ };
+ 
++static struct regulator_ops mc13892_power_gating_ops = {
++	.enable = mc13892_power_gating_enable,
++	.disable = mc13892_power_gating_disable,
++
++};
+ struct mc13892_regulator {
+ 	struct regulator regulator;
+ };
+@@ -1872,6 +1938,20 @@ static struct mc13892_regulator reg_mc13892[] = {
+ 		       .ops = &mc13892_gpo_ops,
+ 		       },
+ 	 },
++	{
++	 .regulator = {
++		       .name = "PWGT1",
++		       .id = MC13892_PWGT1,
++		       .ops = &mc13892_power_gating_ops,
++		       },
++	 },
++	{
++	 .regulator = {
++		       .name = "PWGT2",
++		       .id = MC13892_PWGT2,
++		       .ops = &mc13892_power_gating_ops,
++		       },
++	 },
+ };
+ 
+ int reg_mc13892_probe(void)
+-- 
+1.5.4.4
+

@@ -1,0 +1,76 @@
+From 73673cb121baeb8a89c851ea8f8df329d2b6c93f Mon Sep 17 00:00:00 2001
+From: Robby Cai <r63905@freescale.com>
+Date: Wed, 8 Apr 2009 18:01:33 +0800
+Subject: [PATCH] ENGR00111086 Add SYS SW Reset control for VPU
+
+Add an ioctl for system software reset control,
+used for vpu reset when meet error, like the case vpu is blocked.
+
+Signed-off-by: Robby Cai <r63905@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c          |   17 +++++++++++++++--
+ include/asm-arm/arch-mxc/mxc_vpu.h |    3 ++-
+ 2 files changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 833fd45..7bf3021 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2006-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2006-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -421,6 +421,19 @@ static int vpu_ioctl(struct inode *inode, struct file *filp, u_int cmd,
+ 			}
+ 			break;
+ 		}
++	case VPU_IOC_SYS_SW_RESET:
++		{
++			u32 reg;
++
++#define SW_VPU_RST_BIT	0x02
++			reg = __raw_readl(IO_ADDRESS(SRC_BASE_ADDR));
++			reg |= SW_VPU_RST_BIT;
++			__raw_writel(reg, IO_ADDRESS(SRC_BASE_ADDR));
++			while (__raw_readl(IO_ADDRESS(SRC_BASE_ADDR)) &
++			       SW_VPU_RST_BIT)
++				;
++			break;
++		}
+ 	case VPU_IOC_REG_DUMP:
+ 		break;
+ 	case VPU_IOC_PHYMEM_DUMP:
+@@ -755,7 +768,7 @@ static void __exit vpu_exit(void)
+ }
+ 
+ MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-MODULE_DESCRIPTION("Linux VPU driver for Freescale i.MX27");
++MODULE_DESCRIPTION("Linux VPU driver for Freescale i.MX/MXC");
+ MODULE_LICENSE("GPL");
+ 
+ module_init(vpu_init);
+diff --git a/include/asm-arm/arch-mxc/mxc_vpu.h b/include/asm-arm/arch-mxc/mxc_vpu.h
+index 51f1979..67a62d3 100644
+--- a/include/asm-arm/arch-mxc/mxc_vpu.h
++++ b/include/asm-arm/arch-mxc/mxc_vpu.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -48,6 +48,7 @@ struct vpu_mem_desc {
+ #define VPU_IOC_GET_WORK_ADDR   _IO(VPU_IOC_MAGIC, 8)
+ #define VPU_IOC_GET_PIC_PARA_ADDR   _IO(VPU_IOC_MAGIC, 9)
+ #define VPU_IOC_GET_USER_DATA_ADDR   _IO(VPU_IOC_MAGIC, 10)
++#define VPU_IOC_SYS_SW_RESET	_IO(VPU_IOC_MAGIC, 11)
+ 
+ #define BIT_CODE_RUN			0x000
+ #define BIT_CODE_DOWN			0x004
+-- 
+1.5.4.4
+

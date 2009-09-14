@@ -1,0 +1,457 @@
+From b8f5e6412aaa802d84ab2e4882147838ee761001 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Tue, 7 Oct 2008 14:25:52 -0500
+Subject: [PATCH] ENGR00094377 wm8903: Add jack function mixer control
+
+Bring over code from imx-3stack-ak4767.c:
+ - Jack Function mixer control
+ - Suspend/Resume code
+ - Move a couple functions within the file
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/imx/imx-3stack-wm8903.c |  317 +++++++++++++++++++++++++------------
+ 1 files changed, 215 insertions(+), 102 deletions(-)
+
+diff --git a/sound/soc/imx/imx-3stack-wm8903.c b/sound/soc/imx/imx-3stack-wm8903.c
+index e2e2784..cc42697 100644
+--- a/sound/soc/imx/imx-3stack-wm8903.c
++++ b/sound/soc/imx/imx-3stack-wm8903.c
+@@ -39,12 +39,6 @@
+ #include "imx-pcm.h"
+ #include "../codecs/wm8903.h"
+ 
+-static void headphone_detect_handler(struct work_struct *work);
+-static DECLARE_WORK(hp_event, headphone_detect_handler);
+-void gpio_activate_audio_ports(void);
+-void wm8903_hp_initialize_hp_detect(struct snd_soc_codec *codec);
+-int wm8903_hp_status(struct snd_soc_codec *codec);
+-
+ /* SSI BCLK and LRC master */
+ #define WM8903_SSI_MASTER	1
+ 
+@@ -53,52 +47,58 @@ int wm8903_hp_status(struct snd_soc_codec *codec);
+ #define WM8903_IRQ_GPIO_PORT	1
+ #define WM8903_IRQ_GPIO_NUM		20
+ 
+-static int imx_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
+-				     struct snd_pcm_hw_params *params)
+-{
+-	struct snd_soc_pcm_link *pcm_link = substream->private_data;
+-	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
+-	struct snd_soc_dai *codec_dai = pcm_link->codec_dai;
+-	unsigned int channels = params_channels(params);
+-	u32 dai_format;
+-
+-#if WM8903_SSI_MASTER
+-	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+-	    SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_SYNC;
+-#else
+-	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+-	    SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_SYNC;
+-#endif
+-	if (channels == 2)
+-		dai_format |= SND_SOC_DAIFMT_TDM;
+-
+-	/* set codec DAI configuration */
+-	codec_dai->ops->set_fmt(codec_dai, dai_format);
++#define IMX_3STACK_MIXER_DEFAULT	0
++#define IMX_3STACK_MIXER_HP	1
++#define IMX_3STACK_MIXER_MIC	2
++#define IMX_3STACK_MIXER_LINE_IN	3
++#define IMX_3STACK_MIXER_LINE_OUT	4
++#define IMX_3STACK_MIXER_OFF	5
++#define IMX_3STACK_MIXER_SPK_OFF	0
++#define IMX_3STACK_MIXER_SPK_ON	1
+ 
+-	/* set cpu DAI configuration */
+-	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
+-
+-	/* set i.MX active slot mask */
+-	cpu_dai->ops->set_tdm_slot(cpu_dai,
+-				   channels == 1 ? 0xfffffffe : 0xfffffffc,
+-				   channels);
++void gpio_activate_audio_ports(void);
++void wm8903_hp_initialize_hp_detect(struct snd_soc_codec *codec);
++int wm8903_hp_status(struct snd_soc_codec *codec);
++static void headphone_detect_handler(struct work_struct *work);
++static DECLARE_WORK(hp_event, headphone_detect_handler);
++static struct snd_soc_machine *imx_3stack_mach;
++static int wm8903_jack_func;
++static int wm8903_spk_func;
+ 
+-	/* set the SSI system clock as input (unused) */
+-	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_IN);
++static void imx_3stack_ext_control(void)
++{
++	int spk = 0, mic = 0, hp = 0, line_in = 0, line_out = 0;
++
++	/* set up jack connection */
++	switch (wm8903_jack_func) {
++	case IMX_3STACK_MIXER_DEFAULT:
++		hp = 1;
++		mic = 1;
++	case IMX_3STACK_MIXER_HP:
++		hp = 1;
++		break;
++	case IMX_3STACK_MIXER_MIC:
++		mic = 1;
++		break;
++	case IMX_3STACK_MIXER_LINE_IN:
++		line_in = 1;
++		break;
++	case IMX_3STACK_MIXER_LINE_OUT:
++		line_out = 1;
++		break;
++	}
+ 
+-	/* MCLK is 12MHz */
+-	codec_dai->ops->set_sysclk(codec_dai, 0, 12000000, 0);
++	if (wm8903_spk_func == IMX_3STACK_MIXER_SPK_ON)
++		spk = 1;
+ 
+-	return 0;
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Mic Jack", mic);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Line In Jack", line_in);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Line Out Jack", line_out);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Headphone Jack", hp);
++	snd_soc_dapm_set_endpoint(imx_3stack_mach, "Ext Spk", spk);
++	snd_soc_dapm_sync_endpoints(imx_3stack_mach);
+ }
+ 
+-/*
+- * imx_3stack WM8903 HiFi DAI operations.
+- */
+-static struct snd_soc_ops imx_3stack_hifi_ops = {
+-	.hw_params = imx_3stack_hifi_hw_params,
+-};
+-
+ static void imx_3stack_init_dam(int ssi_port, int dai_port)
+ {
+ 	/* WM8903 uses SSI2 via AUDMUX port dai_port for audio */
+@@ -140,15 +140,67 @@ static void imx_3stack_init_dam(int ssi_port, int dai_port)
+ #endif
+ }
+ 
++static int imx_3stack_hifi_startup(struct snd_pcm_substream *substream)
++{
++	/* check the jack status at stream startup */
++	imx_3stack_ext_control();
++	return 0;
++}
++
++static int imx_3stack_hifi_hw_params(struct snd_pcm_substream *substream,
++				     struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_link *pcm_link = substream->private_data;
++	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
++	struct snd_soc_dai *codec_dai = pcm_link->codec_dai;
++	unsigned int channels = params_channels(params);
++	u32 dai_format;
++
++#if WM8903_SSI_MASTER
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
++	    SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_SYNC;
++#else
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
++	    SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_SYNC;
++#endif
++	if (channels == 2)
++		dai_format |= SND_SOC_DAIFMT_TDM;
++
++	/* set codec DAI configuration */
++	codec_dai->ops->set_fmt(codec_dai, dai_format);
++
++	/* set cpu DAI configuration */
++	cpu_dai->ops->set_fmt(cpu_dai, dai_format);
++
++	/* set i.MX active slot mask */
++	cpu_dai->ops->set_tdm_slot(cpu_dai,
++				   channels == 1 ? 0xfffffffe : 0xfffffffc,
++				   channels);
++
++	/* set the SSI system clock as input (unused) */
++	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_IN);
++
++	/* MCLK is 12MHz */
++	codec_dai->ops->set_sysclk(codec_dai, 0, 12000000, 0);
++
++	return 0;
++}
++
++/*
++ * imx_3stack WM8903 HiFi DAI operations.
++ */
++static struct snd_soc_ops imx_3stack_hifi_ops = {
++	.startup = imx_3stack_hifi_startup,
++	.hw_params = imx_3stack_hifi_hw_params,
++};
++
+ static int imx_3stack_pcm_new(struct snd_soc_pcm_link *pcm_link)
+ {
+ 	int ret;
+-
+ 	pcm_link->audio_ops = &imx_3stack_hifi_ops;
+-
+ 	ret = snd_soc_pcm_new(pcm_link, 1, 1);
+ 	if (ret < 0) {
+-		pr_err("%s: failed to create hifi pcm\n", __func__);
++		pr_err("%s: Failed to create hifi pcm\n", __func__);
+ 		return ret;
+ 	}
+ 
+@@ -159,13 +211,49 @@ static const struct snd_soc_pcm_link_ops imx_3stack_pcm_ops = {
+ 	.new = imx_3stack_pcm_new,
+ };
+ 
++static int imx_3stack_get_jack(struct snd_kcontrol *kcontrol,
++			       struct snd_ctl_elem_value *ucontrol)
++{
++	ucontrol->value.integer.value[0] = wm8903_jack_func;
++	return 0;
++}
++
++static int imx_3stack_set_jack(struct snd_kcontrol *kcontrol,
++			       struct snd_ctl_elem_value *ucontrol)
++{
++	if (wm8903_jack_func == ucontrol->value.integer.value[0])
++		return 0;
++
++	wm8903_jack_func = ucontrol->value.integer.value[0];
++	imx_3stack_ext_control();
++	return 1;
++}
++
++static int imx_3stack_get_spk(struct snd_kcontrol *kcontrol,
++			      struct snd_ctl_elem_value *ucontrol)
++{
++	ucontrol->value.integer.value[0] = wm8903_spk_func;
++	return 0;
++}
++
++static int imx_3stack_set_spk(struct snd_kcontrol *kcontrol,
++			      struct snd_ctl_elem_value *ucontrol)
++{
++	if (wm8903_spk_func == ucontrol->value.integer.value[0])
++		return 0;
++
++	wm8903_spk_func = ucontrol->value.integer.value[0];
++	imx_3stack_ext_control();
++	return 1;
++}
++
+ /* imx_3stack machine dapm widgets */
+ static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
+ 	SND_SOC_DAPM_MIC("Mic Jack", NULL),
+ 	SND_SOC_DAPM_LINE("Line In Jack", NULL),
+ 	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
+ 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+-	SND_SOC_DAPM_SPK("Speaker Jack", NULL),
++	SND_SOC_DAPM_SPK("Ext Spk", NULL),
+ };
+ 
+ /* imx_3stack machine audio map */
+@@ -187,31 +275,33 @@ static const char *audio_map[][3] = {
+ 	{"Line Out Jack", NULL, "LINEOUTR"},
+ 	{"Line Out Jack", NULL, "LINEOUTL"},
+ 
+-	/* WM8903 Speaker --> Speaker Jack */
+-	{"Speaker Jack", NULL, "LOP"},
+-	{"Speaker Jack", NULL, "LON"},
+-	{"Speaker Jack", NULL, "ROP"},
+-	{"Speaker Jack", NULL, "RON"},
++	/* WM8903 Speaker --> Ext Spk */
++	{"Ext Spk", NULL, "LOP"},
++	{"Ext Spk", NULL, "LON"},
++	{"Ext Spk", NULL, "ROP"},
++	{"Ext Spk", NULL, "RON"},
+ 
+ 	{NULL, NULL, NULL},
++
+ };
+ 
+-#ifdef CONFIG_PM
+-static int imx_3stack_audio_suspend(struct platform_device *dev,
+-				    pm_message_t state)
+-{
+-	return 0;
+-}
++static const char *jack_function[] = { "Hp-Mic", "Headphone", "Mic", "Line In",
++	"Line Out", "Off"
++};
+ 
+-static int imx_3stack_audio_resume(struct platform_device *dev)
+-{
+-	return 0;
+-}
++static const char *spk_function[] = { "Off", "On" };
+ 
+-#else
+-#define imx_3stack_audio_suspend	NULL
+-#define imx_3stack_audio_resume	NULL
+-#endif
++static const struct soc_enum imx_3stack_enum[] = {
++	SOC_ENUM_SINGLE_EXT(6, jack_function),
++	SOC_ENUM_SINGLE_EXT(2, spk_function),
++};
++
++static const struct snd_kcontrol_new imx_3stack_machine_controls[] = {
++	SOC_ENUM_EXT("Jack Function", imx_3stack_enum[0], imx_3stack_get_jack,
++		     imx_3stack_set_jack),
++	SOC_ENUM_EXT("Speaker Function", imx_3stack_enum[1], imx_3stack_get_spk,
++		     imx_3stack_set_spk),
++};
+ 
+ static void *wm8903_3stack_pcm_link;
+ 
+@@ -239,31 +329,11 @@ static irqreturn_t imx_headphone_detect_handler(int irq, void *dev_id)
+ {
+ 	schedule_work(&hp_event);
+ 	return IRQ_HANDLED;
+-}
+-
+-static ssize_t show_headphone(struct device_driver *dev, char *buf)
+-{
+-	u16 hp_status;
+-	struct snd_soc_pcm_link *pcm_link;
+-	struct snd_soc_codec *codec;
+-
+-	pcm_link = (struct snd_soc_pcm_link *)wm8903_3stack_pcm_link;
+-	codec = pcm_link->codec;
+ 
+-	/* determine whether hp is plugged in */
+-	hp_status = wm8903_hp_status(codec);
+-
+-	if (hp_status == 0)
+-		strcpy(buf, "speaker\n");
+-	else
+-		strcpy(buf, "headphone\n");
+-
+-	return strlen(buf);
+ }
+ 
+-DRIVER_ATTR(headphone, S_IRUGO | S_IWUSR, show_headphone, NULL);
+-
+-int mach_probe(struct snd_soc_machine *machine)
++static int imx_3stack_mach_probe(struct snd_soc_machine
++				 *machine)
+ {
+ 	struct snd_soc_codec *codec;
+ 	struct snd_soc_pcm_link *pcm_link;
+@@ -289,15 +359,21 @@ int mach_probe(struct snd_soc_machine *machine)
+ 					 &imx_3stack_dapm_widgets[i]);
+ 	}
+ 
++	for (i = 0; i < ARRAY_SIZE(imx_3stack_machine_controls); i++) {
++		ret = snd_ctl_add(machine->card,
++				  snd_soc_cnew(&imx_3stack_machine_controls[i],
++					       codec, NULL));
++		if (ret < 0)
++			return ret;
++	}
++
+ 	/* set up imx_3stack specific audio path audio map */
+ 	for (i = 0; audio_map[i][0] != NULL; i++) {
+ 		snd_soc_dapm_connect_input(machine, audio_map[i][0],
+ 					   audio_map[i][1], audio_map[i][2]);
+ 	}
+ 
+-	/* connect and enable all input jacks (for now) */
+-	snd_soc_dapm_set_endpoint(machine, "Mic Jack", 1);
+-	snd_soc_dapm_set_endpoint(machine, "Line In Jack", 1);
++	imx_3stack_ext_control();
+ 
+ 	snd_soc_dapm_set_policy(machine, SND_SOC_DAPM_POLICY_STREAM);
+ 	snd_soc_dapm_sync_endpoints(machine);
+@@ -322,10 +398,32 @@ int mach_probe(struct snd_soc_machine *machine)
+ 	return 0;
+ }
+ 
+-struct snd_soc_machine_ops machine_ops = {
+-	.mach_probe = mach_probe,
++struct snd_soc_machine_ops imx_3stack_mach_ops = {
++	.mach_probe = imx_3stack_mach_probe,
+ };
+ 
++static ssize_t show_headphone(struct device_driver *dev, char *buf)
++{
++	u16 hp_status;
++	struct snd_soc_pcm_link *pcm_link;
++	struct snd_soc_codec *codec;
++
++	pcm_link = (struct snd_soc_pcm_link *)wm8903_3stack_pcm_link;
++	codec = pcm_link->codec;
++
++	/* determine whether hp is plugged in */
++	hp_status = wm8903_hp_status(codec);
++
++	if (hp_status == 0)
++		strcpy(buf, "speaker\n");
++	else
++		strcpy(buf, "headphone\n");
++
++	return strlen(buf);
++}
++
++DRIVER_ATTR(headphone, S_IRUGO | S_IWUSR, show_headphone, NULL);
++
+ static int __init imx_3stack_audio_probe(struct platform_device *pdev)
+ {
+ 	struct snd_soc_machine *machine;
+@@ -342,10 +440,11 @@ static int __init imx_3stack_audio_probe(struct platform_device *pdev)
+ 	machine->pdev = pdev;
+ 	machine->name = "i.MX_3STACK";
+ 	machine->longname = "WM8903";
+-	machine->ops = &machine_ops;
++	machine->ops = &imx_3stack_mach_ops;
+ 	pdev->dev.driver_data = machine;
+ 
+ 	/* register card */
++	imx_3stack_mach = machine;
+ 	ret = snd_soc_new_card(machine, 1, SNDRV_DEFAULT_IDX1,
+ 			       SNDRV_DEFAULT_STR1);
+ 	if (ret < 0) {
+@@ -411,13 +510,27 @@ static int __devexit imx_3stack_audio_remove(struct platform_device *pdev)
+ 
+ 	driver_remove_file(pdev->dev.driver, &driver_attr_headphone);
+ 	kfree(machine);
+-
+ 	return 0;
+ }
+ 
+-const char imx_3stack_audio[32] = {
+-	"imx-3stack-wm8903"
+-};
++#ifdef CONFIG_PM
++static int imx_3stack_audio_suspend(struct platform_device *pdev,
++				    pm_message_t state)
++{
++	struct snd_soc_machine *machine = platform_get_drvdata(pdev);
++	return snd_soc_suspend(machine, state);
++}
++
++static int imx_3stack_audio_resume(struct platform_device *pdev)
++{
++	struct snd_soc_machine *machine = platform_get_drvdata(pdev);
++	return snd_soc_resume(machine);
++}
++
++#else
++#define imx_3stack_audio_suspend	NULL
++#define imx_3stack_audio_resume	NULL
++#endif
+ 
+ static struct platform_driver imx_3stack_wm8903_audio_driver = {
+ 	.probe = imx_3stack_audio_probe,
+@@ -425,7 +538,7 @@ static struct platform_driver imx_3stack_wm8903_audio_driver = {
+ 	.suspend = imx_3stack_audio_suspend,
+ 	.resume = imx_3stack_audio_resume,
+ 	.driver = {
+-		   .name = imx_3stack_audio,
++		   .name = "imx-3stack-wm8903",
+ 		   .owner = THIS_MODULE,
+ 		   },
+ };
+-- 
+1.5.4.4
+

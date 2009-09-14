@@ -1,0 +1,77 @@
+From 1932716753a853368d77b3f533a0fbc584df4bf5 Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Wed, 21 Jan 2009 15:16:35 +0800
+Subject: [PATCH] ENGR00105179 USBPHY_VBUS source enable and PWR/OC pins config for MX51.
+
+1.Enable SWBST for USBPHY_VBUS.
+2.Configure Power and OC pins for USBOTG.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/mach-mx51/mx51_3stack_gpio.c |   17 +++++++++++++++++
+ arch/arm/plat-mxc/utmixc.c            |    9 ++++++++-
+ 2 files changed, 25 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 5be5e15..8a90b12 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -1247,6 +1247,18 @@ EXPORT_SYMBOL(gpio_keypad_inactive);
+  */
+ int gpio_usbotg_hs_active(void)
+ {
++	/* USB_PWR */
++	mxc_request_iomux(MX51_PIN_GPIO1_8, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_GPIO1_8, PAD_CTL_SRE_FAST |
++			  PAD_CTL_DRV_HIGH | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PKE_NONE | PAD_CTL_HYS_ENABLE);
++
++	/* USB_OC */
++	mxc_request_iomux(MX51_PIN_GPIO1_9, IOMUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX51_PIN_GPIO1_9, PAD_CTL_SRE_SLOW |
++			  PAD_CTL_DRV_LOW | PAD_CTL_ODE_OPENDRAIN_NONE |
++			  PAD_CTL_PUE_KEEPER | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_HYS_ENABLE);
+ 	return 0;
+ }
+ 
+@@ -1254,6 +1266,11 @@ EXPORT_SYMBOL(gpio_usbotg_hs_active);
+ 
+ void gpio_usbotg_hs_inactive(void)
+ {
++	mxc_request_gpio(MX51_PIN_GPIO1_8);
++	mxc_request_gpio(MX51_PIN_GPIO1_9);
++
++	mxc_free_iomux(MX51_PIN_GPIO1_8, IOMUX_CONFIG_GPIO);
++	mxc_free_iomux(MX51_PIN_GPIO1_9, IOMUX_CONFIG_GPIO);
+ }
+ 
+ EXPORT_SYMBOL(gpio_usbotg_hs_inactive);
+diff --git a/arch/arm/plat-mxc/utmixc.c b/arch/arm/plat-mxc/utmixc.c
+index d6e8533..16da8e1 100644
+--- a/arch/arm/plat-mxc/utmixc.c
++++ b/arch/arm/plat-mxc/utmixc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -63,6 +63,13 @@ static void set_power(struct fsl_xcvr_ops *this,
+ 	} else if (machine_is_mx51_3ds()) {
+ 		unsigned int value;
+ 
++		usbotg_regux = regulator_get(dev, "SWBST");
++		if (on)
++			regulator_enable(usbotg_regux);
++		else
++			regulator_disable(usbotg_regux);
++		regulator_put(usbotg_regux, dev);
++
+ 		/* VUSBIN */
+ 		pmic_read_reg(REG_USB1, &value, 0xffffff);
+ 		if (on)
+-- 
+1.5.4.4
+

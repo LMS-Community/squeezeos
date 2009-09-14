@@ -1,0 +1,78 @@
+From 4d287f23ed845d45384b4f90eab758fec6a93621 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Thu, 20 Mar 2008 15:31:57 -0500
+Subject: [PATCH] ENGR00069540 MX31_3stack: Make GPO2 parent GPO1
+
+Set regulator GPO1 to be the parent of regulator GPO2 for MX31_3stack
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack.c          |   19 +++++++++++++++++++
+ drivers/regulator/mc13783/reg-mc13783.c |    5 +++--
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 5aa22a5..40a3574 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -31,6 +31,8 @@
+ #include <linux/platform_device.h>
+ #include <linux/spi/spi.h>
+ #include <linux/i2c.h>
++#include <linux/regulator/regulator-platform.h>
++#include <linux/regulator/regulator.h>
+ #if defined(CONFIG_MTD) || defined(CONFIG_MTD_MODULE)
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/map.h>
+@@ -483,6 +485,23 @@ static int __init mxc_expio_init(void)
+ 	return 0;
+ }
+ 
++static int __init mxc_init_regulator(void)
++{
++	struct regulator *gpo1;
++	struct regulator *gpo2;
++
++	gpo1 = regulator_get(NULL, "GPO1");
++	gpo2 = regulator_get(NULL, "GPO2");
++	if (!(IS_ERR(gpo1) || IS_ERR(gpo2)))
++		regulator_set_platform_source(gpo2, gpo1);
++	else
++		printk(KERN_ERR "Unable to set GPO1 be the parent of GPO2\n");
++
++	return 0;
++}
++
++module_init(mxc_init_regulator);
++
+ #if defined(CONFIG_MXC_PMIC_MC13783) && defined(CONFIG_SND_MXC_PMIC)
+ static void __init mxc_init_pmic_audio(void)
+ {
+diff --git a/drivers/regulator/mc13783/reg-mc13783.c b/drivers/regulator/mc13783/reg-mc13783.c
+index c7fd08f..95417cc 100644
+--- a/drivers/regulator/mc13783/reg-mc13783.c
++++ b/drivers/regulator/mc13783/reg-mc13783.c
+@@ -2945,8 +2945,6 @@ int reg_mc13783_probe(void)
+ 	int ret11 = 0;
+ 	int i = 0;
+ 
+-	printk(KERN_INFO "MC13783 regulator successfully probed\n");
+-
+ 	for (i = 0; i < ARRAY_SIZE(reg_mc13783); i++) {
+ 		ret11 = regulator_register(&reg_mc13783[i].regulator);
+ 		regulator_set_platform_constraints(reg_mc13783[i].regulator.
+@@ -2964,8 +2962,11 @@ int reg_mc13783_probe(void)
+ 		}
+ 	}
+ 
++	printk(KERN_INFO "MC13783 regulator successfully probed\n");
++
+ 	return 0;
+ }
++
+ EXPORT_SYMBOL(reg_mc13783_probe);
+ 
+ /* Module information */
+-- 
+1.5.4.4
+

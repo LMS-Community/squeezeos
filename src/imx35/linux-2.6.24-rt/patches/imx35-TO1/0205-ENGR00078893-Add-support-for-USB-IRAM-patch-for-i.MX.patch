@@ -1,0 +1,137 @@
+From 20d219d5e0595d91ff6b2a710e4397ce8b678490 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Wed, 11 Jun 2008 22:22:23 -0500
+Subject: [PATCH] ENGR00078893 Add support for USB IRAM patch for i.MX37
+
+Change the #define USB_IRAM_BASE_ADDR and added USB_IRAM_SIZE in
+mx37.h, this will make the code easier to support other platforms.
+Also change the code to not use IRAM for qTD for MX37.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/host/Kconfig         |    2 +-
+ drivers/usb/host/ehci-mem-iram.c |   30 +++++++++++++++++++++---------
+ include/asm-arm/arch-mxc/mx37.h  |    9 +++++++++
+ 3 files changed, 31 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 1f37a5f..d07b81b 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -60,7 +60,7 @@ config USB_EHCI_ARC_OTG
+ 
+ config USB_STATIC_IRAM
+ 	bool "Apply static IRAM patch"
+-	depends on USB_EHCI_ARC	&& ARCH_MX3
++	depends on USB_EHCI_ARC
+ 	---help---
+ 	  Apply static IRAM patch to EHCI driver.
+ 
+diff --git a/drivers/usb/host/ehci-mem-iram.c b/drivers/usb/host/ehci-mem-iram.c
+index 343ea33..8c9344f 100644
+--- a/drivers/usb/host/ehci-mem-iram.c
++++ b/drivers/usb/host/ehci-mem-iram.c
+@@ -36,6 +36,8 @@
+ /* Allocate the key transfer structures from the previously allocated pool */
+ #include <linux/smp_lock.h>
+ 
++bool use_iram_qtd;
++
+ struct memDesc {
+ 	u32 start;
+ 	u32 end;
+@@ -201,18 +203,18 @@ static int address_to_buffer(struct ehci_hcd *ehci, int address)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < 2; i++) {
++	for (i = 0; i < IRAM_NTD; i++) {
+ 		if (ehci->usb_address[i] == address)
+ 			return i;
+ 	}
+-	return 2;
++	return IRAM_NTD;
+ }
+ 
+ static void use_buffer(struct ehci_hcd *ehci, int address)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < 2; i++) {
++	for (i = 0; i < IRAM_NTD; i++) {
+ 		if (ehci->usb_address[i] == address)
+ 			return;
+ 	}
+@@ -265,9 +267,13 @@ static struct ehci_qtd *ehci_qtd_alloc(struct ehci_hcd *ehci, gfp_t flags)
+ 	struct ehci_qtd *qtd;
+ 	dma_addr_t dma;
+ 
+-	dma = usb_malloc(sizeof(struct ehci_qtd), flags);
+-	if (dma != 0)
+-		qtd = (struct ehci_qtd *)IO_ADDRESS(dma);
++	if (use_iram_qtd) {
++		dma = usb_malloc(sizeof(struct ehci_qtd), flags);
++		if (dma != 0)
++			qtd = (struct ehci_qtd *)IO_ADDRESS(dma);
++		else
++			qtd = dma_pool_alloc(ehci->qtd_pool, flags, &dma);
++	}
+ 	else
+ 		qtd = dma_pool_alloc(ehci->qtd_pool, flags, &dma);
+ 
+@@ -305,7 +311,7 @@ static void qh_destroy(struct ehci_qh *qh)
+ 	if (qh->dummy)
+ 		ehci_qtd_free(ehci, qh->dummy);
+ 	int i;
+-	for (i = 0; i < 2; i++) {
++	for (i = 0; i < IRAM_NTD; i++) {
+ 		if (ehci->usb_address[i] == (qh->hw_info1 & 0x7F))
+ 			ehci->usb_address[i] = 0;
+ 	}
+@@ -422,8 +428,14 @@ static int ehci_mem_init(struct ehci_hcd *ehci, gfp_t flags)
+ 	g_debug_qH_allocated = 0;
+ 	g_alloc_map = 0;
+ 
+-	usb_pool_initialize(USB_IRAM_BASE_ADDR + IRAM_TD_SIZE * IRAM_NTD * 4,
+-			    16384 - IRAM_TD_SIZE * IRAM_NTD * 4, 32);
++	if (cpu_is_mx37())
++		use_iram_qtd = 0;
++	else
++		use_iram_qtd = 1;
++
++	usb_pool_initialize(USB_IRAM_BASE_ADDR + IRAM_TD_SIZE * IRAM_NTD * 2,
++			    USB_IRAM_SIZE - IRAM_TD_SIZE * IRAM_NTD * 2, 32);
++
+ 	if (!ehci->iram_buffer[0]) {
+ 		ehci->iram_buffer[0] = alloc_iram_buf();
+ 		ehci->iram_buffer_v[0] = IO_ADDRESS(ehci->iram_buffer[0]);
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index 6976b7f..6c1ed02 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -81,6 +81,13 @@
+ 
+ #define SND_RAM_BASE_ADDR	(IRAM_BASE_ADDR + CONFIG_SDMA_IRAM_SIZE)
+ 
++#define USB_IRAM_BASE_ADDR	(SND_RAM_BASE_ADDR + SND_RAM_SIZE)
++#ifdef CONFIG_USB_STATIC_IRAM
++#define USB_IRAM_SIZE	(2*SZ_8K)
++#else
++#define USB_IRAM_SIZE 0
++#endif
++
+ /*
+  * NFC
+  */
+@@ -293,6 +300,8 @@
+ #define NFC_BASE_ADDR_AXI_IO_ADDRESS(x) \
+         (((x) - NFC_BASE_ADDR_AXI) + NFC_BASE_ADDR_AXI_VIRT)
+ 
++#define IS_MEM_DEVICE_NONSHARED(x)	((x) >= 0x80000000)
++
+ /*
+  * DMA request assignments
+  */
+-- 
+1.5.4.4
+

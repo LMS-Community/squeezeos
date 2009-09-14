@@ -1,0 +1,116 @@
+From bdfb750ab19ab001ab556e4071cec22f17876087 Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Mon, 24 Nov 2008 16:37:22 -0700
+Subject: [PATCH] ENGR00099228 MX25: Enhance 4Mbps UART support
+
+Enhance the 4Mbps UART support for MX25 including
+SDMA support for UART4 and UART5.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/mach-mx25/dma.c    |   60 +++++++++++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx25/serial.h |    4 +-
+ 2 files changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx25/dma.c b/arch/arm/mach-mx25/dma.c
+index 1bee714..b1ee663 100644
+--- a/arch/arm/mach-mx25/dma.c
++++ b/arch/arm/mach-mx25/dma.c
+@@ -107,6 +107,62 @@ static mxc_sdma_channel_params_t mxc_sdma_uart3_tx_params = {
+ 	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
+ };
+ 
++static mxc_sdma_channel_params_t mxc_sdma_uart4_rx_params = {
++	.chnl_params = {
++			.watermark_level = UART4_UFCR_RXTL,
++			.per_address = UART4_BASE_ADDR,
++			.peripheral_type = UART_SP,
++			.transfer_type = per_2_emi,
++			.event_id = DMA_REQ_UART4_RX,
++			.bd_number = 32,
++			.word_size = TRANSFER_8BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_UART4_RX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
++static mxc_sdma_channel_params_t mxc_sdma_uart4_tx_params = {
++	.chnl_params = {
++			.watermark_level = UART4_UFCR_TXTL,
++			.per_address = UART4_BASE_ADDR + MXC_UARTUTXD,
++			.peripheral_type = UART_SP,
++			.transfer_type = emi_2_per,
++			.event_id = DMA_REQ_UART4_TX,
++			.bd_number = 32,
++			.word_size = TRANSFER_8BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_UART4_TX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
++static mxc_sdma_channel_params_t mxc_sdma_uart5_rx_params = {
++	.chnl_params = {
++			.watermark_level = UART5_UFCR_RXTL,
++			.per_address = UART5_BASE_ADDR,
++			.peripheral_type = UART_SP,
++			.transfer_type = per_2_emi,
++			.event_id = DMA_REQ_UART5_RX,
++			.bd_number = 32,
++			.word_size = TRANSFER_8BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_UART5_RX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
++static mxc_sdma_channel_params_t mxc_sdma_uart5_tx_params = {
++	.chnl_params = {
++			.watermark_level = UART5_UFCR_TXTL,
++			.per_address = UART5_BASE_ADDR + MXC_UARTUTXD,
++			.peripheral_type = UART_SP,
++			.transfer_type = emi_2_per,
++			.event_id = DMA_REQ_UART5_TX,
++			.bd_number = 32,
++			.word_size = TRANSFER_8BIT,
++			},
++	.channel_num = MXC_DMA_CHANNEL_UART5_TX,
++	.chnl_priority = MXC_SDMA_DEFAULT_PRIORITY,
++};
++
+ static mxc_sdma_channel_params_t mxc_sdma_memory_params = {
+ 	.chnl_params = {
+ 			.peripheral_type = MEMORY,
+@@ -125,6 +181,10 @@ static struct mxc_sdma_info_entry_s mxc_sdma_active_dma_info[] = {
+ 	{MXC_DMA_UART2_TX, &mxc_sdma_uart2_tx_params},
+ 	{MXC_DMA_UART3_RX, &mxc_sdma_uart3_rx_params},
+ 	{MXC_DMA_UART3_TX, &mxc_sdma_uart3_tx_params},
++	{MXC_DMA_UART4_RX, &mxc_sdma_uart4_rx_params},
++	{MXC_DMA_UART4_TX, &mxc_sdma_uart4_tx_params},
++	{MXC_DMA_UART5_RX, &mxc_sdma_uart5_rx_params},
++	{MXC_DMA_UART5_TX, &mxc_sdma_uart5_tx_params},
+ 	{MXC_DMA_MEMORY, &mxc_sdma_memory_params},
+ };
+ 
+diff --git a/arch/arm/mach-mx25/serial.h b/arch/arm/mach-mx25/serial.h
+index d7d5699..a6591bd 100644
+--- a/arch/arm/mach-mx25/serial.h
++++ b/arch/arm/mach-mx25/serial.h
+@@ -76,14 +76,14 @@
+ /* UART 4 configuration */
+ #define UART4_HW_FLOW           1
+ #define UART4_UCR4_CTSTL        16
+-#define UART4_DMA_ENABLE        0
++#define UART4_DMA_ENABLE        1
+ #define UART4_DMA_RXBUFSIZE     1024
+ #define UART4_UFCR_RXTL         16
+ #define UART4_UFCR_TXTL         16
+ /* UART 5 configuration */
+ #define UART5_HW_FLOW           1
+ #define UART5_UCR4_CTSTL        16
+-#define UART5_DMA_ENABLE        0
++#define UART5_DMA_ENABLE        1
+ #define UART5_DMA_RXBUFSIZE     1024
+ #define UART5_UFCR_RXTL         16
+ #define UART5_UFCR_TXTL         16
+-- 
+1.5.4.4
+

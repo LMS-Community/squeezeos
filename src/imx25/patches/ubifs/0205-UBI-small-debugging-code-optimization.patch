@@ -1,0 +1,61 @@
+From 3eed68b8edce842c7292fa4bfdf373dc03096761 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 12 May 2009 15:10:03 +0300
+Subject: [PATCH] UBI: small debugging code optimization
+
+The @ubi->dbg_peb_buf is needed only when paranoid checks are
+enabled, not when debugging in general is enabled.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    6 +++---
+ drivers/mtd/ubi/ubi.h   |    2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 4eb7944..d782190 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -824,7 +824,7 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 	if (!ubi->peb_buf2)
+ 		goto out_free;
+ 
+-#ifdef CONFIG_MTD_UBI_DEBUG
++#ifdef CONFIG_MTD_UBI_DEBUG_PARANOID
+ 	mutex_init(&ubi->dbg_buf_mutex);
+ 	ubi->dbg_peb_buf = vmalloc(ubi->peb_size);
+ 	if (!ubi->dbg_peb_buf)
+@@ -891,7 +891,7 @@ out_detach:
+ out_free:
+ 	vfree(ubi->peb_buf1);
+ 	vfree(ubi->peb_buf2);
+-#ifdef CONFIG_MTD_UBI_DEBUG
++#ifdef CONFIG_MTD_UBI_DEBUG_PARANOID
+ 	vfree(ubi->dbg_peb_buf);
+ #endif
+ 	kfree(ubi);
+@@ -960,7 +960,7 @@ int ubi_detach_mtd_dev(int ubi_num, int anyway)
+ 	put_mtd_device(ubi->mtd);
+ 	vfree(ubi->peb_buf1);
+ 	vfree(ubi->peb_buf2);
+-#ifdef CONFIG_MTD_UBI_DEBUG
++#ifdef CONFIG_MTD_UBI_DEBUG_PARANOID
+ 	vfree(ubi->dbg_peb_buf);
+ #endif
+ 	ubi_msg("mtd%d is detached from ubi%d", ubi->mtd->index, ubi->ubi_num);
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index 76ec79b..749007e 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -443,7 +443,7 @@ struct ubi_device {
+ 	void *peb_buf2;
+ 	struct mutex buf_mutex;
+ 	struct mutex ckvol_mutex;
+-#ifdef CONFIG_MTD_UBI_DEBUG
++#ifdef CONFIG_MTD_UBI_DEBUG_PARANOID
+ 	void *dbg_peb_buf;
+ 	struct mutex dbg_buf_mutex;
+ #endif
+-- 
+1.5.4.3
+

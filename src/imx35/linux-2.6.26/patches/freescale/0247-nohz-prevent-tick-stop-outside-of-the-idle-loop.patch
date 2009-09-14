@@ -1,0 +1,316 @@
+From 5d47b693a59b4b650ebaddcf44bd597174a67ff9 Mon Sep 17 00:00:00 2001
+From: Thomas Gleixner <tglx@linutronix.de>
+Date: Fri, 18 Jul 2008 17:27:28 +0200
+Subject: [PATCH] nohz: prevent tick stop outside of the idle loop
+
+Jack Ren and Eric Miao tracked down the following long standing
+problem in the NOHZ code:
+
+	scheduler switch to idle task
+	enable interrupts
+
+Window starts here
+
+	----> interrupt happens (does not set NEED_RESCHED)
+	      	irq_exit() stops the tick
+
+	----> interrupt happens (does set NEED_RESCHED)
+
+	return from schedule()
+
+	cpu_idle(): preempt_disable();
+
+Window ends here
+
+The interrupts can happen at any point inside the race window. The
+first interrupt stops the tick, the second one causes the scheduler to
+rerun and switch away from idle again and we end up with the tick
+disabled.
+
+The fact that it needs two interrupts where the first one does not set
+NEED_RESCHED and the second one does made the bug obscure and extremly
+hard to reproduce and analyse. Kudos to Jack and Eric.
+
+Solution: Limit the NOHZ functionality to the idle loop to make sure
+that we can not run into such a situation ever again.
+
+cpu_idle()
+{
+	preempt_disable();
+
+	while(1) {
+		 tick_nohz_stop_sched_tick(1); <- tell NOHZ code that we
+		 			          are in the idle loop
+
+		 while (!need_resched())
+		       halt();
+
+		 tick_nohz_restart_sched_tick(); <- disables NOHZ mode
+		 preempt_enable_no_resched();
+		 schedule();
+		 preempt_disable();
+	}
+}
+
+In hindsight we should have done this forever, but ...
+
+/me grabs a large brown paperbag.
+
+Debugged-by: Jack Ren <jack.ren@marvell.com>,
+Debugged-by: eric miao <eric.y.miao@gmail.com>
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+---
+ arch/arm/kernel/process.c              |    2 +-
+ arch/avr32/kernel/process.c            |    2 +-
+ arch/blackfin/kernel/process.c         |    2 +-
+ arch/mips/kernel/process.c             |    2 +-
+ arch/powerpc/kernel/idle.c             |    2 +-
+ arch/powerpc/platforms/iseries/setup.c |    4 ++--
+ arch/sh/kernel/process_32.c            |    2 +-
+ arch/sparc64/kernel/process.c          |    2 +-
+ arch/um/kernel/process.c               |    2 +-
+ arch/x86/kernel/process_32.c           |    2 +-
+ arch/x86/kernel/process_64.c           |    2 +-
+ include/linux/tick.h                   |    5 +++--
+ kernel/softirq.c                       |    2 +-
+ kernel/time/tick-sched.c               |   12 ++++++++++--
+ 14 files changed, 26 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/kernel/process.c b/arch/arm/kernel/process.c
+index 46bf2ed..84f5a4c 100644
+--- a/arch/arm/kernel/process.c
++++ b/arch/arm/kernel/process.c
+@@ -164,7 +164,7 @@ void cpu_idle(void)
+ 		if (!idle)
+ 			idle = default_idle;
+ 		leds_event(led_idle_start);
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched())
+ 			idle();
+ 		leds_event(led_idle_end);
+diff --git a/arch/avr32/kernel/process.c b/arch/avr32/kernel/process.c
+index 6cf9df1..ff820a9 100644
+--- a/arch/avr32/kernel/process.c
++++ b/arch/avr32/kernel/process.c
+@@ -31,7 +31,7 @@ void cpu_idle(void)
+ {
+ 	/* endless idle loop with no priority at all */
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched())
+ 			cpu_idle_sleep();
+ 		tick_nohz_restart_sched_tick();
+diff --git a/arch/blackfin/kernel/process.c b/arch/blackfin/kernel/process.c
+index 53c2cd2..77800dd 100644
+--- a/arch/blackfin/kernel/process.c
++++ b/arch/blackfin/kernel/process.c
+@@ -105,7 +105,7 @@ void cpu_idle(void)
+ #endif
+ 		if (!idle)
+ 			idle = default_idle;
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched())
+ 			idle();
+ 		tick_nohz_restart_sched_tick();
+diff --git a/arch/mips/kernel/process.c b/arch/mips/kernel/process.c
+index 2c09a44..bdead3a 100644
+--- a/arch/mips/kernel/process.c
++++ b/arch/mips/kernel/process.c
+@@ -53,7 +53,7 @@ void __noreturn cpu_idle(void)
+ {
+ 	/* endless idle loop with no priority at all */
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched()) {
+ #ifdef CONFIG_SMTC_IDLE_HOOK_DEBUG
+ 			extern void smtc_idle_loop_hook(void);
+diff --git a/arch/powerpc/kernel/idle.c b/arch/powerpc/kernel/idle.c
+index c3cf0e8..d308a9f 100644
+--- a/arch/powerpc/kernel/idle.c
++++ b/arch/powerpc/kernel/idle.c
+@@ -60,7 +60,7 @@ void cpu_idle(void)
+ 
+ 	set_thread_flag(TIF_POLLING_NRFLAG);
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched() && !cpu_should_die()) {
+ 			ppc64_runlatch_off();
+ 
+diff --git a/arch/powerpc/platforms/iseries/setup.c b/arch/powerpc/platforms/iseries/setup.c
+index b721207..70b688c 100644
+--- a/arch/powerpc/platforms/iseries/setup.c
++++ b/arch/powerpc/platforms/iseries/setup.c
+@@ -561,7 +561,7 @@ static void yield_shared_processor(void)
+ static void iseries_shared_idle(void)
+ {
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched() && !hvlpevent_is_pending()) {
+ 			local_irq_disable();
+ 			ppc64_runlatch_off();
+@@ -591,7 +591,7 @@ static void iseries_dedicated_idle(void)
+ 	set_thread_flag(TIF_POLLING_NRFLAG);
+ 
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		if (!need_resched()) {
+ 			while (!need_resched()) {
+ 				ppc64_runlatch_off();
+diff --git a/arch/sh/kernel/process_32.c b/arch/sh/kernel/process_32.c
+index b98e37a..921892c 100644
+--- a/arch/sh/kernel/process_32.c
++++ b/arch/sh/kernel/process_32.c
+@@ -86,7 +86,7 @@ void cpu_idle(void)
+ 		if (!idle)
+ 			idle = default_idle;
+ 
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched())
+ 			idle();
+ 		tick_nohz_restart_sched_tick();
+diff --git a/arch/sparc64/kernel/process.c b/arch/sparc64/kernel/process.c
+index 2084f81..0798928 100644
+--- a/arch/sparc64/kernel/process.c
++++ b/arch/sparc64/kernel/process.c
+@@ -97,7 +97,7 @@ void cpu_idle(void)
+ 	set_thread_flag(TIF_POLLING_NRFLAG);
+ 
+ 	while(1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 
+ 		while (!need_resched() && !cpu_is_offline(cpu))
+ 			sparc64_yield(cpu);
+diff --git a/arch/um/kernel/process.c b/arch/um/kernel/process.c
+index 83603cf..a1c6d07 100644
+--- a/arch/um/kernel/process.c
++++ b/arch/um/kernel/process.c
+@@ -243,7 +243,7 @@ void default_idle(void)
+ 		if (need_resched())
+ 			schedule();
+ 
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		nsecs = disable_timer();
+ 		idle_sleep(nsecs);
+ 		tick_nohz_restart_sched_tick();
+diff --git a/arch/x86/kernel/process_32.c b/arch/x86/kernel/process_32.c
+index e2db9ac..ed4b512 100644
+--- a/arch/x86/kernel/process_32.c
++++ b/arch/x86/kernel/process_32.c
+@@ -166,7 +166,7 @@ void cpu_idle(void)
+ 
+ 	/* endless idle loop with no priority at all */
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched()) {
+ 			void (*idle)(void);
+ 
+diff --git a/arch/x86/kernel/process_64.c b/arch/x86/kernel/process_64.c
+index c6eb5c9..975ca15 100644
+--- a/arch/x86/kernel/process_64.c
++++ b/arch/x86/kernel/process_64.c
+@@ -148,7 +148,7 @@ void cpu_idle(void)
+ 	current_thread_info()->status |= TS_POLLING;
+ 	/* endless idle loop with no priority at all */
+ 	while (1) {
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(1);
+ 		while (!need_resched()) {
+ 			void (*idle)(void);
+ 
+diff --git a/include/linux/tick.h b/include/linux/tick.h
+index a881c65..d3c0269 100644
+--- a/include/linux/tick.h
++++ b/include/linux/tick.h
+@@ -49,6 +49,7 @@ struct tick_sched {
+ 	unsigned long			check_clocks;
+ 	enum tick_nohz_mode		nohz_mode;
+ 	ktime_t				idle_tick;
++	int				inidle;
+ 	int				tick_stopped;
+ 	unsigned long			idle_jiffies;
+ 	unsigned long			idle_calls;
+@@ -105,14 +106,14 @@ static inline int tick_check_oneshot_change(int allow_nohz) { return 0; }
+ #endif /* !CONFIG_GENERIC_CLOCKEVENTS */
+ 
+ # ifdef CONFIG_NO_HZ
+-extern void tick_nohz_stop_sched_tick(void);
++extern void tick_nohz_stop_sched_tick(int inidle);
+ extern void tick_nohz_restart_sched_tick(void);
+ extern void tick_nohz_update_jiffies(void);
+ extern ktime_t tick_nohz_get_sleep_length(void);
+ extern void tick_nohz_stop_idle(int cpu);
+ extern u64 get_cpu_idle_time_us(int cpu, u64 *last_update_time);
+ # else
+-static inline void tick_nohz_stop_sched_tick(void) { }
++static inline void tick_nohz_stop_sched_tick(int inidle) { }
+ static inline void tick_nohz_restart_sched_tick(void) { }
+ static inline void tick_nohz_update_jiffies(void) { }
+ static inline ktime_t tick_nohz_get_sleep_length(void)
+diff --git a/kernel/softirq.c b/kernel/softirq.c
+index 36e0617..05f2480 100644
+--- a/kernel/softirq.c
++++ b/kernel/softirq.c
+@@ -312,7 +312,7 @@ void irq_exit(void)
+ #ifdef CONFIG_NO_HZ
+ 	/* Make sure that timer wheel updates are propagated */
+ 	if (!in_interrupt() && idle_cpu(smp_processor_id()) && !need_resched())
+-		tick_nohz_stop_sched_tick();
++		tick_nohz_stop_sched_tick(0);
+ 	rcu_irq_exit();
+ #endif
+ 	preempt_enable_no_resched();
+diff --git a/kernel/time/tick-sched.c b/kernel/time/tick-sched.c
+index b854a89..6f501ab 100644
+--- a/kernel/time/tick-sched.c
++++ b/kernel/time/tick-sched.c
+@@ -188,7 +188,7 @@ u64 get_cpu_idle_time_us(int cpu, u64 *last_update_time)
+  * Called either from the idle loop or from irq_exit() when an idle period was
+  * just interrupted by an interrupt which did not cause a reschedule.
+  */
+-void tick_nohz_stop_sched_tick(void)
++void tick_nohz_stop_sched_tick(int inidle)
+ {
+ 	unsigned long seq, last_jiffies, next_jiffies, delta_jiffies, flags;
+ 	struct tick_sched *ts;
+@@ -217,6 +217,11 @@ void tick_nohz_stop_sched_tick(void)
+ 	if (unlikely(ts->nohz_mode == NOHZ_MODE_INACTIVE))
+ 		goto end;
+ 
++	if (!inidle && !ts->inidle)
++		goto end;
++
++	ts->inidle = 1;
++
+ 	if (need_resched())
+ 		goto end;
+ 
+@@ -364,11 +369,14 @@ void tick_nohz_restart_sched_tick(void)
+ 	local_irq_disable();
+ 	tick_nohz_stop_idle(cpu);
+ 
+-	if (!ts->tick_stopped) {
++	if (!ts->inidle || !ts->tick_stopped) {
++		ts->inidle = 0;
+ 		local_irq_enable();
+ 		return;
+ 	}
+ 
++	ts->inidle = 0;
++
+ 	rcu_exit_nohz();
+ 
+ 	/* Update jiffies first */
+-- 
+1.5.4.4
+

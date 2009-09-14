@@ -1,0 +1,196 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-06-22 22:34:34.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-06-22 22:34:34.000000000 +0100
+@@ -31,7 +31,7 @@
+  * @ingroup GPIO_MX25
+  */
+ 
+-#define BABY_DAC_PAD_CFG   (PAD_CTL_DRV_3_3V | PAD_CTL_PKE_NONE | PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW)
++#define BABY_DAC_PAD_CFG   (PAD_CTL_DRV_3_3V | PAD_CTL_PKE_NONE | PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW | PAD_CTL_HYS_SCHMITZ)
+ void gpio_activate_audio_ports(int ssi_port)
+ {
+ 	/* MCLK uses CLKO */
+@@ -41,20 +41,20 @@
+ 	mxc_request_iomux(BABY_DAC_SDOUT, 	    MUX_CONFIG_ALT1);
+ 	mxc_request_iomux(BABY_DAC_SCLK,  	    MUX_CONFIG_ALT1);
+ 	mxc_request_iomux(BABY_DAC_LRCLK, 	    MUX_CONFIG_ALT1);
+-	mxc_request_iomux(BABY_DAC_MCLK, 	    MUX_CONFIG_GPIO);
++	//mxc_request_iomux(BABY_DAC_MCLK, 	    MUX_CONFIG_GPIO);
+ 	mxc_request_iomux(BABY_DAC_PA_MUTE,         MUX_CONFIG_GPIO);
+ 	mxc_request_iomux(BABY_DAC_PA_SHUTDOWN,     MUX_CONFIG_GPIO);
+ 	mxc_request_iomux(BABY_DAC_HP_DETECT,       MUX_CONFIG_GPIO);
+ 
+ 	mxc_iomux_set_pad(BABY_DAC_SDIN,  	    BABY_DAC_PAD_CFG);
+ 	mxc_iomux_set_pad(BABY_DAC_SDOUT, 	    BABY_DAC_PAD_CFG);
+-	mxc_iomux_set_pad(BABY_DAC_SCLK,  	    BABY_DAC_PAD_CFG |PAD_CTL_HYS_SCHMITZ);
+-	mxc_iomux_set_pad(BABY_DAC_LRCLK, 	    BABY_DAC_PAD_CFG |PAD_CTL_HYS_SCHMITZ);
++	mxc_iomux_set_pad(BABY_DAC_SCLK,  	    BABY_DAC_PAD_CFG);
++	mxc_iomux_set_pad(BABY_DAC_LRCLK, 	    BABY_DAC_PAD_CFG);
+ 	mxc_iomux_set_pad(BABY_DAC_PA_MUTE,         BABY_DAC_PAD_CFG);
+ 	mxc_iomux_set_pad(BABY_DAC_PA_SHUTDOWN,     BABY_DAC_PAD_CFG);
+ 	mxc_iomux_set_pad(BABY_DAC_HP_DETECT,       BABY_DAC_PAD_CFG);
+ 
+-	mxc_set_gpio_direction(BABY_DAC_MCLK,   	 GPIO_DIRECTION_INPUT);
++	//mxc_set_gpio_direction(BABY_DAC_MCLK,   	 GPIO_DIRECTION_INPUT);
+ 	mxc_set_gpio_direction(BABY_DAC_PA_MUTE,     	 GPIO_DIRECTION_OUTPUT);
+ 	mxc_set_gpio_direction(BABY_DAC_PA_SHUTDOWN, 	 GPIO_DIRECTION_OUTPUT);
+ 	mxc_set_gpio_direction(BABY_DAC_HP_DETECT,   	 GPIO_DIRECTION_INPUT);
+Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
+===================================================================
+--- linux-2.6.26.orig/sound/soc/codecs/tlv320aic3104.c	2009-06-22 22:34:33.000000000 +0100
++++ linux-2.6.26/sound/soc/codecs/tlv320aic3104.c	2009-06-22 22:45:06.000000000 +0100
+@@ -45,6 +45,11 @@
+ #define TLV320AIC3104_RATES (SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_48000 | \
+ 		      SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000)
+ 
++
++/* define this to make the codec the i2s master */
++#define CODEC_MASTER
++
++
+ static const struct snd_soc_pcm_stream tlv320aic3104_dai_playback = {
+ 	.stream_name = "Playback",
+ 	.channels_min = 2,
+@@ -181,10 +186,18 @@
+ 	6, ((PLL_D & 0x3F) << 2), /* PLL D value */
+ 
+ 	/* configure I2S */
++#ifdef CODEC_MASTER
+ 	8, ((1 << 7) |            /* BCLK is an output */
+ 	    (1 << 6)              /* WCLK is an output */
+ 	    ),
++	//9, (2 << 4),              /* Audio data work length 24 bits */
++	9, (3 << 4),              /* Audio data work length 32 bits */
++#else
++	8, ((0 << 7) |            /* BCLK is an input */
++	    (0 << 6)              /* WCLK is an input */
++	    ),
+ 	9, (2 << 4),              /* Audio data work length 24 bits */
++#endif
+ 
+ 	/* DAC signal path */
+ 	7, ((1 << 7) |            /* fs(ref) = 44.1kHz */
+@@ -308,7 +321,7 @@
+ 	//tlv320aic3104_timer.data = (unsigned long) isp;
+ 
+ 	tlv320aic3104_timer.expires = jiffies + HZ;
+-	add_timer(&tlv320aic3104_timer);
++	//add_timer(&tlv320aic3104_timer);
+ 
+ #if 0
+ 	{
+Index: linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c
+===================================================================
+--- linux-2.6.26.orig/sound/soc/imx/baby-tlv320aic3104.c	2009-06-22 22:34:33.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c	2009-06-22 22:34:34.000000000 +0100
+@@ -40,6 +40,10 @@
+ #include "imx-ssi.h"
+ 
+ 
++/* define this to make the codec the i2s master */
++#define CODEC_MASTER
++
++
+ extern void gpio_activate_audio_ports(int ssi_port);
+ extern const char tlv320aic3104_codec[SND_SOC_CODEC_NAME_SIZE];
+ extern const char tlv320aic3104_dai[SND_SOC_CODEC_NAME_SIZE];
+@@ -58,6 +62,7 @@
+         DAM_PTCR(dai_port) = 0;
+         DAM_PDCR(dai_port) = 0;
+ 
++#ifdef CODEC_MASTER
+         /* set to synchronous */
+         DAM_PTCR(ssi_port) |= AUDMUX_PTCR_SYN;
+         DAM_PTCR(dai_port) |= AUDMUX_PTCR_SYN;
+@@ -73,6 +78,25 @@
+         /* set Tx Clock direction and source dai_port--> ssi_port output */
+         DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TCLKDIR;
+         DAM_PTCR(ssi_port) |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, dai_port);
++#else
++	/* set to asynchronous */
++
++	/* set Rx sources ssi_port <--> dai_port */
++	DAM_PDCR(ssi_port) |= AUDMUX_PDCR_RXDSEL(dai_port);
++	DAM_PDCR(dai_port) |= AUDMUX_PDCR_RXDSEL(ssi_port);
++
++	/* set Tx frame direction and source  ssi_port --> dai_port output */
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TFSDIR;
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TFSSEL(AUDMUX_FROM_TXFS, ssi_port);
++
++	/* set Tx Clock direction and source ssi_port--> dai_port output */
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TCLKDIR;
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_TCSEL(AUDMUX_FROM_TXFS, ssi_port);
++
++	/* set Rx Clock (master clock) ssi_port --> dai_port output */
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_RCLKDIR;
++	DAM_PTCR(dai_port) |= AUDMUX_PTCR_RCSEL(AUDMUX_FROM_RXFS, ssi_port);
++#endif
+ }
+ 
+ static int baby_hifi_hw_params(struct snd_pcm_substream *substream,
+@@ -83,13 +107,18 @@
+ 	struct snd_soc_dai *cpu_dai = pcm_link->cpu_dai;
+ 	unsigned int channels = params_channels(params);
+ 	u32 dai_format;
+-	struct clk *cko1, *parent;
++	struct clk *cko1, *parent, *ssi1_clk;
+ 	unsigned long rate;
+ 
+ 	baby_init_dam(dev_data->src_port, dev_data->ext_port);
+ 
++#ifdef CODEC_MASTER
+ 	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_IF |
+ 	    SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_SYNC;
++#else
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_IF |
++	    SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_SYNC;
++#endif
+ 
+ 	if (channels == 2)
+ 		dai_format |= SND_SOC_DAIFMT_TDM;
+@@ -102,7 +131,10 @@
+ 				   channels == 1 ? 0xfffffffe : 0xfffffffc,
+ 				   channels);
+ 
+-	/* set the SSI system clock as input (unused) */
++
++#ifdef CODEC_MASTER
++	/* set the SSI system clock as output */
++	printk("**** clock output\n");
+ 	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_OUT);
+ 
+ 	/* cko1 clock */
+@@ -124,6 +156,32 @@
+ 	clk_set_rate(cko1, rate);
+ 	clk_enable(cko1);
+ 
++	printk("**** SET MCLK CLOCK %ld\n", clk_get_rate(cko1));
++#else
++	// FIXME wrong clock speed
++
++	/* set the SSI system clock as input */
++	printk("**** clock input\n");
++	cpu_dai->ops->set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_IN);
++
++	/* set the SSI1 clock divider */
++	ssi1_clk = clk_get(NULL, "per_ssi1_clk");
++	clk_set_rate(ssi1_clk, 24000000);
++	printk("**** SET SSI1 CLOCK %ld\n", clk_get_rate(ssi1_clk));
++	clk_put(ssi1_clk);
++
++	/* set BCLK division for sample rate */
++	switch (rate) {
++	case 96000:
++	case 88200:
++		cpu_dai->ops->set_clkdiv(cpu_dai, IMX_SSI_TX_DIV_PM, 0);
++		break;
++	default:
++		cpu_dai->ops->set_clkdiv(cpu_dai, IMX_SSI_TX_DIV_PM, 1);
++		break;
++	}
++#endif
++
+ 	return 0;
+ }
+ 

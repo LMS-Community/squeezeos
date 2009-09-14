@@ -1,0 +1,1389 @@
+From 815da3b3a3474420ed0d111f95c006b4a6f9042e Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Tue, 20 Jan 2009 15:02:47 -0600
+Subject: [PATCH] ENGR00099234-2 Restructure CPU_FREQ into a common driver
+
+Restructure CPU_FREQ into a common driver
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/Kconfig                        |    6 +-
+ arch/arm/configs/imx37_3stack_defconfig |    2 +-
+ arch/arm/mach-mx37/Makefile             |    3 -
+ arch/arm/mach-mx37/board-mx37_3stack.h  |    4 +-
+ arch/arm/mach-mx37/cpufreq.c            |  600 -------------------------------
+ arch/arm/mach-mx37/devices.c            |    4 +-
+ arch/arm/mach-mx37/mx37_3stack.c        |   19 +-
+ arch/arm/plat-mxc/Makefile              |    3 +
+ arch/arm/plat-mxc/cpufreq.c             |  594 ++++++++++++++++++++++++++++++
+ 9 files changed, 621 insertions(+), 614 deletions(-)
+
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 26d6d07..17e22c3 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -998,11 +998,11 @@ config CPU_FREQ_PXA
+ 	default y
+ 	select CPU_FREQ_DEFAULT_GOV_USERSPACE
+ 
+-config CPU_FREQ_IMX37
+-         tristate "CPUfreq driver for i.MX37 CPUs"
++config CPU_FREQ_IMX
++         tristate "CPUfreq driver for i.MX CPUs"
+          depends on ARCH_MXC && CPU_FREQ && REGULATOR
+          help
+-           This enables the CPUfreq driver for i.MX37 CPUs.
++           This enables the CPUfreq driver for i.MX CPUs.
+ 
+ endmenu
+ 
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index fcced7b..56f4f35 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -294,7 +294,7 @@ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
+ # CONFIG_CPU_FREQ_GOV_ONDEMAND is not set
+ # CONFIG_CPU_FREQ_GOV_CONSERVATIVE is not set
+-CONFIG_CPU_FREQ_IMX37=y
++CONFIG_CPU_FREQ_IMX=y
+ 
+ #
+ # Floating point emulation
+diff --git a/arch/arm/mach-mx37/Makefile b/arch/arm/mach-mx37/Makefile
+index ea59215..87d2b4f 100644
+--- a/arch/arm/mach-mx37/Makefile
++++ b/arch/arm/mach-mx37/Makefile
+@@ -11,9 +11,6 @@ obj-$(CONFIG_MACH_MX37_3DS) += mx37_3stack.o mx37_3stack_gpio.o
+ obj-$(CONFIG_SPI_MXC) += mx37_3stack_cpld.o
+ obj-$(CONFIG_REGULATOR_WM8350) += mx37_3stack_pmic_wm8350.o
+ 
+-imx37-cpufreq-objs := cpufreq.o
+-obj-$(CONFIG_CPU_FREQ_IMX37)    += imx37-cpufreq.o
+-
+ # power management
+ obj-$(CONFIG_PM)        += pm.o
+ 
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index cc2852e..b090fa5 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -110,6 +110,8 @@ extern struct tve_platform_data tve_data;
+ extern struct mxc_dptc_data dptc_lp_data;
+ extern struct mxc_dptc_data dptc_gp_data;
+ extern struct mxc_dvfs_platform_data dvfs_core_data;
++extern char *gp_reg_id;
++extern char *lp_reg_id;
+ 
+ extern int headphone_det_status(void);
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX37_3STACK_H__ */
+diff --git a/arch/arm/mach-mx37/cpufreq.c b/arch/arm/mach-mx37/cpufreq.c
+deleted file mode 100644
+index f3b9a4e..0000000
+--- a/arch/arm/mach-mx37/cpufreq.c
++++ /dev/null
+@@ -1,600 +0,0 @@
+-/*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file cpufreq.c
+- *
+- * @brief A driver for the Freescale Semiconductor i.MX37 CPUfreq module.
+- *
+- * The CPUFREQ driver is for controling CPU frequency. It allows you to change
+- * the CPU clock speed on the fly.
+- *
+- * @ingroup PM
+- */
+-
+-#include <linux/types.h>
+-#include <linux/kernel.h>
+-#include <linux/cpufreq.h>
+-#include <linux/init.h>
+-#include <linux/proc_fs.h>
+-#include <linux/regulator/regulator.h>
+-#include <linux/clk.h>
+-#include <linux/delay.h>
+-#include <linux/io.h>
+-#include <asm/hardware.h>
+-#include <asm/setup.h>
+-#include <asm/arch/clock.h>
+-#include <asm/cacheflush.h>
+-
+-/*
+- * Frequencys can be set for CPU.
+- */
+-#define CPU_FREQUENCY_200000_KHZ		200000
+-#define CPU_FREQUENCY_400000_KHZ		400000
+-#define CPU_FREQUENCY_532000_KHZ		532000
+-#define CPU_FREQUENCY_600000_KHZ		600000
+-#define ARM_LPM_CLK  200000000
+-#define ARM_400MHZ_CLK  400000000
+-#define ARM_NORMAL_CLK  532000000
+-#define ARM_HIGH_CLK  600000000
+-
+-#define LP_LPM_CLK  24000000
+-#define LP_NORMAL_CLK  133000000
+-#define GP_LPM_VOLTAGE 850000
+-#define LP_LPM_VOLTAGE 1000000
+-#define GP_400MHZ_VOLTAGE 900000
+-#define GP_NORMAL_VOLTAGE 1000000
+-#define LP_NORMAL_VOLTAGE 1200000
+-#define GP_HIGH_VOLTAGE 1200000
+-
+-int low_bus_freq_mode;
+-int high_bus_freq_mode;
+-static struct clk *cpu_clk;
+-static struct clk *main_bus_clk;
+-static struct clk *pll2;
+-static struct clk *axi_a_clk;
+-static struct clk *axi_b_clk;
+-static struct clk *axi_c_clk;
+-static struct clk *emi_core_clk;
+-static struct clk *nfc_clk;
+-static struct clk *ahb_clk;
+-static struct clk *vpu_clk;
+-static struct clk *vpu_core_clk;
+-static struct clk *arm_axi_clk;
+-static struct clk *ddr_clk;
+-static struct clk *ipu_clk;
+-static struct clk *periph_apm_clk;
+-static struct clk *lp_apm;
+-static struct clk *osc;
+-static struct regulator *gp_regulator;
+-static struct regulator *lp_regulator;
+-
+-extern int dvfs_core_is_active;
+-
+-/* does need to be in ascending order for calc_frequency_khz() below */
+-static struct cpufreq_frequency_table imx37_freq_table[] = {
+-	{0x01, CPU_FREQUENCY_200000_KHZ},
+-	{0x02, CPU_FREQUENCY_400000_KHZ},
+-	{0x03, CPU_FREQUENCY_532000_KHZ},
+-	{0x04, CPU_FREQUENCY_600000_KHZ},
+-	{0, CPUFREQ_TABLE_END},
+-};
+-
+-int set_cpu_freq(int freq)
+-{
+-	int ret = 0;
+-	int org_cpu_rate;
+-
+-	org_cpu_rate = clk_get_rate(cpu_clk);
+-	if (org_cpu_rate == freq)
+-		return ret;
+-
+-	if (freq == ARM_NORMAL_CLK) {
+-		/*Set the voltage to 1.00v for the GP domain. */
+-		if (freq > org_cpu_rate) {
+-			ret = regulator_set_voltage(gp_regulator, GP_NORMAL_VOLTAGE);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+-				return ret;
+-			}
+-		}
+-
+-		ret = clk_set_rate(cpu_clk, ARM_NORMAL_CLK);
+-		if (ret != 0) {
+-			printk(KERN_DEBUG "cannot set CPU clock rate\n");
+-			return ret;
+-		}
+-
+-		if (freq < org_cpu_rate) {
+-			ret = regulator_set_voltage(gp_regulator, GP_NORMAL_VOLTAGE);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+-				return ret;
+-			}
+-		}
+-	} else if (freq == ARM_LPM_CLK) {
+-		ret = clk_set_rate(cpu_clk, ARM_LPM_CLK);
+-		if (ret != 0) {
+-			printk(KERN_DEBUG "cannot set CPU clock rate\n");
+-			return ret;
+-		}
+-
+-		/* Set the voltage to 0.8v for the GP domain. */
+-		ret = regulator_set_voltage(gp_regulator, GP_LPM_VOLTAGE);
+-		if (ret < 0) {
+-			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
+-			return ret;
+-		}
+-	} else if (freq == ARM_400MHZ_CLK) {
+-		if (freq > org_cpu_rate) {
+-			/* Set the voltage to 0.9v for the GP domain. */
+-			ret = regulator_set_voltage(gp_regulator, GP_400MHZ_VOLTAGE);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
+-				return ret;
+-			}
+-		}
+-
+-		ret = clk_set_rate(cpu_clk, ARM_400MHZ_CLK);
+-		if (ret != 0) {
+-			printk(KERN_DEBUG "cannot set CPU clock rate\n");
+-			return ret;
+-		}
+-
+-		if (freq < org_cpu_rate) {
+-			/* Set the voltage to 0.9v for the GP domain. */
+-			ret = regulator_set_voltage(gp_regulator, GP_400MHZ_VOLTAGE);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
+-				return ret;
+-			}
+-		}
+-	} else if (freq == ARM_HIGH_CLK) {
+-		/* Set the voltage to 1.2v for the GP domain. */
+-		ret = regulator_set_voltage(gp_regulator, GP_HIGH_VOLTAGE);
+-		if (ret < 0) {
+-			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
+-			return ret;
+-		}
+-
+-		ret = clk_set_rate(cpu_clk, ARM_HIGH_CLK);
+-		if (ret != 0) {
+-			printk(KERN_DEBUG "cannot set CPU clock rate\n");
+-			return ret;
+-		}
+-	}
+-	return ret;
+-}
+-
+-int set_low_bus_freq(void)
+-{
+-	int ret = 0;
+-
+-	struct clk *p_clk;
+-	struct clk *amode_parent_clk;
+-
+-	amode_parent_clk = lp_apm;
+-	p_clk = clk_get_parent(periph_apm_clk);
+-
+-	/* Make sure osc_clk is the parent of lp_apm. */
+-	if (clk_get_parent(amode_parent_clk) != osc)
+-		clk_set_parent(amode_parent_clk, osc);
+-
+-	/* Set the parent of periph_apm_clk to be lp_apm */
+-	clk_set_parent(periph_apm_clk, amode_parent_clk);
+-	amode_parent_clk = periph_apm_clk;
+-
+-	p_clk = clk_get_parent(main_bus_clk);
+-	/* Set the parent of main_bus_clk to be periph_apm_clk */
+-	clk_set_parent(main_bus_clk, amode_parent_clk);
+-
+-	clk_set_rate(axi_a_clk, LP_LPM_CLK);
+-	clk_set_rate(axi_b_clk, LP_LPM_CLK);
+-	clk_set_rate(axi_c_clk, LP_LPM_CLK);
+-	clk_set_rate(emi_core_clk, LP_LPM_CLK);
+-	clk_set_rate(nfc_clk, 4800000);
+-	clk_set_rate(ahb_clk, LP_LPM_CLK);
+-
+-	amode_parent_clk = emi_core_clk;
+-
+-	p_clk = clk_get_parent(arm_axi_clk);
+-	if (p_clk != amode_parent_clk) {
+-		clk_set_parent(arm_axi_clk, amode_parent_clk);
+-	}
+-
+-	p_clk = clk_get_parent(vpu_clk);
+-	if (p_clk != amode_parent_clk) {
+-		clk_set_parent(vpu_clk, amode_parent_clk);
+-	}
+-
+-	p_clk = clk_get_parent(vpu_core_clk);
+-	if (p_clk != amode_parent_clk) {
+-		clk_set_parent(vpu_core_clk, amode_parent_clk);
+-	}
+-
+-	/* Set the voltage to 1.0v for the LP domain. */
+-	ret = regulator_set_voltage(lp_regulator, LP_LPM_VOLTAGE);
+-	if (ret < 0) {
+-		printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!!\n");
+-		return ret;
+-	}
+-
+-	low_bus_freq_mode = 1;
+-	high_bus_freq_mode = 0;
+-	return ret;
+-}
+-
+-int set_high_bus_freq(void)
+-{
+-	struct clk *p_clk;
+-	struct clk *rmode_parent_clk;
+-	int ret = 0;
+-
+-	if (!low_bus_freq_mode)
+-		return ret;
+-
+-	low_bus_freq_mode = 0;
+-
+-	/* Set the voltage to 1.2v for the LP domain. */
+-	ret = regulator_set_voltage(lp_regulator, LP_NORMAL_VOLTAGE);
+-	if (ret < 0) {
+-		printk(KERN_DEBUG "COULD NOT SET LP VOLTAGE!!!!!!\n");
+-		return ret;
+-	}
+-
+-	rmode_parent_clk = pll2;
+-
+-	/* Set the dividers before setting the parent clock. */
+-	clk_set_rate(axi_a_clk, 4800000);
+-	clk_set_rate(axi_b_clk, 4000000);
+-	clk_set_rate(axi_c_clk, 6000000);
+-
+-	clk_set_rate(emi_core_clk, 4800000);
+-	clk_set_rate(ahb_clk, 4800000);
+-
+-	/* Set the parent of main_bus_clk to be pll2 */
+-	p_clk = clk_get_parent(main_bus_clk);
+-	clk_set_parent(main_bus_clk, rmode_parent_clk);
+-	udelay(5);
+-	high_bus_freq_mode = 1;
+-	return ret;
+-}
+-
+-int low_freq_bus_used(void)
+-{
+-	if ((clk_get_usecount(ipu_clk) == 0)
+-	    && (clk_get_usecount(vpu_clk) == 0))
+-		return 1;
+-	else
+-		return 0;
+-}
+-
+-static int mx37_verify_speed(struct cpufreq_policy *policy)
+-{
+-	if (policy->cpu != 0)
+-		return -EINVAL;
+-
+-	return cpufreq_frequency_table_verify(policy, imx37_freq_table);
+-}
+-
+-static unsigned int mx37_get_speed(unsigned int cpu)
+-{
+-	if (cpu)
+-		return 0;
+-
+-	return clk_get_rate(cpu_clk) / 1000;
+-}
+-
+-static int calc_frequency_khz(int target, unsigned int relation)
+-{
+-	int i;
+-
+-	if (relation == CPUFREQ_RELATION_H) {
+-		for (i = ARRAY_SIZE(imx37_freq_table) - 1; i > 0; i--) {
+-			if (imx37_freq_table[i].frequency <= target)
+-				return imx37_freq_table[i].frequency;
+-		}
+-	} else if (relation == CPUFREQ_RELATION_L) {
+-		for (i = 0; i < ARRAY_SIZE(imx37_freq_table) - 1; i++) {
+-			if (imx37_freq_table[i].frequency >= target)
+-				return imx37_freq_table[i].frequency;
+-		}
+-	}
+-	printk(KERN_ERR "Error: No valid cpufreq relation\n");
+-	return CPU_FREQUENCY_532000_KHZ;
+-}
+-
+-static int mx37_set_target(struct cpufreq_policy *policy,
+-			   unsigned int target_freq, unsigned int relation)
+-{
+-	struct cpufreq_freqs freqs;
+-	long freq_Hz;
+-	int low_freq_bus_ready = 0;
+-	int ret = 0;
+-
+-	/*
+-	 * Some governors do not respects CPU and policy lower limits
+-	 * which leads to bad things (division by zero etc), ensure
+-	 * that such things do not happen.
+-	 */
+-	if (target_freq < policy->cpuinfo.min_freq)
+-		target_freq = policy->cpuinfo.min_freq;
+-
+-	if (target_freq < policy->min)
+-		target_freq = policy->min;
+-
+-	freq_Hz = calc_frequency_khz(target_freq, relation) * 1000;
+-
+-	freqs.old = clk_get_rate(cpu_clk) / 1000;
+-	freqs.new = freq_Hz / 1000;
+-	freqs.cpu = 0;
+-	freqs.flags = 0;
+-
+-	if ((freqs.old == freqs.new) && (freqs.new != ARM_LPM_CLK))
+-		return 0;
+-
+-	low_freq_bus_ready = low_freq_bus_used();
+-
+-	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+-
+-	if ((freq_Hz == ARM_LPM_CLK) && (!low_bus_freq_mode)
+-	    && (low_freq_bus_ready)) {
+-		set_low_bus_freq();
+-		if (!dvfs_core_is_active)
+-			ret = set_cpu_freq(freq_Hz);
+-	} else {
+-		if (!high_bus_freq_mode)
+-			set_high_bus_freq();
+-
+-		if (!dvfs_core_is_active)
+-			ret = set_cpu_freq(freq_Hz);
+-		if (low_bus_freq_mode) {
+-			if (ret == 0)
+-				set_high_bus_freq();
+-		}
+-	}
+-
+-	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+-
+-	return 0;
+-}
+-
+-static int __init mx37_cpufreq_driver_init(struct cpufreq_policy *policy)
+-{
+-	int ret;
+-
+-	printk(KERN_INFO "i.MX37 CPU frequency driver\n");
+-
+-	if (policy->cpu != 0)
+-		return -EINVAL;
+-
+-	cpu_clk = clk_get(NULL, "cpu_clk");
+-	if (IS_ERR(cpu_clk)) {
+-		printk(KERN_ERR "%s: failed to get cpu clock\n", __func__);
+-		return PTR_ERR(cpu_clk);
+-	}
+-
+-	main_bus_clk = clk_get(NULL, "main_bus_clk");
+-	if (IS_ERR(main_bus_clk)) {
+-		printk(KERN_ERR "%s: failed to get main_bus_clk\n", __func__);
+-		return PTR_ERR(main_bus_clk);
+-	}
+-
+-	pll2 = clk_get(NULL, "pll2");
+-	if (IS_ERR(pll2)) {
+-		printk(KERN_ERR "%s: failed to get pll2\n", __func__);
+-		return PTR_ERR(pll2);
+-	}
+-
+-	axi_a_clk = clk_get(NULL, "axi_a_clk");
+-	if (IS_ERR(axi_a_clk)) {
+-		printk(KERN_ERR "%s: failed to get axi_a_clk\n", __func__);
+-		return PTR_ERR(axi_a_clk);
+-	}
+-
+-	axi_b_clk = clk_get(NULL, "axi_b_clk");
+-	if (IS_ERR(axi_b_clk)) {
+-		printk(KERN_ERR "%s: failed to get axi_b_clk\n", __func__);
+-		return PTR_ERR(axi_b_clk);
+-	}
+-
+-	axi_c_clk = clk_get(NULL, "axi_c_clk");
+-	if (IS_ERR(axi_c_clk)) {
+-		printk(KERN_ERR "%s: failed to get axi_c_clk\n", __func__);
+-		return PTR_ERR(axi_c_clk);
+-	}
+-
+-	emi_core_clk = clk_get(NULL, "emi_core_clk");
+-	if (IS_ERR(emi_core_clk)) {
+-		printk(KERN_ERR "%s: failed to get emi_core_clk\n", __func__);
+-		return PTR_ERR(emi_core_clk);
+-	}
+-
+-	nfc_clk = clk_get(NULL, "nfc_clk");
+-	if (IS_ERR(nfc_clk)) {
+-		printk(KERN_ERR "%s: failed to get nfc_clk\n", __func__);
+-		return PTR_ERR(nfc_clk);
+-	}
+-
+-	ahb_clk = clk_get(NULL, "ahb_clk");
+-	if (IS_ERR(ahb_clk)) {
+-		printk(KERN_ERR "%s: failed to get ahb_clk\n", __func__);
+-		return PTR_ERR(ahb_clk);
+-	}
+-
+-	vpu_core_clk = clk_get(NULL, "vpu_core_clk");
+-	if (IS_ERR(vpu_core_clk)) {
+-		printk(KERN_ERR "%s: failed to get vpu_core_clk\n", __func__);
+-		return PTR_ERR(vpu_core_clk);
+-	}
+-
+-	arm_axi_clk = clk_get(NULL, "arm_axi_clk");
+-	if (IS_ERR(arm_axi_clk)) {
+-		printk(KERN_ERR "%s: failed to get arm_axi_clk\n", __func__);
+-		return PTR_ERR(arm_axi_clk);
+-	}
+-
+-	ddr_clk = clk_get(NULL, "ddr_clk");
+-	if (IS_ERR(ddr_clk)) {
+-		printk(KERN_ERR "%s: failed to get ddr_clk\n", __func__);
+-		return PTR_ERR(ddr_clk);
+-	}
+-
+-	ipu_clk = clk_get(NULL, "ipu_clk");
+-	if (IS_ERR(ipu_clk)) {
+-		printk(KERN_ERR "%s: failed to get ipu_clk\n", __func__);
+-		return PTR_ERR(ipu_clk);
+-	}
+-
+-	vpu_clk = clk_get(NULL, "vpu_clk");
+-	if (IS_ERR(vpu_clk)) {
+-		printk(KERN_ERR "%s: failed to get vpu_clk\n", __func__);
+-		return PTR_ERR(vpu_clk);
+-	}
+-
+-	periph_apm_clk = clk_get(NULL, "periph_apm_clk");
+-	if (IS_ERR(periph_apm_clk)) {
+-		printk(KERN_ERR "%s: failed to get periph_apm_clk\n", __func__);
+-		return PTR_ERR(periph_apm_clk);
+-	}
+-
+-	lp_apm = clk_get(NULL, "lp_apm");
+-	if (IS_ERR(lp_apm)) {
+-		printk(KERN_ERR "%s: failed to get lp_apm\n", __func__);
+-		return PTR_ERR(lp_apm);
+-	}
+-
+-	osc = clk_get(NULL, "osc");
+-	if (IS_ERR(osc)) {
+-		printk(KERN_ERR "%s: failed to get osc\n", __func__);
+-		return PTR_ERR(osc);
+-	}
+-
+-	if (!board_is_mx37(BOARD_REV_2))
+-		gp_regulator = regulator_get(NULL, "DCDC1");
+-	else
+-		gp_regulator = regulator_get(NULL, "SW1");
+-
+-	if (IS_ERR(gp_regulator)) {
+-		clk_put(cpu_clk);
+-		printk(KERN_ERR "%s: failed to get gp regulator\n", __func__);
+-		return PTR_ERR(gp_regulator);
+-	}
+-
+-	if (!board_is_mx37(BOARD_REV_2))
+-		lp_regulator = regulator_get(NULL, "DCDC4");
+-	else
+-		lp_regulator = regulator_get(NULL, "SW2");
+-
+-	if (IS_ERR(lp_regulator)) {
+-		clk_put(ahb_clk);
+-		printk(KERN_ERR "%s: failed to get lp regulator\n", __func__);
+-		return PTR_ERR(lp_regulator);
+-	}
+-
+-	policy->cur = policy->min = policy->max = clk_get_rate(cpu_clk) / 1000;
+-	policy->governor = CPUFREQ_DEFAULT_GOVERNOR;
+-	policy->cpuinfo.min_freq = CPU_FREQUENCY_200000_KHZ;
+-	policy->cpuinfo.max_freq = CPU_FREQUENCY_532000_KHZ;
+-
+-	/* Manual states, that PLL stabilizes in two CLK32 periods */
+-	policy->cpuinfo.transition_latency = 10;
+-
+-	ret = cpufreq_frequency_table_cpuinfo(policy, imx37_freq_table);
+-	if (ret < 0) {
+-		clk_put(cpu_clk);
+-		clk_put(main_bus_clk);
+-		clk_put(pll2);
+-		clk_put(axi_a_clk);
+-		clk_put(axi_b_clk);
+-		clk_put(axi_c_clk);
+-		clk_put(emi_core_clk);
+-		clk_put(nfc_clk);
+-		clk_put(ahb_clk);
+-		clk_put(vpu_core_clk);
+-		clk_put(arm_axi_clk);
+-		clk_put(ddr_clk);
+-		clk_put(ipu_clk);
+-		clk_put(vpu_clk);
+-		clk_put(periph_apm_clk);
+-		clk_put(lp_apm);
+-		clk_put(osc);
+-		regulator_put(gp_regulator, NULL);
+-		regulator_put(lp_regulator, NULL);
+-		printk(KERN_ERR "%s: failed to register i.MX37 CPUfreq\n",
+-		       __func__);
+-		return ret;
+-	}
+-	cpufreq_frequency_table_get_attr(imx37_freq_table, policy->cpu);
+-
+-	low_bus_freq_mode = 0;
+-	high_bus_freq_mode = 0;
+-	return 0;
+-}
+-
+-static int mx37_cpufreq_driver_exit(struct cpufreq_policy *policy)
+-{
+-	cpufreq_frequency_table_put_attr(policy->cpu);
+-
+-	/* reset CPU to 532MHz */
+-	set_cpu_freq(ARM_NORMAL_CLK);
+-	if (low_bus_freq_mode)
+-		set_high_bus_freq();
+-
+-	clk_put(cpu_clk);
+-	clk_put(main_bus_clk);
+-	clk_put(pll2);
+-	clk_put(axi_a_clk);
+-	clk_put(axi_b_clk);
+-	clk_put(axi_c_clk);
+-	clk_put(emi_core_clk);
+-	clk_put(nfc_clk);
+-	clk_put(ahb_clk);
+-	clk_put(vpu_core_clk);
+-	clk_put(arm_axi_clk);
+-	clk_put(ddr_clk);
+-	clk_put(ipu_clk);
+-	clk_put(periph_apm_clk);
+-	clk_put(lp_apm);
+-	clk_put(osc);
+-	regulator_put(gp_regulator, NULL);
+-	regulator_put(lp_regulator, NULL);
+-	return 0;
+-}
+-
+-static struct cpufreq_driver mx37_driver = {
+-	.flags = CPUFREQ_STICKY,
+-	.verify = mx37_verify_speed,
+-	.target = mx37_set_target,
+-	.get = mx37_get_speed,
+-	.init = mx37_cpufreq_driver_init,
+-	.exit = mx37_cpufreq_driver_exit,
+-	.name = "imx37",
+-};
+-
+-static int __devinit mx37_cpufreq_init(void)
+-{
+-	return cpufreq_register_driver(&mx37_driver);
+-}
+-
+-static void mx37_cpufreq_exit(void)
+-{
+-	cpufreq_unregister_driver(&mx37_driver);
+-}
+-
+-module_init(mx37_cpufreq_init);
+-module_exit(mx37_cpufreq_exit);
+-
+-MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-MODULE_DESCRIPTION("CPUfreq driver for i.mx37");
+-MODULE_LICENSE("GPL");
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index 746d23a..0325abf 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -592,7 +592,7 @@ void __init mxc_init_tve(void)
+ static struct resource dvfs_core_resources[] = {
+ 	[0] = {
+ 	       .start = MXC_DVFS_CORE_BASE,
+-	       .end = MXC_DVFS_CORE_BASE + 8 * SZ_16 - 1,
++	       .end = MXC_DVFS_CORE_BASE + 4 * SZ_16 - 1,
+ 	       .flags = IORESOURCE_MEM,
+ 	       },
+ 	[1] = {
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index c505b02..6a408e9 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -73,7 +73,7 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .mfi = 5,
+ 	 .mfd = 23,
+ 	 .mfn = 13,
+-	 .cpu_voltage = 1000000,},
++	 .cpu_voltage = 1050000,},
+ 	{
+ 	 .pll_rate = 400000000,
+ 	 .cpu_rate = 400000000,
+@@ -81,7 +81,7 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .mfi = 8,
+ 	 .mfd = 2,
+ 	 .mfn = 1,
+-	 .cpu_voltage = 900000,},
++	 .cpu_voltage = 950000,},
+ 	{
+ 	 .pll_rate = 200000000,
+ 	 .cpu_rate = 200000000,
+@@ -89,7 +89,7 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .mfi = 8,
+ 	 .mfd = 2,
+ 	 .mfn = 1,
+-	 .cpu_voltage = 850000,},
++	 .cpu_voltage = 900000,},
+ 	{
+ 	 .pll_rate = 600000000,
+ 	 .cpu_rate = 600000000,
+@@ -97,7 +97,7 @@ static struct cpu_wp cpu_wp_auto[] = {
+ 	 .mfi = 6,
+ 	 .mfd = 3,
+ 	 .mfn = 1,
+-	 .cpu_voltage = 1200000,},
++	 .cpu_voltage = 1250000,},
+ };
+ 
+ struct cpu_wp *get_cpu_wp(int *wp)
+@@ -812,8 +812,19 @@ static inline void mxc_sgtl5000_init(void)
+  */
+ static void mx37_3stack_fixup_for_board_v1(void)
+ {
++	struct cpu_wp *cpu_wp_tbl1;
++	int cpu_wp_nr1;
++	int i;
++
++	/* Set the current working point. */
++	cpu_wp_tbl1 = get_cpu_wp(&cpu_wp_nr1);
++	for (i = 0; i < cpu_wp_nr1; i++)
++		cpu_wp_tbl1[i].cpu_voltage -= 50000;
++
+ 	dptc_gp_data.reg_id = "DCDC1";
+ 	dptc_lp_data.reg_id = "DCDC4";
++	gp_reg_id = "DCDC1";
++	lp_reg_id = "DCDC4";
+ 	tve_data.dac_reg = "LDO2";
+ 	tve_data.dig_reg = "LDO3";
+ 	lcd_data.core_reg = "LDO1";
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index e3cc7b6..bb1131c 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -26,6 +26,9 @@ obj-$(CONFIG_ARCH_MX51) += usb_common.o utmixc.o dvfs_core.o
+ # LEDs support
+ obj-$(CONFIG_LEDS) += leds.o
+ 
++# CPU FREQ support
++obj-$(CONFIG_CPU_FREQ_IMX)    += cpufreq.o
++
+ # USB support
+ obj-$(CONFIG_ISP1504_MXC) += isp1504xc.o
+ obj-$(CONFIG_ISP1301_MXC) += isp1301xc.o
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+new file mode 100644
+index 0000000..85bc2f4
+--- /dev/null
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -0,0 +1,594 @@
++/*
++ * Copyright 2009 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file cpufreq.c
++ *
++ * @brief A driver for the Freescale Semiconductor i.MXC CPUfreq module.
++ *
++ * The CPUFREQ driver is for controling CPU frequency. It allows you to change
++ * the CPU clock speed on the fly.
++ *
++ * @ingroup PM
++ */
++
++#include <linux/types.h>
++#include <linux/kernel.h>
++#include <linux/cpufreq.h>
++#include <linux/init.h>
++#include <linux/proc_fs.h>
++#include <linux/regulator/regulator.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <asm/hardware.h>
++#include <asm/setup.h>
++#include <asm/arch/clock.h>
++#include <asm/cacheflush.h>
++
++int low_bus_freq_mode;
++int high_bus_freq_mode;
++int cpu_freq_khz_min;
++int cpu_freq_khz_max;
++int arm_lpm_clk;
++int arm_normal_clk;
++char *gp_reg_id = "SW1";
++char *lp_reg_id = "SW2";
++int axi_c_clk_support;
++
++static struct clk *cpu_clk;
++static struct clk *main_bus_clk;
++static struct clk *pll2;
++static struct clk *axi_a_clk;
++static struct clk *axi_b_clk;
++static struct clk *axi_c_clk;
++static struct clk *emi_core_clk;
++static struct clk *nfc_clk;
++static struct clk *ahb_clk;
++static struct clk *vpu_clk;
++static struct clk *vpu_core_clk;
++static struct clk *arm_axi_clk;
++static struct clk *ddr_clk;
++static struct clk *ipu_clk;
++static struct clk *periph_apm_clk;
++static struct clk *lp_apm;
++static struct clk *osc;
++static struct regulator *gp_regulator;
++static struct regulator *lp_regulator;
++static int cpu_wp_nr;
++static struct cpu_wp *cpu_wp_tbl;
++static struct cpufreq_frequency_table imx_freq_table[4];
++
++extern int dvfs_core_is_active;
++
++static int set_cpu_freq(int freq)
++{
++	int ret = 0;
++	int org_cpu_rate;
++	int gp_volt = 0;
++	int i;
++
++	org_cpu_rate = clk_get_rate(cpu_clk);
++	if (org_cpu_rate == freq)
++		return ret;
++
++	for (i = 0; i < cpu_wp_nr; i++) {
++		if (freq == cpu_wp_tbl[i].cpu_rate)
++			gp_volt = cpu_wp_tbl[i].cpu_voltage;
++	}
++
++	if (gp_volt == 0)
++		return ret;
++
++	/*Set the voltage for the GP domain. */
++	if (freq > org_cpu_rate) {
++		ret = regulator_set_voltage(gp_regulator, gp_volt);
++		if (ret < 0) {
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
++			return ret;
++		}
++	}
++
++	ret = clk_set_rate(cpu_clk, freq);
++	if (ret != 0) {
++		printk(KERN_DEBUG "cannot set CPU clock rate\n");
++		return ret;
++	}
++
++	if (freq < org_cpu_rate) {
++		ret = regulator_set_voltage(gp_regulator, gp_volt);
++		if (ret < 0) {
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
++			return ret;
++		}
++	}
++
++	return ret;
++}
++
++static int set_low_bus_freq(void)
++{
++	int ret = 0;
++	unsigned long lp_lpm_clk;
++
++	struct clk *p_clk;
++	struct clk *amode_parent_clk;
++
++	if (axi_c_clk_support == 0)
++		return 0;
++
++	lp_lpm_clk = clk_get_rate(lp_apm);
++	amode_parent_clk = lp_apm;
++	p_clk = clk_get_parent(periph_apm_clk);
++
++	/* Make sure osc_clk is the parent of lp_apm. */
++	if (clk_get_parent(amode_parent_clk) != osc)
++		clk_set_parent(amode_parent_clk, osc);
++
++	/* Set the parent of periph_apm_clk to be lp_apm */
++	clk_set_parent(periph_apm_clk, amode_parent_clk);
++	amode_parent_clk = periph_apm_clk;
++
++	p_clk = clk_get_parent(main_bus_clk);
++	/* Set the parent of main_bus_clk to be periph_apm_clk */
++	clk_set_parent(main_bus_clk, amode_parent_clk);
++
++	clk_set_rate(axi_a_clk, lp_lpm_clk);
++	clk_set_rate(axi_b_clk, lp_lpm_clk);
++	clk_set_rate(axi_c_clk, lp_lpm_clk);
++	clk_set_rate(emi_core_clk, lp_lpm_clk);
++	clk_set_rate(nfc_clk, 4800000);
++	clk_set_rate(ahb_clk, lp_lpm_clk);
++
++	amode_parent_clk = emi_core_clk;
++
++	p_clk = clk_get_parent(arm_axi_clk);
++	if (p_clk != amode_parent_clk)
++		clk_set_parent(arm_axi_clk, amode_parent_clk);
++
++	p_clk = clk_get_parent(vpu_clk);
++	if (p_clk != amode_parent_clk)
++		clk_set_parent(vpu_clk, amode_parent_clk);
++
++	p_clk = clk_get_parent(vpu_core_clk);
++	if (p_clk != amode_parent_clk)
++		clk_set_parent(vpu_core_clk, amode_parent_clk);
++
++	/* Set the voltage to 1.0v for the LP domain. */
++	ret = regulator_set_voltage(lp_regulator, 1000000);
++	if (ret < 0) {
++		printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!!\n");
++		return ret;
++	}
++
++	low_bus_freq_mode = 1;
++	high_bus_freq_mode = 0;
++	return ret;
++}
++
++static int set_high_bus_freq(void)
++{
++	struct clk *p_clk;
++	struct clk *rmode_parent_clk;
++	int ret = 0;
++
++	if (axi_c_clk_support == 0)
++		return 0;
++
++	if (!low_bus_freq_mode)
++		return ret;
++
++	low_bus_freq_mode = 0;
++
++	/* Set the voltage to 1.2v for the LP domain. */
++	ret = regulator_set_voltage(lp_regulator, 1200000);
++	if (ret < 0) {
++		printk(KERN_DEBUG "COULD NOT SET LP VOLTAGE!!!!!!\n");
++		return ret;
++	}
++
++	rmode_parent_clk = pll2;
++
++	/* Set the dividers before setting the parent clock. */
++	clk_set_rate(axi_a_clk, 4800000);
++	clk_set_rate(axi_b_clk, 4000000);
++	clk_set_rate(axi_c_clk, 6000000);
++
++	clk_set_rate(emi_core_clk, 4800000);
++	clk_set_rate(ahb_clk, 4800000);
++
++	/* Set the parent of main_bus_clk to be pll2 */
++	p_clk = clk_get_parent(main_bus_clk);
++	clk_set_parent(main_bus_clk, rmode_parent_clk);
++	udelay(5);
++	high_bus_freq_mode = 1;
++	return ret;
++}
++
++static int low_freq_bus_used(void)
++{
++	if (axi_c_clk_support == 0)
++		return 0;
++
++	if ((clk_get_usecount(ipu_clk) == 0)
++	    && (clk_get_usecount(vpu_clk) == 0))
++		return 1;
++	else
++		return 0;
++}
++
++static int mxc_verify_speed(struct cpufreq_policy *policy)
++{
++	if (policy->cpu != 0)
++		return -EINVAL;
++
++	return cpufreq_frequency_table_verify(policy, imx_freq_table);
++}
++
++static unsigned int mxc_get_speed(unsigned int cpu)
++{
++	if (cpu)
++		return 0;
++
++	return clk_get_rate(cpu_clk) / 1000;
++}
++
++static int calc_frequency_khz(int target, unsigned int relation)
++{
++	int i;
++
++	if (relation == CPUFREQ_RELATION_H) {
++		for (i = ARRAY_SIZE(imx_freq_table) - 1; i > 0; i--) {
++			if (imx_freq_table[i].frequency <= target)
++				return imx_freq_table[i].frequency;
++		}
++	} else if (relation == CPUFREQ_RELATION_L) {
++		for (i = 0; i < ARRAY_SIZE(imx_freq_table) - 1; i++) {
++			if (imx_freq_table[i].frequency >= target)
++				return imx_freq_table[i].frequency;
++		}
++	}
++	printk(KERN_ERR "Error: No valid cpufreq relation\n");
++	return cpu_freq_khz_max;
++}
++
++static int mxc_set_target(struct cpufreq_policy *policy,
++			  unsigned int target_freq, unsigned int relation)
++{
++	struct cpufreq_freqs freqs;
++	long freq_Hz;
++	int low_freq_bus_ready = 0;
++	int ret = 0;
++
++	/*
++	 * Some governors do not respects CPU and policy lower limits
++	 * which leads to bad things (division by zero etc), ensure
++	 * that such things do not happen.
++	 */
++	if (target_freq < policy->cpuinfo.min_freq)
++		target_freq = policy->cpuinfo.min_freq;
++
++	if (target_freq < policy->min)
++		target_freq = policy->min;
++
++	freq_Hz = calc_frequency_khz(target_freq, relation) * 1000;
++
++	freqs.old = clk_get_rate(cpu_clk) / 1000;
++	freqs.new = freq_Hz / 1000;
++	freqs.cpu = 0;
++	freqs.flags = 0;
++
++	if ((freqs.old == freqs.new) && (freqs.new != cpu_freq_khz_min))
++		return 0;
++
++	low_freq_bus_ready = low_freq_bus_used();
++
++	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
++
++	if ((freq_Hz == arm_lpm_clk) && (!low_bus_freq_mode)
++	    && (low_freq_bus_ready)) {
++		set_low_bus_freq();
++		if (!dvfs_core_is_active)
++			ret = set_cpu_freq(freq_Hz);
++	} else {
++		if (!high_bus_freq_mode)
++			set_high_bus_freq();
++
++		if (!dvfs_core_is_active)
++			ret = set_cpu_freq(freq_Hz);
++		if (low_bus_freq_mode) {
++			if (ret == 0)
++				set_high_bus_freq();
++		}
++	}
++
++	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
++
++	return ret;
++}
++
++static int __init mxc_cpufreq_driver_init(struct cpufreq_policy *policy)
++{
++	int ret;
++	int i;
++
++	printk(KERN_INFO "i.MXC CPU frequency driver\n");
++
++	if (policy->cpu != 0)
++		return -EINVAL;
++
++	cpu_clk = clk_get(NULL, "cpu_clk");
++	if (IS_ERR(cpu_clk)) {
++		printk(KERN_ERR "%s: failed to get cpu clock\n", __func__);
++		return PTR_ERR(cpu_clk);
++	}
++
++	axi_c_clk = clk_get(NULL, "axi_c_clk");
++	if (IS_ERR(axi_c_clk)) {
++		axi_c_clk_support = 0;
++		printk(KERN_ERR "%s: failed to get axi_c_clk\n", __func__);
++	} else {
++		axi_c_clk_support = 1;
++		main_bus_clk = clk_get(NULL, "main_bus_clk");
++		if (IS_ERR(main_bus_clk)) {
++			printk(KERN_ERR "%s: failed to get main_bus_clk\n",
++			       __func__);
++			return PTR_ERR(main_bus_clk);
++		}
++
++		pll2 = clk_get(NULL, "pll2");
++		if (IS_ERR(pll2)) {
++			printk(KERN_ERR "%s: failed to get pll2\n", __func__);
++			return PTR_ERR(pll2);
++		}
++
++		axi_a_clk = clk_get(NULL, "axi_a_clk");
++		if (IS_ERR(axi_a_clk)) {
++			printk(KERN_ERR "%s: failed to get axi_a_clk\n",
++			       __func__);
++			return PTR_ERR(axi_a_clk);
++		}
++
++		axi_b_clk = clk_get(NULL, "axi_b_clk");
++		if (IS_ERR(axi_b_clk)) {
++			printk(KERN_ERR "%s: failed to get axi_b_clk\n",
++			       __func__);
++			return PTR_ERR(axi_b_clk);
++		}
++
++		emi_core_clk = clk_get(NULL, "emi_core_clk");
++		if (IS_ERR(emi_core_clk)) {
++			printk(KERN_ERR "%s: failed to get emi_core_clk\n",
++			       __func__);
++			return PTR_ERR(emi_core_clk);
++		}
++
++		nfc_clk = clk_get(NULL, "nfc_clk");
++		if (IS_ERR(nfc_clk)) {
++			printk(KERN_ERR "%s: failed to get nfc_clk\n",
++			       __func__);
++			return PTR_ERR(nfc_clk);
++		}
++
++		ahb_clk = clk_get(NULL, "ahb_clk");
++		if (IS_ERR(ahb_clk)) {
++			printk(KERN_ERR "%s: failed to get ahb_clk\n",
++			       __func__);
++			return PTR_ERR(ahb_clk);
++		}
++
++		vpu_core_clk = clk_get(NULL, "vpu_core_clk");
++		if (IS_ERR(vpu_core_clk)) {
++			printk(KERN_ERR "%s: failed to get vpu_core_clk\n",
++			       __func__);
++			return PTR_ERR(vpu_core_clk);
++		}
++
++		arm_axi_clk = clk_get(NULL, "arm_axi_clk");
++		if (IS_ERR(arm_axi_clk)) {
++			printk(KERN_ERR "%s: failed to get arm_axi_clk\n",
++			       __func__);
++			return PTR_ERR(arm_axi_clk);
++		}
++
++		ddr_clk = clk_get(NULL, "ddr_clk");
++		if (IS_ERR(ddr_clk)) {
++			printk(KERN_ERR "%s: failed to get ddr_clk\n",
++			       __func__);
++			return PTR_ERR(ddr_clk);
++		}
++
++		ipu_clk = clk_get(NULL, "ipu_clk");
++		if (IS_ERR(ipu_clk)) {
++			printk(KERN_ERR "%s: failed to get ipu_clk\n",
++			       __func__);
++			return PTR_ERR(ipu_clk);
++		}
++
++		vpu_clk = clk_get(NULL, "vpu_clk");
++		if (IS_ERR(vpu_clk)) {
++			printk(KERN_ERR "%s: failed to get vpu_clk\n",
++			       __func__);
++			return PTR_ERR(vpu_clk);
++		}
++
++		periph_apm_clk = clk_get(NULL, "periph_apm_clk");
++		if (IS_ERR(periph_apm_clk)) {
++			printk(KERN_ERR "%s: failed to get periph_apm_clk\n",
++			       __func__);
++			return PTR_ERR(periph_apm_clk);
++		}
++
++		lp_apm = clk_get(NULL, "lp_apm");
++		if (IS_ERR(lp_apm)) {
++			printk(KERN_ERR "%s: failed to get lp_apm\n", __func__);
++			return PTR_ERR(lp_apm);
++		}
++
++		osc = clk_get(NULL, "osc");
++		if (IS_ERR(osc)) {
++			printk(KERN_ERR "%s: failed to get osc\n", __func__);
++			return PTR_ERR(osc);
++		}
++	}
++
++	gp_regulator = regulator_get(NULL, gp_reg_id);
++	if (IS_ERR(gp_regulator)) {
++		clk_put(cpu_clk);
++		printk(KERN_ERR "%s: failed to get gp regulator\n", __func__);
++		return PTR_ERR(gp_regulator);
++	}
++
++	lp_regulator = regulator_get(NULL, lp_reg_id);
++	if (IS_ERR(lp_regulator)) {
++		clk_put(ahb_clk);
++		printk(KERN_ERR "%s: failed to get lp regulator\n", __func__);
++		return PTR_ERR(lp_regulator);
++	}
++
++	/* Set the current working point. */
++	cpu_wp_tbl = get_cpu_wp(&cpu_wp_nr);
++
++	cpu_freq_khz_min = cpu_wp_tbl[0].cpu_rate / 1000;
++	cpu_freq_khz_max = cpu_wp_tbl[0].cpu_rate / 1000;
++
++	for (i = 0; i < cpu_wp_nr; i++) {
++		imx_freq_table[cpu_wp_nr - 1 - i].index = cpu_wp_nr - i;
++		imx_freq_table[cpu_wp_nr - 1 - i].frequency =
++		    cpu_wp_tbl[i].cpu_rate / 1000;
++
++		if ((cpu_wp_tbl[i].cpu_rate / 1000) < cpu_freq_khz_min)
++			cpu_freq_khz_min = cpu_wp_tbl[i].cpu_rate / 1000;
++
++		if ((cpu_wp_tbl[i].cpu_rate / 1000) > cpu_freq_khz_max)
++			cpu_freq_khz_max = cpu_wp_tbl[i].cpu_rate / 1000;
++	}
++
++	imx_freq_table[i].index = i + 1;
++	imx_freq_table[i].frequency = cpu_wp_tbl[i].cpu_rate / 1000;
++
++	if ((cpu_wp_tbl[i].cpu_rate / 1000) < cpu_freq_khz_min)
++		cpu_freq_khz_min = cpu_wp_tbl[i].cpu_rate / 1000;
++
++	if ((cpu_wp_tbl[i].cpu_rate / 1000) > cpu_freq_khz_max)
++		cpu_freq_khz_max = cpu_wp_tbl[i].cpu_rate / 1000;
++
++	imx_freq_table[i].index = 0;
++	imx_freq_table[i].frequency = CPUFREQ_TABLE_END;
++
++	policy->cur = policy->min = policy->max = clk_get_rate(cpu_clk) / 1000;
++	policy->governor = CPUFREQ_DEFAULT_GOVERNOR;
++	policy->cpuinfo.min_freq = cpu_freq_khz_min;
++	policy->cpuinfo.max_freq = cpu_freq_khz_max;
++
++	arm_lpm_clk = cpu_freq_khz_min * 1000;
++	arm_normal_clk = cpu_freq_khz_max * 1000;
++
++	/* Manual states, that PLL stabilizes in two CLK32 periods */
++	policy->cpuinfo.transition_latency = 10;
++
++	ret = cpufreq_frequency_table_cpuinfo(policy, imx_freq_table);
++	if (ret < 0) {
++		clk_put(cpu_clk);
++		if (axi_c_clk_support != 0) {
++			clk_put(main_bus_clk);
++			clk_put(pll2);
++			clk_put(axi_a_clk);
++			clk_put(axi_b_clk);
++			clk_put(axi_c_clk);
++			clk_put(emi_core_clk);
++			clk_put(nfc_clk);
++			clk_put(ahb_clk);
++			clk_put(vpu_core_clk);
++			clk_put(arm_axi_clk);
++			clk_put(ddr_clk);
++			clk_put(ipu_clk);
++			clk_put(vpu_clk);
++			clk_put(periph_apm_clk);
++			clk_put(lp_apm);
++			clk_put(osc);
++		}
++
++		regulator_put(gp_regulator, NULL);
++		regulator_put(lp_regulator, NULL);
++		printk(KERN_ERR "%s: failed to register i.MXC CPUfreq\n",
++		       __func__);
++		return ret;
++	}
++	cpufreq_frequency_table_get_attr(imx_freq_table, policy->cpu);
++
++	low_bus_freq_mode = 0;
++	high_bus_freq_mode = 0;
++	return 0;
++}
++
++static int mxc_cpufreq_driver_exit(struct cpufreq_policy *policy)
++{
++	cpufreq_frequency_table_put_attr(policy->cpu);
++
++	/* Reset CPU to 665MHz */
++	if (!dvfs_core_is_active)
++		set_cpu_freq(arm_normal_clk);
++
++	if (low_bus_freq_mode)
++		set_high_bus_freq();
++
++	clk_put(cpu_clk);
++	if (axi_c_clk_support != 0) {
++		clk_put(main_bus_clk);
++		clk_put(pll2);
++		clk_put(axi_a_clk);
++		clk_put(axi_b_clk);
++		clk_put(axi_c_clk);
++		clk_put(emi_core_clk);
++		clk_put(nfc_clk);
++		clk_put(ahb_clk);
++		clk_put(vpu_core_clk);
++		clk_put(arm_axi_clk);
++		clk_put(ddr_clk);
++		clk_put(ipu_clk);
++		clk_put(periph_apm_clk);
++		clk_put(lp_apm);
++		clk_put(osc);
++	}
++	regulator_put(gp_regulator, NULL);
++	regulator_put(lp_regulator, NULL);
++	return 0;
++}
++
++static struct cpufreq_driver mxc_driver = {
++	.flags = CPUFREQ_STICKY,
++	.verify = mxc_verify_speed,
++	.target = mxc_set_target,
++	.get = mxc_get_speed,
++	.init = mxc_cpufreq_driver_init,
++	.exit = mxc_cpufreq_driver_exit,
++	.name = "imx",
++};
++
++static int __devinit mxc_cpufreq_init(void)
++{
++	return cpufreq_register_driver(&mxc_driver);
++}
++
++static void mxc_cpufreq_exit(void)
++{
++	cpufreq_unregister_driver(&mxc_driver);
++}
++
++module_init(mxc_cpufreq_init);
++module_exit(mxc_cpufreq_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("CPUfreq driver for i.MX");
++MODULE_LICENSE("GPL");
+-- 
+1.5.4.4
+

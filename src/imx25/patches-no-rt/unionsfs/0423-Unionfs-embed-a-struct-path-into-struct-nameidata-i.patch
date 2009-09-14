@@ -1,0 +1,58 @@
+From 03ee889b3c04a6ade4eba4c391c8f759cd91621e Mon Sep 17 00:00:00 2001
+From: Andrew Morton <akpm@linux-foundation.org>
+Date: Fri, 15 Feb 2008 18:45:45 -0500
+Subject: [PATCH] Unionfs: embed a struct path into struct nameidata instead of nd dentrymnt
+
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 2e791fd..640969d 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -254,8 +254,8 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 
+ 	/* save the dentry & vfsmnt from namei */
+ 	if (nd) {
+-		path_save.dentry = nd->dentry;
+-		path_save.mnt = nd->mnt;
++		path_save.dentry = nd->path.dentry;
++		path_save.mnt = nd->path.mnt;
+ 	}
+ 
+ 	/*
+@@ -266,8 +266,8 @@ static struct dentry *unionfs_lookup(struct inode *parent,
+ 
+ 	/* restore the dentry & vfsmnt in namei */
+ 	if (nd) {
+-		nd->dentry = path_save.dentry;
+-		nd->mnt = path_save.mnt;
++		nd->path.dentry = path_save.dentry;
++		nd->path.mnt = path_save.mnt;
+ 	}
+ 	if (!IS_ERR(ret)) {
+ 		if (ret)
+@@ -885,7 +885,7 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 	const int write_mask = (mask & MAY_WRITE) && !(mask & MAY_READ);
+ 
+ 	if (nd)
+-		unionfs_lock_dentry(nd->dentry, UNIONFS_DMUTEX_CHILD);
++		unionfs_lock_dentry(nd->path.dentry, UNIONFS_DMUTEX_CHILD);
+ 
+ 	if (!UNIONFS_I(inode)->lower_inodes) {
+ 		if (is_file)	/* dirs can be unlinked but chdir'ed to */
+@@ -960,7 +960,7 @@ out:
+ 	unionfs_check_inode(inode);
+ 	unionfs_check_nd(nd);
+ 	if (nd)
+-		unionfs_unlock_dentry(nd->dentry);
++		unionfs_unlock_dentry(nd->path.dentry);
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

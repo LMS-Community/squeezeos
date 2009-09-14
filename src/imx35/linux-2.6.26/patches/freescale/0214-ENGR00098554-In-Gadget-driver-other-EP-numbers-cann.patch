@@ -1,0 +1,37 @@
+From 2a0febfdf4a66a9d8e219ed7d81480d5ae651ed5 Mon Sep 17 00:00:00 2001
+From: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+Date: Tue, 11 Nov 2008 11:14:00 -0600
+Subject: [PATCH] ENGR00098554 In Gadget driver, other EP numbers cannot be selected.
+
+In the Gadget driver, when auto config bulk ep, ep1in/ep1out will
+always be selected, regardless of the value of bEndpointAddress
+in ep description. So if changing bEndpointAddress to other
+value larger than 1, the driver will not work. Because in the
+Gadget driver, the ep number is still 1, but in the Host side, the
+ep number is bEndpointAddress.
+
+Signed-off-by: Dinh Nguyen <Dinh.Nguyen@freescale.com>
+---
+ drivers/usb/gadget/epautoconf.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/epautoconf.c b/drivers/usb/gadget/epautoconf.c
+index 8bdad22..130dda6 100644
+--- a/drivers/usb/gadget/epautoconf.c
++++ b/drivers/usb/gadget/epautoconf.c
+@@ -161,7 +161,11 @@ ep_matches (
+ 	/* report address */
+ 	if (isdigit (ep->name [2])) {
+ 		u8	num = simple_strtol (&ep->name [2], NULL, 10);
+-		desc->bEndpointAddress |= num;
++		if (desc->bEndpointAddress & 0x7) {
++			if (num != (desc->bEndpointAddress & 0x7))
++				return 0;
++		} else
++			desc->bEndpointAddress |= num;
+ #ifdef	MANY_ENDPOINTS
+ 	} else if (desc->bEndpointAddress & USB_DIR_IN) {
+ 		if (++in_epnum > 15)
+-- 
+1.5.4.4
+

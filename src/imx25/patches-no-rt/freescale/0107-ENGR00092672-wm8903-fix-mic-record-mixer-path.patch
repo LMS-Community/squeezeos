@@ -1,0 +1,83 @@
+From 6c3f6b16c1400964e28661dbb597453a589a6a5a Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Wed, 24 Sep 2008 11:47:05 -0500
+Subject: [PATCH] ENGR00092672 wm8903: fix mic record mixer path
+
+Configure left input as differential mic.
+Fix inverted input pga mute bit.
+Fix build warning introduced by going to 2.6.26 kernel.
+Fix initialization of unused codec input endpoints.
+Unmute input pga.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/codecs/wm8903.c         |   19 ++++++++++++++++---
+ sound/soc/imx/imx-3stack-wm8903.c |    2 +-
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8903.c b/sound/soc/codecs/wm8903.c
+index 241fbf9..108f2ad 100644
+--- a/sound/soc/codecs/wm8903.c
++++ b/sound/soc/codecs/wm8903.c
+@@ -701,14 +701,14 @@ static const struct snd_kcontrol_new wm8903_snd_controls[] = {
+ 
+ /* Input PGAs - No TLV since the scale depends on PGA mode */
+ SOC_SINGLE("Left Input PGA Switch", WM8903_ANALOGUE_LEFT_INPUT_0,
+-	   7, 1, 0),
++	   7, 1, 1),
+ SOC_SINGLE("Left Input PGA Volume", WM8903_ANALOGUE_LEFT_INPUT_0,
+ 	   0, 31, 0),
+ SOC_SINGLE("Left Input PGA Common Mode Switch", WM8903_ANALOGUE_LEFT_INPUT_1,
+ 	   6, 1, 0),
+ 
+ SOC_SINGLE("Right Input PGA Switch", WM8903_ANALOGUE_RIGHT_INPUT_0,
+-	   7, 1, 0),
++	   7, 1, 1),
+ SOC_SINGLE("Right Input PGA Volume", WM8903_ANALOGUE_RIGHT_INPUT_0,
+ 	   0, 31, 0),
+ SOC_SINGLE("Right Input PGA Common Mode Switch", WM8903_ANALOGUE_RIGHT_INPUT_1,
+@@ -1685,6 +1685,19 @@ static int wm8903_codec_io_probe(struct snd_soc_codec *codec,
+ 	/* Configure GPIO1 to drive external spkr amp enable pin. */
+ 	wm8903_write(codec, WM8903_GPIO_CONTROL_1, 0x0000);
+ 
++	/* Configure Left input as differential mic */
++	val = wm8903_read(codec, WM8903_ANALOGUE_LEFT_INPUT_1);
++	val = (val & ~WM8903_L_MODE_MASK) | 2;
++	wm8903_write(codec, WM8903_ANALOGUE_LEFT_INPUT_1, val);
++
++	/* Unmute input */
++	val = wm8903_read(codec, WM8903_ANALOGUE_LEFT_INPUT_0);
++	val = (val & ~WM8903_LINMUTE);
++	wm8903_write(codec, WM8903_ANALOGUE_LEFT_INPUT_0, val);
++	val = wm8903_read(codec, WM8903_ANALOGUE_RIGHT_INPUT_0);
++	val = (val & ~WM8903_RINMUTE);
++	wm8903_write(codec, WM8903_ANALOGUE_RIGHT_INPUT_0, val);
++
+ 	wm8903_add_controls(codec, machine->card);
+ 	wm8903_add_widgets(codec, machine);
+ 
+@@ -1788,7 +1801,7 @@ static struct snd_soc_device_driver wm8903_hifi_dai_driver = {
+ 		   },
+ };
+ 
+-static int wm8903_i2c_probe(struct i2c_client *client, struct i2c_device_id *id)
++static int wm8903_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+ {
+ 	wm8903_i2c_client = client;
+ 	return 0;
+diff --git a/sound/soc/imx/imx-3stack-wm8903.c b/sound/soc/imx/imx-3stack-wm8903.c
+index 5206989..e2e2784 100644
+--- a/sound/soc/imx/imx-3stack-wm8903.c
++++ b/sound/soc/imx/imx-3stack-wm8903.c
+@@ -281,7 +281,7 @@ int mach_probe(struct snd_soc_machine *machine)
+ 
+ 	/* set unused imx_3stack WM8903 codec pins */
+ 	snd_soc_dapm_set_endpoint(machine, "IN2R", 0);
+-	snd_soc_dapm_set_endpoint(machine, "IN2L", 0);
++	snd_soc_dapm_set_endpoint(machine, "IN1R", 0);
+ 
+ 	/* Add imx_3stack specific widgets */
+ 	for (i = 0; i < ARRAY_SIZE(imx_3stack_dapm_widgets); i++) {
+-- 
+1.5.4.4
+

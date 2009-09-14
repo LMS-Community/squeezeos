@@ -1,0 +1,243 @@
+From 59406a5e5cd05ec491434704a6a457ad02dfe3f6 Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Mon, 8 Sep 2008 13:39:06 -0500
+Subject: [PATCH] ENGR00069687-1 usb host: driver updates for mx51
+
+Required to support MX51 USB Host function on USBOTG and Host1 ports.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ arch/arm/plat-mxc/Makefile         |    4 ++
+ arch/arm/plat-mxc/usb_common.c     |   76 ++++++++++++++++++++++++++++++++---
+ drivers/usb/host/Kconfig           |    6 +-
+ include/asm-arm/arch-mxc/arc_otg.h |    8 ++++
+ 4 files changed, 84 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 5b12038..0294413 100644
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -32,5 +32,9 @@ obj-$(CONFIG_MC13783_MXC) += mc13783_xc.o
+ obj-$(CONFIG_USB_EHCI_FSL_UTMI) += utmixc.o
+ 
+ ifneq ($(CONFIG_USB_EHCI_ARC_H1),)
++ifneq ($(CONFIG_ARCH_MX51),y)
+ obj-y += serialxc.o
++else
++obj-y += isp1504xc.o
++endif
+ endif
+\ No newline at end of file
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 899ed5c..8da3cea 100644
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -261,6 +261,40 @@ static void usbh1_set_serial_xcvr(void)
+ 		   UCTRL_H1PM;			/* power mask */
+ }
+ 
++static void usbh1_set_ulpi_xcvr(void)
++{
++	pr_debug("%s: \n", __func__);
++
++	/* Stop then Reset */
++	UH1_USBCMD &= ~UCMD_RUN_STOP;
++	while (UH1_USBCMD & UCMD_RUN_STOP) ;
++
++	UH1_USBCMD |= UCMD_RESET;
++	while (UH1_USBCMD & UCMD_RESET) ;
++
++	/* Select the clock from external PHY */
++	USB_CTRL_1 |= USB_CTRL_UH1_EXT_CLK_EN;
++
++	/* select ULPI PHY PTS=2 */
++	UH1_PORTSC1 = (UH1_PORTSC1 & ~PORTSC_PTS_MASK) | PORTSC_PTS_ULPI;
++
++	USBCTRL |= UCTRL_H1WIE; /* HOST1 wakeup intr enable */
++	USBCTRL |= UCTRL_H1UIE; /* Host1 ULPI interrupt enable */
++	USBCTRL &= ~UCTRL_H1PM; /* HOST1 power mask */
++
++	/* Interrupt Threshold Control:Immediate (no threshold) */
++	UH1_USBCMD &= UCMD_ITC_NO_THRESHOLD;
++
++	UH1_USBCMD |= UCMD_RESET;       /* reset the controller */
++
++	/* allow controller to reset, and leave time for
++	* the ULPI transceiver to reset too.
++	*/
++	msleep(100);
++
++	/* Turn off the usbpll for ulpi tranceivers */
++	clk_disable(usb_clk);
++}
+ static void usbh2_set_ulpi_xcvr(void)
+ {
+ 	u32 tmp;
+@@ -323,6 +357,7 @@ static void usbh2_set_serial_xcvr(void)
+ 
+ extern void usbh2_get_xcvr_power(struct device *dev);
+ extern void usbh2_put_xcvr_power(struct device *dev);
++extern void gpio_usbh1_setback_stp(void);
+ 
+ int fsl_usb_host_init(struct platform_device *pdev)
+ {
+@@ -363,6 +398,12 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 		return -EINVAL;
+ 	}
+ 
++	if (cpu_is_mx51()) {
++		usb_clk = clk_get(NULL, "usboh3_clk");
++		clk_enable(usb_clk);
++		clk_put(usb_clk);
++	}
++
+ 	if (xops->init)
+ 		xops->init(xops);
+ 
+@@ -372,7 +413,11 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 		else
+ 			usbh1_set_serial_xcvr();
+ 	} else if (xops->xcvr_type == PORTSC_PTS_ULPI) {
+-		usbh2_set_ulpi_xcvr();
++		if (cpu_is_mx51()) {
++			usbh1_set_ulpi_xcvr();
++			gpio_usbh1_setback_stp();
++		} else
++			usbh2_set_ulpi_xcvr();
+ 	}
+ 
+ 	pr_debug("%s: %s success\n", __func__, pdata->name);
+@@ -397,6 +442,12 @@ void fsl_usb_host_uninit(struct fsl_usb2_platform_data *pdata)
+ 		usbh2_put_xcvr_power(&(pdata->xcvr_pwr->usb_pdev->dev));
+ 		kfree(pdata->xcvr_pwr);
+ 	}
++
++	if (cpu_is_mx51()) {
++		usb_clk = clk_get(NULL, "usboh3_clk");
++		clk_disable(usb_clk);
++		clk_put(usb_clk);
++	}
+ }
+ EXPORT_SYMBOL(fsl_usb_host_uninit);
+ 
+@@ -526,24 +577,35 @@ static void otg_set_utmi_xcvr(void)
+ 	UOG_USBCMD |= UCMD_RESET;
+ 	while ((UOG_USBCMD) & (UCMD_RESET)) ;
+ 
+-	USBCTRL &= ~UCTRL_PP;	/* USBOTG_PWR low active */
+-	USBCTRL &= ~UCTRL_OCPOL;	/* OverCurrent Polarity is Low Active */
++	if (cpu_is_mx51()) {
++		/* OTG Polarity of Overcurrent is Low active */
++		USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_OC_POL;
++		/* Enable OTG Overcurrent Event */
++		USB_PHY_CTR_FUNC &= ~USB_UTMI_PHYCTRL_OC_DIS;
++	} else {
++		/* USBOTG_PWR low active */
++		USBCTRL &= ~UCTRL_PP;
++		/* OverCurrent Polarity is Low Active */
++		USBCTRL &= ~UCTRL_OCPOL;
++		/* OTG Lock Disable */
++		USBCTRL |= UCTRL_OLOCKD;
++	}
++
+ 	USBCTRL &= ~UCTRL_OPM;	/* OTG Power Mask */
+ 	USBCTRL |= UCTRL_OWIE;	/* OTG Wakeup Intr Enable */
+-	USBCTRL |= UCTRL_OLOCKD;	/* OTG Lock Disable */
+ 
+ 	/* set UTMI xcvr */
+ 	tmp = UOG_PORTSC1 & ~PORTSC_PTS_MASK;
+ 	tmp |= PORTSC_PTS_UTMI;
+ 	UOG_PORTSC1 = tmp;
+ 
+-	/* Enable UTMI interface in PHY control Reg */
+-	USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
+-
+ 	if (cpu_is_mx51()) {
+ 		/* Set the PHY clock to 19.2MHz */
+ 		USB_PHY_CTR_FUNC2 &= ~USB_UTMI_PHYCTRL2_PLLDIV_MASK;
+ 		USB_PHY_CTR_FUNC2 |= 0x01;
++	} else if (machine_is_mx35_3ds()) {
++		/* Enable UTMI interface in PHY control Reg */
++		USB_PHY_CTR_FUNC |= USB_UTMI_PHYCTRL_UTMI_ENABLE;
+ 	}
+ 
+ 	if (UOG_HCSPARAMS & HCSPARAMS_PPC)
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 42e2df2..89fdec3 100644
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -54,7 +54,7 @@ config USB_EHCI_ARC
+ 
+ config USB_EHCI_ARC_H1
+ 	bool "Support for Host1 port on Freescale controller"
+-	depends on USB_EHCI_ARC	&& (ARCH_MX27 || ARCH_MX3)
++	depends on USB_EHCI_ARC	&& (ARCH_MX27 || ARCH_MX3 || ARCH_MX51)
+ 	---help---
+ 	  Enable support for the USB Host1 port.
+ 
+@@ -89,7 +89,7 @@ choice
+ 	depends on USB_EHCI_ARC_OTG
+ 	default USB_EHCI_FSL_1504 if ARCH_MX3
+ 	default USB_EHCI_FSL_1301 if ARCH_MX27
+-	default USB_EHCI_FSL_UTMI if (ARCH_MX35 || ARCH_MX37)
++	default USB_EHCI_FSL_UTMI if (ARCH_MX35 || ARCH_MX37 || ARCH_MX51)
+ 	---help---
+ 	  Choose the transceiver to use with the Freescale DR port.
+ 
+@@ -121,7 +121,7 @@ config USB_EHCI_FSL_1504
+ 
+ config USB_EHCI_FSL_UTMI
+ 	bool "Internal UTMI"
+-	depends on (ARCH_MX35 || ARCH_MX37)
++	depends on (ARCH_MX35 || ARCH_MX37 || ARCH_MX51)
+ 	---help---
+ 	  Enable support for the on-chip High Speed UTMI transceiver.
+ 
+diff --git a/include/asm-arm/arch-mxc/arc_otg.h b/include/asm-arm/arch-mxc/arc_otg.h
+index 037d0a2..5e3e910 100644
+--- a/include/asm-arm/arch-mxc/arc_otg.h
++++ b/include/asm-arm/arch-mxc/arc_otg.h
+@@ -142,6 +142,7 @@
+ #define USB_OTG_MIRROR		USBOTHER_REG(0x04)	/* USB OTG mirror register */
+ #define USB_PHY_CTR_FUNC	USBOTHER_REG(0x08)      /* OTG UTMI PHY Function Control register */
+ #define USB_PHY_CTR_FUNC2	USBOTHER_REG(0x0c)      /* OTG UTMI PHY Function Control register */
++#define USB_CTRL_1		USBOTHER_REG(0x10)	/* USB Cotrol Register 1*/
+ 
+ /*
+  * register bits
+@@ -258,6 +259,7 @@
+ #define UCTRL_H1SIC_SB3		(3 << 13)	/* single-ended/bidirectional  3 wire */
+ #define UCTRL_OLOCKD		(1 << 13)	/* otg lock disable */
+ #define UCTRL_H2LOCKD		(1 << 12)	/* HOST2 lock disable */
++#define UCTRL_H1UIE		(1 << 12)	/* Host1 ULPI interrupt enable */
+ 
+ #define UCTRL_PP                (1 << 11)       /* power polarity bit */
+ #define UCTRL_H1WIE		(1 << 11)	/* HOST1 wakeup intr enable */
+@@ -283,6 +285,7 @@
+ /* USBCMD */
+ #define UCMD_RUN_STOP           (1 << 0)        /* controller run/stop */
+ #define UCMD_RESET		(1 << 1)	/* controller reset */
++#define UCMD_ITC_NO_THRESHOLD	 ~(0xff << 16)	/* Interrupt Threshold Control */
+ 
+ /* OTG_MIRROR */
+ #define OTGM_SESEND		(1 << 4)	/* B device session end */
+@@ -295,11 +298,16 @@
+ 
+ /* USB_PHY_CTRL_FUNC */
+ #define USB_UTMI_PHYCTRL_UTMI_ENABLE   0x01000000
++#define USB_UTMI_PHYCTRL_OC_POL	(1 << 9)	/* OTG Polarity of Overcurrent */
++#define USB_UTMI_PHYCTRL_OC_DIS	(1 << 8)	/* OTG Disable Overcurrent Event */
+ 
+ /* USB_PHY_CTRL_FUNC2*/
+ #define USB_UTMI_PHYCTRL2_PLLDIV_MASK		0x3
+ #define USB_UTMI_PHYCTRL2_PLLDIV_SHIFT		0
+ 
++/* USB_CTRL_1 */
++#define USB_CTRL_UH1_EXT_CLK_EN			(1 << 25)
++
+ /* ULPIVIEW register bits */
+ #define ULPIVW_OFF		(0x170)
+ #define ULPIVW_WU		(1 << 31)	/* Wakeup */
+-- 
+1.5.4.4
+

@@ -1,0 +1,141 @@
+From 837700b1ec6a2f9550ba64f854785174d5f25c28 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <Xinyu.Chen@freescale.com>
+Date: Mon, 6 Oct 2008 13:10:32 +0800
+Subject: [PATCH] ENGR00093255 SPDIF: Fix playback noise due to kernel upgrading to 2.6.26
+
+Fix wrong returned dma pos
+Remove unused variable tx_spin
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/arm/mxc-alsa-spdif.c |   37 ++++++-------------------------------
+ 1 files changed, 6 insertions(+), 31 deletions(-)
+
+diff --git a/sound/arm/mxc-alsa-spdif.c b/sound/arm/mxc-alsa-spdif.c
+index 9d561b6..3518972 100644
+--- a/sound/arm/mxc-alsa-spdif.c
++++ b/sound/arm/mxc-alsa-spdif.c
+@@ -250,10 +250,6 @@ struct mxc_spdif_stream {
+ 	 */
+ 	int periods;
+ 	/*!
+-	 * are we recording - flag used to do DMA trans. for sync
+-	 */
+-	int tx_spin;
+-	/*!
+ 	 * for locking in DMA operations
+ 	 */
+ 	spinlock_t dma_lock;
+@@ -905,23 +901,12 @@ static u_int spdif_get_dma_pos(struct mxc_spdif_stream *s)
+ 	substream = s->stream;
+ 	runtime = substream->runtime;
+ 
+-	/* tx_spin value is used here to check if a transfer is active */
+-	if (s->tx_spin) {
+-		offset =
+-		    (runtime->period_size * (s->periods)) +
+-		    (runtime->period_size >> 1);
+-		if (offset >= runtime->buffer_size)
+-			offset = runtime->period_size >> 1;
+-		pr_debug("MXC: audio_get_dma_pos offset  %d, buffer_size %d\n",
+-			 offset, (int)runtime->buffer_size);
+-	} else {
+-		offset = (runtime->period_size * (s->periods));
+-		if (offset >= runtime->buffer_size)
+-			offset = 0;
+-		pr_debug
+-		    ("MXC: spdif_get_dma_pos BIS offset  %d, buffer_size %d\n",
+-		     offset, (int)runtime->buffer_size);
+-	}
++	offset = (runtime->period_size * (s->periods));
++	if (offset >= runtime->buffer_size)
++		offset = 0;
++	pr_debug
++	    ("MXC: spdif_get_dma_pos BIS offset  %d, buffer_size %d\n",
++	     offset, (int)runtime->buffer_size);
+ 	return offset;
+ }
+ 
+@@ -989,7 +974,6 @@ static void spdif_start_tx(struct mxc_spdif_stream *s)
+ 			       MXC_DMA_MODE_WRITE);
+ 		ret = mxc_dma_enable(s->dma_wchannel);
+ 		spdif_dma_enable(SCR_DMA_TX_EN, 1);
+-		s->tx_spin = 1;
+ 		if (ret) {
+ 			pr_info("audio_process_dma: cannot queue DMA \
+ 				buffer\n");
+@@ -1070,7 +1054,6 @@ static void spdif_tx_callback(void *data, int error, unsigned int count)
+ 	offset = dma_size * previous_period;
+ 
+ 	spin_lock(&s->dma_lock);
+-	s->tx_spin = 0;
+ 	s->periods++;
+ 	s->periods %= runtime->periods;
+ 	dma_unmap_single(NULL, runtime->dma_addr + offset, dma_size,
+@@ -1107,7 +1090,6 @@ snd_mxc_spdif_playback_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	spin_lock_irqsave(&s->dma_lock, flags);
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+-		s->tx_spin = 0;
+ 		s->active = 1;
+ 		spdif_start_tx(s);
+ 		break;
+@@ -1120,7 +1102,6 @@ snd_mxc_spdif_playback_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 		s->active = 1;
+-		s->tx_spin = 0;
+ 		spdif_start_tx(s);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+@@ -1128,7 +1109,6 @@ snd_mxc_spdif_playback_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		s->active = 1;
+-		s->tx_spin = 0;
+ 		spdif_start_tx(s);
+ 		break;
+ 	default:
+@@ -1339,7 +1319,6 @@ static void spdif_start_rx(struct mxc_spdif_stream *s)
+ 		/* enable SPDIF dma */
+ 		spdif_dma_enable(SCR_DMA_RX_EN, 1);
+ 
+-		s->tx_spin = 1;
+ 		if (ret) {
+ 			pr_info("audio_process_dma: cannot queue DMA \
+ 				buffer\n");
+@@ -1419,7 +1398,6 @@ static void spdif_rx_callback(void *data, int error, unsigned int count)
+ 	offset = dma_size * previous_period;
+ 
+ 	spin_lock(&s->dma_lock);
+-	s->tx_spin = 0;
+ 	s->periods++;
+ 	s->periods %= runtime->periods;
+ 
+@@ -1456,7 +1434,6 @@ snd_mxc_spdif_capture_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	spin_lock_irqsave(&s->dma_lock, flags);
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+-		s->tx_spin = 0;
+ 		s->active = 1;
+ 		spdif_start_rx(s);
+ 		break;
+@@ -1469,7 +1446,6 @@ snd_mxc_spdif_capture_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 		s->active = 1;
+-		s->tx_spin = 0;
+ 		spdif_start_rx(s);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+@@ -1477,7 +1453,6 @@ snd_mxc_spdif_capture_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		s->active = 1;
+-		s->tx_spin = 0;
+ 		spdif_start_rx(s);
+ 		break;
+ 	default:
+-- 
+1.5.4.4
+

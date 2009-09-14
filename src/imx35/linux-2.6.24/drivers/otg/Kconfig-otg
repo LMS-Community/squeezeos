@@ -1,0 +1,243 @@
+#
+# @(#) balden@belcarra.com/seth2.rillanon.org|otg/Kconfig-otg|20070531215019|62203
+# Copyright (c) 2005 Belcarra Technologies Corp
+# Copyright (c) 2005-2006 Belcarra Technologies 2005 Corp
+#
+# The platform configuration must define the following capability flags to
+# allow this common selection to work.
+
+# This implements selection of the appropriate role that the software should
+# implement:
+#
+
+# Device and Platform Capabilities
+#                               Supports Acting as a:
+#   OTG_PLATFORM_USBD           standard USB peripheral
+#   OTG_PLATFORM_USB            standard USB host
+#   OTG_PLATFORM_OTG            OTG Device
+#
+#   OTG_HIGH_SPEED_CAPABLE      High Speed Capable Device.
+#   OTG_REMOTE_WAKEUP_CAPABLE   Device can do Remote Wakeup.
+#
+#   OTG_BUS_POWERED_CAPABLE     Platform can be bus powered.
+#
+
+# Role Configuration
+#                               Implements:
+#   OTG_USB_PERIPHERAL          USB peripheral
+#   OTG_USB_HOST                USB host
+#   OTG_USB_PERIPHERAL_OR_HOST  USB peripheral or USB host
+#   OTG_BDEVICE_WITH_SRP        OTG SRP capable B-Device
+#   OTG_DEVICE                  OTG Device
+#
+#
+
+    comment ""
+
+    menu "On-The-Go Options"
+
+        depends on OTG_PLATFORM_OTG|| OTG_PLATFORM_USBD
+
+
+        # USBOTG Role Configuration
+        choice
+            prompt "On-The-Go or USB Device Role Configuration"
+
+            config OTG_USB_PERIPHERAL
+                bool "USB Peripheral (only)"
+                depends on OTG_PLATFORM_USBD
+                ---help---
+                Implement a standard USB Peripheral only.
+
+            config OTG_USB_WIRED_DEVICE
+                bool "USB Wired Device (only)"
+                depends on OTG_PLATFORM_WUSBD
+                ---help---
+                Implement a Wired USB Device only.
+
+            #config OTG_USB_HOST
+            #    bool "USB Host (only)"
+            #    depends on OTG_PLATFORM_USB
+            #    ---help---
+            #    Implement a standard USB Host only.
+
+            #config OTG_USB_WIRED_HOST
+            #    bool "USB Host (only)"
+            #    depends on OTG_PLATFORM_WUSB
+            #    ---help---
+            #    Implement a Wired USB Host only.
+
+            config OTG_USB_PERIPHERAL_OR_HOST
+                bool "USB Peripheral or Host"
+                depends on OTG_PLATFORM_USB && OTG_PLATFORM_USBD && USB
+                ---help---
+                Implement a standard USB Peripheral and Host.
+                Support for this is platform-dependent.
+
+            config OTG_USB_WIRED_DEVICE_OR_HOST
+                bool "USB Wired Device  or Host"
+                depends on OTG_PLATFORM_WUSB && OTG_PLATFORM_WUSBD && USB
+                ---help---
+                Implement a Wired USB Peripheral and Host.
+                Support for this is platform-dependent.
+
+            #config OTG_BDEVICE_WITH_SRP
+            #    bool "SRP Capable B-Device (Only)"
+            #    depends on OTG_PLATFORM_OTG
+            #    ---help---
+            #    Implement an On-The-Go Peripheral-Only SRP-capable device. This
+            #    is similar to a Traditional USB Peripheral but enables
+            #    On-The-Go features such as Service Request Protocol (SRP).
+
+            config OTG_DEVICE
+                bool "OTG Device - can act as A or B Device"
+                depends on OTG_PLATFORM_OTG && USB
+                ---help---
+                Implement full On-The-Go Device support for a platform that
+                supports implementation of A and B Devices that implement
+                Service Request Protocol (SRP) and Host Negotiation Protocol
+                (HNP).
+
+        endchoice
+
+        # High Speed
+        if ( OTG_HIGH_SPEED_CAPABLE = 'y')
+                # we may want to make this conditional
+                config OTG_HIGH_SPEED
+                        bool 'Enable High Speed for this device'
+                        default OTG_HIGH_SPEED_CAPABLE
+                        ---help---
+                        This device is capable of USB 2.0 High Speed connections.
+                        This option can be used to limit connections to Full Speed
+                        only. Generally this should not be neccessary.
+        endif
+
+        # Device that can be bus powered
+        if ( OTG_BUS_POWERED_CAPABLE = 'y')
+
+                config OTG_SELF_POWERED
+                        bool 'Enable if device is Self-Powered'
+                        default y
+                        ---help---
+                        This device is capable of being bus powered or self powered.
+                        Enable this option if it is self powered.
+
+                if ( OTG_SELF_POWERED = 'n')
+
+                        config OTG_BMAXPOWER
+                                int 'bMaxPower - 2mA units'
+                                default 1
+                                ---help---
+                                The amount of power the device will draw in 2mA units.
+
+                endif
+
+                # N.B. bMaxPower must be 1 even for self powered devices.
+                if ( OTG_SELF_POWERED != 'n')
+                        config OTG_BMAXPOWER
+                                int
+                                default 1
+                endif
+        endif
+
+        # Device that can only be self-powered,
+        # N.B. bMaxPower must be 1 even for self powered devices.
+        if ( OTG_BUS_POWERED_CAPABLE != 'y')
+
+                config OTG_SELF_POWERED
+                        bool
+                        default y
+
+                config OTG_BMAXPOWER
+                        int
+                        default 1
+        endif
+
+        # Device that can implement Remote Wakeup
+        if ( OTG_REMOTE_WAKEUP_CAPABLE = 'y')
+
+                config OTG_REMOTE_WAKEUP
+                        bool 'Enable Remote Wakeup'
+                        default y
+                        ---help---
+                        This device can initiate a Remote Wakeup. Do you wish
+                        to enable this capability. This will add the Remote Wakeup
+                        bit to bmAttributes.
+
+                        Note that Chapter 9 tests will require
+                        that you use the usbadmin (or similiar) program to test
+                        this.
+
+        endif
+
+
+        config OTG_TR_AUTO
+                bool 'Enable Auto-Start'
+                default OTG_USB_PERIPHERAL || OTG_USB_PERIPHERAL_OR_HOST || OTG_USB_HOST
+                ---help---
+                Automatically start and enable standard USB Device or USB
+                Host.  If disabled, a USBOTG management application will need
+                to enable the OTG software before the device can be used.
+
+        #comment ""
+        #comment "OTG Support In Linux USB Core"
+        #
+        #config OTG_HOST
+        #        boolean "USB Host - OTG Support"
+        #        depends on OTG_DEVICE && USB
+        #        default OTG_DEVICE
+        #        ---help---
+        #           This option adds OTG options in the standard Linux
+        #           USB Core to support implmentation of On-The-Go Devices.
+        #           This should be enabled if implementing an OTG Device.
+
+        comment ""
+        comment "Language"
+
+        config OTG_LANGID
+                hex "Language ID)"
+                depends on OTG
+                default "0x0904"
+                ---help---
+                   This option sets the default language ID. Typical
+                   values are 0x0904 for US English, or 0x0903 for English.
+
+
+        comment "Testing and Portability"
+
+        config OTG_TRACE
+            bool 'OTG Fast Tracing'
+            depends on OTG!=n
+            ---help---
+            This option implements register trace to support
+            driver debugging; do not enable in production devices.
+
+        config OTG_TRACE_PACKED
+            bool 'OTG Fast Tracing -- packed option'
+            depends on (OTG !=n) && (OTG_TRACE != n)
+            default n
+            ---help---
+            This option is experimental. Do not enable for normal use
+        config OTG_LATENCY_CHECK
+            bool 'OTG Latency Check'
+            depends on (OTG !=n) && (OTG_TRACE != n)
+            default n
+            ---help---
+            This option is experimental. Do not enable for normal use
+
+
+        config OTG_NOC99
+                bool 'Disable C99 initializers'
+                ---help---
+                Enable this if your compiler does not allow a structure to
+                be initialized as .element_name=value
+
+        config OTG_INTERNAL_TESTING
+                bool 'Enable internal testing modes'
+		depends on (OTG != n)
+                default n
+                ---help---
+                This option enables Belcara internal testing options.
+                Do not enable for normal use.
+
+    endmenu

@@ -1,0 +1,101 @@
+From e2f8b30fb2b86526e0c940d35015ae1ac246eada Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 29 Sep 2007 01:36:57 -0400
+Subject: [PATCH] Unionfs: use pr_debug() instead of custom dprintk()
+
+Also turn on DEBUG if CONFIG_UNION_FS_DEBUG is on
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/Makefile     |    4 ++++
+ fs/unionfs/commonfops.c |    4 ++--
+ fs/unionfs/dentry.c     |    6 +++---
+ fs/unionfs/lookup.c     |    2 +-
+ fs/unionfs/union.h      |    6 +-----
+ 5 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/fs/unionfs/Makefile b/fs/unionfs/Makefile
+index 87a0e65..c298686 100644
+--- a/fs/unionfs/Makefile
++++ b/fs/unionfs/Makefile
+@@ -11,3 +11,7 @@ unionfs-y := subr.o dentry.o file.o inode.o main.o super.o \
+ unionfs-$(CONFIG_UNION_FS_XATTR) += xattr.o
+ 
+ unionfs-$(CONFIG_UNION_FS_DEBUG) += debug.o
++
++ifeq ($(CONFIG_UNION_FS_DEBUG),y)
++EXTRA_CFLAGS += -DDEBUG
++endif
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 8550a34..16df572 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -394,8 +394,8 @@ int unionfs_file_revalidate(struct file *file, bool willwrite)
+ 	if (willwrite && IS_WRITE_FLAG(file->f_flags) &&
+ 	    !IS_WRITE_FLAG(unionfs_lower_file(file)->f_flags) &&
+ 	    is_robranch(dentry)) {
+-		dprintk(KERN_DEBUG "unionfs: do delay copyup of \"%s\"\n",
+-			dentry->d_name.name);
++		pr_debug("unionfs: do delay copyup of \"%s\"\n",
++			 dentry->d_name.name);
+ 		err = do_delayed_copyup(file);
+ 	}
+ 
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 89f6a91..5dde6af 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -46,9 +46,9 @@ static bool __unionfs_d_revalidate_one(struct dentry *dentry,
+ 
+ 	/* if the dentry is unhashed, do NOT revalidate */
+ 	if (d_deleted(dentry)) {
+-		dprintk(KERN_DEBUG "unionfs: unhashed dentry being "
+-			"revalidated: %*s\n",
+-			dentry->d_name.len, dentry->d_name.name);
++		pr_debug("unionfs: unhashed dentry being "
++			 "revalidated: %*s\n",
++			 dentry->d_name.len, dentry->d_name.name);
+ 		goto out;
+ 	}
+ 
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 53668d6..9c6fd56 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -629,7 +629,7 @@ int init_lower_nd(struct nameidata *nd, unsigned int flags)
+ 		 * We should never get here, for now.
+ 		 * We can add new cases here later on.
+ 		 */
+-		dprintk("unionfs: unknown nameidata flag 0x%x\n", flags);
++		pr_debug("unionfs: unknown nameidata flag 0x%x\n", flags);
+ 		BUG();
+ 		break;
+ 	}
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 4e153d2..8a83742 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -512,10 +512,8 @@ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ 
+ #ifdef CONFIG_UNION_FS_DEBUG
+ 
+-#define dprintk(args...)		printk(args)
+-
+ /* useful for tracking code reachability */
+-#define UDBG printk("DBG:%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__)
++#define UDBG pr_debug("DBG:%s:%s:%d\n",__FILE__,__FUNCTION__,__LINE__)
+ 
+ #define unionfs_check_inode(i)	__unionfs_check_inode((i),	\
+ 	__FILE__,__FUNCTION__,__LINE__)
+@@ -554,8 +552,6 @@ extern void __show_inode_counts(const struct inode *inode,
+ 
+ #else /* not CONFIG_UNION_FS_DEBUG */
+ 
+-#define dprintk(args...)		do { } while (0)
+-
+ /* we leave useful hooks for these check functions throughout the code */
+ #define unionfs_check_inode(i)		do { } while(0)
+ #define unionfs_check_dentry(d)		do { } while(0)
+-- 
+1.5.4.3
+

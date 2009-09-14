@@ -1,0 +1,285 @@
+From 30e1a7a90923a1e809cd01c91258f92854108ad3 Mon Sep 17 00:00:00 2001
+From: Bruce Schmid <duck@freescale.com>
+Date: Wed, 11 Jun 2008 10:55:38 -0600
+Subject: [PATCH] ENGR00083330-9 Integrate Devtech's USB code patch 9/12
+
+USB: mx37 platform_device registration
+
+Signed-off-by: Bruce Schmid <duck@freescale.com>
+---
+ arch/arm/mach-mx37/Makefile |    6 ++-
+ arch/arm/mach-mx37/usb.h    |  112 +++++++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx37/usb_dr.c |  123 +++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 240 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/Makefile b/arch/arm/mach-mx37/Makefile
+index 7e476ef..63bb4b3 100644
+--- a/arch/arm/mach-mx37/Makefile
++++ b/arch/arm/mach-mx37/Makefile
+@@ -4,7 +4,7 @@
+ 
+ # Object file lists.
+ 
+-obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o usb.o
++obj-y   := system.o iomux.o cpu.o mm.o clock.o devices.o serial.o dma.o
+ 
+ obj-$(CONFIG_MACH_MX37_3DS) += mx37_3stack.o mx37_3stack_gpio.o
+ obj-$(CONFIG_SPI_MXC) += mx37_3stack_cpld.o
+@@ -12,3 +12,7 @@ obj-$(CONFIG_REGULATOR_WM8350) += mx37_3stack_pmic_wm8350.o
+ 
+ # power management
+ obj-$(CONFIG_PM) 		+= pm.o
++
++ifneq ($(strip $(CONFIG_USB_GADGET_ARC) $(CONFIG_USB_EHCI_ARC_OTG)),)
++	obj-y	+= usb_dr.o
++endif
+diff --git a/arch/arm/mach-mx37/usb.h b/arch/arm/mach-mx37/usb.h
+new file mode 100644
+index 0000000..3542866
+--- /dev/null
++++ b/arch/arm/mach-mx37/usb.h
+@@ -0,0 +1,112 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++
++extern int usbotg_init(struct platform_device *pdev);
++extern void usbotg_uninit(struct fsl_usb2_platform_data *pdata);
++extern int gpio_usbotg_hs_active(void);
++extern void gpio_usbotg_hs_inactive(void);
++extern struct platform_device *host_pdev_register(struct resource *res,
++		  int n_res, struct fsl_usb2_platform_data *config);
++
++extern int gpio_usbotg_utmi_active(void);
++extern void gpio_usbotg_utmi_inactive(void);
++static int usbotg_init_ext(struct platform_device *pdev);
++static void usbotg_uninit_ext(struct fsl_usb2_platform_data *pdata);
++
++/*
++ * Determine which platform_data struct to use for the DR controller,
++ * based on which transceiver is configured.
++ * PDATA is a pointer to it.
++ */
++#if defined(CONFIG_ISP1301_MXC)
++static struct fsl_usb2_platform_data __maybe_unused dr_1301_config;
++#define PDATA (&dr_1301_config)
++#elif defined(CONFIG_MC13783_MXC)
++static struct fsl_usb2_platform_data __maybe_unused dr_13783_config;
++#define PDATA (&dr_13783_config)
++#elif defined(CONFIG_UTMI_MXC)
++static struct fsl_usb2_platform_data __maybe_unused dr_utmi_config;
++#define PDATA (&dr_utmi_config)
++#endif
++
++
++/*
++ * Used to set pdata->operating_mode before registering the platform_device.
++ * If OTG is configured, the controller operates in OTG mode,
++ * otherwise it's either host or device.
++ */
++#ifdef CONFIG_USB_OTG
++#define DR_UDC_MODE	FSL_USB2_DR_OTG
++#define DR_HOST_MODE	FSL_USB2_DR_OTG
++#else
++#define DR_UDC_MODE	FSL_USB2_DR_DEVICE
++#define DR_HOST_MODE	FSL_USB2_DR_HOST
++#endif
++
++
++#ifdef CONFIG_USB_EHCI_ARC_OTG
++static inline void dr_register_host(struct resource *r, int rs)
++{
++	PDATA->operating_mode = DR_HOST_MODE;
++	host_pdev_register(r, rs, PDATA);
++}
++#else
++static inline void dr_register_host(struct resource *r, int rs)
++{
++}
++#endif
++
++#ifdef CONFIG_USB_GADGET_ARC
++static struct platform_device dr_udc_device;
++
++static inline void dr_register_udc(void)
++{
++	PDATA->operating_mode = DR_UDC_MODE;
++	dr_udc_device.dev.platform_data = PDATA;
++
++	if (platform_device_register(&dr_udc_device))
++		printk(KERN_ERR "usb: can't register DR gadget\n");
++	else
++		printk(KERN_INFO "usb: DR gadget (%s) registered\n",
++		       PDATA->transceiver);
++}
++#else
++static inline void dr_register_udc(void)
++{
++}
++#endif
++
++#ifdef CONFIG_USB_OTG
++static struct platform_device dr_otg_device;
++
++/*
++ * set the proper operating_mode and
++ * platform_data pointer, then register the
++ * device.
++ */
++static inline void dr_register_otg(void)
++{
++	PDATA->operating_mode = FSL_USB2_DR_OTG;
++	dr_otg_device.dev.platform_data = PDATA;
++
++	if (platform_device_register(&dr_otg_device))
++		printk(KERN_ERR "usb: can't register otg device\n");
++	else
++		printk(KERN_INFO "usb: DR OTG registered\n");
++}
++#else
++static inline void dr_register_otg(void)
++{
++}
++#endif
+diff --git a/arch/arm/mach-mx37/usb_dr.c b/arch/arm/mach-mx37/usb_dr.c
+new file mode 100644
+index 0000000..65919ed
+--- /dev/null
++++ b/arch/arm/mach-mx37/usb_dr.c
+@@ -0,0 +1,123 @@
++/*
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <asm/arch/arc_otg.h>
++#include "usb.h"
++
++/*
++ * platform data structs
++ * 	- Which one to use is determined by CONFIG options in usb.h
++ * 	- operating_mode plugged at run time
++ */
++static struct fsl_usb2_platform_data __maybe_unused dr_utmi_config = {
++	.name              = "DR",
++	.platform_init     = usbotg_init_ext,
++	.platform_uninit   = usbotg_uninit_ext,
++	.phy_mode          = FSL_USB2_PHY_UTMI_WIDE,
++	.power_budget      = 150,	/* 150 mA max power */
++	.gpio_usb_active   = gpio_usbotg_hs_active,
++	.gpio_usb_inactive = gpio_usbotg_hs_inactive,
++	.transceiver       = "utmi",
++};
++
++
++/*
++ * resources
++ */
++static struct resource otg_resources[] = {
++	[0] = {
++		.start = (u32)(OTG_BASE_ADDR),
++		.end   = (u32)(OTG_BASE_ADDR + 0x1ff),
++		.flags = IORESOURCE_MEM,
++	},
++	[1] = {
++		.start = MXC_INT_USB_OTG,
++		.flags = IORESOURCE_IRQ,
++	},
++};
++
++
++static u64 dr_udc_dmamask = ~(u32) 0;
++static void dr_udc_release(struct device *dev)
++{
++}
++
++/*
++ * platform device structs
++ * 	dev.platform_data field plugged at run time
++ */
++static struct platform_device dr_udc_device = {
++	.name = "fsl-usb2-udc",
++	.id   = -1,
++	.dev  = {
++		.release           = dr_udc_release,
++		.dma_mask          = &dr_udc_dmamask,
++		.coherent_dma_mask = 0xffffffff,
++	},
++	.resource      = otg_resources,
++	.num_resources = ARRAY_SIZE(otg_resources),
++};
++
++/* Notes: configure USB clock*/
++static int usbotg_init_ext(struct platform_device *pdev)
++{
++	struct clk *usb_clk;
++
++	usb_clk = clk_get(NULL, "usboh2_clk");
++	clk_enable(usb_clk);
++	clk_put(usb_clk);
++
++	usb_clk = clk_get(NULL, "usb_phy_clk");
++	clk_enable(usb_clk);
++	clk_put(usb_clk);
++
++	/*derive clock from oscillator */
++	usb_clk = clk_get(NULL, "usb_utmi_clk");
++	clk_disable(usb_clk);
++	clk_put(usb_clk);
++
++	return usbotg_init(pdev);
++}
++
++static void usbotg_uninit_ext(struct fsl_usb2_platform_data *pdata)
++{
++	struct clk *usb_clk;
++
++	usb_clk = clk_get(NULL, "usboh2_clk");
++	clk_disable(usb_clk);
++	clk_put(usb_clk);
++
++	usb_clk = clk_get(NULL, "usb_phy_clk");
++	clk_disable(usb_clk);
++	clk_put(usb_clk);
++
++	usbotg_uninit(pdata);
++}
++
++static int __init usb_dr_init(void)
++{
++	pr_debug("%s: \n", __func__);
++
++	/* dr_register_otg(); */
++	dr_register_host(otg_resources, ARRAY_SIZE(otg_resources));
++	dr_register_udc();
++
++	return 0;
++}
++
++module_init(usb_dr_init);
+-- 
+1.5.4.4
+

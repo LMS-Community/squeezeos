@@ -1,0 +1,117 @@
+From 0642aa5c172a3d6d0beffca5c04bf6e9ad89c502 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 17 Feb 2009 14:30:07 +0800
+Subject: [PATCH] ENGR00107759 MX37 : Can not enter STOP mode
+
+mpr084 keypad & tsc2007 touch screen driver run kthread_stop
+when enter STOP mode even never opened, the condition define
+is error.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/input/keyboard/mpr084.c     |   10 ++++++++--
+ drivers/input/touchscreen/tsc2007.c |   11 +++++++++--
+ 2 files changed, 17 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/keyboard/mpr084.c b/drivers/input/keyboard/mpr084.c
+index 8a82c24..4976c7c 100644
+--- a/drivers/input/keyboard/mpr084.c
++++ b/drivers/input/keyboard/mpr084.c
+@@ -88,6 +88,7 @@ struct mpr084_data {
+ 	struct completion kpirq_completion;
+ 	int kpirq;
+ 	int kp_thread_cnt;
++	int opened;
+ };
+ 
+ static int kpstatus[KEY_COUNT];
+@@ -219,7 +220,7 @@ static int mpr084_suspend(struct i2c_client *client, pm_message_t state)
+ {
+ 	struct mpr084_data *d = i2c_get_clientdata(client);
+ 
+-	if (!IS_ERR(d->tstask))
++	if (!IS_ERR(d->tstask) && d->opened)
+ 		kthread_stop(d->tstask);
+ 
+ 	return 0;
+@@ -237,7 +238,8 @@ static int mpr084_resume(struct i2c_client *client)
+ {
+ 	struct mpr084_data *d = i2c_get_clientdata(client);
+ 
+-	d->tstask = kthread_run(mpr084ts_thread, d, DRIVER_NAME "kpd");
++	if (d->opened)
++		d->tstask = kthread_run(mpr084ts_thread, d, DRIVER_NAME "kpd");
+ 
+ 	return 0;
+ }
+@@ -250,6 +252,8 @@ static int mpr084_idev_open(struct input_dev *idev)
+ 	d->tstask = kthread_run(mpr084ts_thread, d, DRIVER_NAME "kpd");
+ 	if (IS_ERR(d->tstask))
+ 		ret = PTR_ERR(d->tstask);
++	else
++		d->opened++;
+ 	return ret;
+ }
+ 
+@@ -259,6 +263,8 @@ static void mpr084_idev_close(struct input_dev *idev)
+ 
+ 	if (!IS_ERR(d->tstask))
+ 		kthread_stop(d->tstask);
++	if (d->opened > 0)
++		d->opened--;
+ }
+ 
+ static int mpr084_driver_register(struct mpr084_data *data)
+diff --git a/drivers/input/touchscreen/tsc2007.c b/drivers/input/touchscreen/tsc2007.c
+index 017f261..23973b8 100644
+--- a/drivers/input/touchscreen/tsc2007.c
++++ b/drivers/input/touchscreen/tsc2007.c
+@@ -79,6 +79,7 @@ struct tsc2007_data {
+ 	int penirq;
+ 	int penup_threshold;
+ 	struct regulator *vdd_reg;
++	int opened;
+ };
+ 
+ static int tsc2007_read(struct tsc2007_data *data,
+@@ -231,7 +232,7 @@ static int tsc2007_suspend(struct i2c_client *client, pm_message_t state)
+ {
+ 	struct tsc2007_data *d = i2c_get_clientdata(client);
+ 
+-	if (!IS_ERR(d->tstask))
++	if (!IS_ERR(d->tstask) && d->opened)
+ 		kthread_stop(d->tstask);
+ 
+ 	return 0;
+@@ -249,7 +250,8 @@ static int tsc2007_resume(struct i2c_client *client)
+ {
+ 	struct tsc2007_data *d = i2c_get_clientdata(client);
+ 
+-	d->tstask = kthread_run(tsc2007ts_thread, d, DRIVER_NAME "tsd");
++	if (d->opened)
++		d->tstask = kthread_run(tsc2007ts_thread, d, DRIVER_NAME "tsd");
+ 
+ 	return 0;
+ }
+@@ -267,6 +269,8 @@ static int tsc2007_idev_open(struct input_dev *idev)
+ 	d->tstask = kthread_run(tsc2007ts_thread, d, DRIVER_NAME "tsd");
+ 	if (IS_ERR(d->tstask))
+ 		ret = PTR_ERR(d->tstask);
++	else
++		d->opened++;
+ 
+ 	return ret;
+ }
+@@ -278,6 +282,9 @@ static void tsc2007_idev_close(struct input_dev *idev)
+ 		kthread_stop(d->tstask);
+ 
+ 	del_timer_sync(&d->penirq_timer);
++
++	if (d->opened > 0)
++		d->opened--;
+ }
+ 
+ static int tsc2007_driver_register(struct tsc2007_data *data)
+-- 
+1.5.4.4
+

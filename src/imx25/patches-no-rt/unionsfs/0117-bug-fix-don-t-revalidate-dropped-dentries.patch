@@ -1,0 +1,34 @@
+From 3cc7929f5192e6b49b8acd397eb53cd8271a8f4c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 01:53:12 -0400
+Subject: [PATCH] bug fix: don't revalidate dropped dentries
+
+This fixes a harmless but annoying message that unionfs prints if a dropped
+dentry is being revalidated, which could happen if you unlink open files.
+---
+ fs/unionfs/commonfops.c |    9 ++++++---
+ 1 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index ab92cac..519dbf0 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -331,9 +331,12 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	unionfs_lock_dentry(dentry);
+ 	sb = dentry->d_sb;
+ 
+-	/* first revalidate the dentry inside struct file */
+-	if (!__unionfs_d_revalidate_chain(dentry, NULL) &&
+-	    !d_deleted(dentry)) {
++	/*
++	 * First revalidate the dentry inside struct file,
++	 * but not unhashed dentries.
++	 */
++	if (!d_deleted(dentry) &&
++	    !__unionfs_d_revalidate_chain(dentry, NULL)) {
+ 		err = -ESTALE;
+ 		goto out_nofree;
+ 	}
+-- 
+1.5.4.3
+

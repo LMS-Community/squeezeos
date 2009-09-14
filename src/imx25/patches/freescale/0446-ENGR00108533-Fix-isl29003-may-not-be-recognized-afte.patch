@@ -1,0 +1,42 @@
+From d16fa1cb5d9a39671a70f095719663cef10c5e06 Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Thu, 26 Feb 2009 10:14:02 +0800
+Subject: [PATCH] ENGR00108533 Fix isl29003 may not be recognized after system reboot
+
+Fix isl29003 may not be recognized after system reboot
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/hwmon/isl29003.c |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/hwmon/isl29003.c b/drivers/hwmon/isl29003.c
+index 82062a3..33505c8 100644
+--- a/drivers/hwmon/isl29003.c
++++ b/drivers/hwmon/isl29003.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -280,9 +280,14 @@ static int isl29003_i2c_probe(struct i2c_client *client,
+ 	if (vdd_reg)
+ 		regulator_enable(vdd_reg);
+ 	msleep(100);
+-	if (isl29003_read(client, ISL29003_CMD))
++
++	if (isl29003_write(client, ISL29003_CMD, 0))
+ 		err = -ENODEV;
+ 
++	if (!err)
++		if (isl29003_read(client, ISL29003_CMD))
++			err = -ENODEV;
++
+ 	if (vdd_reg)
+ 		regulator_disable(vdd_reg);
+ 	if (err < 0)
+-- 
+1.5.4.4
+

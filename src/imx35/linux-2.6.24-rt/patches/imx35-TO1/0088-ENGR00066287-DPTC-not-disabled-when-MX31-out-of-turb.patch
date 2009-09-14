@@ -1,0 +1,79 @@
+From 50bd8d022236794c70953442ef9effd53b2f7e0d Mon Sep 17 00:00:00 2001
+From: Yves vandervennet <r55763@freescale.com>
+Date: Wed, 19 Mar 2008 11:30:00 -0500
+Subject: [PATCH] ENGR00066287 DPTC not disabled when MX31 out of turbo mode
+
+added function dptc_suspend(), called from clock.c
+
+Signed-off-by: Yves vandervennet <r55763@freescale.com>
+---
+ arch/arm/mach-mx3/clock.c |    6 +++++-
+ arch/arm/plat-mxc/dptc.c  |   23 +++++++++++++++++++++++
+ 2 files changed, 28 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/clock.c b/arch/arm/mach-mx3/clock.c
+index 9b00e83..d023689 100644
+--- a/arch/arm/mach-mx3/clock.c
++++ b/arch/arm/mach-mx3/clock.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -24,6 +24,8 @@
+ #define PRE_DIV_MIN_FREQ    10000000	/* Minimum Frequency after Predivider */
+ #define PROPAGATE_RATE_DIS  2
+ 
++extern void dptc_suspend(void);
++
+ static int cpu_clk_set_wp(int wp);
+ struct timer_list dptcen_timer;
+ 
+@@ -1340,6 +1342,8 @@ static int cpu_clk_set_wp(int wp)
+ 		dptcen_timer.function = dptcen_after_timeout;
+ 		dptcen_timer.data = wp;
+ 		add_timer(&dptcen_timer);
++	} else {
++		dptc_suspend();
+ 	}
+ 
+ 	return 0;
+diff --git a/arch/arm/plat-mxc/dptc.c b/arch/arm/plat-mxc/dptc.c
+index af23ae6..e087b09 100644
+--- a/arch/arm/plat-mxc/dptc.c
++++ b/arch/arm/plat-mxc/dptc.c
+@@ -214,6 +214,29 @@ static void stop_dptc(void)
+ 	pr_info("DPTC has been stopped\n");
+ }
+ 
++/*
++  this function does not change the working point. It can be
++ called from an interrupt context.
++*/
++void dptc_suspend(void)
++{
++	u32 pmcr0;
++
++	if (!dptc_is_active)
++		return;
++
++
++	pmcr0 = __raw_readl(MXC_CCM_PMCR0);
++
++	/* disable DPTC and mask its interrupt */
++	pmcr0 = ((pmcr0 & ~(MXC_CCM_PMCR0_DPTEN)) | MXC_CCM_PMCR0_PTVAIM) &
++	    (~MXC_CCM_PMCR0_DPVCR);
++
++	__raw_writel(pmcr0, MXC_CCM_PMCR0);
++
++}
++
++
+ /*!
+  * This function is called to put the DPTC in a low power state.
+  *
+-- 
+1.5.4.4
+

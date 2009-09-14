@@ -1,0 +1,79 @@
+From f286b9b044e1ac1b8370c4e998c48d0920f71ebe Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Thu, 5 Feb 2009 13:28:16 +0800
+Subject: [PATCH] ENGR00107077 Sgtl5000: Move part id checking to io_probe
+
+The sgtl5000 power maybe still not enabed in i2c_probe and codec_probe
+The power has been enabed in io_probe.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com
+---
+ sound/soc/codecs/sgtl5000.c         |   24 ++++++++++++------------
+ sound/soc/imx/imx-3stack-sgtl5000.c |    4 +++-
+ 2 files changed, 15 insertions(+), 13 deletions(-)
+
+diff --git a/sound/soc/codecs/sgtl5000.c b/sound/soc/codecs/sgtl5000.c
+index ad8d61b..9e7fc09 100644
+--- a/sound/soc/codecs/sgtl5000.c
++++ b/sound/soc/codecs/sgtl5000.c
+@@ -735,8 +735,20 @@ static int sgtl5000_codec_io_probe(struct snd_soc_codec *codec,
+ {
+ 	u16 reg, ana_pwr, lreg_ctrl, ref_ctrl, lo_ctrl, short_ctrl, sss;
+ 	int vag;
++	unsigned int val;
+ 	struct sgtl5000_platform_data *plat = codec->platform_data;
+ 
++	val = sgtl5000_read(NULL, SGTL5000_CHIP_ID);
++	if (((val & SGTL5000_PARTID_MASK) >> SGTL5000_PARTID_SHIFT) !=
++		SGTL5000_PARTID_PART_ID) {
++		sgtl5000_i2c_client = NULL;
++		pr_err("Device with ID register %x is not a SGTL5000\n", val);
++		return -ENODEV;
++	}
++
++	dev_info(&sgtl5000_i2c_client->dev, "SGTL5000 revision %d\n",
++		(val & SGTL5000_REVID_MASK) >> SGTL5000_REVID_SHIFT);
++
+ 	/* reset value */
+ 	ana_pwr = SGTL5000_DAC_STERO |
+ 		  SGTL5000_LINREG_SIMPLE_POWERUP |
+@@ -935,21 +947,9 @@ static int sgtl5000_i2c_probe(struct i2c_client *client,
+ 				const struct i2c_device_id *id)
+ {
+ 	int ret;
+-	unsigned int val;
+ 
+ 	sgtl5000_i2c_client = client;
+ 
+-	val = sgtl5000_read(NULL, SGTL5000_CHIP_ID);
+-	if (((val & SGTL5000_PARTID_MASK) >> SGTL5000_PARTID_SHIFT) !=
+-		SGTL5000_PARTID_PART_ID) {
+-		sgtl5000_i2c_client = NULL;
+-		pr_err("Device with ID register %x is not a SGTL5000\n", val);
+-		return -ENODEV;
+-	}
+-
+-	dev_info(&sgtl5000_i2c_client->dev, "SGTL5000 revision %d\n",
+-		 (val & SGTL5000_REVID_MASK) >> SGTL5000_REVID_SHIFT);
+-
+ 	ret = driver_register(&sgtl5000_codec_driver.driver);
+ 	if (ret < 0)
+ 		return ret;
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index 715aa49..d2e0163 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -489,7 +489,9 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 	codec_data->vddd = plat->vddd / 1000;
+ 	codec->platform_data = codec_data;
+ 
+-	codec->ops->io_probe(codec, machine);
++	ret = codec->ops->io_probe(codec, machine);
++	if (ret < 0)
++		goto err_card_reg;
+ 
+ 	/* Add imx_3stack specific widgets */
+ 	for (i = 0; i < ARRAY_SIZE(imx_3stack_dapm_widgets); i++) {
+-- 
+1.5.4.4
+

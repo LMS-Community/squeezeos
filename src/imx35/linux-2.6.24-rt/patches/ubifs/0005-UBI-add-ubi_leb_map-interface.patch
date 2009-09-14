@@ -1,0 +1,117 @@
+From deb2509ad846ff874dd33f7f2597ddef8b3a8b65 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 6 Dec 2007 18:47:30 +0200
+Subject: [PATCH] UBI: add ubi_leb_map interface
+
+The idea of this interface belongs to Adrian Hunter. The
+interface is extremely useful when one has to have a guarantee
+that an LEB will contain all 0xFFs even in case of an unclean
+reboot. UBI does have an 'ubi_leb_erase()' call which may do
+this, but it is stupid and ineffecient, because it flushes whole
+queue. I should be re-worked to just be a pair of unmap,
+map calls.
+
+The user of the interfaci is UBIFS at the moment.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c   |   13 ++++++++-----
+ drivers/mtd/ubi/kapi.c  |   45 +++++++++++++++++++++++++++++++++++++++++++++
+ include/linux/mtd/ubi.h |    1 +
+ 3 files changed, 54 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index 85f50c8..c87db07 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -656,11 +656,14 @@ retry:
+ 		goto write_error;
+ 	}
+ 
+-	err = ubi_io_write_data(ubi, buf, pnum, offset, len);
+-	if (err) {
+-		ubi_warn("failed to write %d bytes at offset %d of LEB %d:%d, "
+-			 "PEB %d", len, offset, vol_id, lnum, pnum);
+-		goto write_error;
++	if (len) {
++		err = ubi_io_write_data(ubi, buf, pnum, offset, len);
++		if (err) {
++			ubi_warn("failed to write %d bytes at offset %d of "
++				 "LEB %d:%d, PEB %d", len, offset, vol_id,
++				 lnum, pnum);
++			goto write_error;
++		}
+ 	}
+ 
+ 	vol->eba_tbl[lnum] = pnum;
+diff --git a/drivers/mtd/ubi/kapi.c b/drivers/mtd/ubi/kapi.c
+index 03c774f..e1ef802 100644
+--- a/drivers/mtd/ubi/kapi.c
++++ b/drivers/mtd/ubi/kapi.c
+@@ -547,6 +547,51 @@ int ubi_leb_unmap(struct ubi_volume_desc *desc, int lnum)
+ EXPORT_SYMBOL_GPL(ubi_leb_unmap);
+ 
+ /**
++ * ubi_leb_map - map logical erasblock to a physical eraseblock.
++ * @desc: volume descriptor
++ * @lnum: logical eraseblock number
++ * @dtype: expected data type
++ *
++ * This function maps an un-mapped logical eraseblock @lnum to a physical
++ * eraseblock. This means, that after a successfull invocation of this
++ * function the logical eraseblock @lnum will be empty (contain only %0xFF
++ * bytes) and be mapped to a physical eraseblock, even if an unclean reboot
++ * happens.
++ *
++ * This function returns zero in case of success, %-EBADF if the volume is
++ * damaged because of an interrupted update, %-EBADMSG if the logical
++ * eraseblock is already mapped, and other negative error codes in case of
++ * other failures.
++ */
++int ubi_leb_map(struct ubi_volume_desc *desc, int lnum, int dtype)
++{
++	struct ubi_volume *vol = desc->vol;
++	struct ubi_device *ubi = vol->ubi;
++	int vol_id = vol->vol_id;
++
++	dbg_msg("unmap LEB %d:%d", vol_id, lnum);
++
++	if (desc->mode == UBI_READONLY || vol->vol_type == UBI_STATIC_VOLUME)
++		return -EROFS;
++
++	if (lnum < 0 || lnum >= vol->reserved_pebs)
++		return -EINVAL;
++
++	if (dtype != UBI_LONGTERM && dtype != UBI_SHORTTERM &&
++	    dtype != UBI_UNKNOWN)
++		return -EINVAL;
++
++	if (vol->upd_marker)
++		return -EBADF;
++
++	if (vol->eba_tbl[lnum] >= 0)
++		return -EBADMSG;
++
++	return ubi_eba_write_leb(ubi, vol_id, lnum, NULL, 0, 0, dtype);
++}
++EXPORT_SYMBOL_GPL(ubi_leb_map);
++
++/**
+  * ubi_is_mapped - check if logical eraseblock is mapped.
+  * @desc: volume descriptor
+  * @lnum: logical eraseblock number
+diff --git a/include/linux/mtd/ubi.h b/include/linux/mtd/ubi.h
+index 3d967b6..c4abe03 100644
+--- a/include/linux/mtd/ubi.h
++++ b/include/linux/mtd/ubi.h
+@@ -167,6 +167,7 @@ int ubi_leb_change(struct ubi_volume_desc *desc, int lnum, const void *buf,
+ 		   int len, int dtype);
+ int ubi_leb_erase(struct ubi_volume_desc *desc, int lnum);
+ int ubi_leb_unmap(struct ubi_volume_desc *desc, int lnum);
++int ubi_leb_map(struct ubi_volume_desc *desc, int lnum, int dtype);
+ int ubi_is_mapped(struct ubi_volume_desc *desc, int lnum);
+ 
+ /*
+-- 
+1.5.6.3
+

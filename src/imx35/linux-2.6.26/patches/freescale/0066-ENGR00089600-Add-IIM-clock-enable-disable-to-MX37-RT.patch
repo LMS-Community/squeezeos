@@ -1,0 +1,46 @@
+From fec43417f116a0d3226a7e05d09f4683a446bd93 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan-RA5478 <ra5478@bluebonnet.javaland.am.freescale.net>
+Date: Thu, 28 Aug 2008 11:15:08 -0500
+Subject: [PATCH] ENGR00089600 Add IIM clock enable/disable to MX37 RTC driver
+
+  Added code to enable/disable IIM clocks before accessing the fuses in the
+  RTC driver.
+
+Signed-off-by: Ranjani Vaidyanathan-RA5478 <Ranjani.Vaidyanathan.freescale.com>
+---
+ drivers/rtc/rtc-mxc_v2.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/rtc/rtc-mxc_v2.c b/drivers/rtc/rtc-mxc_v2.c
+index beb68c8..905d369 100644
+--- a/drivers/rtc/rtc-mxc_v2.c
++++ b/drivers/rtc/rtc-mxc_v2.c
+@@ -523,7 +523,6 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 
+ 	pdata->clk = clk_get(&pdev->dev, "rtc_clk");
+ 	clk_enable(pdata->clk);
+-
+ 	pdata->baseaddr = res->start;
+ 	pdata->ioaddr = ioremap(pdata->baseaddr, 0x40);
+ 	ioaddr = pdata->ioaddr;
+@@ -559,6 +558,8 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 	rtc_write_sync_lp(ioaddr);
+ 
+ 	plat_data = (struct mxc_srtc_platform_data *)pdev->dev.platform_data;
++	clk = clk_get(NULL, "iim_clk");
++	clk_enable(clk);
+ 	srtc_secmode_addr = ioremap(plat_data->srtc_sec_mode_addr, 1);
+ 
+ 	/* Check SRTC security mode */
+@@ -586,6 +587,8 @@ static int mxc_rtc_probe(struct platform_device *pdev)
+ 		__raw_writel(0xFFFFFFFF, ioaddr + SRTC_LPSR);
+ 		rtc_write_sync_lp(ioaddr);
+ 	}
++	clk_disable(clk);
++	clk_put(clk);
+ 
+ 	rtc = rtc_device_register(pdev->name, &pdev->dev,
+ 				  &mxc_rtc_ops, THIS_MODULE);
+-- 
+1.5.4.4
+

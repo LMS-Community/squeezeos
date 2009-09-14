@@ -1,0 +1,776 @@
+From 04f368b112e008aa832c348312ae4d62179ebbec Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Mon, 15 Dec 2008 16:49:45 +0800
+Subject: [PATCH] ENGR00101861 MX35: CCM driver upgrade for TO2
+
+1. Support MX35 chip version 1 & 2 on one image using system_rev
+2. Remove auto path in chip version 2
+3. Some clock divider is changed from (3bit + 1) x (3bit + 1)
+to (6bit + 1): USB_DIV, UART_DIV, PER0_DIV, ESDHC1_DIV,
+ESDHC2_DIV, ESDHC3_DIV, CSI_DIV
+4. Add bit 7 for select CKILH as the source of CLKO
+5. Add nfc and hsp clock as the source of CLKO
+6. Add bit 27 to 16 as the CKILH divider vaule config bit.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/clock.c       |  387 ++++++++++++++++++++++++--------------
+ arch/arm/mach-mx35/cpu.c         |    5 +
+ arch/arm/mach-mx35/crm_regs.h    |   33 +++-
+ arch/arm/mach-mx35/mx35_3stack.c |   11 +-
+ 4 files changed, 284 insertions(+), 152 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/clock.c b/arch/arm/mach-mx35/clock.c
+index 872ae82..6d41688 100644
+--- a/arch/arm/mach-mx35/clock.c
++++ b/arch/arm/mach-mx35/clock.c
+@@ -135,9 +135,11 @@ static unsigned long _clk_round_rate(struct clk *clk, unsigned long rate)
+ 	if (clk->parent->rate % rate)
+ 		div++;
+ 
+-	__calc_two_dividers(div, &pre, &post);
+-
+-	return clk->parent->rate / (pre * post);
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		__calc_two_dividers(div, &pre, &post);
++		return clk->parent->rate / (pre * post);
++	} else
++		return clk->parent->rate / div;
+ }
+ 
+ static int __switch_cpu_wp(struct clk *clk, unsigned long rate)
+@@ -211,11 +213,13 @@ static int __switch_cpu_rate(struct clk *clk, unsigned long rate)
+ static int __get_arm_div(unsigned long pdr0, int *fi, int *fd)
+ {
+ 	int *pclk_mux;
+-	if (pdr0 & MXC_CCM_PDR0_AUTO_CON) {
+-		pclk_mux = g_clk_mux_consumer +
++	if ((pdr0 & MXC_CCM_PDR0_AUTO_CON)
++	    || (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1))
++		pclk_mux =
++		    g_clk_mux_consumer +
+ 		    ((pdr0 & MXC_CCM_PDR0_CON_MUX_DIV_MASK) >>
+ 		     MXC_CCM_PDR0_CON_MUX_DIV_OFFSET);
+-	} else {
++	else {
+ 		pclk_mux = g_clk_mux_auto +
+ 		    ((pdr0 & MXC_CCM_PDR0_AUTO_MUX_DIV_MASK) >>
+ 		     MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET);
+@@ -231,7 +235,8 @@ static int __get_arm_div(unsigned long pdr0, int *fi, int *fd)
+ 			*fi = *fd = 1;
+ 			return CLK_CODE_ARM(*pclk_mux);
+ 		}
+-		if (pdr0 & MXC_CCM_PDR0_AUTO_CON) {
++		if ((pdr0 & MXC_CCM_PDR0_AUTO_CON)
++		    || (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1)) {
+ 			*fi = 3;
+ 			*fd = 4;
+ 		} else {
+@@ -245,8 +250,10 @@ static int __get_arm_div(unsigned long pdr0, int *fi, int *fd)
+ static int __get_ahb_div(unsigned long pdr0)
+ {
+ 	int *pclk_mux;
+-	if (pdr0 & MXC_CCM_PDR0_AUTO_CON) {
+-		pclk_mux = g_clk_mux_consumer +
++	if ((pdr0 & MXC_CCM_PDR0_AUTO_CON)
++	    || (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1)) {
++		pclk_mux =
++		    g_clk_mux_consumer +
+ 		    ((pdr0 & MXC_CCM_PDR0_CON_MUX_DIV_MASK) >>
+ 		     MXC_CCM_PDR0_CON_MUX_DIV_OFFSET);
+ 	} else {
+@@ -267,7 +274,8 @@ static void sync_cpu_wb(void)
+ 	int i;
+ 	struct cpu_wp *p;
+ 	unsigned long reg = __raw_readl(MXC_CCM_PDR0);
+-	if (reg & MXC_CCM_PDR0_AUTO_CON) {
++	if ((reg & MXC_CCM_PDR0_AUTO_CON)
++	    && (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1)) {
+ 		reg &= MXC_CCM_PDR0_CON_MUX_DIV_MASK;
+ 	} else {
+ 		reg &= MXC_CCM_PDR0_AUTO_MUX_DIV_MASK;
+@@ -505,7 +513,9 @@ static void _clk_hsp_recalc(struct clk *clk)
+ 	int hsp_pdf;
+ 	unsigned long reg;
+ 	reg = __raw_readl(MXC_CCM_PDR0);
+-	if (reg & MXC_CCM_PDR0_AUTO_CON) {
++
++	if ((reg & MXC_CCM_PDR0_AUTO_CON)
++	    || (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1)) {
+ 		hsp_pdf =
+ 		    (reg & MXC_CCM_PDR0_HSP_PODF_MASK) >>
+ 		    MXC_CCM_PDR0_HSP_PODF_OFFSET;
+@@ -529,72 +539,93 @@ static void _clk_mlb_recalc(struct clk *clk)
+ 
+ static void _clk_usb_recalc(struct clk *clk)
+ {
+-	unsigned long usb_pdf, usb_prepdf;
+-
+-	usb_pdf = PDR4(MXC_CCM_PDR4_USB_PODF_MASK,
+-		       MXC_CCM_PDR4_USB_PODF_OFFSET);
+-	usb_prepdf = PDR4(MXC_CCM_PDR4_USB_PRDF_MASK,
+-			  MXC_CCM_PDR4_USB_PRDF_OFFSET);
+-	clk->rate = clk->parent->rate / ((usb_prepdf + 1) * (usb_pdf + 1));
++	unsigned long usb_podf, usb_prdf;
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		usb_podf = PDR4(MXC_CCM_PDR4_USB_PODF_MASK,
++				MXC_CCM_PDR4_USB_PODF_OFFSET);
++		usb_prdf = PDR4(MXC_CCM_PDR4_USB_PRDF_MASK,
++				MXC_CCM_PDR4_USB_PRDF_OFFSET);
++		clk->rate =
++		    clk->parent->rate / ((usb_prdf + 1) * (usb_podf + 1));
++	} else {
++		usb_podf = PDR4(MXC_CCM_PDR4_USB_PODF_MASK_V2,
++				MXC_CCM_PDR4_USB_PODF_OFFSET);
++		clk->rate = clk->parent->rate / (usb_podf + 1);
++	}
+ }
+ 
+ static int _clk_usb_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	u32 reg;
+ 	u32 div;
+-	u32 pre, post;
++	u32 podf, prdf;
+ 
+ 	div = clk->parent->rate / rate;
+ 
+ 	if ((clk->parent->rate / div) != rate)
+ 		return -EINVAL;
+ 
+-	__calc_two_dividers(div, &pre, &post);
+-
+-	/* Set CSI clock divider */
+-	reg = __raw_readl(MXC_CCM_PDR4) &
+-	    ~(MXC_CCM_PDR4_USB_PODF_MASK | MXC_CCM_PDR4_USB_PRDF_MASK);
+-	reg |= (post - 1) << MXC_CCM_PDR4_USB_PODF_OFFSET;
+-	reg |= (pre - 1) << MXC_CCM_PDR4_USB_PRDF_OFFSET;
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		__calc_two_dividers(div, &prdf, &podf);
++		reg = __raw_readl(MXC_CCM_PDR4) &
++		    ~(MXC_CCM_PDR4_USB_PODF_MASK | MXC_CCM_PDR4_USB_PRDF_MASK);
++		reg |= (podf - 1) << MXC_CCM_PDR4_USB_PODF_OFFSET;
++		reg |= (prdf - 1) << MXC_CCM_PDR4_USB_PRDF_OFFSET;
++	} else {
++		podf = div - 1;
++		reg =
++		    __raw_readl(MXC_CCM_PDR4) & ~MXC_CCM_PDR4_USB_PODF_MASK_V2;
++		reg |= (podf - 1) << MXC_CCM_PDR4_USB_PODF_OFFSET;
++	}
+ 	__raw_writel(reg, MXC_CCM_PDR4);
+-
+ 	clk->rate = rate;
+ 	return 0;
+ }
+ 
+ static void _clk_csi_recalc(struct clk *clk)
+ {
+-	u32 reg;
+-	u32 pre, post;
+-
+-	reg = __raw_readl(MXC_CCM_PDR2);
+-	pre = (reg & MXC_CCM_PDR2_CSI_PRDF_MASK) >>
+-	    MXC_CCM_PDR2_CSI_PRDF_OFFSET;
+-	post = (reg & MXC_CCM_PDR2_CSI_PODF_MASK) >>
+-	    MXC_CCM_PDR2_CSI_PODF_OFFSET;
+-	clk->rate = clk->parent->rate / ((pre + 1) * (post + 1));
++	u32 podf, prdf;
++
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		prdf = PDR2(MXC_CCM_PDR2_CSI_PRDF_MASK,
++			    MXC_CCM_PDR2_CSI_PRDF_OFFSET);
++		podf =
++		    PDR2(MXC_CCM_PDR2_CSI_PODF_MASK,
++			 MXC_CCM_PDR2_CSI_PODF_OFFSET);
++		clk->rate = clk->parent->rate / ((prdf + 1) * (podf + 1));
++	} else {
++		podf =
++		    PDR2(MXC_CCM_PDR2_CSI_PODF_MASK_V2,
++			 MXC_CCM_PDR2_CSI_PODF_OFFSET);
++		clk->rate = clk->parent->rate / (podf + 1);
++	}
+ }
+ 
+ static int _clk_csi_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	u32 reg;
+ 	u32 div;
+-	u32 pre, post;
++	u32 prdf, podf;
+ 
+ 	div = clk->parent->rate / rate;
+ 
+ 	if ((clk->parent->rate / div) != rate)
+ 		return -EINVAL;
+ 
+-	__calc_two_dividers(div, &pre, &post);
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		__calc_two_dividers(div, &prdf, &podf);
++		reg = __raw_readl(MXC_CCM_PDR2) &
++		    ~(MXC_CCM_PDR2_CSI_PRDF_MASK | MXC_CCM_PDR2_CSI_PODF_MASK);
++		reg |= (podf - 1) << MXC_CCM_PDR2_CSI_PODF_OFFSET;
++		reg |= (prdf - 1) << MXC_CCM_PDR2_CSI_PRDF_OFFSET;
++	} else {
++		reg =
++		    __raw_readl(MXC_CCM_PDR2) & ~MXC_CCM_PDR2_CSI_PODF_MASK_V2;
++		reg |= (div - 1) << MXC_CCM_PDR2_CSI_PODF_OFFSET;
++	}
+ 
+ 	/* Set CSI clock divider */
+-	reg = __raw_readl(MXC_CCM_PDR2) &
+-	    ~(MXC_CCM_PDR2_CSI_PRDF_MASK | MXC_CCM_PDR2_CSI_PODF_MASK);
+-	reg |= (post - 1) << MXC_CCM_PDR2_CSI_PODF_OFFSET;
+-	reg |= (pre - 1) << MXC_CCM_PDR2_CSI_PRDF_OFFSET;
+ 	__raw_writel(reg, MXC_CCM_PDR2);
+-
+ 	clk->rate = rate;
+ 	return 0;
+ }
+@@ -614,29 +645,46 @@ static int _clk_csi_set_parent(struct clk *clk, struct clk *parent)
+ 
+ static void _clk_per_recalc(struct clk *clk)
+ {
+-	unsigned long per_prdf = 0, per_podf;
+-
+-	if (clk->parent == &cpu_clk) {
+-		per_prdf = PDR4(MXC_CCM_PDR4_PER0_PRDF_MASK,
+-				MXC_CCM_PDR4_PER0_PRDF_OFFSET);
+-		per_podf = PDR4(MXC_CCM_PDR4_PER0_PODF_MASK,
+-				MXC_CCM_PDR4_PER0_PODF_OFFSET);
++	u32 podf = 0, prdf = 0;
++
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		if (clk->parent == &cpu_clk) {
++			prdf = PDR4(MXC_CCM_PDR4_PER0_PRDF_MASK,
++				    MXC_CCM_PDR4_PER0_PRDF_OFFSET);
++			podf = PDR4(MXC_CCM_PDR4_PER0_PODF_MASK,
++				    MXC_CCM_PDR4_PER0_PODF_OFFSET);
++		} else {
++			podf = PDR0(MXC_CCM_PDR0_PER_PODF_MASK,
++				    MXC_CCM_PDR0_PER_PODF_OFFSET);
++		}
++		clk->rate = clk->parent->rate / ((podf + 1) * (prdf + 1));
+ 	} else {
+-		per_podf = PDR0(MXC_CCM_PDR0_PER_PODF_MASK,
+-				MXC_CCM_PDR0_PER_PODF_OFFSET);
++		if (clk->parent == &ahb_clk)
++			podf = PDR0(MXC_CCM_PDR0_PER_PODF_MASK,
++				    MXC_CCM_PDR0_PER_PODF_OFFSET);
++		else if (clk->parent == &cpu_clk) {
++			podf = PDR4(MXC_CCM_PDR4_PER0_PODF_MASK_V2,
++				    MXC_CCM_PDR4_PER0_PODF_OFFSET);
++		}
++		clk->rate = clk->parent->rate / (podf + 1);
+ 	}
+-	per_podf = (per_podf + 1) * (per_prdf + 1);
+-	clk->rate = clk->parent->rate / per_podf;
+ }
+ 
+ static void _clk_uart_per_recalc(struct clk *clk)
+ {
+-	unsigned long pre_pdf, pro_pdf;
+-	pre_pdf = PDR4(MXC_CCM_PDR4_UART_PRDF_MASK,
+-		       MXC_CCM_PDR4_UART_PRDF_OFFSET);
+-	pro_pdf = PDR4(MXC_CCM_PDR4_UART_PODF_MASK,
+-		       MXC_CCM_PDR4_UART_PODF_OFFSET);
+-	clk->rate = clk->parent->rate / ((pre_pdf + 1) * (pro_pdf + 1));
++	unsigned long podf, prdf;
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		prdf = PDR4(MXC_CCM_PDR4_UART_PRDF_MASK,
++			    MXC_CCM_PDR4_UART_PRDF_OFFSET);
++		podf = PDR4(MXC_CCM_PDR4_UART_PODF_MASK,
++			    MXC_CCM_PDR4_UART_PODF_OFFSET);
++		clk->rate = clk->parent->rate / ((prdf + 1) * (podf + 1));
++	} else {
++		podf =
++		    PDR4(MXC_CCM_PDR4_UART_PODF_MASK_V2,
++			 MXC_CCM_PDR4_UART_PODF_OFFSET);
++		clk->rate = clk->parent->rate / (podf + 1);
++	}
+ 
+ }
+ 
+@@ -644,22 +692,27 @@ static int _clk_uart_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	u32 reg;
+ 	u32 div;
+-	u32 pre, post;
++	u32 prdf, podf;
+ 
+ 	div = clk->parent->rate / rate;
+ 
+ 	if ((clk->parent->rate / div) != rate)
+ 		return -EINVAL;
+ 
+-	__calc_two_dividers(div, &pre, &post);
+-
+-	/* Set CSI clock divider */
+-	reg = __raw_readl(MXC_CCM_PDR4) &
+-	    ~(MXC_CCM_PDR4_UART_PRDF_MASK | MXC_CCM_PDR4_UART_PODF_MASK);
+-	reg |= (post - 1) << MXC_CCM_PDR4_UART_PODF_OFFSET;
+-	reg |= (pre - 1) << MXC_CCM_PDR4_UART_PRDF_OFFSET;
++	/* Set UART clock divider */
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		__calc_two_dividers(div, &prdf, &podf);
++		reg = __raw_readl(MXC_CCM_PDR4) &
++		    ~(MXC_CCM_PDR4_UART_PRDF_MASK |
++		      MXC_CCM_PDR4_UART_PODF_MASK);
++		reg |= (podf - 1) << MXC_CCM_PDR4_UART_PODF_OFFSET;
++		reg |= (prdf - 1) << MXC_CCM_PDR4_UART_PRDF_OFFSET;
++	} else {
++		reg =
++		    __raw_readl(MXC_CCM_PDR4) & ~MXC_CCM_PDR4_UART_PODF_MASK_V2;
++		reg |= (div - 1) << MXC_CCM_PDR4_UART_PODF_OFFSET;
++	}
+ 	__raw_writel(reg, MXC_CCM_PDR4);
+-
+ 	clk->rate = rate;
+ 	return 0;
+ }
+@@ -812,16 +865,6 @@ static void _clk_asrc_recalc(struct clk *clk)
+ 	clk->rate = clk->parent->rate / (div + 1);
+ }
+ 
+-static unsigned long _clk_asrc_round_rate(struct clk *clk, unsigned long rate)
+-{
+-	unsigned long div;
+-	div = clk->parent->rate / rate;
+-	if ((clk->parent->rate % rate))
+-		div++;
+-
+-	return clk->parent->rate / div;
+-}
+-
+ static int _clk_asrc_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	int div;
+@@ -839,66 +882,98 @@ static int _clk_asrc_set_rate(struct clk *clk, unsigned long rate)
+ 
+ static void _clk_sdhc_recalc(struct clk *clk)
+ {
+-	unsigned long prdf, podf;
++	u32 podf = 0, prdf = 0;
++
+ 	switch (clk->id) {
+ 	case 0:
+-		prdf = PDR3(MXC_CCM_PDR3_ESDHC1_PRDF_MASK,
+-			    MXC_CCM_PDR3_ESDHC1_PRDF_OFFSET);
+-		podf = PDR3(MXC_CCM_PDR3_ESDHC1_PODF_MASK,
+-			    MXC_CCM_PDR3_ESDHC1_PODF_OFFSET);
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++			prdf = PDR3(MXC_CCM_PDR3_ESDHC1_PRDF_MASK,
++				    MXC_CCM_PDR3_ESDHC1_PRDF_OFFSET);
++			podf = PDR3(MXC_CCM_PDR3_ESDHC1_PODF_MASK,
++				    MXC_CCM_PDR3_ESDHC1_PODF_OFFSET);
++		} else
++			podf = PDR3(MXC_CCM_PDR3_ESDHC1_PODF_MASK_V2,
++				    MXC_CCM_PDR3_ESDHC1_PODF_OFFSET);
+ 		break;
+ 	case 1:
+-		prdf = PDR3(MXC_CCM_PDR3_ESDHC2_PRDF_MASK,
+-			    MXC_CCM_PDR3_ESDHC2_PRDF_OFFSET);
+-		podf = PDR3(MXC_CCM_PDR3_ESDHC2_PODF_MASK,
+-			    MXC_CCM_PDR3_ESDHC2_PODF_OFFSET);
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++			prdf = PDR3(MXC_CCM_PDR3_ESDHC2_PRDF_MASK,
++				    MXC_CCM_PDR3_ESDHC2_PRDF_OFFSET);
++			podf = PDR3(MXC_CCM_PDR3_ESDHC2_PODF_MASK,
++				    MXC_CCM_PDR3_ESDHC2_PODF_OFFSET);
++		} else
++			podf = PDR3(MXC_CCM_PDR3_ESDHC2_PODF_MASK_V2,
++				    MXC_CCM_PDR3_ESDHC2_PODF_OFFSET);
+ 		break;
+ 	case 2:
+-		prdf = PDR3(MXC_CCM_PDR3_ESDHC3_PRDF_MASK,
+-			    MXC_CCM_PDR3_ESDHC3_PRDF_OFFSET);
+-		podf = PDR3(MXC_CCM_PDR3_ESDHC3_PODF_MASK,
+-			    MXC_CCM_PDR3_ESDHC3_PODF_OFFSET);
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++			prdf = PDR3(MXC_CCM_PDR3_ESDHC3_PRDF_MASK,
++				    MXC_CCM_PDR3_ESDHC3_PRDF_OFFSET);
++			podf = PDR3(MXC_CCM_PDR3_ESDHC3_PODF_MASK,
++				    MXC_CCM_PDR3_ESDHC3_PODF_OFFSET);
++		} else
++			podf = PDR3(MXC_CCM_PDR3_ESDHC3_PODF_MASK_V2,
++				    MXC_CCM_PDR3_ESDHC3_PODF_OFFSET);
+ 		break;
+ 	default:
+ 		return;
+ 	}
+-	clk->rate = clk->parent->rate / ((prdf + 1) * (podf + 1));
++	clk->rate = clk->parent->rate / ((podf + 1) * (prdf + 1));
+ }
+ 
+ static int _clk_sdhc_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	u32 reg;
+ 	u32 div;
+-	u32 pre, post;
++	u32 prdf, podf;
+ 
+ 	div = clk->parent->rate / rate;
+ 
+ 	if ((clk->parent->rate / div) != rate)
+ 		return -EINVAL;
+ 
+-	__calc_pre_post_dividers(div, &pre, &post);
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1)
++		__calc_pre_post_dividers(div, &prdf, &podf);
+ 
+ 	switch (clk->id) {
+ 	case 0:
+-		reg = __raw_readl(MXC_CCM_PDR3) &
+-		    ~(MXC_CCM_PDR3_ESDHC1_PRDF_MASK |
+-		      MXC_CCM_PDR3_ESDHC1_PODF_MASK);
+-		reg |= (post - 1) << MXC_CCM_PDR3_ESDHC1_PODF_OFFSET;
+-		reg |= (pre - 1) << MXC_CCM_PDR3_ESDHC1_PRDF_OFFSET;
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++			reg = __raw_readl(MXC_CCM_PDR3) &
++			    ~(MXC_CCM_PDR3_ESDHC1_PRDF_MASK |
++			      MXC_CCM_PDR3_ESDHC1_PODF_MASK);
++			reg |= (podf - 1) << MXC_CCM_PDR3_ESDHC1_PODF_OFFSET;
++			reg |= (prdf - 1) << MXC_CCM_PDR3_ESDHC1_PRDF_OFFSET;
++		} else {
++			reg = __raw_readl(MXC_CCM_PDR3) &
++			    ~MXC_CCM_PDR3_ESDHC1_PODF_MASK_V2;
++			reg |= (div - 1) << MXC_CCM_PDR3_ESDHC1_PODF_OFFSET;
++		}
+ 		break;
+ 	case 1:
+-		reg = __raw_readl(MXC_CCM_PDR3) &
+-		    ~(MXC_CCM_PDR3_ESDHC2_PRDF_MASK |
+-		      MXC_CCM_PDR3_ESDHC2_PODF_MASK);
+-		reg |= (post - 1) << MXC_CCM_PDR3_ESDHC2_PODF_OFFSET;
+-		reg |= (pre - 1) << MXC_CCM_PDR3_ESDHC2_PRDF_OFFSET;
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++			reg = __raw_readl(MXC_CCM_PDR3) &
++			    ~(MXC_CCM_PDR3_ESDHC2_PRDF_MASK |
++			      MXC_CCM_PDR3_ESDHC2_PODF_MASK);
++			reg |= (podf - 1) << MXC_CCM_PDR3_ESDHC2_PODF_OFFSET;
++			reg |= (prdf - 1) << MXC_CCM_PDR3_ESDHC2_PRDF_OFFSET;
++		} else {
++			reg = __raw_readl(MXC_CCM_PDR3) &
++			    ~MXC_CCM_PDR3_ESDHC2_PODF_MASK_V2;
++			reg |= (div - 1) << MXC_CCM_PDR3_ESDHC2_PODF_OFFSET;
++		}
+ 		break;
+ 	case 2:
+-		reg = __raw_readl(MXC_CCM_PDR3) &
+-		    ~(MXC_CCM_PDR3_ESDHC3_PRDF_MASK |
+-		      MXC_CCM_PDR3_ESDHC3_PODF_MASK);
+-		reg |= (post - 1) << MXC_CCM_PDR3_ESDHC3_PODF_OFFSET;
+-		reg |= (pre - 1) << MXC_CCM_PDR3_ESDHC3_PRDF_OFFSET;
++		if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++			reg = __raw_readl(MXC_CCM_PDR3) &
++			    ~(MXC_CCM_PDR3_ESDHC3_PRDF_MASK |
++			      MXC_CCM_PDR3_ESDHC3_PODF_MASK);
++			reg |= (podf - 1) << MXC_CCM_PDR3_ESDHC3_PODF_OFFSET;
++			reg |= (prdf - 1) << MXC_CCM_PDR3_ESDHC3_PRDF_OFFSET;
++		} else {
++			reg = __raw_readl(MXC_CCM_PDR3) &
++			    ~MXC_CCM_PDR3_ESDHC3_PODF_MASK_V2;
++			reg |= (div - 1) << MXC_CCM_PDR3_ESDHC3_PODF_OFFSET;
++		}
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -994,7 +1069,7 @@ static struct clk asrc_clk[] = {
+ 	 .name = "asrc_audio_clk",
+ 	 .parent = &ckie_clk,
+ 	 .recalc = _clk_asrc_recalc,
+-	 .round_rate = _clk_asrc_round_rate,
++	 .round_rate = _clk_round_rate,
+ 	 .set_rate = _clk_asrc_set_rate,
+ 	 .enable = _clk_asrc_enable,
+ 	 .disable = _clk_asrc_disable,},
+@@ -1391,7 +1466,7 @@ static struct clk wdog_clk = {
+ 
+ static struct clk csi_clk = {
+ 	.name = "csi_clk",
+-	.parent = &cpu_clk,
++	.parent = &peri_pll_clk,
+ 	.recalc = _clk_csi_recalc,
+ 	.round_rate = _clk_round_rate,
+ 	.set_rate = _clk_csi_set_rate,
+@@ -1419,47 +1494,53 @@ static struct clk nfc_clk = {
+ 
+ static unsigned long _clk_cko1_round_rate(struct clk *clk, unsigned long rate)
+ {
+-	u32 div;
++	u32 div = 0, div1 = 1;
+ 
+ 	div = clk->parent->rate / rate;
+ 	if (clk->parent->rate % rate)
+ 		div++;
+ 
+-	if (div > 64)
+-		div = (div + 1) & (~1);
++	if (div > 64) {
++		div = (div + 1) >> 1;
++		div1++;
++	}
+ 
+ 	if (div > 128)
+-		return -EINVAL;
+-
+-	return clk->parent->rate / div;
++		div = 64;
++	return clk->parent->rate / (div * div1);
+ }
+ 
+ static int _clk_cko1_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	u32 reg;
+-	u32 div, div2;
+-	u32 pre, post;
++	u32 div, div1 = 0;
++	u32 prdf, podf;
+ 
+ 	div = clk->parent->rate / rate;
+-
+ 	if ((clk->parent->rate / div) != rate)
+ 		return -EINVAL;
+ 	if (div > 64) {
+-		if (div % 1)
+-			return -EINVAL;
+-		div2 = MXC_CCM_COSR_CLKOUTDIV_1;
++		div1 = MXC_CCM_COSR_CLKOUTDIV_1;
+ 		div >>= 1;
+ 	} else {
+-		div2 = 0;
++		div1 = 0;
+ 	}
+ 
+-	__calc_two_dividers(div, &pre, &post);
+-
+-	reg = __raw_readl(MXC_CCM_COSR) &
+-	    ~(MXC_CCM_COSR_CLKOUT_PREDIV_MASK |
+-	      MXC_CCM_COSR_CLKOUT_PRODIV_MASK | MXC_CCM_COSR_CLKOUTDIV_1);
+-	reg |= ((pre - 1) << MXC_CCM_COSR_CLKOUT_PREDIV_OFFSET) |
+-	    ((post - 1) << MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET) | div2;
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		__calc_two_dividers(div, &prdf, &podf);
++		reg = __raw_readl(MXC_CCM_COSR) &
++		    ~(MXC_CCM_COSR_CLKOUT_PREDIV_MASK |
++		      MXC_CCM_COSR_CLKOUT_PRODIV_MASK |
++		      MXC_CCM_COSR_CLKOUTDIV_1);
++		reg |= ((prdf - 1) << MXC_CCM_COSR_CLKOUT_PREDIV_OFFSET)
++		    | ((podf - 1) << MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET)
++		    | div1;
++	} else {
++		reg = __raw_readl(MXC_CCM_COSR) &
++		    ~(MXC_CCM_COSR_CLKOUT_PRODIV_MASK_V2 |
++		      MXC_CCM_COSR_CLKOUTDIV_1);
++		reg |= ((div - 1) << MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET) | div1;
++	}
+ 	__raw_writel(reg, MXC_CCM_COSR);
+ 
+ 	return 0;
+@@ -1467,17 +1548,21 @@ static int _clk_cko1_set_rate(struct clk *clk, unsigned long rate)
+ 
+ static void _clk_cko1_recalc(struct clk *clk)
+ {
+-	u32 pre, post, factor;
++	u32 prdf = 1;
++	u32 podf, div1;
+ 	u32 reg = __raw_readl(MXC_CCM_COSR);
+ 
+-	pre = (reg & MXC_CCM_COSR_CLKOUT_PREDIV_MASK) >>
+-	    MXC_CCM_COSR_CLKOUT_PREDIV_OFFSET;
+-
+-	post = (reg & MXC_CCM_COSR_CLKOUT_PRODIV_MASK) >>
+-	    MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET;
+-
+-	factor = 1 << ((reg & MXC_CCM_COSR_CLKOUTDIV_1) != 0);
+-	clk->rate = clk->parent->rate / (factor * (pre + 1) * (post + 1));
++	div1 = 1 << ((reg & MXC_CCM_COSR_CLKOUTDIV_1) != 0);
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) < 1) {
++		prdf = (reg & MXC_CCM_COSR_CLKOUT_PREDIV_MASK) >>
++		    MXC_CCM_COSR_CLKOUT_PREDIV_OFFSET;
++		podf = (reg & MXC_CCM_COSR_CLKOUT_PRODIV_MASK) >>
++		    MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET;
++	} else
++		podf = (reg & MXC_CCM_COSR_CLKOUT_PRODIV_MASK_V2) >>
++		    MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET;
++
++	clk->rate = clk->parent->rate / (div1 * (podf + 1) * (prdf + 1));
+ }
+ 
+ static int _clk_cko1_set_parent(struct clk *clk, struct clk *parent)
+@@ -1485,11 +1570,12 @@ static int _clk_cko1_set_parent(struct clk *clk, struct clk *parent)
+ 	u32 reg;
+ 	reg = __raw_readl(MXC_CCM_COSR) & ~MXC_CCM_COSR_CLKOSEL_MASK;
+ 
+-	if (parent == &ckil_clk)
++	if (parent == &ckil_clk) {
++		reg &= ~MXC_CCM_COSR_CKIL_CKIH_MASK;
+ 		reg |= 0 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+-	else if (parent == &ckih_clk)
++	} else if (parent == &ckih_clk) {
+ 		reg |= 1 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+-	else if (parent == &ckie_clk)
++	} else if (parent == &ckie_clk)
+ 		reg |= 2 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+ 	else if (parent == &peri_pll_clk)
+ 		reg |= 6 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+@@ -1515,6 +1601,10 @@ static int _clk_cko1_set_parent(struct clk *clk, struct clk *parent)
+ 		reg |= 0x13 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+ 	else if (parent == &asrc_clk[1])
+ 		reg |= 0x14 << MXC_CCM_COSR_CLKOSEL_OFFSET;
++	else if ((parent == &nfc_clk) && (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1))
++		reg |= 0x17 << MXC_CCM_COSR_CLKOSEL_OFFSET;
++	else if ((parent == &ipu_clk) && (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1))
++		reg |= 0x18 << MXC_CCM_COSR_CLKOSEL_OFFSET;
+ 	else
+ 		return -EINVAL;
+ 
+@@ -1663,6 +1753,12 @@ static void mxc_clockout_scan(void)
+ 	case 0x14:
+ 		cko1_clk.parent = &asrc_clk[1];
+ 		break;
++	case 0x17:
++		cko1_clk.parent = &nfc_clk;
++		break;
++	case 0x18:
++		cko1_clk.parent = &ipu_clk;
++		break;
+ 	}
+ }
+ 
+@@ -1670,7 +1766,8 @@ static void mxc_update_clocks(void)
+ {
+ 	unsigned long reg;
+ 	reg = __raw_readl(MXC_CCM_PDR0);
+-	if (!(reg & MXC_CCM_PDR0_AUTO_CON))
++	if ((!(reg & MXC_CCM_PDR0_AUTO_CON))
++	    && (cpu_is_mx35_rev(CHIP_REV_2_0) < 1))
+ 		ipu_clk.parent = &ahb_clk;
+ 
+ 	if (reg & MXC_CCM_PDR0_PER_SEL)
+diff --git a/arch/arm/mach-mx35/cpu.c b/arch/arm/mach-mx35/cpu.c
+index 021d547..2737575 100644
+--- a/arch/arm/mach-mx35/cpu.c
++++ b/arch/arm/mach-mx35/cpu.c
+@@ -31,10 +31,15 @@
+  */
+ void __init mxc_cpu_init(void)
+ {
++
+ 	/* Setup Peripheral Port Remap register for AVIC */
+ 	asm("ldr r0, =0xC0000015				\n\
+ 	 mcr p15, 0, r0, c15, c2, 4");
+ 	/*TODO:Add code to check chip version */
++
++	if (!system_rev)
++		mxc_set_system_rev(0x35, CHIP_REV_1_0);
++
+ }
+ 
+ /*!
+diff --git a/arch/arm/mach-mx35/crm_regs.h b/arch/arm/mach-mx35/crm_regs.h
+index 93c2e30..3593807 100644
+--- a/arch/arm/mach-mx35/crm_regs.h
++++ b/arch/arm/mach-mx35/crm_regs.h
+@@ -100,6 +100,9 @@
+ #define MXC_CCM_PDR2_SSI1_PODF_OFFSET           0
+ #define MXC_CCM_PDR2_SSI1_PODF_MASK             (0x3F)
+ 
++/* Extra definitions for Chip Version 2*/
++#define MXC_CCM_PDR2_CSI_PODF_MASK_V2              (0x3F << 16)
++
+ #define MXC_CCM_PDR3_SPDIF_PRDF_OFFSET          29
+ #define MXC_CCM_PDR3_SPDIF_PRDF_MASK            (0x7 << 29)
+ #define MXC_CCM_PDR3_SPDIF_PODF_OFFSET          23
+@@ -120,6 +123,11 @@
+ #define MXC_CCM_PDR3_ESDHC1_PODF_OFFSET         0
+ #define MXC_CCM_PDR3_ESDHC1_PODF_MASK           (0x7)
+ 
++/* Extra definitions for Chip Version 2 */
++#define MXC_CCM_PDR3_ESDHC3_PODF_MASK_V2	(0x3F << 16)
++#define MXC_CCM_PDR3_ESDHC2_PODF_MASK_V2        (0x3F << 8)
++#define MXC_CCM_PDR3_ESDHC1_PODF_MASK_V2        0x3F
++
+ #define MXC_CCM_PDR4_NFC_PODF_OFFSET           	28
+ #define MXC_CCM_PDR4_NFC_PODF_MASK            	(0xF << 28)
+ #define MXC_CCM_PDR4_USB_PRDF_OFFSET          	25
+@@ -136,6 +144,11 @@
+ #define MXC_CCM_PDR4_UART_PODF_MASK            	(0x7 << 10)
+ #define MXC_CCM_PDR4_USB_M_U			(1 << 9)
+ 
++/* Extra definitions for Chip Version 2 */
++#define MXC_CCM_PDR4_USB_PODF_MASK_V2		(0x3F << 22)
++#define MXC_CCM_PDR4_PER0_PODF_MASK_V2		(0x3F << 16)
++#define MXC_CCM_PDR4_UART_PODF_MASK_V2          (0x3F << 10)
++
+ /* Bit definitions for RCSR */
+ #define MXC_CCM_RCSR_BUS_WIDTH			(1 << 29)
+ #define MXC_CCM_RCSR_BUS_16BIT			(1 << 29)
+@@ -170,6 +183,13 @@
+ #define MXC_CCM_ACMR_SSI2_CLK_SEL_OFFSET	0
+ #define MXC_CCM_ACMR_SSI2_CLK_SEL_MASK		(0xF << 0)
+ 
++/* Extra definitions for Version 2 */
++#define MXC_CCM_ACMR_CKILH_PODF0_OFFSET		16
++#define MXC_CCM_ACMR_CKILH_PODF1_OFFSET		19
++#define MXC_CCM_ACMR_CKILH_PODF2_OFFSET		22
++#define MXC_CCM_ACMR_CKILH_PODF3_OFFSET         25
++#define MXC_CCM_ACMR_CKILH_PODF_MASK		0x7
++
+ /* Bit definitions for Clock gating Register*/
+ #define MXC_CCM_CGR0_ASRC_OFFSET             	0
+ #define MXC_CCM_CGR0_ASRC_MASK               	(0x3 << 0)
+@@ -372,10 +392,10 @@
+ #define MXC_CCM_COSR_CLKOSEL_OFFSET             0
+ #define MXC_CCM_COSR_CLKOEN                     (1 << 5)
+ #define MXC_CCM_COSR_CLKOUTDIV_1             	(1 << 6)
+-#define MXC_CCM_COSR_CLKOUT_PREDIV_MASK         (0x7 << 10)
+-#define MXC_CCM_COSR_CLKOUT_PREDIV_OFFSET       10
+-#define MXC_CCM_COSR_CLKOUT_PRODIV_MASK         (0x7 << 13)
+-#define MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET       13
++#define MXC_CCM_COSR_CLKOUT_PREDIV_MASK         (0x7 << 13)
++#define MXC_CCM_COSR_CLKOUT_PREDIV_OFFSET       13
++#define MXC_CCM_COSR_CLKOUT_PRODIV_MASK         (0x7 << 10)
++#define MXC_CCM_COSR_CLKOUT_PRODIV_OFFSET       10
+ #define MXC_CCM_COSR_SSI1_RX_SRC_SEL_MASK       (0x3 << 16)
+ #define MXC_CCM_COSR_SSI1_RX_SRC_SEL_OFFSET     16
+ #define MXC_CCM_COSR_SSI1_TX_SRC_SEL_MASK       (0x3 << 18)
+@@ -388,6 +408,11 @@
+ #define MXC_CCM_COSR_ASRC_AUDIO_PODF_MASK       (0x3F << 26)
+ #define MXC_CCM_COSR_ASRC_AUDIO_PODF_OFFSET     26
+ 
++/* extra definitions for Version 2 */
++#define MXC_CCM_COSR_CKIL_CKIH_MASK		(1 << 7)
++#define MXC_CCM_COSR_CKIL_CKIH_OFFSET		7
++#define MXC_CCM_COSR_CLKOUT_PRODIV_MASK_V2	(0x3F << 10)
++
+ /*
+  * PMCR0 register offsets
+  */
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 9980652..1822f52 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -941,12 +941,17 @@ static struct cpu_wp cpu_wp_con[] = {
+ 
+ struct cpu_wp *get_cpu_wp(int *wp)
+ {
+-	if (__raw_readl(MXC_CCM_PDR0) & MXC_CCM_PDR0_AUTO_CON) {
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1) {
+ 		*wp = 9;
+ 		return cpu_wp_con;
+ 	} else {
+-		*wp = 6;
+-		return cpu_wp_auto;
++		if (__raw_readl(MXC_CCM_PDR0) & MXC_CCM_PDR0_AUTO_CON) {
++			*wp = 9;
++			return cpu_wp_con;
++		} else {
++			*wp = 6;
++			return cpu_wp_auto;
++		}
+ 	}
+ }
+ 
+-- 
+1.5.4.4
+

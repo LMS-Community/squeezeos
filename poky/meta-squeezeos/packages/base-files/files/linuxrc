@@ -29,10 +29,26 @@ MOUNT_OK=$?
 /bin/grep -q factoryreset /proc/cmdline
 FACTORY_RESET=$?
 
+# Forced factory reset
+SQUEEZEOS_VERSION=`/usr/bin/head -1 /mnt/storage/etc/squeezeos.version | /usr/bin/cut -dr -f2`
+
+/bin/grep -q Fab4 /proc/cpuinfo
+if [ $? -eq 0 ]; then
+    if [ $SQUEEZEOS_VERSION -lt 4398 ]; then
+        FACTORY_RESET=0
+     fi
+fi
+
 # Factory reset
 if [ $MOUNT_OK -ne 0 -o -f /mnt/storage/.factoryreset -o $FACTORY_RESET -eq 0 ]
 then
 	/bin/echo "Factory Reset"
+	/bin/cat /usr/share/images/factoryreset.fb > /dev/fb0
+
+	/bin/grep -q Baby /proc/cpuinfo
+	if [ $? -eq 0 ]; then
+		echo "erase" > /sys/devices/platform/i2c-adapter\:i2c-1/1-0010/flash
+	fi
 
 	/bin/umount /mnt/storage
 	/usr/sbin/flash_eraseall -q ${MOUNT_MTD}
@@ -49,6 +65,9 @@ else
 		# Remove modified files
 		/bin/echo "SqueezeOS Upgraded"
 		/usr/bin/find /mnt/storage/ -type f | /bin/grep -v -f /etc/keep-after-upgrade | /usr/bin/xargs /bin/rm -f
+
+		# Delete udev cache
+		/bin/rm -f /etc/dev.tar
 
 		# Store version
 		/bin/mkdir -p /mnt/storage/etc
@@ -67,6 +86,9 @@ then
 
 	/bin/mount -t unionfs -o dirs=/mnt/storage=rw:/=ro none /mnt/overlay
 	/bin/mount -o move /dev /mnt/overlay/dev
+
+	/bin/umount /sys
+	/bin/mount -t sysfs none /mnt/overlay/sys/
 
 	/bin/umount /proc
 	/bin/mount -t proc none /mnt/overlay/proc/

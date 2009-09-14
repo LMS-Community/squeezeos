@@ -4,16 +4,10 @@ LICENSE = "LGPL"
 
 DEPENDS = "clutter gstreamer gst-plugins-base"
 
+FILESPATH = "${FILE_DIRNAME}/clutter-gst"
+
 PACKAGES =+ "${PN}-examples"
 FILES_${PN}-examples = "${bindir}/video-player ${bindir}/video-sink ${bindir}/audio"
 
-inherit autotools pkgconfig
-
-do_configure_prepend() {
-        touch ${S}/gtk-doc.make
-}
-
-do_stage () {
-        autotools_stage_all
-}
+inherit autotools_stage pkgconfig gtk-doc
 

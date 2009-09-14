@@ -1,0 +1,165 @@
+From 30274a40b478a26e8dba7b3f383df85e4531bd4f Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Fri, 13 Feb 2009 11:03:12 +0800
+Subject: [PATCH] ENGR00105246 SPI: loopback support and add SCLK ctl inactive state configure
+
+1. Modify chipselect number for loopback so that loopback can be tested without
+modify spi.c.
+2. Make SCLK CTL bit to be consistent with SCLK POL bit to avoid latency clock
+sequence errors.
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ drivers/spi/Kconfig   |    1 +
+ drivers/spi/mxc_spi.c |   50 ++++++++++++++++++++++++++++--------------------
+ 2 files changed, 30 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index fedb8c1..58ce813 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -208,6 +208,7 @@ config SPI_MXC
+ config SPI_MXC_TEST_LOOPBACK
+ 	bool "LOOPBACK Testing of CSPIs"
+ 	depends on SPI_MXC
++	select SPI_SPIDEV
+ 	default n
+ 
+ config SPI_MXC_SELECT1
+diff --git a/drivers/spi/mxc_spi.c b/drivers/spi/mxc_spi.c
+index 432ca1b..036acfe 100644
+--- a/drivers/spi/mxc_spi.c
++++ b/drivers/spi/mxc_spi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -140,6 +140,8 @@ struct mxc_spi_unique_def {
+ 	unsigned int rx_cnt_mask;
+ 	/* Reset start */
+ 	unsigned int reset_start;
++	/* SCLK control inactive state shift */
++	unsigned int sclk_ctl_shift;
+ };
+ 
+ struct mxc_spi;
+@@ -214,7 +216,7 @@ static struct spi_chip_info lb_chip_info = {
+ static struct spi_board_info loopback_info[] = {
+ #ifdef CONFIG_SPI_MXC_SELECT1
+ 	{
+-	 .modalias = "loopback_spi",
++	 .modalias = "spidev",
+ 	 .controller_data = &lb_chip_info,
+ 	 .irq = 0,
+ 	 .max_speed_hz = 4000000,
+@@ -224,7 +226,7 @@ static struct spi_board_info loopback_info[] = {
+ #endif
+ #ifdef CONFIG_SPI_MXC_SELECT2
+ 	{
+-	 .modalias = "loopback_spi",
++	 .modalias = "spidev",
+ 	 .controller_data = &lb_chip_info,
+ 	 .irq = 0,
+ 	 .max_speed_hz = 4000000,
+@@ -234,7 +236,7 @@ static struct spi_board_info loopback_info[] = {
+ #endif
+ #ifdef CONFIG_SPI_MXC_SELECT3
+ 	{
+-	 .modalias = "loopback_spi",
++	 .modalias = "spidev",
+ 	 .controller_data = &lb_chip_info,
+ 	 .irq = 0,
+ 	 .max_speed_hz = 4000000,
+@@ -278,6 +280,7 @@ static struct mxc_spi_unique_def spi_ver_2_3 = {
+ 	.rx_cnt_off = 8,
+ 	.rx_cnt_mask = (0x7F << 8),
+ 	.reset_start = 0,
++	.sclk_ctl_shift = 20,
+ };
+ 
+ static struct mxc_spi_unique_def spi_ver_0_7 = {
+@@ -585,9 +588,8 @@ void mxc_spi_chipselect(struct spi_device *spi, int is_active)
+ 		    ((spi->chip_select & MXC_CSPICTRL_CSMASK) << spi_ver_def->
+ 		     cs_shift);
+ 		ctrl_reg |=
+-		    (((1 << spi->
+-		       chip_select) & spi_ver_def->mode_mask) <<
+-		     spi_ver_def->mode_shift);
++		    (((1 << (spi->chip_select & MXC_CSPICTRL_CSMASK)) &
++		      spi_ver_def->mode_mask) << spi_ver_def->mode_shift);
+ 		ctrl_reg |=
+ 		    spi_find_baudrate(master_drv_data, spi->max_speed_hz);
+ 		ctrl_reg |=
+@@ -596,22 +598,28 @@ void mxc_spi_chipselect(struct spi_device *spi, int is_active)
+ 
+ 		if (spi->mode & SPI_CPHA)
+ 			config_reg |=
+-			    (((1 << spi->
+-			       chip_select) & spi_ver_def->
+-			      mode_mask) << spi_ver_def->pha_shift);
+-		if ((spi->mode & SPI_CPOL))
++			    (((1 << (spi->chip_select & MXC_CSPICTRL_CSMASK)) &
++			      spi_ver_def->mode_mask) <<
++			     spi_ver_def->pha_shift);
++
++		if ((spi->mode & SPI_CPOL)) {
+ 			config_reg |=
+-			    (((1 << spi->
+-			       chip_select) & spi_ver_def->mode_mask) <<
++			    (((1 << (spi->chip_select & MXC_CSPICTRL_CSMASK)) &
++			      spi_ver_def->mode_mask) <<
+ 			     spi_ver_def->low_pol_shift);
++			config_reg |=
++			    (((1 << (spi->chip_select & MXC_CSPICTRL_CSMASK)) &
++			      spi_ver_def->mode_mask) <<
++			     spi_ver_def->sclk_ctl_shift);
++		}
+ 		if (spi->mode & SPI_CS_HIGH)
+ 			config_reg |=
+-			    (((1 << spi->
+-			       chip_select) & spi_ver_def->
+-			      mode_mask) << spi_ver_def->ss_pol_shift);
++			    (((1 << (spi->chip_select & MXC_CSPICTRL_CSMASK)) &
++			      spi_ver_def->mode_mask) <<
++			     spi_ver_def->ss_pol_shift);
+ 		config_reg |=
+-		    (((1 << spi->chip_select) & spi_ver_def->
+-		      mode_mask) << spi_ver_def->ss_ctrl_shift);
++		    (((1 << (spi->chip_select & MXC_CSPICTRL_CSMASK)) &
++		      spi_ver_def->mode_mask) << spi_ver_def->ss_ctrl_shift);
+ 
+ 		__raw_writel(ctrl_reg, master_drv_data->base + MXC_CSPICTRL);
+ 		__raw_writel(config_reg,
+@@ -823,7 +831,6 @@ int mxc_spi_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 	master_drv_data = spi_master_get_devdata(spi->master);
+ 
+ 	clk_enable(master_drv_data->clk);
+-
+ 	/* Modify the Tx, Rx, Count */
+ 	master_drv_data->transfer.tx_buf = t->tx_buf;
+ 	master_drv_data->transfer.rx_buf = t->rx_buf;
+@@ -843,7 +850,6 @@ int mxc_spi_transfer(struct spi_device *spi, struct spi_transfer *t)
+ 	spi_put_tx_data(master_drv_data->base, count, master_drv_data);
+ 
+ 	/* Wait for transfer completion */
+-
+ 	wait_for_completion(&master_drv_data->xfer_done);
+ 
+ 	/* Disable the Rx Interrupts */
+@@ -911,7 +917,9 @@ static int mxc_spi_probe(struct platform_device *pdev)
+ 
+ 	master->bus_num = pdev->id + 1;
+ 	master->num_chipselect = mxc_platform_info->maxchipselect;
+-
++#ifdef CONFIG_SPI_MXC_TEST_LOOPBACK
++	master->num_chipselect += 1;
++#endif
+ 	/* Set the master controller driver data for this master */
+ 
+ 	master_drv_data = spi_master_get_devdata(master);
+-- 
+1.5.4.4
+

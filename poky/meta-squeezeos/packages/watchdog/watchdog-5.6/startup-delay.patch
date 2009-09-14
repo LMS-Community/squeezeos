@@ -1,0 +1,55 @@
+Index: watchdog-5.6/src/watchdog.c
+===================================================================
+--- watchdog-5.6.orig/src/watchdog.c	2009-06-09 09:01:32.000000000 +0100
++++ watchdog-5.6/src/watchdog.c	2009-06-11 20:38:38.000000000 +0100
+@@ -76,6 +76,7 @@
+ #define HEARTBEAT	"heartbeat-file"
+ #define HBSTAMPS	"heartbeat-stamps"
+ #define SEMKEY		"semkey"
++#define STARTUPDELAY	"startup-delay"
+ 
+ pid_t pid;
+ int softboot = FALSE, watchdog = -1, load = -1, mem = -1, temp = -1;
+@@ -90,6 +91,7 @@
+ FILE *hb;
+ key_t semkey;
+ int semid = -1;
++int startupdelay = 0;
+ 
+ #if defined(_POSIX_MEMLOCK)
+ int mlocked = FALSE, realtime = FALSE;
+@@ -431,6 +433,12 @@
+ 		else {
+ 			semkey = atol(line + i);
+ 		}
++	    } else if (strncmp(line + i, STARTUPDELAY, strlen(STARTUPDELAY)) == 0) {
++		if (spool(line, &i, strlen(STARTUPDELAY)))
++			fprintf(stderr, "Ignoring invalid line in config file:\n%s\n", line);
++		else {
++			startupdelay = atol(line + i);
++		}
+ 	    } else {
+ 		fprintf(stderr, "Ignoring invalid line in config file:\n%s\n", line);
+ 	    }
+@@ -854,6 +862,21 @@
+     }
+ #endif
+ 
++    /* startup delay */
++    while (startupdelay > 0) {
++	int delay;
++
++	wd_action(keep_alive(), rbinary, NULL);
++
++	delay = (tint >> 1) + (tint % 2);
++	if (delay > startupdelay) {
++	    delay = startupdelay;
++	}
++
++	startupdelay -= delay;
++	sleep(delay);
++    }
++
+     /* main loop: update after <tint> seconds */
+     while (_running) {
+ 	wd_action(keep_alive(), rbinary, NULL);

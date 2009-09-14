@@ -1,0 +1,37 @@
+From af3457df3fc8b014ca6da9df77e13c760c17497d Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Tue, 18 Dec 2007 19:14:46 -0500
+Subject: [PATCH] Unionfs: release special files on copyup
+
+If we copyup a special file (char, block, etc.), then dput the source
+object.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    7 +++----
+ 1 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 3fe4865..f48209f 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -505,13 +505,12 @@ out_unlock:
+ 
+ out_free:
+ 	/*
+-	 * If old_lower_dentry was a directory, we need to dput it.  If it
+-	 * was a file, then it was already dput indirectly by other
++	 * If old_lower_dentry was not a file, then we need to dput it.  If
++	 * it was a file, then it was already dput indirectly by other
+ 	 * functions we call above which operate on regular files.
+ 	 */
+ 	if (old_lower_dentry && old_lower_dentry->d_inode &&
+-	    (S_ISDIR(old_lower_dentry->d_inode->i_mode) ||
+-	     S_ISLNK(old_lower_dentry->d_inode->i_mode)))
++	    !S_ISREG(old_lower_dentry->d_inode->i_mode))
+ 		dput(old_lower_dentry);
+ 	kfree(symbuf);
+ 
+-- 
+1.5.4.3
+

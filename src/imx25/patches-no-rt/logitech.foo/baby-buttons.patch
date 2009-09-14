@@ -1,0 +1,182 @@
+Index: linux-2.6.26/drivers/mxc/baby/Kconfig
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/Kconfig	2009-04-20 20:42:06.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/Kconfig	2009-04-21 14:49:34.000000000 +0100
+@@ -11,4 +11,11 @@
+ 	---help---
+ 	This driver allows debugging Baby GPIOs via the /sys interface.
+ 
++config MXC_BABY_BUTTONS
++	bool "Baby Buttons"
++	depends on MACH_MX25_BABY
++	default n
++	---help---
++	This driver adds support the the GPIO buttons on baby.
++
+ endmenu
+Index: linux-2.6.26/drivers/mxc/baby/Makefile
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/Makefile	2009-04-20 20:42:06.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/Makefile	2009-04-21 14:49:34.000000000 +0100
+@@ -3,3 +3,4 @@
+ #
+ 
+ obj-$(CONFIG_MXC_BABY_DEBUG_GPIO)       += baby_gpio.o
++obj-$(CONFIG_MXC_BABY_BUTTONS)          += baby_buttons.o
+Index: linux-2.6.26/drivers/mxc/baby/baby_buttons.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/baby_buttons.c	2009-04-21 14:07:47.000000000 +0100
+@@ -0,0 +1,152 @@
++/*
++ * Copyright 2009 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/input.h>
++#include <linux/irq.h>
++
++#include <asm/arch/gpio.h>
++
++
++#define NUM_BUTTONS 4
++
++unsigned int button_codes[] = {
++	KEY_MUTE,
++	KEY_RIGHT,
++	KEY_POWER,
++	KEY_AUDIO,
++};
++
++struct baby_buttons {
++	struct input_dev *inputdev;
++
++	unsigned int gpio[NUM_BUTTONS];
++	int value[NUM_BUTTONS];
++	unsigned int *code;
++};
++
++
++static irqreturn_t button_irq(int irq, void *data)
++{
++	struct baby_buttons *state = (struct baby_buttons *) data;
++	int i;
++
++	for (i=0; i<NUM_BUTTONS; i++) {
++		unsigned int gpio = state->gpio[i];
++		int old_value = state->value[i];
++
++		state->value[i] = mxc_get_gpio_datain(gpio);
++		if (state->value[i]) {
++			set_irq_type(IOMUX_TO_IRQ(gpio),  IRQ_TYPE_EDGE_FALLING);
++		}
++		else {
++			set_irq_type(IOMUX_TO_IRQ(gpio),  IRQ_TYPE_EDGE_RISING);
++		}
++
++		if (old_value != state->value[i]) {
++			input_report_key(state->inputdev, state->code[i], (state->value[i] == 0));
++		}
++	}
++
++	return IRQ_HANDLED;
++}
++
++
++static int baby_buttons_probe(struct platform_device *pdev)
++{
++	struct baby_buttons *state;
++	int i, ret;
++
++	state = kmalloc(sizeof(struct baby_buttons), GFP_KERNEL);
++	if (!state) {
++		goto err0;
++	}
++
++	state->code = button_codes;
++
++	state->inputdev = input_allocate_device();
++	if (!state->inputdev) {
++		goto err1;
++	}
++
++	state->inputdev->evbit[0] = BIT(EV_KEY);
++
++	for (i=0; i<NUM_BUTTONS; i++) {
++		unsigned int gpio = platform_get_resource(pdev, IORESOURCE_MEM, i)->start;
++
++		__set_bit(state->code[i], state->inputdev->keybit);
++
++		state->gpio[i] = gpio;
++		state->value[i] = mxc_get_gpio_datain(gpio);
++
++		if (state->value[i]) {
++			set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_FALLING);
++		}
++		else {
++			set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_RISING);
++		}
++
++		ret = request_irq(IOMUX_TO_IRQ(gpio), button_irq, IRQF_DISABLED | IRQF_SAMPLE_RANDOM, pdev->name, state);
++		if (ret) {
++			printk(KERN_ERR "Can't allocate irq\n");
++			continue;
++		}
++	}
++
++	ret = input_register_device(state->inputdev);
++	if (ret < 0) {
++		goto err2;
++	}
++
++	return 0;
++
++ err2:
++	input_free_device(state->inputdev);
++ err1:
++	kfree(state);
++ err0:
++	return 0;
++}
++
++
++static int baby_buttons_remove(struct platform_device *pdev)
++{
++	printk("***** BABY BUTTONS REMOVE\n");
++
++	return 0;
++}
++
++
++static struct platform_driver baby_buttons_driver = {
++	.probe = baby_buttons_probe,
++	.remove = baby_buttons_remove,
++	.driver = {
++		.name = "baby_buttons",
++	},
++};
++
++static int __init baby_buttons_init(void)
++{
++	return platform_driver_register(&baby_buttons_driver);
++}
++
++static void __exit baby_buttons_exit(void)
++{
++	platform_driver_unregister(&baby_buttons_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("Baby button driver");
++MODULE_LICENSE("GPL");
++
++module_init(baby_buttons_init)
++module_exit(baby_buttons_exit)

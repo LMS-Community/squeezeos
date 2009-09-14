@@ -1,0 +1,42 @@
+From: Kay Sievers <kay.sievers@vrfy.org>
+Date: Tue, 2 Dec 2008 18:31:50 +0000 (-0800)
+Subject: bdi: register sysfs bdi device only once per queue
+X-Git-Tag: v2.6.28-rc8~81
+X-Git-Url: http://git.kernel.org/?p=linux%2Fkernel%2Fgit%2Fstable%2Flinux-2.6.29.y.git;a=commitdiff_plain;h=f1d0b063d993527754f062c589b73f125024d216
+
+bdi: register sysfs bdi device only once per queue
+
+Devices which share the same queue, like floppies and mtd devices, get
+registered multiple times in the bdi interface, but bdi accounts only the
+last registered device of the devices sharing one queue.
+
+On remove, all earlier registered devices leak, stay around in sysfs, and
+cause "duplicate filename" errors if the devices are re-created.
+
+This prevents the creation of multiple bdi interfaces per queue, and the
+bdi device will carry the dev_t name of the block device which is the
+first one registered, of the pool of devices using the same queue.
+
+[akpm@linux-foundation.org: add a WARN_ON so we know which drivers are misbehaving]
+Tested-by: Peter Korsgaard <jacmet@sunsite.dk>
+Acked-by: Peter Zijlstra <a.p.zijlstra@chello.nl>
+Signed-off-by: Kay Sievers <kay.sievers@vrfy.org>
+Cc: David Woodhouse <dwmw2@infradead.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+
+Index: linux-2.6.26/mm/backing-dev.c
+===================================================================
+--- linux-2.6.26.orig/mm/backing-dev.c	2008-07-13 22:51:29.000000000 +0100
++++ linux-2.6.26/mm/backing-dev.c	2009-04-24 12:03:08.000000000 +0100
+@@ -176,6 +176,9 @@
+ 	int ret = 0;
+ 	struct device *dev;
+ 
++	if (bdi->dev)	/* The driver needs to use separate queues per device */
++		goto exit;
++
+ 	va_start(args, fmt);
+ 	dev = device_create_vargs(bdi_class, parent, MKDEV(0, 0), bdi, fmt, args);
+ 	va_end(args);

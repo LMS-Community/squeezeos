@@ -1,0 +1,616 @@
+From 40a99255631c4c35ced030e4920dfea4540b6316 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Mon, 8 Sep 2008 16:18:44 -0500
+Subject: [PATCH] ENGR00090789 Add CPU_FREQ Peripheral support for MX37
+
+Add community CPU_FREQ Peripheral support for MX37
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx37/clock.c       |    2 +
+ arch/arm/mach-mx37/cpufreq.c     |  386 ++++++++++++++++++++++++++++++++------
+ arch/arm/plat-mxc/clock.c        |   12 ++
+ drivers/mxc/ipu3/ipu_common.c    |    9 +-
+ include/asm-arm/arch-mxc/clock.h |    3 +-
+ 5 files changed, 346 insertions(+), 66 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/clock.c b/arch/arm/mach-mx37/clock.c
+index 5437a2f..fc5fcd8 100644
+--- a/arch/arm/mach-mx37/clock.c
++++ b/arch/arm/mach-mx37/clock.c
+@@ -2018,6 +2018,7 @@ static struct clk ipu_clk = {
+ 	.enable_shift = MXC_CCM_CCGR4_CG15_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
++	.flags = CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static struct clk ipu_di_clk = {
+@@ -2108,6 +2109,7 @@ static struct clk vpu_clk[] = {
+ 	 .enable_shift = MXC_CCM_CCGR5_CG7_OFFSET,
+ 	 .disable = _clk_disable,
+ 	 .secondary = &vpu_clk[1],
++	 .flags = CPU_FREQ_TRIG_UPDATE,
+ 	 },
+ 	{
+ 	 .name = "vpu_core_clk",
+diff --git a/arch/arm/mach-mx37/cpufreq.c b/arch/arm/mach-mx37/cpufreq.c
+index 23a6f93..42d8ee1 100644
+--- a/arch/arm/mach-mx37/cpufreq.c
++++ b/arch/arm/mach-mx37/cpufreq.c
+@@ -41,26 +41,38 @@
+  */
+ #define CPU_FREQUENCY_200000_KHZ		200000
+ #define CPU_FREQUENCY_532000_KHZ		532000
+-#define AHB_FREQUENCY_133000_KHZ		133000
+-
++#define ARM_LPM_CLK  200000000
++#define ARM_NORMAL_CLK  532000000
++
++#define LP_LPM_CLK  24000000
++#define LP_NORMAL_CLK  133000000
++#define GP_LPM_VOLTAGE 850000
++#define LP_LPM_VOLTAGE 1000000
++#define GP_NORMAL_VOLTAGE 1000000
++#define LP_NORMAL_VOLTAGE 1200000
++
++int low_bus_freq_mode;
++int high_bus_freq_mode;
+ static struct clk *cpu_clk;
++static struct clk *main_bus_clk;
++static struct clk *pll2;
++static struct clk *axi_a_clk;
++static struct clk *axi_b_clk;
++static struct clk *axi_c_clk;
++static struct clk *emi_core_clk;
++static struct clk *nfc_clk;
+ static struct clk *ahb_clk;
++static struct clk *vpu_clk;
++static struct clk *vpu_core_clk;
++static struct clk *arm_axi_clk;
++static struct clk *ddr_clk;
++static struct clk *ipu_clk;
++static struct clk *periph_apm_clk;
++static struct clk *lp_apm;
++static struct clk *osc;
+ static struct regulator *gp_regulator;
+ static struct regulator *lp_regulator;
+ 
+-struct mx37_freq_volts {
+-	int gp_freq;
+-	int gp_uV;
+-};
+-
+-/*
+- * These voltage and frequency settings could be further refined.
+- */
+-static const struct mx37_freq_volts freq_uV[] = {
+-	{CPU_FREQUENCY_200000_KHZ * 1000, 850 * 1000},
+-	{CPU_FREQUENCY_532000_KHZ * 1000, 1000 * 1000},
+-};
+-
+ /* does need to be in ascending order for calc_frequency_khz() below */
+ static struct cpufreq_frequency_table imx37_freq_table[] = {
+ 	{0x01, CPU_FREQUENCY_200000_KHZ},
+@@ -68,6 +80,160 @@ static struct cpufreq_frequency_table imx37_freq_table[] = {
+ 	{0, CPUFREQ_TABLE_END},
+ };
+ 
++int set_cpu_freq(int freq)
++{
++	int ret = 0;
++	int org_cpu_rate;
++
++	org_cpu_rate = clk_get_rate(cpu_clk);
++	if (org_cpu_rate == freq)
++		return ret;
++
++	if (freq == ARM_NORMAL_CLK) {
++		/*Set the voltage to 1.00v for the GP domain. */
++
++		ret = regulator_set_voltage(gp_regulator, GP_NORMAL_VOLTAGE);
++		if (ret < 0) {
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
++			return ret;
++		}
++
++		ret = clk_set_rate(cpu_clk, ARM_NORMAL_CLK);
++		if (ret != 0) {
++			printk(KERN_DEBUG "cannot set CPU clock rate\n");
++			return ret;
++		}
++	} else if (freq == ARM_LPM_CLK) {
++		ret = clk_set_rate(cpu_clk, ARM_LPM_CLK);
++		if (ret != 0) {
++			printk(KERN_DEBUG "cannot set CPU clock rate\n");
++			return ret;
++		}
++
++		/* Set the voltage to 0.8v for the GP domain. */
++		ret = regulator_set_voltage(gp_regulator, GP_LPM_VOLTAGE);
++		if (ret < 0) {
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!\n");
++			return ret;
++		}
++	}
++	return ret;
++}
++
++int set_low_bus_freq(void)
++{
++	int ret = 0;
++
++	struct clk *p_clk;
++	struct clk *amode_parent_clk;
++
++	amode_parent_clk = lp_apm;
++	p_clk = clk_get_parent(periph_apm_clk);
++
++	/* Make sure osc_clk is the parent of lp_apm. */
++	if (clk_get_parent(amode_parent_clk) != osc)
++		clk_set_parent(amode_parent_clk, osc);
++
++	/* Set the parent of periph_apm_clk to be lp_apm */
++	clk_set_parent(periph_apm_clk, amode_parent_clk);
++	amode_parent_clk = periph_apm_clk;
++
++	p_clk = clk_get_parent(main_bus_clk);
++	/* Set the parent of main_bus_clk to be periph_apm_clk */
++	clk_set_parent(main_bus_clk, amode_parent_clk);
++	/*disable the old parent. */
++	clk_disable(p_clk);
++
++	clk_set_rate(axi_a_clk, LP_LPM_CLK);
++	clk_set_rate(axi_b_clk, LP_LPM_CLK);
++	clk_set_rate(axi_c_clk, LP_LPM_CLK);
++	clk_set_rate(emi_core_clk, LP_LPM_CLK);
++	clk_set_rate(nfc_clk, 4800000);
++	clk_set_rate(ahb_clk, LP_LPM_CLK);
++
++	amode_parent_clk = emi_core_clk;
++
++	p_clk = clk_get_parent(arm_axi_clk);
++	if (p_clk != amode_parent_clk) {
++		clk_set_parent(arm_axi_clk, amode_parent_clk);
++		/* Disable the old parent */
++		clk_disable(p_clk);
++	}
++
++	p_clk = clk_get_parent(vpu_clk);
++	if (p_clk != amode_parent_clk) {
++		clk_set_parent(vpu_clk, amode_parent_clk);
++		/* Disable the old parent */
++		clk_disable(p_clk);
++	}
++
++	p_clk = clk_get_parent(vpu_core_clk);
++	if (p_clk != amode_parent_clk) {
++		clk_set_parent(vpu_core_clk, amode_parent_clk);
++		/* Disable the old parent */
++		clk_disable(p_clk);
++	}
++
++	/* Set the voltage to 1.0v for the LP domain. */
++	ret = regulator_set_voltage(lp_regulator, LP_LPM_VOLTAGE);
++	if (ret < 0) {
++		printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!!!\n");
++		return ret;
++	}
++
++	low_bus_freq_mode = 1;
++	high_bus_freq_mode = 0;
++	return ret;
++}
++
++int set_high_bus_freq(void)
++{
++	struct clk *p_clk;
++	struct clk *rmode_parent_clk;
++	int ret = 0;
++
++	if (!low_bus_freq_mode)
++		return ret;
++
++	low_bus_freq_mode = 0;
++
++	/* Set the voltage to 1.2v for the LP domain. */
++	ret = regulator_set_voltage(lp_regulator, LP_NORMAL_VOLTAGE);
++	if (ret < 0) {
++		printk(KERN_DEBUG "COULD NOT SET LP VOLTAGE!!!!!!\n");
++		return ret;
++	}
++
++	rmode_parent_clk = pll2;
++	clk_enable(rmode_parent_clk);
++
++	/* Set the dividers before setting the parent clock. */
++	clk_set_rate(axi_a_clk, 4800000);
++	clk_set_rate(axi_b_clk, 4000000);
++	clk_set_rate(axi_c_clk, 6000000);
++
++	clk_set_rate(emi_core_clk, 4800000);
++	clk_set_rate(ahb_clk, 4800000);
++
++	/* Set the parent of main_bus_clk to be pll2 */
++	p_clk = clk_get_parent(main_bus_clk);
++	clk_set_parent(main_bus_clk, rmode_parent_clk);
++	/* Need to increase the count */
++	clk_enable(rmode_parent_clk);
++	udelay(5);
++	high_bus_freq_mode = 1;
++	return ret;
++}
++
++int low_freq_bus_used(void)
++{
++	if ((clk_get_usecount(ipu_clk) == 0)
++	    && (clk_get_usecount(vpu_clk) == 0))
++		return 1;
++	else
++		return 0;
++}
++
+ static int mx37_verify_speed(struct cpufreq_policy *policy)
+ {
+ 	if (policy->cpu != 0)
+@@ -80,6 +246,7 @@ static unsigned int mx37_get_speed(unsigned int cpu)
+ {
+ 	if (cpu)
+ 		return 0;
++
+ 	return clk_get_rate(cpu_clk) / 1000;
+ }
+ 
+@@ -102,28 +269,12 @@ static int calc_frequency_khz(int target, unsigned int relation)
+ 	return CPU_FREQUENCY_532000_KHZ;
+ }
+ 
+-static int mx37_set_voltage(struct cpufreq_policy *policy, int gp_freq)
+-{
+-	int i, ret = -EINVAL;
+-
+-	for (i = 0; i < ARRAY_SIZE(freq_uV); i++) {
+-		if ((freq_uV[i].gp_freq == gp_freq))
+-			goto found;
+-	}
+-	printk(KERN_ERR "%s: could not find voltage for gp_freq %d Hz\n",
+-	       __func__, gp_freq);
+-	return ret;
+-
+-found:
+-	ret = regulator_set_voltage(gp_regulator, freq_uV[i].gp_uV);
+-	return ret;
+-}
+-
+ static int mx37_set_target(struct cpufreq_policy *policy,
+ 			   unsigned int target_freq, unsigned int relation)
+ {
+ 	struct cpufreq_freqs freqs;
+ 	long freq_Hz;
++	int low_freq_bus_ready = 0;
+ 	int ret = 0;
+ 
+ 	/*
+@@ -138,38 +289,33 @@ static int mx37_set_target(struct cpufreq_policy *policy,
+ 		target_freq = policy->min;
+ 
+ 	freq_Hz = calc_frequency_khz(target_freq, relation) * 1000;
++
+ 	freqs.old = clk_get_rate(cpu_clk) / 1000;
+ 	freqs.new = freq_Hz / 1000;
+ 	freqs.cpu = 0;
+ 	freqs.flags = 0;
+ 
+-	if (freqs.old < freqs.new) {
+-		ret = mx37_set_voltage(policy, freq_Hz);
+-
+-		if (ret < 0) {
+-			printk(KERN_ERR
+-			       "cant raise voltage for CPU frequency %ld\n",
+-			       freq_Hz);
+-			return -EIO;
+-		}
+-	}
++	low_freq_bus_ready = low_freq_bus_used();
+ 
+ 	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+-	printk(KERN_ERR "CPU frequency %ld\n", freq_Hz);
+-	ret = clk_set_rate(cpu_clk, freq_Hz);
+-	if (ret != 0)
+-		printk(KERN_DEBUG "cannot set CPU clock rate\n");
+ 
+-	if (freqs.old > freqs.new) {
+-		ret = mx37_set_voltage(policy, freq_Hz);
+-		if (ret < 0) {
+-			printk(KERN_ERR
+-			       "cant lower voltage for CPU frequency %ld\n",
+-			       freq_Hz);
++	if ((freq_Hz == ARM_LPM_CLK) && (!low_bus_freq_mode)
++	    && (low_freq_bus_ready)) {
++		set_low_bus_freq();
++		ret = set_cpu_freq(freq_Hz);
++	} else {
++		if (!high_bus_freq_mode)
++			set_high_bus_freq();
++
++		ret = set_cpu_freq(freq_Hz);
++		if (low_bus_freq_mode) {
++			if (ret == 0)
++				set_high_bus_freq();
+ 		}
+ 	}
+ 
+ 	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
++
+ 	return 0;
+ }
+ 
+@@ -188,12 +334,102 @@ static int __init mx37_cpufreq_driver_init(struct cpufreq_policy *policy)
+ 		return PTR_ERR(cpu_clk);
+ 	}
+ 
++	main_bus_clk = clk_get(NULL, "main_bus_clk");
++	if (IS_ERR(main_bus_clk)) {
++		printk(KERN_ERR "%s: failed to get main_bus_clk\n", __func__);
++		return PTR_ERR(main_bus_clk);
++	}
++
++	pll2 = clk_get(NULL, "pll2");
++	if (IS_ERR(pll2)) {
++		printk(KERN_ERR "%s: failed to get pll2\n", __func__);
++		return PTR_ERR(pll2);
++	}
++
++	axi_a_clk = clk_get(NULL, "axi_a_clk");
++	if (IS_ERR(axi_a_clk)) {
++		printk(KERN_ERR "%s: failed to get axi_a_clk\n", __func__);
++		return PTR_ERR(axi_a_clk);
++	}
++
++	axi_b_clk = clk_get(NULL, "axi_b_clk");
++	if (IS_ERR(axi_b_clk)) {
++		printk(KERN_ERR "%s: failed to get axi_b_clk\n", __func__);
++		return PTR_ERR(axi_b_clk);
++	}
++
++	axi_c_clk = clk_get(NULL, "axi_c_clk");
++	if (IS_ERR(axi_c_clk)) {
++		printk(KERN_ERR "%s: failed to get axi_c_clk\n", __func__);
++		return PTR_ERR(axi_c_clk);
++	}
++
++	emi_core_clk = clk_get(NULL, "emi_core_clk");
++	if (IS_ERR(emi_core_clk)) {
++		printk(KERN_ERR "%s: failed to get emi_core_clk\n", __func__);
++		return PTR_ERR(emi_core_clk);
++	}
++
++	nfc_clk = clk_get(NULL, "nfc_clk");
++	if (IS_ERR(nfc_clk)) {
++		printk(KERN_ERR "%s: failed to get nfc_clk\n", __func__);
++		return PTR_ERR(nfc_clk);
++	}
++
+ 	ahb_clk = clk_get(NULL, "ahb_clk");
+ 	if (IS_ERR(ahb_clk)) {
+-		printk(KERN_ERR "%s: failed to get ahb clock\n", __func__);
++		printk(KERN_ERR "%s: failed to get ahb_clk\n", __func__);
+ 		return PTR_ERR(ahb_clk);
+ 	}
+ 
++	vpu_core_clk = clk_get(NULL, "vpu_core_clk");
++	if (IS_ERR(vpu_core_clk)) {
++		printk(KERN_ERR "%s: failed to get vpu_core_clk\n", __func__);
++		return PTR_ERR(vpu_core_clk);
++	}
++
++	arm_axi_clk = clk_get(NULL, "arm_axi_clk");
++	if (IS_ERR(arm_axi_clk)) {
++		printk(KERN_ERR "%s: failed to get arm_axi_clk\n", __func__);
++		return PTR_ERR(arm_axi_clk);
++	}
++
++	ddr_clk = clk_get(NULL, "ddr_clk");
++	if (IS_ERR(ddr_clk)) {
++		printk(KERN_ERR "%s: failed to get ddr_clk\n", __func__);
++		return PTR_ERR(ddr_clk);
++	}
++
++	ipu_clk = clk_get(NULL, "ipu_clk");
++	if (IS_ERR(ipu_clk)) {
++		printk(KERN_ERR "%s: failed to get ipu_clk\n", __func__);
++		return PTR_ERR(ipu_clk);
++	}
++
++	vpu_clk = clk_get(NULL, "vpu_clk");
++	if (IS_ERR(vpu_clk)) {
++		printk(KERN_ERR "%s: failed to get vpu_clk\n", __func__);
++		return PTR_ERR(vpu_clk);
++	}
++
++	periph_apm_clk = clk_get(NULL, "periph_apm_clk");
++	if (IS_ERR(periph_apm_clk)) {
++		printk(KERN_ERR "%s: failed to get periph_apm_clk\n", __func__);
++		return PTR_ERR(periph_apm_clk);
++	}
++
++	lp_apm = clk_get(NULL, "lp_apm");
++	if (IS_ERR(lp_apm)) {
++		printk(KERN_ERR "%s: failed to get lp_apm\n", __func__);
++		return PTR_ERR(lp_apm);
++	}
++
++	osc = clk_get(NULL, "osc");
++	if (IS_ERR(osc)) {
++		printk(KERN_ERR "%s: failed to get osc\n", __func__);
++		return PTR_ERR(osc);
++	}
++
+ 	gp_regulator = regulator_get(NULL, "DCDC1");
+ 	if (IS_ERR(gp_regulator)) {
+ 		clk_put(cpu_clk);
+@@ -219,14 +455,32 @@ static int __init mx37_cpufreq_driver_init(struct cpufreq_policy *policy)
+ 	ret = cpufreq_frequency_table_cpuinfo(policy, imx37_freq_table);
+ 	if (ret < 0) {
+ 		clk_put(cpu_clk);
+-		regulator_put(gp_regulator, NULL);
++		clk_put(main_bus_clk);
++		clk_put(pll2);
++		clk_put(axi_a_clk);
++		clk_put(axi_b_clk);
++		clk_put(axi_c_clk);
++		clk_put(emi_core_clk);
++		clk_put(nfc_clk);
+ 		clk_put(ahb_clk);
++		clk_put(vpu_core_clk);
++		clk_put(arm_axi_clk);
++		clk_put(ddr_clk);
++		clk_put(ipu_clk);
++		clk_put(vpu_clk);
++		clk_put(periph_apm_clk);
++		clk_put(lp_apm);
++		clk_put(osc);
++		regulator_put(gp_regulator, NULL);
+ 		regulator_put(lp_regulator, NULL);
+ 		printk(KERN_ERR "%s: failed to register i.MX37 CPUfreq\n",
+ 		       __func__);
+ 		return ret;
+ 	}
+ 	cpufreq_frequency_table_get_attr(imx37_freq_table, policy->cpu);
++
++	low_bus_freq_mode = 0;
++	high_bus_freq_mode = 0;
+ 	return 0;
+ }
+ 
+@@ -235,15 +489,27 @@ static int mx37_cpufreq_driver_exit(struct cpufreq_policy *policy)
+ 	cpufreq_frequency_table_put_attr(policy->cpu);
+ 
+ 	/* reset CPU to 532MHz */
+-	if (regulator_set_voltage(gp_regulator, 1000 * 1000) == 0)
+-		clk_set_rate(cpu_clk, CPU_FREQUENCY_532000_KHZ * 1000);
+-
+-	if (regulator_set_voltage(lp_regulator, 1200 * 1000) == 0)
+-		clk_set_rate(ahb_clk, AHB_FREQUENCY_133000_KHZ * 1000);
++	set_cpu_freq(ARM_NORMAL_CLK);
++	if (low_bus_freq_mode)
++		set_high_bus_freq();
+ 
+ 	clk_put(cpu_clk);
+-	regulator_put(gp_regulator, NULL);
++	clk_put(main_bus_clk);
++	clk_put(pll2);
++	clk_put(axi_a_clk);
++	clk_put(axi_b_clk);
++	clk_put(axi_c_clk);
++	clk_put(emi_core_clk);
++	clk_put(nfc_clk);
+ 	clk_put(ahb_clk);
++	clk_put(vpu_core_clk);
++	clk_put(arm_axi_clk);
++	clk_put(ddr_clk);
++	clk_put(ipu_clk);
++	clk_put(periph_apm_clk);
++	clk_put(lp_apm);
++	clk_put(osc);
++	regulator_put(gp_regulator, NULL);
+ 	regulator_put(lp_regulator, NULL);
+ 	return 0;
+ }
+diff --git a/arch/arm/plat-mxc/clock.c b/arch/arm/plat-mxc/clock.c
+index a4da645..dc9251c 100644
+--- a/arch/arm/plat-mxc/clock.c
++++ b/arch/arm/plat-mxc/clock.c
+@@ -39,6 +39,7 @@
+ #include <linux/mutex.h>
+ #include <linux/platform_device.h>
+ #include <linux/proc_fs.h>
++#include <linux/cpufreq.h>
+ 
+ #include <asm/io.h>
+ #include <asm/semaphore.h>
+@@ -202,6 +203,11 @@ int clk_enable(struct clk *clk)
+ 
+ 	spin_unlock_irqrestore(&clockfw_lock, flags);
+ 
++#if defined(CONFIG_CPU_FREQ)
++	if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
++	    && (clk_get_usecount(clk) == 1))
++		cpufreq_update_policy(0);
++#endif
+ 	return ret;
+ }
+ 
+@@ -229,6 +235,12 @@ void clk_disable(struct clk *clk)
+ 	__clk_disable(clk);
+ 
+ 	spin_unlock_irqrestore(&clockfw_lock, flags);
++
++#if defined(CONFIG_CPU_FREQ)
++	if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
++	    && (clk_get_usecount(clk) == 0))
++		cpufreq_update_policy(0);
++#endif
+ }
+ 
+ EXPORT_SYMBOL(clk_disable);
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 5c03af1..d6979f2 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -302,15 +302,14 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 	__raw_writel(0xFFFFFFFF, IPU_INT_CTRL(9));
+ 	__raw_writel(0xFFFFFFFF, IPU_INT_CTRL(10));
+ 
+-
+-	spin_lock_irqsave(&ipu_lock, lock_flags);
+-
+ 	ipu_conf = __raw_readl(IPU_CONF);
+ 	if (ipu_conf == 0) {
+ 		g_ipu_clk_enabled = true;
+ 		clk_enable(g_ipu_clk);
+ 	}
+ 
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
+ 	if (g_channel_init_mask & (1L << IPU_CHAN_ID(channel))) {
+ 		dev_err(g_ipu_dev, "Warning: channel already initialized %d\n",
+ 			IPU_CHAN_ID(channel));
+@@ -570,13 +569,13 @@ void ipu_uninit_channel(ipu_channel_t channel)
+ 
+ 	__raw_writel(ipu_conf, IPU_CONF);
+ 
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++
+ 	if (ipu_conf == 0) {
+ 		clk_disable(g_ipu_clk);
+ 		g_ipu_clk_enabled = false;
+ 	}
+ 
+-	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+-
+ 	WARN_ON(ipu_ic_use_count < 0);
+ 	WARN_ON(ipu_rot_use_count < 0);
+ 	WARN_ON(ipu_dc_use_count < 0);
+diff --git a/include/asm-arm/arch-mxc/clock.h b/include/asm-arm/arch-mxc/clock.h
+index fce03fa..ed9497f 100644
+--- a/include/asm-arm/arch-mxc/clock.h
++++ b/include/asm-arm/arch-mxc/clock.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -85,6 +85,7 @@ int clk_set_pll_dither(struct clk *clk, unsigned int pll_ppm);
+ #define RATE_PROPAGATES		(1 << 0)	/* Program children too */
+ #define ALWAYS_ENABLED		(1 << 1)	/* Clock cannot be disabled */
+ #define RATE_FIXED		(1 << 2)	/* Fixed clock rate */
++#define CPU_FREQ_TRIG_UPDATE	(1 << 3)	/* CPUFREQ trig update */
+ 
+ #endif				/* __ASSEMBLY__ */
+ #endif				/* __ASM_ARCH_MXC_CLOCK_H__ */
+-- 
+1.5.4.4
+

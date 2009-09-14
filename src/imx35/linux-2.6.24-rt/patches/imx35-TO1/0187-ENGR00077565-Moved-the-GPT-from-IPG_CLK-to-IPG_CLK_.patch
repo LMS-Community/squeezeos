@@ -1,0 +1,109 @@
+From 8e9f717ff640bf611ef9295c7597300e5c647a71 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ranjani.vaidyanathan@freescale.com>
+Date: Fri, 23 May 2008 15:00:07 -0500
+Subject: [PATCH] ENGR00077565  Moved the GPT from IPG_CLK to IPG_CLK_HIGHFREQ
+
+Fixed coding standards.
+
+Some more coding standard fixes.
+
+Fixed review comments.
+
+Removed unnecessary spaces.
+
+Signed-off-by: Ranjani Vaidyanathan <ranjani.vaidyanathan@freescale.com>
+---
+ arch/arm/mach-mx37/clock.c      |   37 +++++++++++++++++++++++--------------
+ include/asm-arm/arch-mxc/mx37.h |    2 +-
+ 2 files changed, 24 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/clock.c b/arch/arm/mach-mx37/clock.c
+index d970355..190244e 100644
+--- a/arch/arm/mach-mx37/clock.c
++++ b/arch/arm/mach-mx37/clock.c
+@@ -775,20 +775,20 @@ static struct clk spba_clk = {
+ static struct clk gpt_clk[] = {
+ 	{
+ 	 .name = "gpt_clk",
+-	 .parent = &ipg_perclk,
++	 .parent = &ipg_clk,
+ 	 .id = 0,
+ 	 .secondary = &gpt_clk[1],
+ 	 .enable_reg = MXC_CCM_CCGR2,
+-	 .enable_shift = MXC_CCM_CCGR2_CG8_OFFSET,
++	 .enable_shift = MXC_CCM_CCGR2_CG7_OFFSET,
+ 	 .enable = _clk_enable,
+ 	 .disable = _clk_disable,
+ 	 },
+ 	{
+ 	 .name = "gpt_ipg_clk",
+ 	 .id = 0,
+-	 .parent = &ipg_clk,
++	 .parent = &ipg_perclk,
+ 	 .enable_reg = MXC_CCM_CCGR2,
+-	 .enable_shift = MXC_CCM_CCGR2_CG7_OFFSET,
++	 .enable_shift = MXC_CCM_CCGR2_CG8_OFFSET,
+ 	 .enable = _clk_enable,
+ 	 .disable = _clk_disable,
+ 	 },
+@@ -1920,7 +1920,7 @@ int __init mxc_clocks_init(void)
+ 	propagate_rate(&ckih_clk);
+ 	propagate_rate(&ckil_clk);
+ 
+-	clk_enable(&gpt_clk[0]);
++	clk_enable(&gpt_clk[1]);
+ 	clk_enable(&spba_clk);
+ 	clk_enable(&iim_clk);
+ 	clk_enable(&tmax_clk[0]);
+@@ -1938,17 +1938,26 @@ int __init mxc_clocks_init(void)
+  */
+ unsigned long __init clk_early_get_timer_rate(void)
+ {
++	u32 reg;
++
++	ipg_perclk.set_parent(&ipg_perclk, &lp_apm_clk);
++
++	/*
++	 *Initialise the IPG PER CLK dividers to 1. IPG_PER_CLK should be at
++	 * 24MHz, its derived from lp_apm.
++	 */
++	reg = __raw_readl(MXC_CCM_CBCDR2);
++	reg &= ~MXC_CCM_CBCDR2_PERCLK_PRED1_MASK;
++	reg &= ~MXC_CCM_CBCDR2_PERCLK_PRED2_MASK;
++	reg &= ~MXC_CCM_CBCDR2_PERCLK_PODF_MASK;
++	__raw_writel(reg, MXC_CCM_CBCDR2);
++
+ 	board_ref_clk_rate(&ckil_clk.rate, &osc_clk.rate, &ckih_clk.rate);
+ 	clk_tree_init();
+-	pll1_main_clk.recalc(&pll1_main_clk);
+-	pll1_sw_clk.recalc(&pll1_sw_clk);
+-	pll2_sw_clk.recalc(&pll2_sw_clk);
+-	pll3_sw_clk.recalc(&pll3_sw_clk);
+-	main_bus_clk.recalc(&main_bus_clk);
+-	ahb_clk.recalc(&ahb_clk);
+-	ipg_clk.recalc(&ipg_clk);
++
++	lp_apm_clk.rate = lp_apm_clk.parent->rate;
++	ipg_perclk.recalc(&ipg_perclk);
+ 	gpt_clk[1].enable(&gpt_clk[1]);
+ 
+-	/* TODO: switch to perclk for timer */
+-	return ipg_clk.rate;
++	return ipg_perclk.rate;
+ }
+diff --git a/include/asm-arm/arch-mxc/mx37.h b/include/asm-arm/arch-mxc/mx37.h
+index 26e26e8..6976b7f 100644
+--- a/include/asm-arm/arch-mxc/mx37.h
++++ b/include/asm-arm/arch-mxc/mx37.h
+@@ -26,7 +26,7 @@
+ /*!
+  * defines the hardware clock tick rate
+  */
+-#define CLOCK_TICK_RATE         16625000
++#define CLOCK_TICK_RATE         12000000
+ 
+ /*!
+  * Register an interrupt handler for the SMN as well as the SCC.  In some
+-- 
+1.5.4.4
+

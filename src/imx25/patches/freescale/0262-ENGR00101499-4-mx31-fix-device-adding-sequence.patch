@@ -1,0 +1,77 @@
+From 6870383388bc4473c15a1a17ebab73dc6b859da9 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <b20223@freescale.com>
+Date: Fri, 5 Dec 2008 14:58:05 +0800
+Subject: [PATCH] ENGR00101499-4 mx31: fix device adding sequence
+
+Add SoC level devices first and add board level device,
+so SoC devices will not suspend before board level devices do.
+
+Signed-off-by: Richard Zhao <b20223@freescale.com>
+---
+ arch/arm/mach-mx3/devices.c    |    4 +---
+ arch/arm/mach-mx3/mx31ads.c    |    2 ++
+ arch/arm/mach-mx3/mx3_3stack.c |    2 ++
+ 3 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/devices.c b/arch/arm/mach-mx3/devices.c
+index 25c2848..45119b3 100644
+--- a/arch/arm/mach-mx3/devices.c
++++ b/arch/arm/mach-mx3/devices.c
+@@ -806,7 +806,7 @@ static inline void mxc_init_vpu(void)
+ }
+ #endif
+ 
+-static int __init mxc_init_devices(void)
++int __init mxc_init_devices(void)
+ {
+ 	mxc_init_wdt();
+ 	mxc_init_ipu();
+@@ -828,5 +828,3 @@ static int __init mxc_init_devices(void)
+ 	spba_take_ownership(SPBA_SSI2, SPBA_MASTER_C | SPBA_MASTER_A);
+ 	return 0;
+ }
+-
+-arch_initcall(mxc_init_devices);
+diff --git a/arch/arm/mach-mx3/mx31ads.c b/arch/arm/mach-mx3/mx31ads.c
+index 2925c22..8b86174 100644
+--- a/arch/arm/mach-mx3/mx31ads.c
++++ b/arch/arm/mach-mx3/mx31ads.c
+@@ -67,6 +67,7 @@ extern void mx31ads_gpio_init(void) __init;
+ extern void mxc_cpu_common_init(void);
+ extern int mxc_clocks_init(void);
+ extern void __init early_console_setup(char *);
++extern int mxc_init_devices(void);
+ 
+ static void mxc_nop_release(struct device *dev)
+ {
+@@ -867,6 +868,7 @@ static void __init mxc_board_init(void)
+ 	mxc_cpu_common_init();
+ 	mxc_clocks_init();
+ 	early_console_setup(saved_command_line);
++	mxc_init_devices();
+ 	mxc_init_pmic_audio();
+ 	mxc_gpio_init();
+ 	mx31ads_gpio_init();
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 51f5210..6e9bb1e 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -74,6 +74,7 @@ extern struct sys_timer mxc_timer;
+ extern void mxc_cpu_common_init(void);
+ extern int mxc_clocks_init(void);
+ extern void __init early_console_setup(char *);
++extern int mxc_init_devices(void);
+ 
+ static void mxc_nop_release(struct device *dev)
+ {
+@@ -982,6 +983,7 @@ static void __init mxc_board_init(void)
+ 	mxc_clocks_init();
+ 	mxc_gpio_init();
+ 	early_console_setup(saved_command_line);
++	mxc_init_devices();
+ 
+ 	/*Pull down MX31_PIN_USB_BYP to reset USB3317 */
+ 	mxc_request_iomux(MX31_PIN_USB_BYP, OUTPUTCONFIG_GPIO,
+-- 
+1.5.4.4
+

@@ -1,0 +1,234 @@
+From 80435a6b1380ac30d56efc946ea2a8d2b118fcb0 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Mon, 13 Oct 2008 17:02:41 +0800
+Subject: [PATCH] ENGR00094849-1 Fix compiler errors due to CSI interface change
+
+Fix compiler errors on the platforms of MX27 MX31 MX35 due to
+CSI interface change
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/adv7180.c          |    7 ++++---
+ drivers/media/video/mxc/capture/ipu_prp_enc.c      |    2 +-
+ drivers/media/video/mxc/capture/ipu_prp_vf_adc.c   |    2 +-
+ drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c   |    2 +-
+ .../media/video/mxc/capture/ipu_prp_vf_sdc_bg.c    |    2 +-
+ drivers/media/video/mxc/capture/mt9v111.c          |    6 ++++--
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    4 ----
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    2 --
+ drivers/media/video/mxc/capture/ov3640.c           |   12 ++++++------
+ 9 files changed, 18 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/adv7180.c b/drivers/media/video/mxc/capture/adv7180.c
+index 90749f9..6ccd219 100644
+--- a/drivers/media/video/mxc/capture/adv7180.c
++++ b/drivers/media/video/mxc/capture/adv7180.c
+@@ -189,19 +189,20 @@ static int adv7180_write_reg(u8 reg, u8 val)
+  */
+ static void adv7180_set_std(v4l2_std_id std)
+ {
++	unsigned int dummy = 0;
+ 
+ 	dev_dbg(&adv7180_i2c_client->dev, "adv7180_set_std call \n");
+ 	down(&mutex);
+ 	if (std == V4L2_STD_PAL) {
+ 		video_idx = ADV7180_PAL;
+-		ipu_csi_set_window_pos(0, 0);
++		ipu_csi_set_window_pos(0, 0, dummy);
+ 	} else if (std == V4L2_STD_NTSC) {
+ 		video_idx = ADV7180_NTSC;
+ 		/* Get rid of the white dot line in NTSC signal input */
+-		ipu_csi_set_window_pos(0, 12);
++		ipu_csi_set_window_pos(0, 12, dummy);
+ 	} else {
+ 		video_idx = ADV7180_NOT_LOCKED;
+-		ipu_csi_set_window_pos(0, 0);
++		ipu_csi_set_window_pos(0, 0, dummy);
+ 		dev_dbg(&adv7180_i2c_client->dev,
+ 			"adv7180 set non-recognized std!\n");
+ 	}
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index 9d870a9..5d7c5e5 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -73,7 +73,7 @@ static int prp_enc_setup(cam_data * cam)
+ 	ipu_csi_get_window_size(&enc.csi_prp_enc_mem.in_width,
+ 				&enc.csi_prp_enc_mem.in_height,
+ 				cam->cam_sensor->csi);
+-	enc.csi_prp_enc_mem.in_pixel_fmt = sensor_output_fmt;
++	enc.csi_prp_enc_mem.in_pixel_fmt = IPU_PIX_FMT_UYVY;
+ 	enc.csi_prp_enc_mem.out_width = cam->v2f.fmt.pix.width;
+ 	enc.csi_prp_enc_mem.out_height = cam->v2f.fmt.pix.height;
+ 	enc.csi_prp_enc_mem.csi = cam->cam_sensor->csi;
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c b/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c
+index 1493292..823d181 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_adc.c
+@@ -59,7 +59,7 @@ static int prpvf_start(void *private)
+ 	memset(&vf, 0, sizeof(ipu_channel_params_t));
+ 	ipu_csi_get_window_size(&vf.csi_prp_vf_adc.in_width,
+ 				&vf.csi_prp_vf_adc.in_height);
+-	vf.csi_prp_vf_adc.in_pixel_fmt = sensor_output_fmt;
++	vf.csi_prp_vf_adc.in_pixel_fmt = IPU_PIX_FMT_UYVY;
+ 	vf.csi_prp_vf_adc.out_width = cam->win.w.width;
+ 	vf.csi_prp_vf_adc.out_height = cam->win.w.height;
+ 	vf.csi_prp_vf_adc.graphics_combine_en = 0;
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+index 89568d6..367c242 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+@@ -56,7 +56,7 @@ static int prpvf_start(void *private)
+ 	ipu_csi_get_window_size(&vf.csi_prp_vf_mem.in_width,
+ 				&vf.csi_prp_vf_mem.in_height,
+ 				cam->cam_sensor->csi);
+-	vf.csi_prp_vf_mem.in_pixel_fmt = sensor_output_fmt;
++	vf.csi_prp_vf_mem.in_pixel_fmt = IPU_PIX_FMT_UYVY;
+ 	vf.csi_prp_vf_mem.out_width = cam->win.w.width;
+ 	vf.csi_prp_vf_mem.out_height = cam->win.w.height;
+ 	vf.csi_prp_vf_mem.csi = cam->cam_sensor->csi;
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+index b3f2b1b..2e25619 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+@@ -125,7 +125,7 @@ static int prpvf_start(void *private)
+ 	ipu_csi_get_window_size(&vf.csi_prp_vf_mem.in_width,
+ 				&vf.csi_prp_vf_mem.in_height,
+ 				cam->cam_sensor->csi);
+-	vf.csi_prp_vf_mem.in_pixel_fmt = sensor_output_fmt;
++	vf.csi_prp_vf_mem.in_pixel_fmt = IPU_PIX_FMT_UYVY;
+ 	vf.csi_prp_vf_mem.out_width = cam->win.w.width;
+ 	vf.csi_prp_vf_mem.out_height = cam->win.w.height;
+ 	vf.csi_prp_vf_mem.csi = cam->cam_sensor->csi;
+diff --git a/drivers/media/video/mxc/capture/mt9v111.c b/drivers/media/video/mxc/capture/mt9v111.c
+index 7e36b47..6d0081a 100644
+--- a/drivers/media/video/mxc/capture/mt9v111.c
++++ b/drivers/media/video/mxc/capture/mt9v111.c
+@@ -296,6 +296,7 @@ static void mt9v111_rate_cal(int *frame_rate, int mclk)
+ sensor_interface *mt9v111_config(int *frame_rate, int high_quality)
+ {
+ 	u32 out_width, out_height;
++	unsigned int dummy = 0;
+ 
+ 	if (interface_param == NULL)
+ 		return NULL;
+@@ -336,7 +337,7 @@ sensor_interface *mt9v111_config(int *frame_rate, int high_quality)
+ 	mt9v111_device.ifpReg->VSize = out_height;
+ 
+ 	mt9v111_interface(interface_param, out_width, out_height);
+-	set_mclk_rate(&interface_param->mclk);
++	set_mclk_rate(&interface_param->mclk, dummy);
+ 	mt9v111_rate_cal(frame_rate, interface_param->mclk);
+ 	mt9v111_sensor_lib(mt9v111_device.coreReg, mt9v111_device.ifpReg);
+ 
+@@ -574,10 +575,11 @@ static int mt9v111_attach(struct i2c_adapter *adap)
+ 	uint32_t mclk = 27000000;
+ 	struct clk *clk;
+ 	int err;
++	unsigned int dummy = 0;
+ 
+ 	clk = clk_get(NULL, "csi_clk");
+ 	clk_enable(clk);
+-	set_mclk_rate(&mclk);
++	set_mclk_rate(&mclk, dummy);
+ 
+ 	err = i2c_probe(adap, &addr_data, &mt9v111_detect_client);
+ 
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 0c3d9d9..462c445 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -43,7 +43,6 @@ static int csi_mclk_flag_backup;
+ #endif
+ static int video_nr = -1;
+ static cam_data *g_cam;
+-uint32_t sensor_output_fmt;
+ 
+ #define MXC_V4L2_CAPTURE_NUM_OUTPUTS        2
+ static struct v4l2_output mxc_capture_outputs[MXC_V4L2_CAPTURE_NUM_OUTPUTS] = {
+@@ -803,8 +802,6 @@ static int mxc_v4l2_s_param(cam_data * cam, struct v4l2_streamparm *parm)
+ 	ipu_csi_init_interface(param->width, param->height,
+ 			       param->pixel_fmt, csi_param);
+ 
+-	sensor_output_fmt = param->pixel_fmt;
+-
+ 	ipu_csi_set_window_size(param->active_width,
+ 		param->active_height, cam->cam_sensor->csi);
+ 
+@@ -941,7 +938,6 @@ static int mxc_v4l_open(struct inode *inode, struct file *file)
+ 		csi_param.csi = cam->cam_sensor->csi;
+ 		ipu_csi_init_interface(param->width, param->height,
+ 				       param->pixel_fmt, csi_param);
+-		sensor_output_fmt = param->pixel_fmt;
+ 
+ 		cam->cam_sensor->get_color(&cam->bright, &cam->saturation,
+ 					   &cam->red, &cam->green, &cam->blue);
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 8510f7a..7ef8842 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -37,8 +37,6 @@
+ 
+ #define FRAME_NUM 3
+ 
+-extern uint32_t sensor_output_fmt;
+-
+ /*!
+  * v4l2 frame structure.
+  */
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index 4e243ff..926bbb4 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -54,7 +54,6 @@ struct ov3640_mode_info {
+ 	u32		height;
+ 	struct reg_value *init_data_ptr;
+ 	u32		init_data_size;
+-	u32		fmt;
+ };
+ 
+ static struct reg_value ov3640_setting_QXGA_2048_1536[] = {
+@@ -217,13 +216,13 @@ static struct reg_value ov3640_setting_QVGA_320_240[] = {
+ 
+ static struct ov3640_mode_info ov3640_mode_info_data[] = {
+ 	{ov3640_mode_VGA_640_480,    640,  480,  ov3640_setting_VGA_640_480,
+-	ARRAY_SIZE(ov3640_setting_VGA_640_480), IPU_PIX_FMT_UYVY},
++	ARRAY_SIZE(ov3640_setting_VGA_640_480)},
+ 	{ov3640_mode_QVGA_320_240,   320,  240,  ov3640_setting_QVGA_320_240,
+-	ARRAY_SIZE(ov3640_setting_QVGA_320_240), IPU_PIX_FMT_UYVY},
++	ARRAY_SIZE(ov3640_setting_QVGA_320_240)},
+ 	{ov3640_mode_QXGA_2048_1536, 2048, 1536, ov3640_setting_QXGA_2048_1536,
+-	ARRAY_SIZE(ov3640_setting_QXGA_2048_1536), IPU_PIX_FMT_UYVY},
++	ARRAY_SIZE(ov3640_setting_QXGA_2048_1536)},
+ 	{ov3640_mode_XGA_1024_768,   1024, 768,  ov3640_setting_XGA_1024_768,
+-	ARRAY_SIZE(ov3640_setting_XGA_1024_768), IPU_PIX_FMT_UYVY},
++	ARRAY_SIZE(ov3640_setting_XGA_1024_768)},
+ };
+ 
+ static s32 s32csi_index;
+@@ -247,6 +246,7 @@ static s32 ov3640_write_reg(u16 reg, u8 val);
+ 
+ static const struct i2c_device_id ov3640_id[] = {
+ 	{"ov3640", 0},
++	{},
+ };
+ MODULE_DEVICE_TABLE(i2c, ov3640_id);
+ 
+@@ -438,6 +438,7 @@ static void ov3640_interface(sensor_interface *param, u32 width, u32 height)
+ 
+ 	param->data_width = IPU_CSI_DATA_WIDTH_8;
+ 	param->clk_mode = IPU_CSI_CLK_MODE_GATED_CLK;  /* gated */
++	param->pixel_fmt = IPU_PIX_FMT_UYVY;
+ 	param->ext_vsync = 1;
+ 	param->Vsync_pol = 0;
+ 	param->Hsync_pol = 0;
+@@ -562,7 +563,6 @@ static sensor_interface *ov3640_config(int *frame_rate, int mode)
+ 	u32OutHeight = ov3640_mode_info_data[mode].height;
+ 
+ 	ov3640_interface(interface_param, u32OutWidth, u32OutHeight);
+-	interface_param->pixel_fmt = ov3640_mode_info_data[mode].fmt;
+ 	set_mclk_rate(&interface_param->mclk, s32csi_index);
+ 
+ 	ov3640_init_mode(mode);
+-- 
+1.5.4.4
+

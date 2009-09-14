@@ -43,7 +43,7 @@ if [ "x$1" != "x" ]; then
     TYPE=$1
     shift
 else
-    TYPE="ext2"
+    TYPE="ext3"
     if [ "$MACHINE" = "akita" ]; then
         TYPE="jffs2"
     fi
@@ -72,17 +72,32 @@ if [ "$MACHINE" = "qemuarm" -o "$MACHINE" = "spitz" -o "$MACHINE" = "borzoi" -o 
     CROSSPATH=$BUILDDIR/tmp/cross/arm-poky-linux-gnueabi/bin
 fi
 
+function findimage {
+    where=$1
+    machine=$2
+    extension=$3
+    names=$4
+    for name in $names;
+    do 
+	fullname=$where/$name-$machine.$extension
+        if [ -e "$fullname" ]; then
+            HDIMAGE=$fullname
+            return
+        fi
+    done
+    echo "Couldn't find image in $where. Attempted image names were:"
+    for name in $names;
+    do 
+        echo $name-$machine.$extension
+    done
+    exit 1
+}
+
 if [ "$MACHINE" = "qemuarm" ]; then
-    if [ "$TYPE" = "ext2" ]; then
+    if [ "$TYPE" = "ext3" ]; then
         if [ "x$HDIMAGE" = "x" ]; then
-            T=$BUILDDIR/tmp/deploy/images/poky-image
-            if [ -e "$T-sdk-qemuarm.ext2" ]; then
-                HDIMAGE="$T-sdk-qemuarm.ext2"
-            elif [ -e "$T-sato-qemuarm.ext2" ]; then
-                HDIMAGE="$T-sato-qemuarm.ext2"
-            elif [ -e "$T-minimal-qemuarm.ext2" ]; then
-                HDIMAGE="$T-minimal-qemuarm.ext2"
-            fi
+            T=$BUILDDIR/tmp/deploy/images
+            findimage $T qemuarm ext3 "poky-image-sdk poky-image-sato poky-image-minimal"
         fi
     fi
 fi
@@ -116,16 +131,10 @@ if [ "$MACHINE" = "qemux86" ]; then
     if [ "x$ZIMAGE" = "x" ]; then
         ZIMAGE=$BUILDDIR/tmp/deploy/images/bzImage-$MACHINE.bin
     fi
-    if [ "$TYPE" = "ext2" ]; then
+    if [ "$TYPE" = "ext3" ]; then
         if [ "x$HDIMAGE" = "x" ]; then
-            T=$BUILDDIR/tmp/deploy/images/poky-image
-            if [ -e "$T-sdk-qemux86.ext2" ]; then
-                HDIMAGE=$T-sdk-qemux86.ext2
-            elif [ -e "$T-sato-qemux86.ext2" ]; then
-                HDIMAGE=$T-sato-qemux86.ext2
-            elif [ -e "$T-minimal-qemux86.ext2" ]; then
-                HDIMAGE=$T-minimal-qemux86.ext2
-            fi
+            T=$BUILDDIR/tmp/deploy/images
+            findimage $T qemux86 ext3 "poky-image-sdk poky-image-sato poky-image-minimal moblin-image-netbook"
         fi
     fi
     CROSSPATH=$BUILDDIR/tmp/cross/i586-poky-linux/bin

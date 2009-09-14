@@ -1,0 +1,42 @@
+From d3caa41391585893c3a7e82df1a9f82ed5587f96 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 17 Jun 2007 22:29:40 -0400
+Subject: [PATCH] Unionfs: bugfix in debugging infrastructure
+
+Off-by-one bug fixed in range checking for lower directories.
+Ensure that we PRINT_CALLER before an additional debug message.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/debug.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/debug.c b/fs/unionfs/debug.c
+index 9255ebb..34ef190 100644
+--- a/fs/unionfs/debug.c
++++ b/fs/unionfs/debug.c
+@@ -285,17 +285,19 @@ void __unionfs_check_dentry(const struct dentry *dentry,
+ 	 * and inode.
+ 	 */
+ 	if (S_ISDIR(inode->i_mode))
+-		for (bindex = dstart+1; bindex < dend-1; bindex++) {
++		for (bindex = dstart+1; bindex < dend; bindex++) {
+ 			lower_inode = unionfs_lower_inode_idx(inode, bindex);
+ 			lower_dentry = unionfs_lower_dentry_idx(dentry,
+ 								bindex);
+ 			lower_mnt = unionfs_lower_mnt_idx(dentry, bindex);
+ 			if (!((lower_inode && lower_dentry && lower_mnt) ||
+-			      (!lower_inode && !lower_dentry && !lower_mnt)))
++			      (!lower_inode && !lower_dentry && !lower_mnt))) {
++				PRINT_CALLER();
+ 				printk(" Cx: lmnt/ldentry/linode=%p:%p:%p "
+ 				       "bindex=%d dstart/end=%d:%d\n",
+ 				       lower_mnt, lower_dentry, lower_inode,
+ 				       bindex, dstart, dend);
++			}
+ 		}
+ }
+ 
+-- 
+1.5.4.3
+

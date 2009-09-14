@@ -1,0 +1,58 @@
+From 9147516fe2d0dd45e3baeca587cb6a874661dd60 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Wed, 4 Feb 2009 17:03:55 +0800
+Subject: [PATCH] ENGR00103831 Add ON_OFF key as wakeup source in MX51 3DS
+
+Add ON_OFF key as wakeup source in MX51 3stack board.
+Add return value for the function mc13892_reg_int to eliminate compile warning.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx51/mx51_3stack.c |   17 ++++++++++++++++-
+ 1 files changed, 16 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index 5392d99..d492e43 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -95,7 +95,15 @@ struct cpu_wp *get_cpu_wp(int *wp)
+ 	return cpu_wp_auto;
+ }
+ 
+-static void mc13892_reg_int(void)
++/*!
++ * the event handler for power on event
++ */
++static void power_on_evt_handler(void)
++{
++	pr_info("pwr on event1 is received \n");
++}
++
++static int __init mc13892_reg_int(void)
+ {
+ 	int i = 0;
+ 	struct regulator *regulator;
+@@ -130,6 +138,7 @@ static void mc13892_reg_int(void)
+ 		"GPO3",
+ 		"GPO4",
+ 	};
++	pmic_event_callback_t power_key_event;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(reg_name); i++) {
+ 		regulator = regulator_get(NULL, reg_name[i]);
+@@ -173,6 +182,12 @@ static void mc13892_reg_int(void)
+ 
+ 	regulator_put(gp, NULL);
+ 	regulator_put(lp, NULL);
++
++	/* subscribe PWRON1 event to enable ON_OFF key */
++	power_key_event.param = NULL;
++	power_key_event.func = (void *)power_on_evt_handler;
++	pmic_event_subscribe(EVENT_PWRONI, power_key_event);
++	return 0;
+ }
+ 
+ late_initcall(mc13892_reg_int);
+-- 
+1.5.4.4
+

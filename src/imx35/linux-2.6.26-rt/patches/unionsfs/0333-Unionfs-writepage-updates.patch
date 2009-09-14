@@ -1,0 +1,63 @@
+From d151ad6dd23770cc8bc2511bc68f19bab8e6fc6f Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Mon, 12 Nov 2007 20:34:28 -0500
+Subject: [PATCH] Unionfs: writepage updates
+
+Don't set/reset the PageUptodate flag on our page.  Call flush_dcache_page
+on the lower page after copy_highpage, and set it uptodate.  Call
+set_page_dirty right before clear_page_dirty_for_io.
+
+CC: Hugh Dickins <hugh@veritas.com>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 4b00b98..468dc61 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -28,6 +28,7 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	struct address_space *lower_mapping; /* lower inode mapping */
+ 	gfp_t mask;
+ 
++	BUG_ON(!PageUptodate(page));
+ 	inode = page->mapping->host;
+ 	lower_inode = unionfs_lower_inode(inode);
+ 	lower_mapping = lower_inode->i_mapping;
+@@ -53,6 +54,8 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 
+ 	/* copy page data from our upper page to the lower page */
+ 	copy_highpage(lower_page, page);
++	flush_dcache_page(lower_page);
++	SetPageUptodate(lower_page);
+ 
+ 	/*
+ 	 * Call lower writepage (expects locked page).  However, if we are
+@@ -68,12 +71,11 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 		goto out_release;
+ 	}
+ 	BUG_ON(!lower_mapping->a_ops->writepage);
++	set_page_dirty(lower_page);
+ 	clear_page_dirty_for_io(lower_page); /* emulate VFS behavior */
+ 	err = lower_mapping->a_ops->writepage(lower_page, wbc);
+-	if (err < 0) {
+-		ClearPageUptodate(page);
++	if (err < 0)
+ 		goto out_release;
+-	}
+ 
+ 	/*
+ 	 * Lower file systems such as ramfs and tmpfs, may return
+@@ -97,7 +99,7 @@ static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ 	}
+ 
+ 	/* all is well */
+-	SetPageUptodate(page);
++
+ 	/* lower mtimes have changed: update ours */
+ 	unionfs_copy_attr_times(inode);
+ 
+-- 
+1.5.4.3
+

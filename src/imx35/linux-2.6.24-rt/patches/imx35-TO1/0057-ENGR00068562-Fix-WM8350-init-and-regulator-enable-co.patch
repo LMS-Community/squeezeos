@@ -1,0 +1,128 @@
+From a75fdc50aa3c2d7f4e990db8343b0ff0a23e360a Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Thu, 13 Mar 2008 08:34:30 -0500
+Subject: [PATCH] ENGR00068562 Fix WM8350 init and regulator enable counting
+
+Fix WM8350 init flow so WM8350 and regulators are enabled as early as possible.
+Prevent regulator enable counting from being < 0.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ drivers/regulator/reg-core.c              |    4 +---
+ drivers/regulator/wm8350/reg-wm8350-bus.c |   14 --------------
+ drivers/regulator/wm8350/reg-wm8350-i2c.c |   11 +++++++++++
+ drivers/regulator/wm8350/reg-wm8350.c     |    7 ++-----
+ 4 files changed, 14 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/regulator/reg-core.c b/drivers/regulator/reg-core.c
+index ecc94b6..afaf684 100644
+--- a/drivers/regulator/reg-core.c
++++ b/drivers/regulator/reg-core.c
+@@ -390,8 +390,7 @@ static int __regulator_disable(struct regulator *regulator)
+ {
+ 	int ret = 0;
+ 
+-	if (regulator->use_count == 1) {
+-
++	if (regulator->use_count > 0 && !(--regulator->use_count)) {
+ 		if (regulator->ops->disable) {
+ 			ret = regulator->ops->disable(regulator);
+ 			if (ret < 0)
+@@ -400,7 +399,6 @@ static int __regulator_disable(struct regulator *regulator)
+ 		if (regulator->parent)
+ 			__regulator_disable(regulator->parent);
+ 	}
+-	regulator->use_count--;
+ out:
+ 	return ret;
+ }
+diff --git a/drivers/regulator/wm8350/reg-wm8350-bus.c b/drivers/regulator/wm8350/reg-wm8350-bus.c
+index c6a42fa..edeb5af 100644
+--- a/drivers/regulator/wm8350/reg-wm8350-bus.c
++++ b/drivers/regulator/wm8350/reg-wm8350-bus.c
+@@ -1496,20 +1496,6 @@ struct bus_type wm8350_bus_type = {
+ };
+ EXPORT_SYMBOL(wm8350_bus_type);
+ 
+-static int __init wm8350_bus_init(void)
+-{
+-	printk("WM8350 Bus Manager %s\n", WM8350_BUS_VERSION);
+-	return bus_register(&wm8350_bus_type);
+-}
+-subsys_initcall(wm8350_bus_init);
+-
+-static void __exit wm8350_bus_exit(void)
+-{
+-	bus_unregister(&wm8350_bus_type);
+-}
+-
+-module_exit(wm8350_bus_exit);
+-
+ MODULE_AUTHOR("Liam Girdwood, liam.girdwood@wolfsonmicro.com, www.wolfsonmicro.com");
+ MODULE_DESCRIPTION("WM8350 PMIC Bus driver");
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/regulator/wm8350/reg-wm8350-i2c.c b/drivers/regulator/wm8350/reg-wm8350-i2c.c
+index 5c0639e..d8ca643 100644
+--- a/drivers/regulator/wm8350/reg-wm8350-i2c.c
++++ b/drivers/regulator/wm8350/reg-wm8350-i2c.c
+@@ -41,6 +41,9 @@ static unsigned short normal_i2c[] = { WM8350_I2C_ADDR, I2C_CLIENT_END };
+ /* Magic definition of all other variables and things */
+ I2C_CLIENT_INSMOD;
+ 
++extern int wm8350_pmu_init(void);
++extern void wm8350_pmu_exit(void);
++
+ static int wm8350_pmic_i2c_detect(struct i2c_adapter *adap, int addr, int kind)
+ {
+ 	struct wm8350* wm8350;
+@@ -90,6 +93,12 @@ static int wm8350_pmic_i2c_detect(struct i2c_adapter *adap, int addr, int kind)
+ 		goto err;
+ 	}
+ 
++	ret = bus_register(&wm8350_bus_type);
++	if (ret < 0)
++		goto err;
++
++	wm8350_pmu_init();
++
+ 	ret = wm8350_init(wm8350);
+ 	if (ret == 0)
+ 		return ret;
+@@ -109,6 +118,8 @@ static int wm8350_i2c_detach(struct i2c_client *client)
+ 	struct wm8350 *wm8350 = i2c_get_clientdata(client);
+ 
+ 	wm8350_free(wm8350);
++	wm8350_pmu_exit();
++	bus_unregister(&wm8350_bus_type);
+ 	i2c_detach_client(client);
+ 	kfree(client);
+ 	if (wm8350->reg_cache)
+diff --git a/drivers/regulator/wm8350/reg-wm8350.c b/drivers/regulator/wm8350/reg-wm8350.c
+index ffbec58..d9aa8ec 100644
+--- a/drivers/regulator/wm8350/reg-wm8350.c
++++ b/drivers/regulator/wm8350/reg-wm8350.c
+@@ -997,19 +997,16 @@ struct device_driver wm8350_driver = {
+ 	.remove = wm8350_remove,
+ };
+ 
+-static int __devinit wm8350_pmu_init(void)
++int wm8350_pmu_init(void)
+ {
+ 	return driver_register(&wm8350_driver);
+ }
+ 
+-static void wm8350_pmu_exit(void)
++void wm8350_pmu_exit(void)
+ {
+ 	driver_unregister(&wm8350_driver);
+ }
+ 
+-module_init(wm8350_pmu_init);
+-module_exit(wm8350_pmu_exit);
+-
+ /* Module information */
+ MODULE_AUTHOR("Liam Girdwood, liam.girdwood@wolfsonmicro.com,\
+ www.wolfsonmicro.com");
+-- 
+1.5.4.4
+

@@ -1,0 +1,77 @@
+From 713065a92462ac923d57920c741ed9cce0a7c9f5 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 14 Oct 2008 15:46:45 +0800
+Subject: [PATCH] ENGR00095068 Fix imx31ads compiler error due to csi interface change
+
+Fix imx31ads compiler error due to csi interface change
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/media/video/mxc/capture/mt9v111.c          |    6 ++----
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    2 +-
+ drivers/media/video/mxc/capture/sensor_clock.c     |    2 +-
+ 3 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mt9v111.c b/drivers/media/video/mxc/capture/mt9v111.c
+index 6d0081a..7e36b47 100644
+--- a/drivers/media/video/mxc/capture/mt9v111.c
++++ b/drivers/media/video/mxc/capture/mt9v111.c
+@@ -296,7 +296,6 @@ static void mt9v111_rate_cal(int *frame_rate, int mclk)
+ sensor_interface *mt9v111_config(int *frame_rate, int high_quality)
+ {
+ 	u32 out_width, out_height;
+-	unsigned int dummy = 0;
+ 
+ 	if (interface_param == NULL)
+ 		return NULL;
+@@ -337,7 +336,7 @@ sensor_interface *mt9v111_config(int *frame_rate, int high_quality)
+ 	mt9v111_device.ifpReg->VSize = out_height;
+ 
+ 	mt9v111_interface(interface_param, out_width, out_height);
+-	set_mclk_rate(&interface_param->mclk, dummy);
++	set_mclk_rate(&interface_param->mclk);
+ 	mt9v111_rate_cal(frame_rate, interface_param->mclk);
+ 	mt9v111_sensor_lib(mt9v111_device.coreReg, mt9v111_device.ifpReg);
+ 
+@@ -575,11 +574,10 @@ static int mt9v111_attach(struct i2c_adapter *adap)
+ 	uint32_t mclk = 27000000;
+ 	struct clk *clk;
+ 	int err;
+-	unsigned int dummy = 0;
+ 
+ 	clk = clk_get(NULL, "csi_clk");
+ 	clk_enable(clk);
+-	set_mclk_rate(&mclk, dummy);
++	set_mclk_rate(&mclk);
+ 
+ 	err = i2c_probe(adap, &addr_data, &mt9v111_detect_client);
+ 
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 7ef8842..0237ad8 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -181,7 +181,7 @@ typedef struct _cam_data {
+ 	struct camera_sensor *cam_sensor;
+ } cam_data;
+ 
+-#ifdef CONFIG_MXC_IPU_V1
++#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA)
+ void set_mclk_rate(uint32_t *p_mclk_freq);
+ #else
+ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi);
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 460f56c..f861464 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -24,7 +24,7 @@
+ #include <linux/device.h>
+ #include <linux/clk.h>
+ 
+-#ifdef CONFIG_MXC_IPU_V1
++#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA)
+ /*
+  * set_mclk_rate
+  *
+-- 
+1.5.4.4
+

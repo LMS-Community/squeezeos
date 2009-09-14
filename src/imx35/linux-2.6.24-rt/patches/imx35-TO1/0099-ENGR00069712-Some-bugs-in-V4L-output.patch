@@ -1,0 +1,89 @@
+From aa4cfb10525a6c76abda9ae3a69f7ad5046326f1 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 25 Mar 2008 23:53:14 +0800
+Subject: [PATCH] ENGR00069712 Some bugs in V4L output
+
+Some bugs in V4L output,pls see CR for detail.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |   26 ++++++++++++++-------
+ 1 files changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index 34f3911..9e9809c 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -235,7 +235,6 @@ static u32 bpp_to_fmt(struct fb_info *fbi)
+ 	return 0;
+ }
+ 
+-
+ static void mxc_v4l2out_timer_handler(unsigned long arg)
+ {
+ 	int index;
+@@ -576,8 +575,7 @@ static int mxc_v4l2out_streamon(vout_data * vout)
+ 		vout->display_bufs[1] = fbi->fix.smem_start +
+ 		    (fbi->fix.line_length * fbi->var.yres);
+ 		vout->display_buf_size = vout->crop_current.width *
+-		    vout->crop_current.height *
+-		    fbi->var.bits_per_pixel / 8;
++		    vout->crop_current.height * fbi->var.bits_per_pixel / 8;
+ 
+ 		vout->post_proc_ch = MEM_PP_MEM;
+ 	}
+@@ -785,6 +783,12 @@ static int mxc_v4l2out_streamoff(vout_data * vout)
+ 			ipu_unlink_channels(MEM_PP_MEM, MEM_ROT_PP_MEM);
+ 			ipu_unlink_channels(MEM_ROT_PP_MEM, vout->display_ch);
+ 			ipu_disable_channel(MEM_ROT_PP_MEM, true);
++
++			if (vout->rot_pp_bufs[0]) {
++				mxc_free_buffers(vout->rot_pp_bufs,
++						 vout->rot_pp_bufs_vaddr, 2,
++						 vout->display_buf_size);
++			}
+ 		} else {
+ 			ipu_unlink_channels(MEM_PP_MEM, vout->display_ch);
+ 		}
+@@ -801,7 +805,7 @@ static int mxc_v4l2out_streamoff(vout_data * vout)
+ 		}
+ 
+ 		ipu_uninit_channel(MEM_PP_MEM);
+-		if (vout->rotate >= IPU_ROTATE_90_RIGHT)
++		if (!ipu_can_rotate_in_place(vout->rotate))
+ 			ipu_uninit_channel(MEM_ROT_PP_MEM);
+ 	} else {		/* ADC Direct */
+ 		ipu_disable_channel(MEM_PP_ADC, true);
+@@ -817,13 +821,14 @@ static int mxc_v4l2out_streamoff(vout_data * vout)
+ 
+ 	vout->state = STATE_STREAM_OFF;
+ 
+-	if (vout->display_bufs[0] != 0) {
+-		mxc_free_buffers(vout->display_bufs,
+-				 vout->display_bufs_vaddr, 2,
+-				 vout->display_buf_size);
+-	}
+ #ifdef CONFIG_FB_MXC_ASYNC_PANEL
+ 	if (vout->cur_disp_output < DISP3) {
++		if (vout->display_bufs[0] != 0) {
++			mxc_free_buffers(vout->display_bufs,
++					 vout->display_bufs_vaddr, 2,
++					 vout->display_buf_size);
++		}
++
+ 		mxcfb_set_refresh_mode(registered_fb
+ 				       [vout->
+ 					output_fb_num[vout->cur_disp_output]],
+@@ -932,6 +937,9 @@ static int mxc_v4l2out_s_fmt(vout_data * vout, struct v4l2_format *f)
+ 			retval = -EFAULT;
+ 			goto err0;
+ 		}
++	} else {
++		vout->offset.u_offset = 0;
++		vout->offset.v_offset = 0;
+ 	}
+ 
+ 	retval = 0;
+-- 
+1.5.4.4
+

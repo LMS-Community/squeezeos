@@ -1,0 +1,90 @@
+From ae541d48ea7ef1ec63c5182c33c45155b6504f19 Mon Sep 17 00:00:00 2001
+From: Lionel.Xu <r63889@freescale.com>
+Date: Tue, 18 Nov 2008 11:28:46 +0800
+Subject: [PATCH] ENGR00097189 audio/ssi fix swapped L/R channels
+
+1. Swap audio output L/R channels
+2. Change capture parameter channels_min back to 1 in ak4647.c
+
+Signed-off-by: Lionel Xu <r63889@freescale.com>
+---
+ sound/soc/codecs/ak4647.c |    8 +++++---
+ sound/soc/imx/imx-ssi.c   |   16 ++++++++--------
+ 2 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/sound/soc/codecs/ak4647.c b/sound/soc/codecs/ak4647.c
+index 8503093..84a9e18 100644
+--- a/sound/soc/codecs/ak4647.c
++++ b/sound/soc/codecs/ak4647.c
+@@ -297,7 +297,7 @@ static const struct snd_soc_pcm_stream ak4647_hifi_dai_playback = {
+ 
+ static const struct snd_soc_pcm_stream ak4647_hifi_dai_capture = {
+ 	.stream_name = "Capture",
+-	.channels_min = 2,
++	.channels_min = 1,
+ 	.channels_max = 2,
+ 	.rates = AK4647_RATES,
+ 	.formats = AK4647_FORMATS,
+@@ -634,7 +634,8 @@ static struct snd_soc_device_driver ak4647_hifi_dai_driver = {
+ 		   },
+ };
+ 
+-static int ak4647_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
++static int ak4647_i2c_probe(struct i2c_client *client,
++			    const struct i2c_device_id *id)
+ {
+ 	ak4647_i2c_client = client;
+ 	return 0;
+@@ -646,9 +647,10 @@ static int ak4647_i2c_remove(struct i2c_client *client)
+ }
+ 
+ static const struct i2c_device_id ak4647_id[] = {
+-	{ "ak4647-i2c", 0 },
++	{"ak4647-i2c", 0},
+ 	{},
+ };
++
+ MODULE_DEVICE_TABLE(i2c, ak4647_id);
+ 
+ static struct i2c_driver ak4647_i2c_driver = {
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 5720677..9ddc002 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -249,25 +249,25 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 	/* DAI clock inversion */
+ 	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
+ 	case SND_SOC_DAIFMT_IB_IF:
++		stcr &= ~(SSI_STCR_TSCKP | SSI_STCR_TFSI);
++		srcr &= ~(SSI_SRCR_RSCKP | SSI_SRCR_RFSI);
++		break;
++	case SND_SOC_DAIFMT_IB_NF:
+ 		stcr |= SSI_STCR_TFSI;
+ 		stcr &= ~SSI_STCR_TSCKP;
+ 		srcr |= SSI_SRCR_RFSI;
+ 		srcr &= ~SSI_SRCR_RSCKP;
+ 		break;
+-	case SND_SOC_DAIFMT_IB_NF:
+-		stcr &= ~(SSI_STCR_TSCKP | SSI_STCR_TFSI);
+-		srcr &= ~(SSI_SRCR_RSCKP | SSI_SRCR_RFSI);
+-		break;
+ 	case SND_SOC_DAIFMT_NB_IF:
+-		stcr |= SSI_STCR_TFSI | SSI_STCR_TSCKP;
+-		srcr |= SSI_SRCR_RFSI | SSI_SRCR_RSCKP;
+-		break;
+-	case SND_SOC_DAIFMT_NB_NF:
+ 		stcr &= ~SSI_STCR_TFSI;
+ 		stcr |= SSI_STCR_TSCKP;
+ 		srcr &= ~SSI_SRCR_RFSI;
+ 		srcr |= SSI_SRCR_RSCKP;
+ 		break;
++	case SND_SOC_DAIFMT_NB_NF:
++		stcr |= SSI_STCR_TFSI | SSI_STCR_TSCKP;
++		srcr |= SSI_SRCR_RFSI | SSI_SRCR_RSCKP;
++		break;
+ 	}
+ 
+ 	/* DAI clock master masks */
+-- 
+1.5.4.4
+

@@ -1,0 +1,47 @@
+From 32d0cc57f86dd3d71fcad9c9f0b68848a4b50eb3 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 21 Apr 2009 10:07:37 +0800
+Subject: [PATCH] ENGR00108634-4 IPUv3:Fix a bug to init CSI1->IC->MEM channel
+
+Fix a wrong logic to set IPU_CONF register when initializing
+CSI1->IC->MEM channel.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 5499960..f587ed0 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -345,6 +345,8 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 			IPU_CHAN_ID(channel));
+ 	}
+ 
++	ipu_conf = __raw_readl(IPU_CONF);
++
+ 	switch (channel) {
+ 	case CSI_MEM0:
+ 	case CSI_MEM1:
+@@ -538,7 +540,7 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 
+ 	/* Enable IPU sub module */
+ 	g_channel_init_mask |= 1L << IPU_CHAN_ID(channel);
+-	ipu_conf = __raw_readl(IPU_CONF);
++
+ 	if (ipu_ic_use_count == 1)
+ 		ipu_conf |= IPU_CONF_IC_EN;
+ 	if (ipu_rot_use_count == 1)
+@@ -1428,7 +1430,7 @@ int32_t ipu_disable_channel(ipu_channel_t channel, bool wait_for_stop)
+ 	    (channel == MEM_DC_SYNC)) {
+ 		_ipu_dp_dc_disable(channel);
+ 	} else if (wait_for_stop) {
+-		timeout = 40;
++		timeout = 240;
+ 		while (idma_is_set(IDMAC_CHA_BUSY, in_dma) ||
+ 		       idma_is_set(IDMAC_CHA_BUSY, out_dma) ||
+ 			(g_sec_chan_en[IPU_CHAN_ID(channel)] &&
+-- 
+1.5.4.4
+

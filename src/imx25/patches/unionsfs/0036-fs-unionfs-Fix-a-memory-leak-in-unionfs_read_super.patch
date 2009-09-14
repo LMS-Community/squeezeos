@@ -1,0 +1,33 @@
+From 4734185f9d9d497d75c02ad78ae68c0653cad324 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 2 Mar 2007 13:35:33 -0500
+Subject: [PATCH] fs/unionfs/: Fix a memory leak in unionfs_read_super
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/main.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index ca7ee26..bd64242 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -584,10 +584,11 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 	atomic_set(&UNIONFS_D(sb->s_root)->generation, 1);
+ 
+ 	/* call interpose to create the upper level inode */
+-	if ((err = unionfs_interpose(sb->s_root, sb, 0)))
+-		goto out_freedpd;
++	err = unionfs_interpose(sb->s_root, sb, 0);
+ 	unionfs_unlock_dentry(sb->s_root);
+-	goto out;
++	if (!err)
++		goto out;
++	/* else fall through */
+ 
+ out_freedpd:
+ 	if (UNIONFS_D(sb->s_root)) {
+-- 
+1.5.4.3
+

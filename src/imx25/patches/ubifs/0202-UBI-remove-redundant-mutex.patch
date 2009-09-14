@@ -1,0 +1,79 @@
+From 2f4d33ba09831cbf005ee5a1380c6eceee5d4e79 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 7 May 2009 11:25:54 +0300
+Subject: [PATCH] UBI: remove redundant mutex
+
+The @mult_mutex does not serve any purpose. We already have
+@volumes_mutex and it is enough. The @volume mutex is pushed
+down to the 'ubi_rename_volumes()', because we want first
+to open all volumes in the exclusive mode, and then lock the
+mutex, just like all other ioctl's (remove, re-size, etc) do.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    1 -
+ drivers/mtd/ubi/cdev.c  |    6 ++----
+ drivers/mtd/ubi/ubi.h   |    2 --
+ 3 files changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index 117cdc0..9e1f39a 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -806,7 +806,6 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 
+ 	mutex_init(&ubi->buf_mutex);
+ 	mutex_init(&ubi->ckvol_mutex);
+-	mutex_init(&ubi->mult_mutex);
+ 	mutex_init(&ubi->volumes_mutex);
+ 	spin_lock_init(&ubi->volumes_lock);
+ 
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index f8e0f68..8087b04 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -810,9 +810,7 @@ static int rename_volumes(struct ubi_device *ubi,
+ 			re->desc->vol->vol_id, re->desc->vol->name);
+ 	}
+ 
+-	mutex_lock(&ubi->volumes_mutex);
+ 	err = ubi_rename_volumes(ubi, &rename_list);
+-	mutex_unlock(&ubi->volumes_mutex);
+ 
+ out_free:
+ 	list_for_each_entry_safe(re, re1, &rename_list, list) {
+@@ -952,9 +950,9 @@ static long ubi_cdev_ioctl(struct file *file, unsigned int cmd,
+ 			break;
+ 		}
+ 
+-		mutex_lock(&ubi->mult_mutex);
++		mutex_lock(&ubi->volumes_mutex);
+ 		err = rename_volumes(ubi, req);
+-		mutex_unlock(&ubi->mult_mutex);
++		mutex_unlock(&ubi->volumes_mutex);
+ 		kfree(req);
+ 		break;
+ 	}
+diff --git a/drivers/mtd/ubi/ubi.h b/drivers/mtd/ubi/ubi.h
+index c055511..485c73f 100644
+--- a/drivers/mtd/ubi/ubi.h
++++ b/drivers/mtd/ubi/ubi.h
+@@ -366,7 +366,6 @@ struct ubi_wl_entry;
+  * @peb_buf2: another buffer of PEB size used for different purposes
+  * @buf_mutex: protects @peb_buf1 and @peb_buf2
+  * @ckvol_mutex: serializes static volume checking when opening
+- * @mult_mutex: serializes operations on multiple volumes, like re-naming
+  * @dbg_peb_buf: buffer of PEB size used for debugging
+  * @dbg_buf_mutex: protects @dbg_peb_buf
+  */
+@@ -444,7 +443,6 @@ struct ubi_device {
+ 	void *peb_buf2;
+ 	struct mutex buf_mutex;
+ 	struct mutex ckvol_mutex;
+-	struct mutex mult_mutex;
+ #ifdef CONFIG_MTD_UBI_DEBUG
+ 	void *dbg_peb_buf;
+ 	struct mutex dbg_buf_mutex;
+-- 
+1.5.4.3
+

@@ -1,0 +1,52 @@
+From 0275c599fb85bb17967340a289dbb4c2e88d402d Mon Sep 17 00:00:00 2001
+From: Ross Wille <wille@freescale.com>
+Date: Thu, 9 Oct 2008 17:31:01 -0600
+Subject: [PATCH] ENGR00094677 keypad: Fix get/set ioctl, device name
+
+Fixes keypad probe function to set up keycodes properly,
+which enables the get/set keymap ioctls to work.
+
+Registers keypad driver in proper order, enabling the correct
+device name to be presented to the input subsystem.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ drivers/input/keyboard/mxc_keyb.c |   16 +++++++++-------
+ 1 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/input/keyboard/mxc_keyb.c b/drivers/input/keyboard/mxc_keyb.c
+index 48fb7fa..08242cc 100644
+--- a/drivers/input/keyboard/mxc_keyb.c
++++ b/drivers/input/keyboard/mxc_keyb.c
+@@ -847,19 +847,21 @@ static int mxc_kpp_probe(struct platform_device *pdev)
+ 		goto err1;
+ 	}
+ 
+-	retval = input_register_device(mxckbd_dev);
+-	if (retval < 0) {
+-		goto err2;
+-	}
+-
+-	mxckbd_dev->keycode = &mxckpd_keycodes;
+-	mxckbd_dev->keycodesize = sizeof(unsigned char);
++	mxckbd_dev->keycode = (void *)mxckpd_keycodes;
++	mxckbd_dev->keycodesize = sizeof(mxckpd_keycodes[0]);
+ 	mxckbd_dev->keycodemax = mxckpd_keycodes_size;
+ 	mxckbd_dev->name = "mxckpd";
+ 	mxckbd_dev->id.bustype = BUS_HOST;
+ 	mxckbd_dev->open = mxc_kpp_open;
+ 	mxckbd_dev->close = mxc_kpp_close;
+ 
++	retval = input_register_device(mxckbd_dev);
++	if (retval < 0) {
++		printk(KERN_ERR
++		       "mxckbd_dev: failed to register input device\n");
++		goto err2;
++	}
++
+ 	/* allocate required memory */
+ 	press_scancode = kmalloc(kpp_dev.kpp_rows * sizeof(press_scancode[0]),
+ 				 GFP_KERNEL);
+-- 
+1.5.4.4
+

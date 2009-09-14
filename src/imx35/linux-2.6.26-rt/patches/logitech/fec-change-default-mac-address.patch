@@ -1,0 +1,44 @@
+---
+ drivers/net/fec.c |   22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+Index: linux-2.6.26/drivers/net/fec.c
+===================================================================
+--- linux-2.6.26.orig/drivers/net/fec.c	2009-04-28 11:16:23.000000000 +0100
++++ linux-2.6.26/drivers/net/fec.c	2009-04-28 11:16:26.000000000 +0100
+@@ -109,7 +109,7 @@
+ };
+ 
+ static unsigned char	fec_mac_default[] = {
+-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++	0x00, 0x40, 0x20, 0xff, 0xff, 0x01,
+ };
+ 
+ /*
+@@ -2147,6 +2147,26 @@
+ 			iap = fec_mac_default;
+ 	}
+ 
++        if (iap == fec_mac_default) {
++		/* Get MAC address set by bootloader
++ 		 * If it is all 1's or 0's, use the default.
++ 		 */
++		tmpaddr[0] = (fecp->fec_addr_low >> 24) & 0xFF;
++		tmpaddr[1] = (fecp->fec_addr_low >> 16) & 0xFF;
++		tmpaddr[2] = (fecp->fec_addr_low >> 8) & 0xFF;
++		tmpaddr[3] = (fecp->fec_addr_low >> 0) & 0xFF;
++		tmpaddr[4] = (fecp->fec_addr_high >> 24) & 0xFF;
++		tmpaddr[5] = (fecp->fec_addr_high >> 16) & 0xFF;
++		iap = &tmpaddr[0];
++
++		if ((iap[0] == 0) && (iap[1] == 0) && (iap[2] == 0) &&
++		    (iap[3] == 0) && (iap[4] == 0) && (iap[5] == 0))
++			iap = fec_mac_default;
++		if ((iap[0] == 0xff) && (iap[1] == 0xff) && (iap[2] == 0xff) &&
++		    (iap[3] == 0xff) && (iap[4] == 0xff) && (iap[5] == 0xff))
++			iap = fec_mac_default;
++	}
++
+         memcpy(dev->dev_addr, iap, ETH_ALEN);
+ 
+         /* Adjust MAC if using default MAC address */

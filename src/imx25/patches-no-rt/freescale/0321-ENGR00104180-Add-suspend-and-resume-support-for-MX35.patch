@@ -1,0 +1,156 @@
+From 897d3b75ab1b22daf59a2dd67cad5c698e88a148 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Mon, 12 Jan 2009 21:08:24 +0800
+Subject: [PATCH] ENGR00104180 Add suspend and resume support for MX35 TO2 board
+
+1. Add power key (AAPL PWRON1) as wakeup event for MX35 TO2 board
+2. Enable standby signal in stop mode.
+3. Change SW2 standby voltage as 1.0V.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx35/mx35_3stack.c      |   68 ++++++++++++++++++++++++++++-----
+ arch/arm/mach-mx35/system.c           |    4 +-
+ drivers/mxc/pmic/core/pmic_core_i2c.c |    3 +-
+ 3 files changed, 63 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 9f02af0..0091087 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -29,6 +29,7 @@
+ #include <linux/mtd/partitions.h>
+ #include <linux/delay.h>
+ #include <linux/regulator/mcu_max8660-bus.h>
++#include <linux/regulator/regulator.h>
+ 
+ #include <asm/mach/flash.h>
+ #endif
+@@ -42,6 +43,7 @@
+ #include <asm/arch/memory.h>
+ #include <asm/arch/gpio.h>
+ #include <asm/arch/mmc.h>
++#include <asm/arch/pmic_external.h>
+ 
+ #include "board-mx35_3stack.h"
+ #include "crm_regs.h"
+@@ -622,21 +624,67 @@ static irqreturn_t power_key_int(int irq, void *dev_id)
+  */
+ static int __init mxc_init_power_key(void)
+ {
+-	/*Set power key as wakeup resource */
+-	int irq, ret;
+-	irq = MXC_PSEUDO_IRQ_POWER_KEY;
+-	set_irq_type(irq, IRQF_TRIGGER_RISING);
+-	ret = request_irq(irq, power_key_int, 0, "power_key", 0);
+-	if (ret)
+-		pr_info("register on-off key interrupt failed\n");
+-	else
+-		set_irq_wake(irq, 1);
+-	return ret;
++	if (!board_is_mx35(BOARD_REV_2)) {
++		/*Set power key as wakeup resource */
++		int irq, ret;
++		irq = MXC_PSEUDO_IRQ_POWER_KEY;
++		set_irq_type(irq, IRQF_TRIGGER_RISING);
++		ret = request_irq(irq, power_key_int, 0, "power_key", 0);
++		if (ret)
++			pr_info("register on-off key interrupt failed\n");
++		else
++			enable_irq_wake(irq);
++		return ret;
++	}
++	return 0;
+ }
+ 
+ late_initcall(mxc_init_power_key);
+ #endif
+ 
++/*!
++ * the event handler for power on event
++ */
++static void power_on_evt_handler(void)
++{
++	pr_info("pwr on event1 is received \n");
++}
++
++/*!
++ * pmic board initialization code
++ */
++static int __init mxc_init_pmic(void)
++{
++	if (board_is_mx35(BOARD_REV_2)) {
++#if defined(CONFIG_MXC_PMIC_MC13892_MODULE) || defined(CONFIG_MXC_PMIC_MC13892)
++		unsigned int value;
++		pmic_event_callback_t power_key_event;
++		struct regulator *sw2_stby_reg;
++
++		/* subscribe PWRON1 event. */
++		power_key_event.param = NULL;
++		power_key_event.func = (void *)power_on_evt_handler;
++		pmic_event_subscribe(EVENT_PWRONI, power_key_event);
++
++		pmic_read_reg(REG_POWER_CTL2, &value, 0xffffff);
++		/* Bit 11 (STANDBYSECINV): Active Low */
++		value |= 0x00800;
++		pmic_write_reg(REG_POWER_CTL2, value, 0xffffff);
++
++		sw2_stby_reg = regulator_get(NULL, "SW2_STBY");
++
++		/* TBD: If core voltage is expected to be updated above 1.375v,
++		* this code needs to be moved before entering standby mode,
++		* which is decided by MC13892 Hi bit behavior */
++		regulator_set_voltage(sw2_stby_reg, 1000000);
++		regulator_put(sw2_stby_reg, NULL);
++#endif
++	}
++	return 0;
++}
++
++late_initcall(mxc_init_pmic);
++
+ #if defined(CONFIG_PATA_FSL) || defined(CONFIG_PATA_FSL_MODULE)
+ extern void gpio_ata_active(void);
+ extern void gpio_ata_inactive(void);
+diff --git a/arch/arm/mach-mx35/system.c b/arch/arm/mach-mx35/system.c
+index 2e74b02..500becc 100644
+--- a/arch/arm/mach-mx35/system.c
++++ b/arch/arm/mach-mx35/system.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -67,6 +67,8 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		lpm = MX35_STOP_MODE;
+ 		/* Enabled Well Bias */
+ 		reg |= MXC_CCM_CCMR_WBEN;
++		if (board_is_mx35(BOARD_REV_2))
++			reg |= MXC_CCM_CCMR_VSTBY;
+ 		break;
+ 
+ 	case WAIT_CLOCKED:
+diff --git a/drivers/mxc/pmic/core/pmic_core_i2c.c b/drivers/mxc/pmic/core/pmic_core_i2c.c
+index 9a8fbb5..a1e88ab 100644
+--- a/drivers/mxc/pmic/core/pmic_core_i2c.c
++++ b/drivers/mxc/pmic/core/pmic_core_i2c.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -288,6 +288,7 @@ static int __devinit pmic_probe(struct i2c_client *client,
+ 		dev_err(&client->dev, "request irq %d error!\n", pmic_irq);
+ 		return ret;
+ 	}
++	enable_irq_wake(IOMUX_TO_IRQ(pmic_irq));
+ 
+ 	reg_mc13892_probe();
+ 
+-- 
+1.5.4.4
+

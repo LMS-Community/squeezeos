@@ -2,14 +2,15 @@ DESCRIPTION = "FLAC"
 SECTION = "libs"
 LICENSE = "Xiph"
 
-PR = "r4"
+PR = "r5"
 
 SRC_URI="${SOURCEFORGE_MIRROR}/flac/flac-${PV}.tar.gz \
-	 file://bitreader-1.2.1.patch;patch=1"
+	 file://bitreader-1.2.1.patch;patch=1 \
+	 file://compile-fix.patch;patch=1"
 
 S = "${WORKDIR}/flac-${PV}"
 
-inherit autotools
+inherit autotools gettext
 
 EXTRA_OECONF = "--disable-ogg --disable-xmms-plugin --enable-static"
 

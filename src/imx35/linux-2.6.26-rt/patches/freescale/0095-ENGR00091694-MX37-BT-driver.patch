@@ -1,0 +1,144 @@
+From f50dfe35b78a36885dd5047c3e809c2e0d04e781 Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Fri, 19 Sep 2008 14:07:06 +0800
+Subject: [PATCH] ENGR00091694 MX37: BT driver
+
+1. add UART2 IOMUX for BT using the UATR2 connector
+2. add BT support
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ arch/arm/configs/imx37_3stack_defconfig |    3 ++-
+ arch/arm/mach-mx37/board-mx37_3stack.h  |    2 +-
+ arch/arm/mach-mx37/mx37_3stack.c        |   30 ++++++++++++++++++++++++++++++
+ arch/arm/mach-mx37/mx37_3stack_gpio.c   |   18 ++++++++++++++++++
+ drivers/mxc/bt/Kconfig                  |    2 +-
+ 5 files changed, 52 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx37_3stack_defconfig b/arch/arm/configs/imx37_3stack_defconfig
+index 58b0328..07e6885 100644
+--- a/arch/arm/configs/imx37_3stack_defconfig
++++ b/arch/arm/configs/imx37_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Tue Sep 16 10:19:23 2008
++# Fri Sep 19 14:05:49 2008
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1417,6 +1417,7 @@ CONFIG_MXC_VPU_IRAM=y
+ #
+ # MXC Bluetooth support
+ #
++CONFIG_MXC_BLUETOOTH=m
+ 
+ #
+ # Broadcom GPS ioctrl support
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index 1ce1bbe..5128524 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -70,7 +70,7 @@
+ /*! @} */
+ /* UART 2 configuration */
+ #define UART2_MODE              MODE_DCE
+-#define UART2_IR                IRDA
++#define UART2_IR                NO_IRDA
+ #define UART2_ENABLED           1
+ /* UART 3 configuration */
+ #define UART3_MODE              MODE_DTE
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index fdea09a..b1a85d3 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -490,6 +490,35 @@ static inline void mxc_init_mmc(void)
+ }
+ #endif
+ 
++static void bt_reset(void)
++{
++	mxc_request_iomux(MX37_PIN_AUD5_RXC, IOMUX_CONFIG_GPIO);
++	mxc_set_gpio_dataout(MX37_PIN_AUD5_RXC, 1);
++	mxc_set_gpio_direction(MX37_PIN_AUD5_RXC, 0);
++}
++
++static struct mxc_bt_platform_data mxc_bt_data = {
++	.bt_vdd = "DCDC3",
++	.bt_vdd_parent = NULL,
++	.bt_vusb = "DCDC6",
++	.bt_vusb_parent = NULL,
++	.bt_reset = bt_reset,
++};
++
++static struct platform_device mxc_bt_device = {
++	.name = "mxc_bt",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_bt_data,
++		},
++};
++
++static void mxc_init_bluetooth(void)
++{
++	(void)platform_device_register(&mxc_bt_device);
++}
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -509,6 +538,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_pata();
+ 	mxc_init_fb();
+ 	mxc_init_touchscreen();
++	mxc_init_bluetooth();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx37/mx37_3stack_gpio.c b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+index 5f53955..b7f3738 100644
+--- a/arch/arm/mach-mx37/mx37_3stack_gpio.c
++++ b/arch/arm/mach-mx37/mx37_3stack_gpio.c
+@@ -67,6 +67,24 @@ void gpio_uart_active(int port, int no_irda)
+ 				  PAD_CTL_DRV_HIGH);
+ 		break;
+ 	case 1:
++		mxc_request_iomux(MX37_PIN_UART1_DCD, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_UART1_DCD, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++		mxc_iomux_set_input(MUX_IN_UART2_UART_RXD_MUX, INPUT_CTL_PATH1);
++		mxc_request_iomux(MX37_PIN_UART1_RI, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_UART1_RI, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++		mxc_request_iomux(MX37_PIN_UART1_DSR, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_UART1_DSR, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH);
++		mxc_iomux_set_input(MUX_IN_UART2_UART_RTS_B, INPUT_CTL_PATH1);
++		mxc_request_iomux(MX37_PIN_UART1_DTR, IOMUX_CONFIG_ALT3);
++		mxc_iomux_set_pad(MX37_PIN_UART1_DTR, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
++				  PAD_CTL_DRV_HIGH);
+ 		break;
+ 	case 2:
+ 		break;
+diff --git a/drivers/mxc/bt/Kconfig b/drivers/mxc/bt/Kconfig
+index 73afe9b..0078e90 100644
+--- a/drivers/mxc/bt/Kconfig
++++ b/drivers/mxc/bt/Kconfig
+@@ -6,7 +6,7 @@ menu "MXC Bluetooth support"
+ 
+ config MXC_BLUETOOTH
+ 	tristate "MXC Bluetooth support"
+-	depends on MACH_MX31_3DS || MACH_MX35_3DS
++	depends on MACH_MX31_3DS || MACH_MX35_3DS || MACH_MX37_3DS
+ 	---help---
+          Say Y to get the third party Bluetooth service.
+ 
+-- 
+1.5.4.4
+

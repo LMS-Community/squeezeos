@@ -1,0 +1,79 @@
+From 57c5334d15feaa835dbd7380eaf5a82e7e11c847 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 24 Oct 2008 13:39:34 +0800
+Subject: [PATCH] ENGR00096537 mx37:fix tvout/lcd/utimix regulator issue
+
+Fix tvout/lcd/utimix regulator issue for v2.0 board
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx37/board-mx37_3stack.h |    1 +
+ arch/arm/mach-mx37/devices.c           |    5 ++++-
+ arch/arm/mach-mx37/mx37_3stack.c       |    4 +++-
+ include/asm-arm/arch-mxc/hardware.h    |    1 +
+ 4 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx37/board-mx37_3stack.h b/arch/arm/mach-mx37/board-mx37_3stack.h
+index 5128524..98bafac 100644
+--- a/arch/arm/mach-mx37/board-mx37_3stack.h
++++ b/arch/arm/mach-mx37/board-mx37_3stack.h
+@@ -105,5 +105,6 @@
+ extern unsigned int sdhc_get_card_det_status(struct device *dev);
+ extern int sdhc_write_protect(struct device *dev);
+ extern int sdhc_init_card_det(int id);
++extern struct tve_platform_data tve_data;
+ 
+ #endif				/* __ASM_ARCH_MXC_BOARD_MX37_3STACK_H__ */
+diff --git a/arch/arm/mach-mx37/devices.c b/arch/arm/mach-mx37/devices.c
+index 2205f87..998ae4a 100644
+--- a/arch/arm/mach-mx37/devices.c
++++ b/arch/arm/mach-mx37/devices.c
+@@ -553,7 +553,10 @@ static inline void mxc_init_i2c(void)
+ }
+ #endif
+ 
+-static struct tve_platform_data tve_data;
++struct tve_platform_data tve_data = {
++	.dac_reg = "VVIDEO",
++	.dig_reg = "VDIG",
++};
+ 
+ static struct resource tve_resources[] = {
+ 	{
+diff --git a/arch/arm/mach-mx37/mx37_3stack.c b/arch/arm/mach-mx37/mx37_3stack.c
+index 769aa44..d50bb30 100644
+--- a/arch/arm/mach-mx37/mx37_3stack.c
++++ b/arch/arm/mach-mx37/mx37_3stack.c
+@@ -241,7 +241,7 @@ static void lcd_reset(void)
+ }
+ 
+ static struct mxc_lcd_platform_data lcd_data = {
+-	.core_reg = "WIDEO",
++	.core_reg = "VVIDEO",
+ 	.io_reg = "SW4",
+ 	.reset = lcd_reset,
+ };
+@@ -614,6 +614,8 @@ static void mxc_init_bluetooth(void)
+  */
+ static void mx37_3stack_fixup_for_board_v1(void)
+ {
++	tve_data.dac_reg = "LDO2";
++	tve_data.dig_reg = "LDO3";
+ 	lcd_data.core_reg = "LDO1";
+ 	lcd_data.io_reg = "DCDC6";
+ 	dvfs_data.vddgp_reg = "DCDC1";
+diff --git a/include/asm-arm/arch-mxc/hardware.h b/include/asm-arm/arch-mxc/hardware.h
+index aebb070..f3774f8 100644
+--- a/include/asm-arm/arch-mxc/hardware.h
++++ b/include/asm-arm/arch-mxc/hardware.h
+@@ -74,6 +74,7 @@ static inline int type## _rev (int rev)		\
+ #define board_is_mx37(rev)   ((system_rev & rev) ? 1 : 0)
+ #else
+ #define cpu_is_mx37()   (0)
++#define board_is_mx37(rev)   (0)
+ #endif
+ 
+ #ifdef CONFIG_ARCH_MX51
+-- 
+1.5.4.4
+

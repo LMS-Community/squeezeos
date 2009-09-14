@@ -1,0 +1,65 @@
+From 1ce97f40f21592991c0175d7340fc0f286b864f1 Mon Sep 17 00:00:00 2001
+From: Julien Brunel <brunel@diku.dk>
+Date: Fri, 26 Sep 2008 15:27:25 +0200
+Subject: [PATCH] UBI: fix IS_ERR test
+
+In case of error, the function add_volume returns an ERR pointer. The
+result of IS_ERR, which is supposed to be used in a test as it is, is
+here checked to be less than zero, which seems odd. We suggest to
+replace this test by a simple IS_ERR test.
+
+A simplified version of the semantic match that finds this problem is
+as follows:
+(http://www.emn.fr/x-info/coccinelle/)
+
+// <smpl>
+@def0@
+expression x;
+position p0;
+@@
+x@p0 = add_volume(...)
+
+@protected@
+expression def0.x,E;
+position def0.p0;
+position p;
+statement S;
+@@
+x@p0
+... when != x = E
+if (!IS_ERR(x) && ...) {<... x@p ...>} else S
+
+@unprotected@
+expression def0.x,E;
+identifier fld;
+position def0.p0;
+position p != protected.p;
+@@
+x@p0
+... when != x = E
+* x@p->fld
+// </smpl>
+
+Signed-off-by:  Julien Brunel <brunel@diku.dk>
+Signed-off-by:  Julia Lawall <julia@diku.dk>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/scan.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 967bb44..4f2daa5 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -387,7 +387,7 @@ int ubi_scan_add_used(struct ubi_device *ubi, struct ubi_scan_info *si,
+ 		pnum, vol_id, lnum, ec, sqnum, bitflips);
+ 
+ 	sv = add_volume(si, vol_id, pnum, vid_hdr);
+-	if (IS_ERR(sv) < 0)
++	if (IS_ERR(sv))
+ 		return PTR_ERR(sv);
+ 
+ 	if (si->max_sqnum < sqnum)
+-- 
+1.5.4.3
+

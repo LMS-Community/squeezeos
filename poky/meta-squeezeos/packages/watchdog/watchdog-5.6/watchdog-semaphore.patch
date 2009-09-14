@@ -1,0 +1,314 @@
+Index: watchdog-5.6/include/extern.h
+===================================================================
+--- watchdog-5.6.orig/include/extern.h	2009-06-02 13:32:12.000000000 +0100
++++ watchdog-5.6/include/extern.h	2009-06-03 12:29:00.000000000 +0100
+@@ -9,6 +9,7 @@
+ extern char *tempname, *admin, *devname, *progname, *timestamps, *heartbeat;
+ extern time_t timeout;
+ extern FILE *hb;
++extern int semid;
+ 
+ /* variable types */
+ struct pingmode
+@@ -57,6 +58,8 @@
+ 
+ #define TS_SIZE	12
+ 
++#define NUM_SEMS 20
++
+ /* function prototypes */
+ int check_file_stat(struct list *);
+ int check_file_table(void);
+@@ -68,6 +71,7 @@
+ int check_pidfile(struct list *);
+ int check_iface(struct list *);
+ int check_memory(void);
++int check_semaphore(void);
+ 
+ void do_shutdown(int errorcode);
+ void sigterm_handler(int arg);
+Index: watchdog-5.6/src/Makefile.am
+===================================================================
+--- watchdog-5.6.orig/src/Makefile.am	2009-06-02 13:31:05.000000000 +0100
++++ watchdog-5.6/src/Makefile.am	2009-06-02 13:34:55.000000000 +0100
+@@ -2,7 +2,7 @@
+ 
+ watchdog_SOURCES = file_stat.c file_table.c fstab.c iface.c ifdown.c keep_alive.c \
+ 			load.c lomount.c memory.c mntent.c mount.c net.c nfsmount.c \
+-			nfsmount_clnt.c nfsmount_xdr.c pidfile.c shutdown.c sundries.c \
++			nfsmount_clnt.c nfsmount_xdr.c pidfile.c shutdown.c semaphore.c sundries.c \
+ 			temp.c test_binary.c umount.c version.c watchdog.c
+ 
+ wd_keepalive_SOURCES = wd_keepalive.c
+Index: watchdog-5.6/src/semaphore.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ watchdog-5.6/src/semaphore.c	2009-06-03 12:29:46.000000000 +0100
+@@ -0,0 +1,75 @@
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <errno.h>
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/ipc.h>
++#include <sys/sem.h>
++#include "extern.h"
++#include "watch_err.h"
++
++#if USE_SYSLOG
++#include <syslog.h>
++#endif
++
++
++int check_semaphore(void)
++{
++    struct sembuf sops = { 0, -1, IPC_NOWAIT };
++    int sem_num = 0;
++
++    if (semid == -1) {
++	return (ENOERR);
++    }
++
++    for (sem_num = 0; sem_num < NUM_SEMS; sem_num += 2) {
++	int active = semctl(semid, sem_num, GETVAL);
++	if (active == -1) {
++	    int err = errno;
++
++#if USE_SYSLOG
++	    syslog(LOG_ERR, "semctl gave errno = %d = '%m'", err);
++#else				/* USE_SYSLOG */
++	    perror(progname);
++#endif				/* USE_SYSLOG */
++	    if (softboot)
++		return (err);
++	}
++	else if (active == 0) {
++	    /* semaphore active */
++	    sops.sem_num = sem_num + 1;
++	    if (semop(semid, &sops, 1) == -1) {
++		int err = errno;
++
++		if (err == EAGAIN) {
++		    int pid = semctl(semid, sem_num, GETPID);
++
++#if USE_SYSLOG
++		    syslog(LOG_ERR, "semaphore %d:%d was not changed.", pid, sem_num);
++#else				/* USE_SYSLOG */
++		    fprintf(stderr, "semaphore %d:%d was not changed.", pid, sem_num);
++#endif				/* USE_SYSLOG */
++
++		    return (ENOCHANGE);
++		}
++		else {
++#if USE_SYSLOG
++		    syslog(LOG_ERR, "semop gave errno = %d = '%m'", err);
++#else				/* USE_SYSLOG */
++		    perror(progname);
++#endif				/* USE_SYSLOG */
++		    if (softboot)
++			return (err);
++		}
++
++	    }
++	}
++
++	sem_num += 2;
++    }
++
++    return (ENOERR);
++}
+Index: watchdog-5.6/src/watchdog.c
+===================================================================
+--- watchdog-5.6.orig/src/watchdog.c	2009-06-02 13:31:39.000000000 +0100
++++ watchdog-5.6/src/watchdog.c	2009-06-03 12:28:35.000000000 +0100
+@@ -25,6 +25,8 @@
+ #include <sys/wait.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#include <sys/ipc.h>
++#include <sys/sem.h>
+ #include <linux/watchdog.h>
+ #define __USE_GNU
+ #include <string.h>
+@@ -73,6 +75,7 @@
+ #define TESTTIMEOUT	"test-timeout"
+ #define HEARTBEAT	"heartbeat-file"
+ #define HBSTAMPS	"heartbeat-stamps"
++#define SEMKEY		"semkey"
+ 
+ pid_t pid;
+ int softboot = FALSE, watchdog = -1, load = -1, mem = -1, temp = -1;
+@@ -85,6 +88,8 @@
+ char *timestamps, *heartbeat;
+ time_t timeout = 0;
+ FILE *hb;
++key_t semkey;
++int semid = -1;
+ 
+ #if defined(_POSIX_MEMLOCK)
+ int mlocked = FALSE, realtime = FALSE;
+@@ -420,6 +425,12 @@
+ 		else {
+ 			minpages = atol(line + i);
+ 		}
++	    } else if (strncmp(line + i, SEMKEY, strlen(SEMKEY)) == 0) {
++		if (spool(line, &i, strlen(SEMKEY)))
++			fprintf(stderr, "Ignoring invalid line in config file:\n%s\n", line);
++		else {
++			semkey = atol(line + i);
++		}
+ 	    } else {
+ 		fprintf(stderr, "Ignoring invalid line in config file:\n%s\n", line);
+ 	    }
+@@ -631,12 +642,12 @@
+     /* Log the starting message */
+     openlog(progname, LOG_PID, LOG_DAEMON);
+     syslog(LOG_INFO, "starting daemon (%d.%d):", MAJOR_VERSION, MINOR_VERSION);
+-    syslog(LOG_INFO, "int=%ds realtime=%s sync=%s soft=%s mla=%d mem=%d",
++    syslog(LOG_INFO, "int=%ds realtime=%s sync=%s soft=%s mla=%d mem=%d semkey=%d",
+ 	    tint,
+ 	    realtime ? "yes" : "no",
+ 	    sync_it ? "yes" : "no",
+ 	    softboot ? "yes" : "no",
+-	    maxload1, minpages);
++	   maxload1, minpages, semkey);
+ 	    
+     if (target == NULL)
+             syslog(LOG_INFO, "ping: no machine to check");
+@@ -784,6 +795,28 @@
+ 	}
+     }
+ 
++    if (semkey > 0) {
++	/* open the ipc semaphore */
++	semid = semget(semkey, NUM_SEMS, 0);
++	if (semid == -1) {
++
++	    semid = semget(semkey, NUM_SEMS, 0666 | IPC_CREAT);
++	    if (semid == -1) {
++#if USE_SYSLOG
++		syslog(LOG_ERR, "cannot get sempahore %d (errno = %d = '%m')", semkey, errno);
++#else				/* USE_SYSLOG */
++		perror(progname);
++#endif				/* USE_SYSLOG */
++	    }
++	    else {
++		int sem_num;
++		for (sem_num = 0; sem_num < NUM_SEMS; sem_num += 2) {
++		    semctl(semid, sem_num, SETVAL, 1);
++		}
++	    }
++	}
++    }
++
+     /* tuck my process id away */
+     pid = getpid();
+     fp = fopen(PIDFILE, "w");
+@@ -840,6 +873,9 @@
+ 	/* check temperature */
+ 	do_check(check_temp(), rbinary, NULL);
+ 
++	/* check semaphore */
++	do_check(check_semaphore(), rbinary, NULL);
++
+ 	/* in filemode stat file */
+ 	for (act = file; act != NULL; act = act->next)
+ 	    do_check(check_file_stat(act), rbinary, act->name);
+Index: watchdog-5.6/examples/sem_ping.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ watchdog-5.6/examples/sem_ping.c	2009-06-03 12:37:49.000000000 +0100
+@@ -0,0 +1,90 @@
++
++/*
++ * This file shows how to use the watchdog semaphores from an application
++ * program.
++ */
++
++#include <errno.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <sys/ipc.h>
++#include <sys/sem.h>
++
++
++static int wdog_sem_id = -1;
++
++
++/*
++ * Return a watchdog id, otherwise -1 if an error happens. If nowayout
++ * is true the watchdog remain active when the process exits, causing
++ * a reboot.
++ */
++static int watchdog_sem_get(key_t key, int nowayout)
++{
++	struct sembuf sops[] = {
++		{ 0, -1, IPC_NOWAIT },
++		{ 0, 1, IPC_NOWAIT }
++	};
++	int sem_num;
++
++	if (wdog_sem_id == -1) {
++		wdog_sem_id = semget(key, 10, 0666 | IPC_CREAT);
++		if (wdog_sem_id == -1) {
++			perror("semget");
++			return -1;
++		}
++	}
++
++	if (!nowayout) {
++		sops[0].sem_flg |= SEM_UNDO;
++	}
++
++	sem_num = 0;
++	while (1) {
++		sops[0].sem_num = sem_num;
++		sops[1].sem_num = sem_num + 1;
++
++		if (semop(wdog_sem_id, sops, 2) == 0) {
++			return sem_num;
++		}
++
++		if (errno == EFBIG) {
++			return -1;
++		}
++
++		sem_num += 2;
++	}
++}
++
++
++/*
++ * Keep the watchdog alive for count intervals.
++ */
++static int watchdog_sem_keepalive(int wdog_id, int count)
++{
++	if (semctl(wdog_sem_id, wdog_id + 1, SETVAL, count) == -1) {
++		perror("semctl");
++		return -1;
++	}
++
++	return 0;
++}
++
++
++
++int main(int argc, char *argv)
++{
++	int wdog_id;
++
++	wdog_id = watchdog_sem_get(1234, argc > 1);
++	if (wdog_id == -1) {
++		printf("can't get watchdog sem\n");
++		exit(-1);
++	}
++
++	while (1) {
++		watchdog_sem_keepalive(wdog_id, 1);
++		sleep(1);
++	}
++}

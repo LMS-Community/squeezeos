@@ -1,0 +1,105 @@
+From eace4dc5feac8fc222b237055d42600a9d2af505 Mon Sep 17 00:00:00 2001
+From: Adrian Bunk <bunk@stusta.de>
+Date: Mon, 2 Jul 2007 14:27:57 -0400
+Subject: [PATCH] [PATCH] unionfs: make functions static
+
+This patch makes some needlessly global functions static.
+
+Signed-off-by: Adrian Bunk <bunk@stusta.de>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |    4 +++-
+ fs/unionfs/mmap.c   |   14 +++++++-------
+ fs/unionfs/union.h  |    1 -
+ 3 files changed, 10 insertions(+), 9 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index f21a9f3..4916f25 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -18,6 +18,8 @@
+ 
+ #include "union.h"
+ 
++static int realloc_dentry_private_data(struct dentry *dentry);
++
+ /* is the filename valid == !(whiteout for a file or opaque dir marker) */
+ static int is_validname(const char *name)
+ {
+@@ -514,7 +516,7 @@ static inline int __realloc_dentry_private_data(struct dentry *dentry)
+ }
+ 
+ /* UNIONFS_D(dentry)->lock must be locked */
+-int realloc_dentry_private_data(struct dentry *dentry)
++static int realloc_dentry_private_data(struct dentry *dentry)
+ {
+ 	if (!__realloc_dentry_private_data(dentry))
+ 		return 0;
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 9cd51f0..40f7f29 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -52,7 +52,7 @@
+  * such day as Linux can better support address_space_ops in a stackable
+  * fashion.
+  */
+-int unionfs_writepage(struct page *page, struct writeback_control *wbc)
++static int unionfs_writepage(struct page *page, struct writeback_control *wbc)
+ {
+ 	int err = -EIO;
+ 	struct inode *inode;
+@@ -181,7 +181,7 @@ out:
+ 	return err;
+ }
+ 
+-int unionfs_readpage(struct file *file, struct page *page)
++static int unionfs_readpage(struct file *file, struct page *page)
+ {
+ 	int err;
+ 
+@@ -211,8 +211,8 @@ out:
+ 	return err;
+ }
+ 
+-int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
+-			  unsigned to)
++static int unionfs_prepare_write(struct file *file, struct page *page,
++				 unsigned from, unsigned to)
+ {
+ 	int err;
+ 
+@@ -236,8 +236,8 @@ int unionfs_prepare_write(struct file *file, struct page *page, unsigned from,
+ 	return err;
+ }
+ 
+-int unionfs_commit_write(struct file *file, struct page *page, unsigned from,
+-			 unsigned to)
++static int unionfs_commit_write(struct file *file, struct page *page,
++				unsigned from, unsigned to)
+ {
+ 	int err = -ENOMEM;
+ 	struct inode *inode, *lower_inode;
+@@ -302,7 +302,7 @@ out:
+ 	return err;		/* assume all is ok */
+ }
+ 
+-void unionfs_sync_page(struct page *page)
++static void unionfs_sync_page(struct page *page)
+ {
+ 	struct inode *inode;
+ 	struct inode *lower_inode;
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 00f2b36..50f7f83 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -248,7 +248,6 @@ static inline void unionfs_double_lock_dentry(struct dentry *d1,
+ 	unionfs_lock_dentry(d2);
+ }
+ 
+-extern int realloc_dentry_private_data(struct dentry *dentry);
+ extern int new_dentry_private_data(struct dentry *dentry);
+ extern void free_dentry_private_data(struct dentry *dentry);
+ extern void update_bstart(struct dentry *dentry);
+-- 
+1.5.4.3
+

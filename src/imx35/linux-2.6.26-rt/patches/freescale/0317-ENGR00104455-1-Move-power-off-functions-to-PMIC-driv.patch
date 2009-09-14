@@ -1,0 +1,142 @@
+From 0c7a39a9c7b4bcaace6f33611d3048a5996d818c Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Mon, 12 Jan 2009 20:23:42 +0800
+Subject: [PATCH] ENGR00104455-1 Move power off functions to PMIC driver
+
+Move power off functions to PMIC driver
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx3/mx3_3stack.c        |    5 +----
+ arch/arm/mach-mx35/mx35_3stack.c      |    9 ---------
+ drivers/mxc/mcu_pmic/mcu_pmic_core.c  |   11 ++++++++++-
+ drivers/mxc/pmic/core/mc13892.c       |    3 ++-
+ drivers/mxc/pmic/mc13783/pmic_power.c |    4 +++-
+ 5 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx3/mx3_3stack.c b/arch/arm/mach-mx3/mx3_3stack.c
+index 6e9bb1e..6dcb40d 100644
+--- a/arch/arm/mach-mx3/mx3_3stack.c
++++ b/arch/arm/mach-mx3/mx3_3stack.c
+@@ -1,7 +1,7 @@
+ /*
+  *  Copyright (C) 2000 Deep Blue Solutions Ltd
+  *  Copyright (C) 2002 Shane Nay (shane@minirl.com)
+- *  Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -1017,9 +1017,6 @@ static void __init mxc_board_init(void)
+ 	mxc_init_pata();
+ 	mxc_init_bluetooth();
+ 	mxc_init_gps();
+-
+-	/* set power off hook to mc13783 power off */
+-	pm_power_off = pmic_power_off;
+ }
+ 
+ #define PLL_PCTL_REG(pd, mfd, mfi, mfn)		\
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index 88b32b1..2b848a7 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -722,13 +722,6 @@ static void __init mxc_init_gps(void)
+ }
+ #endif
+ 
+-static void pmic_power_off(void)
+-{
+-#ifdef CONFIG_MXC_PMIC_MC9SDZ60
+-	mcu_pmic_write_reg(REG_MCU_POWER_CTL, 0x10, 0x10);
+-#endif
+-}
+-
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -886,8 +879,6 @@ static void __init mxc_board_init(void)
+ 	mxc_init_bluetooth();
+ 	mxc_init_gps();
+ 	mxc_init_mlb();
+-
+-	pm_power_off = pmic_power_off;
+ }
+ 
+ #define PLL_PCTL_REG(brmo, pd, mfd, mfi, mfn)		\
+diff --git a/drivers/mxc/mcu_pmic/mcu_pmic_core.c b/drivers/mxc/mcu_pmic/mcu_pmic_core.c
+index 6bff9ab..5970996 100644
+--- a/drivers/mxc/mcu_pmic/mcu_pmic_core.c
++++ b/drivers/mxc/mcu_pmic/mcu_pmic_core.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -175,6 +175,14 @@ int mcu_pmic_write_reg(int reg, unsigned int reg_value,
+ 	return ret;
+ }
+ 
++/*!
++ * make max8660 - mc9sdz60 enter low-power mode
++ */
++static void pmic_power_off(void)
++{
++	mcu_pmic_write_reg(REG_MCU_POWER_CTL, 0x10, 0x10);
++}
++
+ static int __init mcu_pmic_init(void)
+ {
+ 	int err;
+@@ -191,6 +199,7 @@ static int __init mcu_pmic_init(void)
+ 	if (is_max8660_present()) {
+ 		pr_info("max8660 is present, reg_max8660_probe\n");
+ 		reg_max8660_probe();
++		pm_power_off = pmic_power_off;
+ 	} else {
+ 		pr_debug("max8660 is not present, reg_mc9sdz60_probe\n");
+ 		reg_mc9sdz60_probe();
+diff --git a/drivers/mxc/pmic/core/mc13892.c b/drivers/mxc/pmic/core/mc13892.c
+index 7b95ec6..f5c2fae 100644
+--- a/drivers/mxc/pmic/core/mc13892.c
++++ b/drivers/mxc/pmic/core/mc13892.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -117,6 +117,7 @@ int pmic_init_registers(void)
+ 	if (machine_is_mx51_3ds())
+ 		CHECK_ERROR(pmic_write(REG_CHARGE, 0xB40003));
+ 
++	pm_power_off = mc13892_power_off;
+ 	return PMIC_SUCCESS;
+ }
+ 
+diff --git a/drivers/mxc/pmic/mc13783/pmic_power.c b/drivers/mxc/pmic/mc13783/pmic_power.c
+index e0ae538..1a3208e 100644
+--- a/drivers/mxc/pmic/mc13783/pmic_power.c
++++ b/drivers/mxc/pmic/mc13783/pmic_power.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -3117,6 +3117,8 @@ static int __init pmic_power_init(void)
+ {
+ 	pr_debug("PMIC Power driver loading..\n");
+ 	pmic_power_event_sub(PWR_IT_ONOFD1I, pmic_power_key_callback);
++	/* set power off hook to mc13783 power off */
++	pm_power_off = pmic_power_off;
+ 	return platform_driver_register(&pmic_power_driver_ldm);
+ }
+ static void __exit pmic_power_exit(void)
+-- 
+1.5.4.4
+

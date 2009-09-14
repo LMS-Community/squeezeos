@@ -1,0 +1,50 @@
+From 9c72c010c0c23563042f84fc9aef7cb6bd14f394 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 6 Jan 2009 12:24:27 +0800
+Subject: [PATCH] ENGR00104024 ipuv3: fix full-screen display issue.
+
+After display offset-window on FG, can not display
+full-screen again.
+Work-around by set window position to (0,0).
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_v4l2_output.c |   17 ++++++++++++++++-
+ 1 files changed, 16 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index 05259b5..2fc0623 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -828,6 +828,21 @@ static int mxc_v4l2out_streamoff(vout_data * vout)
+ 
+ 	spin_unlock_irqrestore(&g_lock, lockflag);
+ 
++	if (vout->display_ch == MEM_FG_SYNC) {
++		struct mxcfb_pos fb_pos;
++		mm_segment_t old_fs;
++
++		fb_pos.x = 0;
++		fb_pos.y = 0;
++		if (fbi->fbops->fb_ioctl) {
++			old_fs = get_fs();
++			set_fs(KERNEL_DS);
++			fbi->fbops->fb_ioctl(fbi, MXCFB_SET_OVERLAY_POS,
++					(unsigned long)&fb_pos);
++			set_fs(old_fs);
++		}
++	}
++
+ 	if (vout->post_proc_ch == MEM_PP_MEM) {	/* SDC or ADC with Rotation */
+ 		if (!ipu_can_rotate_in_place(vout->rotate)) {
+ 			ipu_unlink_channels(MEM_PP_MEM, MEM_ROT_PP_MEM);
+-- 
+1.5.4.4
+

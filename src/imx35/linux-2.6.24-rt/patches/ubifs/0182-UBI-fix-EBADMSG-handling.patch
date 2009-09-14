@@ -1,0 +1,47 @@
+From b5a72a9facd7eadd4dd3ab3eb976fae416e4bad7 Mon Sep 17 00:00:00 2001
+From: Zoltan Sogor <weth@inf.u-szeged.hu>
+Date: Wed, 29 Oct 2008 09:50:02 +0100
+Subject: [PATCH] UBI: fix EBADMSG handling
+
+'ubi_io_read_data()' may return EBADMSG in case of an ECC error,
+and we should not panic because of this. We have CRC32 checksum
+and may check the data. So just ignore the EBADMSG error.
+
+This patch also fixes a minor spelling error at the same time.
+
+Signed-off-by: Zoltan Sogor <weth@inf.u-szeged.hu>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/eba.c  |    2 +-
+ drivers/mtd/ubi/scan.c |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/ubi/eba.c b/drivers/mtd/ubi/eba.c
+index e04bcf1..d8966ba 100644
+--- a/drivers/mtd/ubi/eba.c
++++ b/drivers/mtd/ubi/eba.c
+@@ -1022,7 +1022,7 @@ int ubi_eba_copy_leb(struct ubi_device *ubi, int from, int to,
+ 	}
+ 
+ 	/*
+-	 * OK, now the LEB is locked and we can safely start moving iy. Since
++	 * OK, now the LEB is locked and we can safely start moving it. Since
+ 	 * this function utilizes thie @ubi->peb1_buf buffer which is shared
+ 	 * with some other functions, so lock the buffer by taking the
+ 	 * @ubi->buf_mutex.
+diff --git a/drivers/mtd/ubi/scan.c b/drivers/mtd/ubi/scan.c
+index 4f2daa5..41d47e1 100644
+--- a/drivers/mtd/ubi/scan.c
++++ b/drivers/mtd/ubi/scan.c
+@@ -320,7 +320,7 @@ static int compare_lebs(struct ubi_device *ubi, const struct ubi_scan_leb *seb,
+ 	}
+ 
+ 	err = ubi_io_read_data(ubi, buf, pnum, 0, len);
+-	if (err && err != UBI_IO_BITFLIPS)
++	if (err && err != UBI_IO_BITFLIPS && err != -EBADMSG)
+ 		goto out_free_buf;
+ 
+ 	data_crc = be32_to_cpu(vid_hdr->data_crc);
+-- 
+1.5.6.3
+

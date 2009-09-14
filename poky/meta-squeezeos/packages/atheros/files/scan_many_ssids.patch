@@ -1,0 +1,622 @@
+Index: AR6kSDK.build_sw.20/host/os/linux/include/ar6000_drv.h
+===================================================================
+--- AR6kSDK.build_sw.20.orig/host/os/linux/include/ar6000_drv.h	2009-07-01 20:52:15.000000000 +0100
++++ AR6kSDK.build_sw.20/host/os/linux/include/ar6000_drv.h	2009-07-01 20:52:40.000000000 +0100
+@@ -42,7 +42,11 @@
+ #include <net/iw_handler.h>
+ #include <linux/if_arp.h>
+ #include <linux/ip.h>
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
+ #include <asm/semaphore.h>
++#else
++#include <linux/semaphore.h>
++#endif
+ #include <linux/wireless.h>
+ #include <linux/module.h>
+ #include <asm/io.h>
+@@ -255,7 +259,9 @@
+     A_UINT32                tcmdRxTotalPkt;
+     A_INT32                 tcmdRxRssi;
+     A_UINT32                tcmdPm;
+-   A_UINT32                 arTargetMode; 
++    A_UINT32                arTargetMode;
++    A_UINT32                tcmdRxcrcErrPkt;
++    A_UINT32                tcmdRxsecErrPkt;
+ #endif
+     AR6000_WLAN_STATE       arWlanState;
+     struct ar_node_mapping  arNodeMap[MAX_NODE_NUM];
+@@ -297,7 +303,7 @@
+     A_BOOL                  dbgLogFetchInProgress;
+     A_UCHAR                 log_buffer[DBGLOG_HOST_LOG_BUFFER_SIZE];
+     A_UINT32                log_cnt;
+-    A_UINT32                dbglog_init_done;    
++    A_UINT32                dbglog_init_done;
+     A_UINT32                arConnectCtrlFlags;
+ #ifdef USER_KEYS
+     A_INT32                 user_savedkeys_stat;
+@@ -325,7 +331,10 @@
+ struct ar_giwscan_param {
+     char    *current_ev;
+     char    *end_buf;
+-    A_BOOL  firstPass;
++    A_UINT32 bytes_needed;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++    struct iw_request_info *info;
++#endif
+ };
+ 
+ #define AR6000_STAT_INC(ar, stat)       (ar->arNetStats.stat++)
+Index: AR6kSDK.build_sw.20/host/os/linux/wireless_ext.c
+===================================================================
+--- AR6kSDK.build_sw.20.orig/host/os/linux/wireless_ext.c	2009-07-01 20:52:00.000000000 +0100
++++ AR6kSDK.build_sw.20/host/os/linux/wireless_ext.c	2009-07-01 20:52:53.000000000 +0100
+@@ -49,7 +49,10 @@
+     bufsize -= leader_len;
+     p += leader_len;
+     for (i = 0; i < ielen && bufsize > 2; i++)
++    {
+         p += sprintf(p, "%02x", ie[i]);
++        bufsize -= 2;
++    }
+     return (i == ielen ? p - (u_int8_t *)buf : 0);
+ }
+ #endif /* WIRELESS_EXT > 14 */
+@@ -59,7 +62,7 @@
+ {
+     struct iw_event iwe;
+ #if WIRELESS_EXT > 14
+-    static char buf[8192];
++    char buf[256];
+ #endif
+     struct ar_giwscan_param *param;
+     A_CHAR *current_ev;
+@@ -67,78 +70,109 @@
+     struct ieee80211_common_ie  *cie;
+     A_CHAR *current_val;
+     A_INT32 j;
+-    A_UINT32 rate_len;
+-    param = (struct ar_giwscan_param *)arg;
+-
+-    if (param->current_ev >= param->end_buf) {
+-        return;
+-    }
+-    if ((param->firstPass == TRUE) &&
+-        ((ni->ni_cie.ie_wpa == NULL) && (ni->ni_cie.ie_rsn == NULL))) {
+-        /*
+-         * Only forward wpa bss's in first pass
+-         */
+-        return;
+-    }
++    A_UINT32 rate_len, data_len = 0;
+ 
+-     if ((param->firstPass == FALSE) &&
+-        ((ni->ni_cie.ie_wpa != NULL) || (ni->ni_cie.ie_rsn != NULL))) {
+-        /*
+-         * Only forward non-wpa bss's in 2nd pass
+-         */
+-        return;
+-    }
++    param = (struct ar_giwscan_param *)arg;
+ 
+     current_ev = param->current_ev;
+     end_buf = param->end_buf;
+ 
+     cie = &ni->ni_cie;
+ 
+-    A_MEMZERO(&iwe, sizeof(iwe));
+-    iwe.cmd = SIOCGIWAP;
+-    iwe.u.ap_addr.sa_family = ARPHRD_ETHER;
+-    A_MEMCPY(iwe.u.ap_addr.sa_data, ni->ni_macaddr, 6);
+-    current_ev = iwe_stream_add_event(current_ev, end_buf, &iwe,
+-                                      IW_EV_ADDR_LEN);
++    if ((end_buf - current_ev) > IW_EV_ADDR_LEN)
++    {
++        A_MEMZERO(&iwe, sizeof(iwe));
++        iwe.cmd = SIOCGIWAP;
++        iwe.u.ap_addr.sa_family = ARPHRD_ETHER;
++        A_MEMCPY(iwe.u.ap_addr.sa_data, ni->ni_macaddr, 6);
++        current_ev = iwe_stream_add_event(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe,
++                          IW_EV_ADDR_LEN);
++    }
++    param->bytes_needed += IW_EV_ADDR_LEN;
+ 
+-    A_MEMZERO(&iwe, sizeof(iwe));
+-    iwe.cmd = SIOCGIWESSID;
+-    iwe.u.data.flags = 1;
+-    iwe.u.data.length = cie->ie_ssid[1];
+-    current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe,
+-                                      &cie->ie_ssid[2]);
++    data_len = cie->ie_ssid[1] + IW_EV_POINT_LEN;
++    if ((end_buf - current_ev) > data_len)
++    {
++        A_MEMZERO(&iwe, sizeof(iwe));
++        iwe.cmd = SIOCGIWESSID;
++        iwe.u.data.flags = 1;
++        iwe.u.data.length = cie->ie_ssid[1];
++        current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe,
++                          &cie->ie_ssid[2]);
++    }
++    param->bytes_needed += data_len;
+ 
+     if (cie->ie_capInfo & (IEEE80211_CAPINFO_ESS|IEEE80211_CAPINFO_IBSS)) {
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = SIOCGIWMODE;
+-        iwe.u.mode = cie->ie_capInfo & IEEE80211_CAPINFO_ESS ?
+-                IW_MODE_MASTER : IW_MODE_ADHOC;
+-        current_ev = iwe_stream_add_event(current_ev, end_buf, &iwe,
+-                                          IW_EV_UINT_LEN);
++        if ((end_buf - current_ev) > IW_EV_UINT_LEN)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = SIOCGIWMODE;
++            iwe.u.mode = cie->ie_capInfo & IEEE80211_CAPINFO_ESS ?
++                         IW_MODE_MASTER : IW_MODE_ADHOC;
++            current_ev = iwe_stream_add_event(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe,
++                          IW_EV_UINT_LEN);
++        }
++        param->bytes_needed += IW_EV_UINT_LEN;
+     }
+ 
+-    A_MEMZERO(&iwe, sizeof(iwe));
+-    iwe.cmd = SIOCGIWFREQ;
+-    iwe.u.freq.m = cie->ie_chan * 100000;
+-    iwe.u.freq.e = 1;
+-    current_ev = iwe_stream_add_event(current_ev, end_buf, &iwe,
+-                                      IW_EV_FREQ_LEN);
++    if ((end_buf - current_ev) > IW_EV_FREQ_LEN)
++    {
++        A_MEMZERO(&iwe, sizeof(iwe));
++        iwe.cmd = SIOCGIWFREQ;
++        iwe.u.freq.m = cie->ie_chan * 100000;
++        iwe.u.freq.e = 1;
++        current_ev = iwe_stream_add_event(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe,
++                          IW_EV_FREQ_LEN);
++    }
++    param->bytes_needed += IW_EV_FREQ_LEN;
+ 
+-    A_MEMZERO(&iwe, sizeof(iwe));
+-    iwe.cmd = IWEVQUAL;
+-    ar6000_set_quality(&iwe.u.qual, ni->ni_snr);
+-    current_ev = iwe_stream_add_event(current_ev, end_buf, &iwe,
+-                                      IW_EV_QUAL_LEN);
++    if ((end_buf - current_ev) > IW_EV_QUAL_LEN)
++    {
++        A_MEMZERO(&iwe, sizeof(iwe));
++        iwe.cmd = IWEVQUAL;
++        ar6000_set_quality(&iwe.u.qual, ni->ni_snr);
++        current_ev = iwe_stream_add_event(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe,
++                          IW_EV_QUAL_LEN);
++    }
++    param->bytes_needed += IW_EV_QUAL_LEN;
+ 
+-    A_MEMZERO(&iwe, sizeof(iwe));
+-    iwe.cmd = SIOCGIWENCODE;
+-    if (cie->ie_capInfo & IEEE80211_CAPINFO_PRIVACY) {
+-        iwe.u.data.flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY;
+-    } else {
+-        iwe.u.data.flags = IW_ENCODE_DISABLED;
++    if ((end_buf - current_ev) > IW_EV_POINT_LEN)
++    {
++        A_MEMZERO(&iwe, sizeof(iwe));
++        iwe.cmd = SIOCGIWENCODE;
++        if (cie->ie_capInfo & IEEE80211_CAPINFO_PRIVACY) {
++            iwe.u.data.flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY;
++        } else {
++            iwe.u.data.flags = IW_ENCODE_DISABLED;
++        }
++        iwe.u.data.length = 0;
++        current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe, "");
+     }
+-    iwe.u.data.length = 0;
+-    current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, "");
++    param->bytes_needed += IW_EV_POINT_LEN;
+ 
+     /* supported bit rate */
+     A_MEMZERO(&iwe, sizeof(iwe));
+@@ -147,36 +181,54 @@
+     iwe.u.bitrate.disabled = 0;
+     iwe.u.bitrate.value = 0;
+     current_val = current_ev + IW_EV_LCP_LEN;
++    param->bytes_needed += IW_EV_LCP_LEN;
+ 
+     if (cie->ie_rates != NULL) {
+         rate_len = cie->ie_rates[1];
+-        for (j = 0; j < rate_len; j++) {
+-                unsigned char val;
+-                val = cie->ie_rates[2 + j];
+-                iwe.u.bitrate.value =
+-                    (val >= 0x80)? ((val - 0x80) * 500000): (val * 500000);
+-                current_val = iwe_stream_add_value(
++        data_len = (rate_len * (IW_EV_PARAM_LEN - IW_EV_LCP_LEN));
++        if ((end_buf - current_ev) > data_len)
++        {
++            for (j = 0; j < rate_len; j++) {
++                    unsigned char val;
++                    val = cie->ie_rates[2 + j];
++                    iwe.u.bitrate.value =
++                        (val >= 0x80)? ((val - 0x80) * 500000): (val * 500000);
++                    current_val = iwe_stream_add_value(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                                      param->info,
++#endif
+                                       current_ev,
+                                       current_val,
+                                       end_buf,
+                                       &iwe,
+                                       IW_EV_PARAM_LEN);
++            }
+         }
++        param->bytes_needed += data_len;
+     }
++
+     if (cie->ie_xrates != NULL) {
+         rate_len = cie->ie_xrates[1];
+-        for (j = 0; j < rate_len; j++) {
+-                unsigned char val;
+-                val = cie->ie_xrates[2 + j];
+-                iwe.u.bitrate.value =
+-                    (val >= 0x80)? ((val - 0x80) * 500000): (val * 500000);
+-                current_val = iwe_stream_add_value(
++        data_len = (rate_len * (IW_EV_PARAM_LEN - IW_EV_LCP_LEN));
++        if ((end_buf - current_ev) > data_len)
++        {
++            for (j = 0; j < rate_len; j++) {
++                    unsigned char val;
++                    val = cie->ie_xrates[2 + j];
++                    iwe.u.bitrate.value =
++                        (val >= 0x80)? ((val - 0x80) * 500000): (val * 500000);
++                    current_val = iwe_stream_add_value(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                                      param->info,
++#endif
+                                       current_ev,
+                                       current_val,
+                                       end_buf,
+                                       &iwe,
+                                       IW_EV_PARAM_LEN);
++            }
+         }
++        param->bytes_needed += data_len;
+     }
+     /* remove fixed header if no rates were added */
+     if ((current_val - current_ev) > IW_EV_LCP_LEN)
+@@ -185,113 +237,185 @@
+ #if WIRELESS_EXT >= 18
+     /* IE */
+     if (cie->ie_wpa != NULL) {
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVGENIE;
+-        iwe.u.data.length = cie->ie_wpa[1] + 2;
+-        memcpy(buf, cie->ie_wpa, cie->ie_wpa[1] + 2);
+-        current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++        data_len = cie->ie_wpa[1] + 2 + IW_EV_POINT_LEN;
++        if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVGENIE;
++            iwe.u.data.length = cie->ie_wpa[1] + 2;
++            current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe, cie->ie_wpa);
++        }
++        param->bytes_needed += data_len;
+     }
++
+     if (cie->ie_rsn != NULL && cie->ie_rsn[0] == IEEE80211_ELEMID_RSN) {
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVGENIE;
+-        iwe.u.data.length = cie->ie_rsn[1] + 2;
+-        memcpy(buf, cie->ie_rsn, cie->ie_rsn[1] + 2);
+-        current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
+-    }
++        data_len = cie->ie_rsn[1] + 2 + IW_EV_POINT_LEN;
++    	if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVGENIE;
++            iwe.u.data.length = cie->ie_rsn[1] + 2;
++            current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
+ #endif
++                          current_ev, end_buf, &iwe, cie->ie_rsn);
++        }
++        param->bytes_needed += data_len;
++    }
+ 
+-    /* protocol */
+-    A_MEMZERO(&iwe, sizeof(iwe));
+-    iwe.cmd = SIOCGIWNAME;
++#endif /* WIRELESS_EXT >= 18 */
++
++    if ((end_buf - current_ev) > IW_EV_CHAR_LEN)
++    {
++        /* protocol */
++        A_MEMZERO(&iwe, sizeof(iwe));
++        iwe.cmd = SIOCGIWNAME;
+ #define CHAN_IS_11A(x)              (!((x >= 2412) && (x <= 2484)))
+-    if (CHAN_IS_11A(cie->ie_chan)) {
+-        /* 11a */
+-        snprintf(iwe.u.name, IFNAMSIZ, "IEEE 802.11a");
+-    } else if ((cie->ie_erp) || (cie->ie_xrates)) {
+-        /* 11g */
+-        snprintf(iwe.u.name, IFNAMSIZ, "IEEE 802.11g");
+-    } else {
+-        /* 11b */
+-        snprintf(iwe.u.name, IFNAMSIZ, "IEEE 802.11b");
++        if (CHAN_IS_11A(cie->ie_chan)) {
++            /* 11a */
++            snprintf(iwe.u.name, IFNAMSIZ, "IEEE 802.11a");
++        } else if ((cie->ie_erp) || (cie->ie_xrates)) {
++            /* 11g */
++            snprintf(iwe.u.name, IFNAMSIZ, "IEEE 802.11g");
++        } else {
++            /* 11b */
++            snprintf(iwe.u.name, IFNAMSIZ, "IEEE 802.11b");
++        }
++        current_ev = iwe_stream_add_event(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe, IW_EV_CHAR_LEN);
+     }
+-    current_ev = iwe_stream_add_event(current_ev, end_buf, &iwe, IW_EV_CHAR_LEN);
++    param->bytes_needed += IW_EV_CHAR_LEN;
+ 
+ #if WIRELESS_EXT > 14
+     A_MEMZERO(&iwe, sizeof(iwe));
+     iwe.cmd = IWEVCUSTOM;
+-    snprintf(buf, sizeof(buf), "bcn_int=%d", cie->ie_beaconInt);
+-    iwe.u.data.length = strlen(buf);
+-    current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++    iwe.u.data.length = snprintf(buf, sizeof(buf), "bcn_int=%d", cie->ie_beaconInt);
++    data_len = iwe.u.data.length + IW_EV_POINT_LEN;
++    if ((end_buf - current_ev) > data_len)
++    {
++        current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe, buf);
++    }
++    param->bytes_needed += data_len;
+ 
+ #if WIRELESS_EXT < 18
+     if (cie->ie_wpa != NULL) {
+         static const char wpa_leader[] = "wpa_ie=";
+-
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVCUSTOM;
+-        iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_wpa,
+-                                      cie->ie_wpa[1]+2,
+-                                      wpa_leader, sizeof(wpa_leader)-1);
+-
+-        if (iwe.u.data.length != 0) {
+-            current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++        data_len = (sizeof(wpa_leader) - 1) + ((cie->ie_wpa[1]+2) * 2) + IW_EV_POINT_LEN;
++        if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVCUSTOM;
++            iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_wpa,
++                                          cie->ie_wpa[1]+2,
++                                          wpa_leader, sizeof(wpa_leader)-1);
++
++            if (iwe.u.data.length != 0) {
++                current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                              param->info,
++#endif
++                              current_ev, end_buf, &iwe, buf);
++            }
+         }
++        param->bytes_needed += data_len;
+     }
+ 
+     if (cie->ie_rsn != NULL && cie->ie_rsn[0] == IEEE80211_ELEMID_RSN) {
+         static const char rsn_leader[] = "rsn_ie=";
+-
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVCUSTOM;
+-        iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_rsn,
+-                                      cie->ie_rsn[1]+2,
+-                                      rsn_leader, sizeof(rsn_leader)-1);
+-
+-        if (iwe.u.data.length != 0) {
+-            current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++        data_len = (sizeof(rsn_leader) - 1) + ((cie->ie_rsn[1]+2) * 2) + IW_EV_POINT_LEN;
++        if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVCUSTOM;
++            iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_rsn,
++                                          cie->ie_rsn[1]+2,
++                                          rsn_leader, sizeof(rsn_leader)-1);
++
++            if (iwe.u.data.length != 0) {
++                current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                              param->info,
++#endif
++                              current_ev, end_buf, &iwe, buf);
++            }
+         }
++        param->bytes_needed += data_len;
+     }
+-#endif
++#endif /* WIRELESS_EXT < 18 */
+ 
+     if (cie->ie_wmm != NULL) {
+         static const char wmm_leader[] = "wmm_ie=";
+-
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVCUSTOM;
+-        iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_wmm,
+-                                      cie->ie_wmm[1]+2,
+-                                      wmm_leader, sizeof(wmm_leader)-1);
+-        if (iwe.u.data.length != 0) {
+-            current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++        data_len = (sizeof(wmm_leader) - 1) + ((cie->ie_wmm[1]+2) * 2) + IW_EV_POINT_LEN;
++        if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVCUSTOM;
++            iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_wmm,
++                                          cie->ie_wmm[1]+2,
++                                          wmm_leader, sizeof(wmm_leader)-1);
++            if (iwe.u.data.length != 0) {
++                current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                              param->info,
++#endif
++                              current_ev, end_buf, &iwe, buf);
++            }
+         }
++        param->bytes_needed += data_len;
+     }
+ 
+     if (cie->ie_ath != NULL) {
+         static const char ath_leader[] = "ath_ie=";
+-
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVCUSTOM;
+-        iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_ath,
+-                                      cie->ie_ath[1]+2,
+-                                      ath_leader, sizeof(ath_leader)-1);
+-        if (iwe.u.data.length != 0) {
+-            current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++        data_len = (sizeof(ath_leader) - 1) + ((cie->ie_ath[1]+2) * 2) + IW_EV_POINT_LEN;
++        if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVCUSTOM;
++            iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_ath,
++                                          cie->ie_ath[1]+2,
++                                          ath_leader, sizeof(ath_leader)-1);
++            if (iwe.u.data.length != 0) {
++                current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                              param->info,
++#endif
++                              current_ev, end_buf, &iwe, buf);
++            }
+         }
++        param->bytes_needed += data_len;
+     }
+ 
+-    if (cie->ie_wsc != NULL) {
+-        static const char wsc_leader[] = "wsc_ie=";
++#endif /* WIRELESS_EXT > 14 */
+ 
+-        A_MEMZERO(&iwe, sizeof(iwe));
+-        iwe.cmd = IWEVCUSTOM;
+-        iwe.u.data.length = encode_ie(buf, sizeof(buf), cie->ie_wsc,
+-                                      cie->ie_wsc[1]+2,
+-                                      wsc_leader, sizeof(wsc_leader)-1);
+-        if (iwe.u.data.length != 0) {
+-            current_ev = iwe_stream_add_point(current_ev, end_buf, &iwe, buf);
++#if WIRELESS_EXT >= 18
++    if (cie->ie_wsc != NULL) {
++	    data_len = (cie->ie_wsc[1] + 2) + IW_EV_POINT_LEN;
++        if ((end_buf - current_ev) > data_len)
++        {
++            A_MEMZERO(&iwe, sizeof(iwe));
++            iwe.cmd = IWEVGENIE;
++            iwe.u.data.length = cie->ie_wsc[1] + 2;
++            current_ev = iwe_stream_add_point(
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++                          param->info,
++#endif
++                          current_ev, end_buf, &iwe, cie->ie_wsc);
+         }
++        param->bytes_needed += data_len;
+     }
+-#endif /* WIRELESS_EXT > 14 */
++#endif /* WIRELESS_EXT >= 18 */
+ 
+     param->current_ev = current_ev;
+ }
+@@ -303,7 +427,6 @@
+ {
+     AR_SOFTC_T *ar = (AR_SOFTC_T *)dev->priv;
+     struct ar_giwscan_param param;
+-    int i;
+ 
+     if (ar->arWlanState == WLAN_DISABLED) {
+         return -EIO;
+@@ -314,32 +437,26 @@
+     }
+ 
+     param.current_ev = extra;
+-    param.end_buf = extra + IW_SCAN_MAX_DATA;
+-    param.firstPass = TRUE;
++    param.end_buf = extra + data->length;
++    param.bytes_needed = 0;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,27)
++    param.info = info;
++#endif
+ 
+-    /*
+-     * Do two passes to insure WPA scan candidates
+-     * are sorted to the front.  This is a hack to deal with
+-     * the wireless extensions capping scan results at
+-     * IW_SCAN_MAX_DATA bytes.  In densely populated environments
+-     * it's easy to overflow this buffer (especially with WPA/RSN
+-     * information elements).  Note this sorting hack does not
+-     * guarantee we won't overflow anyway.
+-     */
+-    for (i = 0; i < 2; i++) {
+-        /*
+-         * Translate data to WE format.
+-         */
+-        wmi_iterate_nodes(ar->arWmi, ar6000_scan_node, &param);
+-        param.firstPass = FALSE;
+-        if (param.current_ev >= param.end_buf) {
+-            data->length = param.current_ev - extra;
+-            return -E2BIG;
+-        }
++    /* Translate data to WE format */
++    wmi_iterate_nodes(ar->arWmi, ar6000_scan_node, &param);
++
++    /* check if bytes needed is greater than bytes consumed */
++    if (param.bytes_needed > (param.current_ev - extra))
++    {
++        /* Request one byte more than needed, because when "data->length" equals bytes_needed,
++        it is not possible to add the last event data as all iwe_stream_add_xxxxx() functions
++        checks whether (cur_ptr + ev_len) < end_ptr, due to this one more retry would happen*/
++        data->length = param.bytes_needed + 1;
++
++        return -E2BIG;
+     }
+ 
+-    if(!(data->length = param.current_ev - extra))
+-        return -EAGAIN;
+     return 0;
+ }
+ 

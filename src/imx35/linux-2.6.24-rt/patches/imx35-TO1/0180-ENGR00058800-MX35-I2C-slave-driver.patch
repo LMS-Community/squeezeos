@@ -1,0 +1,1635 @@
+From 7d391f14b9e8fe01cf33e8a1551ddb070e60ac05 Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b02248@freescale.com>
+Date: Tue, 20 May 2008 10:16:59 +0800
+Subject: [PATCH] ENGR00058800 MX35: I2C slave driver
+
+Request to support I2C slave driver in MX35 platform
+
+Signed-off-by: Guoxing Wu <b02248@freescale.com>
+---
+ arch/arm/Kconfig                          |    2 +
+ arch/arm/mach-mx35/devices.c              |    6 +-
+ arch/arm/mach-mx35/mx35_3stack.c          |    6 +
+ drivers/Makefile                          |    1 +
+ drivers/i2c-slave/Kconfig                 |   40 ++++
+ drivers/i2c-slave/Makefile                |   10 +
+ drivers/i2c-slave/i2c_slave_client.c      |   81 +++++++
+ drivers/i2c-slave/i2c_slave_core.c        |  355 +++++++++++++++++++++++++++++
+ drivers/i2c-slave/i2c_slave_device.c      |  270 ++++++++++++++++++++++
+ drivers/i2c-slave/i2c_slave_device.h      |   79 +++++++
+ drivers/i2c-slave/i2c_slave_ring_buffer.c |  185 +++++++++++++++
+ drivers/i2c-slave/i2c_slave_ring_buffer.h |   39 ++++
+ drivers/i2c-slave/mxc_i2c_slave.c         |  329 ++++++++++++++++++++++++++
+ drivers/i2c-slave/mxc_i2c_slave.h         |   44 ++++
+ drivers/i2c-slave/mxc_i2c_slave_reg.h     |   41 ++++
+ 15 files changed, 1483 insertions(+), 5 deletions(-)
+
+Index: linux-2.6.24/arch/arm/Kconfig
+===================================================================
+--- linux-2.6.24.orig/arch/arm/Kconfig	2009-01-24 22:03:41.000000000 +0100
++++ linux-2.6.24/arch/arm/Kconfig	2009-01-24 22:04:02.000000000 +0100
+@@ -1041,6 +1041,8 @@
+ 
+ source "drivers/i2c/Kconfig"
+ 
++source "drivers/i2c-slave/Kconfig"
++
+ source "drivers/spi/Kconfig"
+ 
+ source "drivers/w1/Kconfig"
+Index: linux-2.6.24/arch/arm/mach-mx35/devices.c
+===================================================================
+--- linux-2.6.24.orig/arch/arm/mach-mx35/devices.c	2009-01-24 22:04:01.000000000 +0100
++++ linux-2.6.24/arch/arm/mach-mx35/devices.c	2009-01-24 22:04:02.000000000 +0100
+@@ -302,7 +302,6 @@
+ };
+ #endif
+ 
+-#ifdef CONFIG_I2C_MXC_SELECT2
+ /*!
+  * Resource definition for the I2C2
+  */
+@@ -323,7 +322,6 @@
+ static struct mxc_i2c_platform_data mxci2c2_data = {
+ 	.i2c_clk = 100000,
+ };
+-#endif
+ 
+ #ifdef CONFIG_I2C_MXC_SELECT3
+ /*!
+@@ -361,9 +359,8 @@
+ 	 .num_resources = ARRAY_SIZE(mxci2c1_resources),
+ 	 .resource = mxci2c1_resources,},
+ #endif
+-#ifdef CONFIG_I2C_MXC_SELECT2
+ 	{
+-	 .name = "mxc_i2c",
++	 .name = "mxc_i2c_slave",
+ 	 .id = 1,
+ 	 .dev = {
+ 		 .release = mxc_nop_release,
+@@ -371,7 +368,6 @@
+ 		 },
+ 	 .num_resources = ARRAY_SIZE(mxci2c2_resources),
+ 	 .resource = mxci2c2_resources,},
+-#endif
+ #ifdef CONFIG_I2C_MXC_SELECT3
+ 	{
+ 	 .name = "mxc_i2c",
+Index: linux-2.6.24/arch/arm/mach-mx35/mx35_3stack.c
+===================================================================
+--- linux-2.6.24.orig/arch/arm/mach-mx35/mx35_3stack.c	2009-01-24 22:03:59.000000000 +0100
++++ linux-2.6.24/arch/arm/mach-mx35/mx35_3stack.c	2009-01-24 22:04:02.000000000 +0100
+@@ -292,6 +292,12 @@
+ 	 .driver_name = "ak4647-i2c",
+ 	 .addr = 0x12,
+ 	 },
++#if defined(CONFIG_I2C_SLAVE_CLIENT)
++	{
++	 .driver_name = "i2c-slave-client",
++	 .addr = 0x55,
++	 },
++#endif
+ };
+ 
+ #if  defined(CONFIG_SMSC911X) || defined(CONFIG_SMSC911X_MODULE)
+Index: linux-2.6.24/drivers/Makefile
+===================================================================
+--- linux-2.6.24.orig/drivers/Makefile	2009-01-24 22:02:41.000000000 +0100
++++ linux-2.6.24/drivers/Makefile	2009-01-24 22:04:02.000000000 +0100
+@@ -62,6 +62,7 @@
+ obj-$(CONFIG_I2O)		+= message/
+ obj-$(CONFIG_RTC_LIB)		+= rtc/
+ obj-y				+= i2c/
++obj-$(CONFIG_I2C_SLAVE) += i2c-slave/
+ obj-$(CONFIG_W1)		+= w1/
+ obj-$(CONFIG_POWER_SUPPLY)	+= power/
+ obj-$(CONFIG_HWMON)		+= hwmon/
+Index: linux-2.6.24/drivers/i2c-slave/Kconfig
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/Kconfig	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,40 @@
++#
++# I2C slave subsystem configuration
++#
++
++menuconfig I2C_SLAVE
++	bool "I2C Slave support"
++	depends on HAS_IOMEM
++	---help---
++	  I2C (pronounce: I-square-C) is a slow serial bus protocol used in
++	  many micro controller applications and developed by Philips. 
++
++	  If you want I2C Slave support, you should say Y here.
++
++	  This I2C Slave support can also be built as a module.  If so, the module
++	  will be called i2c-slave.
++
++if I2C_SLAVE
++
++config I2C_SLAVE_CORE
++	tristate "I2C SLAVE CORE"
++	default y
++	---help---
++		i2c slave core.
++
++config MXC_I2C_SLAVE
++	tristate "MXC I2C SLAVE"
++	depends on I2C_SLAVE_CORE
++	default y
++	---help---
++		mxc i2c slave support.
++
++config I2C_SLAVE_CLIENT
++	tristate "I2C SLAVE CLIENT"
++	default y
++	---help---
++		i2c slave client that used when the master is on the same board.
++		this is for i2c master which is on the same board with the slave.
++
++endif # I2C_SLAVE
++
+Index: linux-2.6.24/drivers/i2c-slave/Makefile
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/Makefile	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,10 @@
++#
++# Makefile for the i2c slave.
++#
++
++i2c_slave-objs := i2c_slave_ring_buffer.o i2c_slave_device.o i2c_slave_core.o
++obj-$(CONFIG_I2C_SLAVE_CORE)	+= i2c_slave.o
++obj-$(CONFIG_MXC_I2C_SLAVE)		+= mxc_i2c_slave.o
++obj-$(CONFIG_I2C_SLAVE_CLIENT)		+= i2c_slave_client.o
++
++
+Index: linux-2.6.24/drivers/i2c-slave/i2c_slave_client.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/i2c_slave_client.c	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,81 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/ctype.h>
++#include <linux/types.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/i2c.h>
++
++struct i2c_client *i2c_slave_client;
++static int i2c_slave_client_probe(struct i2c_client *adapter);
++static int i2c_slave_client_remove(struct i2c_client *client);
++static struct i2c_driver i2c_slave_client_driver = {
++	.driver = {
++		   .owner = THIS_MODULE,
++		   .name = "i2c-slave-client",
++		   },
++	.probe = i2c_slave_client_probe,
++	.remove = i2c_slave_client_remove,
++};
++
++/*!
++ * ov2640 I2C attach function
++ *
++ * @param adapter            struct i2c_adapter *
++ * @return  Error code indicating success or failure
++ */
++static int i2c_slave_client_probe(struct i2c_client *client)
++{
++	i2c_slave_client = client;
++	return 0;
++}
++
++/*!
++ * ov2640 I2C detach function
++ *
++ * @param client            struct i2c_client *
++ * @return  Error code indicating success or failure
++ */
++static int i2c_slave_client_remove(struct i2c_client *client)
++{
++	return 0;
++}
++
++/*!
++ * ov2640 init function
++ *
++ * @return  Error code indicating success or failure
++ */
++static __init int i2c_slave_client_init(void)
++{
++	return i2c_add_driver(&i2c_slave_client_driver);
++}
++
++/*!
++ * OV2640 cleanup function
++ *
++ * @return  Error code indicating success or failure
++ */
++static void __exit i2c_slave_client_clean(void)
++{
++	i2c_del_driver(&i2c_slave_client_driver);
++}
++
++module_init(i2c_slave_client_init);
++module_exit(i2c_slave_client_clean);
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("I2c Slave Client Driver");
++MODULE_LICENSE("GPL");
+Index: linux-2.6.24/drivers/i2c-slave/i2c_slave_core.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/i2c_slave_core.c	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,355 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/fs.h>
++#include <linux/module.h>
++#include <linux/device.h>
++#include <asm/uaccess.h>
++#include "i2c_slave_device.h"
++
++int i2c_slave_major;
++
++static ssize_t i2c_slave_read(struct file *fd, char __user *buf, size_t len,
++			      loff_t *ptr)
++{
++	i2c_slave_device_t *dev;
++	void *kbuf;
++	int ret;
++
++	if (len == 0)
++		return 0;
++
++	kbuf = kmalloc(len, GFP_KERNEL);
++	if (!kbuf) {
++		ret = -ENOMEM;
++		goto error0;
++	}
++
++	dev = (i2c_slave_device_t *) fd->private_data;
++	if (!dev) {
++		ret = -ENODEV;
++		goto error1;
++	}
++
++	ret = i2c_slave_device_read(dev, len, kbuf);
++	if (ret <= 0 || copy_to_user(buf, kbuf, len)) {
++		ret = -EFAULT;
++	}
++
++      error1:
++	kfree(kbuf);
++      error0:
++	return ret;
++}
++
++static ssize_t i2c_slave_write(struct file *fd, const char __user *buf,
++			       size_t len, loff_t *ptr)
++{
++	i2c_slave_device_t *dev;
++	void *kbuf;
++	int ret;
++
++	if (len == 0)
++		return 0;
++
++	kbuf = kmalloc(len, GFP_KERNEL);
++	if (!kbuf) {
++		ret = -ENOMEM;
++		goto error0;
++	}
++	if (copy_from_user(kbuf, buf, len)) {
++		ret = -EFAULT;
++		goto error1;
++	}
++
++	dev = (i2c_slave_device_t *) fd->private_data;
++	if (!dev) {
++		ret = -ENODEV;
++		goto error1;
++	}
++
++	ret = i2c_slave_device_write(dev, len, (u8 *) buf);
++
++      error1:
++	kfree(kbuf);
++      error0:
++	return ret;
++}
++
++static int i2c_slave_ioctl(struct inode *inode, struct file *fd,
++			   unsigned code, unsigned long value)
++{
++	/*todo */
++	return 0;
++}
++
++static int i2c_slave_open(struct inode *inode, struct file *fd)
++{
++	int ret;
++	unsigned int id;
++	i2c_slave_device_t *dev;
++	id = iminor(inode);
++
++	if (id >= I2C_SLAVE_DEVICE_MAX) {
++		ret = -ENODEV;
++		goto error;
++	}
++
++	dev = i2c_slave_device_find(id);
++	if (!dev) {
++		ret = -ENODEV;
++		goto error;
++	}
++
++	if (i2c_slave_device_start(dev)) {
++		ret = -EBUSY;
++		goto error;
++	}
++
++	fd->private_data = (void *)dev;
++	ret = 0;
++
++      error:
++	return ret;
++}
++
++static int i2c_slave_release(struct inode *inode, struct file *fd)
++{
++	int ret;
++	unsigned int id;
++	i2c_slave_device_t *dev;
++	id = iminor(inode);
++
++	if (id >= I2C_SLAVE_DEVICE_MAX) {
++		ret = -ENODEV;
++		goto error;
++	}
++
++	dev = i2c_slave_device_find(id);
++	if (!dev) {
++		ret = -ENODEV;
++		goto error;
++	}
++
++	if (i2c_slave_device_stop(dev)) {
++		ret = -EBUSY;
++		goto error;
++	}
++
++	ret = 0;
++
++      error:
++	return ret;
++}
++
++static const struct file_operations i2c_slave_fops = {
++	.owner = THIS_MODULE,
++	.llseek = no_llseek,
++	.read = i2c_slave_read,
++	.write = i2c_slave_write,
++	.ioctl = i2c_slave_ioctl,
++	.open = i2c_slave_open,
++	.release = i2c_slave_release,
++};
++
++static int i2c_slave_bus_match(struct device *dev, struct device_driver *drv)
++{
++	return 0;
++}
++
++/*
++static int i2c_slave_bus_probe(struct device *dev)
++{
++	struct device_driver *driver = dev->driver;
++
++	if (driver) {
++		return driver->probe(dev);
++	} else {
++		dev_err(dev, "%s: no driver\n", __func__);
++		return -ENODEV;
++	}
++}
++*/
++
++static int i2c_slave_bus_remove(struct device *dev)
++{
++	struct device_driver *driver = dev->driver;
++
++	if (driver) {
++		if (!driver->remove) {
++			return 0;
++		} else {
++			return driver->remove(dev);
++		}
++	} else {
++
++		dev_err(dev, "%s: no driver\n", __func__);
++		return -ENODEV;
++	}
++}
++
++static void i2c_slave_bus_shutdown(struct device *dev)
++{
++	struct device_driver *driver = dev->driver;
++
++	if (driver) {
++
++		driver->shutdown(dev);
++	} else {
++
++		dev_err(dev, "%s: no driver\n", __func__);
++		return;
++	}
++}
++static int i2c_slave_bus_suspend(struct device *dev, pm_message_t state)
++{
++	struct device_driver *driver = dev->driver;
++
++	if (driver) {
++
++		if (!driver->suspend) {
++			return 0;
++		} else {
++			return driver->suspend(dev, state);
++		}
++	} else {
++
++		dev_err(dev, "%s: no driver\n", __func__);
++		return -ENODEV;
++	}
++}
++
++static int i2c_slave_bus_resume(struct device *dev)
++{
++	struct device_driver *driver = dev->driver;
++
++	if (driver) {
++
++		if (!driver->resume) {
++			return 0;
++		} else {
++			return driver->resume(dev);
++		}
++	} else {
++
++		dev_err(dev, "%s: no driver\n", __func__);
++		return -ENODEV;
++	}
++}
++
++struct bus_type i2c_slave_bus_type = {
++	.name = "i2c-slave",
++	.match = i2c_slave_bus_match,
++	.remove = i2c_slave_bus_remove,
++	.shutdown = i2c_slave_bus_shutdown,
++	.suspend = i2c_slave_bus_suspend,
++	.resume = i2c_slave_bus_resume,
++};
++
++EXPORT_SYMBOL_GPL(i2c_slave_bus_type);
++
++static int i2c_slave_driver_probe(struct device *dev)
++{
++	return 0;
++}
++
++static int i2c_slave_driver_remove(struct device *dev)
++{
++	return 0;
++}
++
++static int i2c_slave_driver_shutdown(struct device *dev)
++{
++	return 0;
++}
++
++static int i2c_slave_driver_suspend(struct device *dev, pm_message_t state)
++{
++	return 0;
++}
++
++static int i2c_slave_driver_resume(struct device *dev)
++{
++	return 0;
++}
++
++extern struct class *i2c_slave_class;
++
++static struct device_driver i2c_slave_driver = {
++	.name = "i2c-slave",
++	.owner = THIS_MODULE,
++	.bus = &i2c_slave_bus_type,
++	.probe = i2c_slave_driver_probe,
++	.remove = i2c_slave_driver_remove,
++	.shutdown = i2c_slave_driver_shutdown,
++	.suspend = i2c_slave_driver_suspend,
++	.resume = i2c_slave_driver_resume,
++};
++
++static int __init i2c_slave_dev_init(void)
++{
++	int ret;
++
++	printk(KERN_INFO "i2c slave /dev entries driver\n");
++
++	ret = bus_register(&i2c_slave_bus_type);
++	if (ret) {
++		printk(KERN_ERR "%s: bus_register error\n", __func__);
++		goto out;
++	}
++
++	i2c_slave_class = class_create(THIS_MODULE, "i2c-slave");
++	if (IS_ERR(i2c_slave_class)) {
++		pr_err("%s: class_create error\n", __func__);
++		goto out_unreg_bus;
++	}
++
++	i2c_slave_major = register_chrdev(0, "i2c-slave", &i2c_slave_fops);
++	if (i2c_slave_major <= 0) {
++		pr_err("%s: register_chrdev error\n", __func__);
++		goto out_unreg_class;
++	}
++
++	ret = driver_register(&i2c_slave_driver);
++	if (ret) {
++		pr_err("%s: driver_register error\n", __func__);
++		goto out_unreg_chrdev;
++	}
++
++	return 0;
++
++      out_unreg_chrdev:
++	unregister_chrdev(i2c_slave_major, "i2c-slave");
++      out_unreg_class:
++	class_destroy(i2c_slave_class);
++      out_unreg_bus:
++	bus_unregister(&i2c_slave_bus_type);
++      out:
++	pr_err("%s: init error\n", __func__);
++	return ret;
++}
++
++static void __exit i2c_dev_exit(void)
++{
++	driver_unregister(&i2c_slave_driver);
++	class_destroy(i2c_slave_class);
++	unregister_chrdev(i2c_slave_major, "i2c-slave");
++	bus_unregister(&i2c_slave_bus_type);
++}
++
++module_init(i2c_slave_dev_init);
++module_exit(i2c_dev_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("I2C Slave Driver Core");
++MODULE_LICENSE("GPL");
+Index: linux-2.6.24/drivers/i2c-slave/i2c_slave_device.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/i2c_slave_device.c	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,270 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/major.h>
++#include <linux/mm.h>
++#include <linux/device.h>
++#include <linux/kernel.h>
++#include <linux/sched.h>
++#include "i2c_slave_device.h"
++static i2c_slave_device_t *i2c_slave_devices[I2C_SLAVE_DEVICE_MAX];
++struct class *i2c_slave_class;
++static int i2c_slave_device_get_id(void)
++{
++	int i;
++	for (i = 0; i < I2C_SLAVE_DEVICE_MAX; i++) {
++		if (!i2c_slave_devices[i])
++			return i;
++	}
++	return -1;
++}
++
++i2c_slave_device_t *i2c_slave_device_find(int id)
++{
++	if (id >= 0 && id < I2C_SLAVE_DEVICE_MAX)
++		return i2c_slave_devices[id];
++
++	else
++		return NULL;
++}
++void i2c_slave_device_set_name(i2c_slave_device_t *device, char *name)
++{
++	device->name = name;
++}
++
++void i2c_slave_device_set_address(i2c_slave_device_t *device, u8 address)
++{
++	device->address = address;
++}
++
++u8 i2c_slave_device_get_addr(i2c_slave_device_t *device)
++{
++	return device->address;
++}
++
++int i2c_slave_device_set_freq(i2c_slave_device_t *device, u32 freq)
++{
++	/*TODO: freq check */
++	device->scl_freq = freq;
++	return 0;
++}
++
++u32 i2c_slave_device_get_freq(i2c_slave_device_t *device)
++{
++	return device->scl_freq;
++}
++
++/*used by the specific i2c device to register itself to the core.*/
++i2c_slave_device_t *i2c_slave_device_alloc(void)
++{
++	int id;
++	i2c_slave_device_t *device;
++	id = i2c_slave_device_get_id();
++	if (id < 0) {
++		goto error;
++	}
++	device =
++	    (i2c_slave_device_t *) kzalloc(sizeof(i2c_slave_device_t),
++					   GFP_KERNEL);
++	if (!device) {
++		printk(KERN_ERR "%s: alloc device error\n", __func__);
++		goto error_device;
++	}
++	device->receive_buffer = i2c_slave_rb_alloc(PAGE_SIZE);
++	if (!device->receive_buffer) {
++		printk(KERN_ERR "%s: alloc receive buffer error\n", __func__);
++		goto error_receive_buffer;
++	}
++	device->send_buffer = i2c_slave_rb_alloc(PAGE_SIZE);
++	if (!device->send_buffer) {
++		printk(KERN_ERR "%s: alloc send buffer error\n", __func__);
++		goto error_send_buffer;
++	}
++	device->id = id;
++	return device;
++
++      error_send_buffer:
++	kfree(device->receive_buffer);
++      error_receive_buffer:
++	kfree((void *)device);
++      error_device:
++	pr_debug(KERN_ERR "%s: no memory\n", __func__);
++      error:
++	return 0;
++}
++
++void i2c_slave_device_free(i2c_slave_device_t *dev)
++{
++	i2c_slave_rb_release(dev->receive_buffer);
++	i2c_slave_rb_release(dev->send_buffer);
++	kfree(dev);
++}
++
++int i2c_slave_device_register(i2c_slave_device_t *device)
++{
++	device->dev =
++	    class_device_create(i2c_slave_class, NULL,
++				(dev_t) MKDEV(i2c_slave_major, device->id),
++				NULL, "slave-i2c-%d", device->id);
++	if (!device->dev) {
++		return -1;
++	}
++	i2c_slave_devices[device->id] = device;
++	return 0;
++}
++
++void i2c_slave_device_unregister(i2c_slave_device_t *device)
++{
++	device_destroy(i2c_slave_class, MKDEV(i2c_slave_major, device->id));
++	i2c_slave_devices[device->id] = 0;
++	i2c_slave_device_free(device);
++}
++
++/*
++	this two functions are used by i2c slave core to start or stop the specific i2c device.
++*/
++int i2c_slave_device_start(i2c_slave_device_t *device)
++{
++	return device->start(device);
++}
++
++int i2c_slave_device_stop(i2c_slave_device_t *device)
++{
++	return device->stop(device);
++}
++
++/*
++	this two functions are used by i2c slave core to get data by the specific i2c slave device
++	or send data to it to feed i2c master's need.
++
++	@mod: async(1) or sync(0) mode.
++*/
++int i2c_slave_device_read(i2c_slave_device_t *device, int num, u8 *data)
++{
++	int read_num, read_total = 0;
++	int step = 1000;
++	u8 *read_buf = data;
++	printk(KERN_INFO "%s: device id=%d, num=%d\n", __func__, device->id,
++	       num);
++	read_num = i2c_slave_rb_consume(device->receive_buffer, num, read_buf);
++	read_total += read_num;
++	read_buf += read_num;
++	step--;
++	while ((read_total < num) && step) {
++		set_current_state(TASK_INTERRUPTIBLE);
++		schedule_timeout(HZ / 10);
++		if (!signal_pending(current)) {
++		} else {
++			 /*TODO*/ break;
++		}
++		read_num =
++		    i2c_slave_rb_consume(device->receive_buffer,
++					 num - read_total, read_buf);
++		num -= read_num;
++		read_buf += read_num;
++		step--;
++	}
++	return read_total;
++}
++int i2c_slave_device_write(i2c_slave_device_t *device, int num, u8 *data)
++{
++	int write_num, write_total = 0;
++	int step = 1000;
++	u8 *buf_index = data;
++	write_num = i2c_slave_rb_produce(device->send_buffer, num, buf_index);
++	write_total += write_num;
++	buf_index += write_num;
++	step--;
++	while (write_total < num && step) {
++		set_current_state(TASK_INTERRUPTIBLE);
++		schedule_timeout(HZ / 10);
++		if (!signal_pending(current)) {
++		} else {
++			 /*TODO*/ step = 0;
++			break;
++		}
++		write_num =
++		    i2c_slave_rb_produce(device->send_buffer, num - write_total,
++					 buf_index);
++		write_total += write_num;
++		buf_index += write_num;
++		step--;
++	}
++	while (step && i2c_slave_rb_num(device->send_buffer)) {
++		set_current_state(TASK_INTERRUPTIBLE);
++		schedule_timeout(HZ / 10);
++		if (!signal_pending(current)) {
++			step--;
++		} else {
++			 /*TODO*/ step = 0;
++			break;
++		}
++	}
++	if (!step) {
++		write_total -= i2c_slave_rb_num(device->send_buffer);
++		i2c_slave_rb_clear(device->send_buffer);
++	}
++	return write_total;
++}
++
++/*
++ * this 2 functions used by the specific i2c slave device when they got data from master(produce),
++ * or is request by master(consume).
++ */
++int i2c_slave_device_produce(i2c_slave_device_t *device, int num, u8 *data)
++{
++	int ret;
++	ret = i2c_slave_rb_produce(device->receive_buffer, num, data);
++	return ret;
++}
++int i2c_slave_device_consume(i2c_slave_device_t *device, int num, u8 *data)
++{
++	return i2c_slave_rb_consume(device->send_buffer, num, data);
++}
++
++EXPORT_SYMBOL(i2c_slave_device_set_name);
++EXPORT_SYMBOL(i2c_slave_device_set_address);
++EXPORT_SYMBOL(i2c_slave_device_get_addr);
++EXPORT_SYMBOL(i2c_slave_device_find);
++EXPORT_SYMBOL(i2c_slave_device_set_freq);
++EXPORT_SYMBOL(i2c_slave_device_get_freq);
++
++/*
++* used by the specific i2c device to register itself to the core.
++*/
++EXPORT_SYMBOL(i2c_slave_device_alloc);
++EXPORT_SYMBOL(i2c_slave_device_free);
++EXPORT_SYMBOL(i2c_slave_device_register);
++EXPORT_SYMBOL(i2c_slave_device_unregister);
++
++/*
++	this two functions are used by i2c slave core to start or stop the specific i2c device.
++*/
++EXPORT_SYMBOL(i2c_slave_device_start);
++EXPORT_SYMBOL(i2c_slave_device_stop);
++
++/*
++	this two functions are used by i2c slave core to get data by the specific i2c slave device
++	or send data to it for it to feed i2c master's need.
++
++	@mod: async(1) or sync(0) mode.
++*/
++EXPORT_SYMBOL(i2c_slave_device_read);
++EXPORT_SYMBOL(i2c_slave_device_write);
++
++/*
++* this 2 functions used by the specific i2c slave device when they got data from master,
++* or is request by master.
++*/
++EXPORT_SYMBOL(i2c_slave_device_produce);
++EXPORT_SYMBOL(i2c_slave_device_consume);
+Index: linux-2.6.24/drivers/i2c-slave/i2c_slave_device.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/i2c_slave_device.h	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,79 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef __I2C_SLAVE_H__
++#define __I2C_SLAVE_H__
++
++#include <linux/list.h>
++#include "i2c_slave_ring_buffer.h"
++
++#define I2C_SLAVE_DEVICE_MAX 256
++extern int i2c_slave_major;
++
++typedef struct i2c_slave_device {
++	struct list_head list;
++	u8 address;
++	u32 scl_freq;
++	char *name;
++	i2c_slave_ring_buffer_t *receive_buffer;
++	i2c_slave_ring_buffer_t *send_buffer;
++	int (*start) (struct i2c_slave_device *);
++	int (*stop) (struct i2c_slave_device *);
++	/*int (*set_freq)(struct i2c_slave_device*);
++	int (*set_addr)(struct i2c_slave_device*);*/
++	void *private_data;
++	struct device *dev;
++	int id;
++} i2c_slave_device_t;
++
++/*
++	used by the specific device to set some infomations.
++*/
++void i2c_slave_device_set_name(i2c_slave_device_t *device, char *name);
++void i2c_slave_device_set_address(i2c_slave_device_t *device, u8 address);
++i2c_slave_device_t *i2c_slave_device_find(int id);
++u8 i2c_slave_device_get_addr(i2c_slave_device_t *device);
++int i2c_slave_device_set_freq(i2c_slave_device_t *device, u32 freq);
++u32 i2c_slave_device_get_freq(i2c_slave_device_t *device);
++
++/*
++**used by the specific i2c device to register itself to the core.
++*/
++i2c_slave_device_t *i2c_slave_device_alloc(void);
++void i2c_slave_device_free(i2c_slave_device_t *);
++int i2c_slave_device_register(i2c_slave_device_t *device);
++void i2c_slave_device_unregister(i2c_slave_device_t *device);
++
++/*
++	this two functions are used by i2c slave core to start or stop the specific i2c device.
++*/
++int i2c_slave_device_start(i2c_slave_device_t *device);
++int i2c_slave_device_stop(i2c_slave_device_t *device);
++
++/*
++	this two functions are used by i2c slave core to get data by the specific i2c slave device
++	or send data to it for it to feed i2c master's need.
++
++	@mod: async(1) or sync(0) mode.
++*/
++int i2c_slave_device_read(i2c_slave_device_t *device, int num, u8 *data);
++int i2c_slave_device_write(i2c_slave_device_t *device, int num, u8 *data);
++
++/*
++*this 2 functions used by the specific i2c slave device when they got data from master,
++*or is requested by master.
++*/
++int i2c_slave_device_produce(i2c_slave_device_t *device, int num, u8 *data);
++int i2c_slave_device_consume(i2c_slave_device_t *device, int num, u8 *data);
++
++#endif
+Index: linux-2.6.24/drivers/i2c-slave/i2c_slave_ring_buffer.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/i2c_slave_ring_buffer.c	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,185 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#include <linux/slab.h>
++#include <linux/hardirq.h>
++#include "i2c_slave_ring_buffer.h"
++
++i2c_slave_ring_buffer_t *i2c_slave_rb_alloc(int size)
++{
++	i2c_slave_ring_buffer_t *ring_buf;
++
++	ring_buf =
++	    (i2c_slave_ring_buffer_t *) kzalloc(sizeof(i2c_slave_ring_buffer_t),
++						GFP_KERNEL);
++	if (!ring_buf) {
++		pr_debug("%s: alloc ring_buf error\n", __func__);
++		goto error;
++	}
++
++	ring_buf->buffer = kmalloc(size, GFP_KERNEL);
++	if (!ring_buf->buffer) {
++		pr_debug("%s: alloc buffer error\n", __func__);
++		goto error1;
++	}
++
++	ring_buf->total = size;
++
++	ring_buf->lock = __SPIN_LOCK_UNLOCKED(ring_buf->lock);
++	return ring_buf;
++
++      error1:
++	kfree(ring_buf);
++      error:
++	return NULL;
++}
++
++void i2c_slave_rb_release(i2c_slave_ring_buffer_t *ring)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(ring->lock, flags);
++	kfree(ring->buffer);
++	spin_unlock_irqrestore(ring->lock, flags);
++	kfree(ring);
++}
++
++int i2c_slave_rb_produce(i2c_slave_ring_buffer_t *ring, int num, char *data)
++{
++	int ret = 0;
++	unsigned long flags;
++
++	spin_lock_irqsave(ring->lock, flags);
++
++	if (ring->start < ring->end) {
++		if ((ring->start + num) < ring->end) {	/*have enough space */
++			memcpy(&ring->buffer[ring->start], data, num);
++			ring->start += num;
++			ret = num;
++		} else {	/*space not enough, just copy part of it. */
++			ret = ring->end - ring->start;
++			memcpy(&ring->buffer[ring->start], data, ret);
++			ring->start += ret;
++			ring->full = 1;
++		}
++	} else if (ring->start >= ring->end && !ring->full) {
++		if (ring->start + num <= ring->total) {	/*space enough */
++			ret = num;
++			memcpy(&ring->buffer[ring->start], data, ret);
++			ring->start += ret;
++		} else {	/*turn ring->start around */
++			ret = ring->total - ring->start;
++			memcpy(&ring->buffer[ring->start], data, ret);
++			ring->start = 0;
++			num -= ret;
++			data += ret;
++			if (num < ring->end) {	/*space enough */
++				ret += num;
++				memcpy(&ring->buffer[ring->start], data, num);
++			} else {	/*space not enough, just copy part of it. */
++				ret += ring->end;
++				memcpy(&ring->buffer[ring->start], data,
++				       ring->end);
++				ring->start = ring->end;
++				ring->full = 1;
++			}
++		}
++	} else {		/*(ring->data == ring->end) && ring->full ) : full */
++		ret = 0;
++	}
++
++	spin_unlock_irqrestore(ring->lock, flags);
++	return ret;
++}
++
++int i2c_slave_rb_consume(i2c_slave_ring_buffer_t *ring, int num, char *data)
++{
++	int ret;
++	unsigned long flags;
++	spin_lock_irqsave(ring->lock, flags);
++	if (num <= 0) {
++		ret = 0;
++		goto out;
++	}
++
++	if (ring->start > ring->end) {
++		if (num <= ring->start - ring->end) {	/*enough */
++			ret = num;
++			memcpy(data, &ring->buffer[ring->end], ret);
++			ring->end += ret;
++		} else {	/*not enough */
++			ret = ring->start - ring->end;
++			memcpy(data, &ring->buffer[ring->end], ret);
++			ring->end += ret;
++		}
++	} else if (ring->start < ring->end || ring->full) {
++		if (num <= ring->total - ring->end) {
++			ret = ring->total - ring->end;
++			memcpy(data, &ring->buffer[ring->end], ret);
++			ring->end += ret;
++		} else if (num <= ring->total - ring->end + ring->start) {
++			ret = ring->total - ring->end;
++			memcpy(data, &ring->buffer[ring->end], ret);
++			ring->end = 0;
++			data += ret;
++			num -= ret;
++			memcpy(data, &ring->buffer[ring->end], num);
++			ring->end = num;
++			ret += num;
++		} else {
++			ret = ring->total - ring->end;
++			memcpy(data, &ring->buffer[ring->end], ret);
++			ring->end = 0;
++			data += ret;
++			num -= ret;
++			memcpy(data, &ring->buffer[ring->end], ring->start);
++			ring->end = ring->start;
++			ret += ring->start;
++		}
++		ring->full = 0;
++	} else {		/*empty */
++		ret = 0;
++	}
++
++      out:
++	spin_unlock_irqrestore(ring->lock, flags);
++
++	return ret;
++}
++
++int i2c_slave_rb_num(i2c_slave_ring_buffer_t *ring)
++{
++	int ret;
++	unsigned long flags;
++	spin_lock_irqsave(ring->lock, flags);
++	if (ring->start > ring->end) {
++		ret = ring->start - ring->end;
++	} else if (ring->start < ring->end) {
++		ret = ring->total - ring->end + ring->start;
++	} else if (ring->full) {
++		ret = ring->total;
++	} else {
++		ret = 0;
++	}
++	spin_unlock_irqrestore(ring->lock, flags);
++	return ret;
++}
++
++void i2c_slave_rb_clear(i2c_slave_ring_buffer_t *ring)
++{
++	unsigned long flags;
++	spin_lock_irqsave(ring->lock, flags);
++
++	ring->start = ring->end = 0;
++	ring->full = 0;
++	spin_unlock_irqrestore(ring->lock, flags);
++}
+Index: linux-2.6.24/drivers/i2c-slave/i2c_slave_ring_buffer.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/i2c_slave_ring_buffer.h	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,39 @@
++#ifndef __BUFFER_MANAGER_H__
++#define __BUFFER_MANAGER_H__
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#include <linux/types.h>
++#include <linux/spinlock.h>
++
++typedef struct i2c_slave_ring_buffer {
++	int start;
++	int end;
++	int total;
++	bool full;
++	char *buffer;
++	spinlock_t lock;
++} i2c_slave_ring_buffer_t;
++
++i2c_slave_ring_buffer_t *i2c_slave_rb_alloc(int size);
++
++void i2c_slave_rb_release(i2c_slave_ring_buffer_t *ring);
++
++int i2c_slave_rb_produce(i2c_slave_ring_buffer_t *ring, int num, char *data);
++
++int i2c_slave_rb_consume(i2c_slave_ring_buffer_t *ring, int num, char *data);
++
++int i2c_slave_rb_num(i2c_slave_ring_buffer_t *ring);
++
++void i2c_slave_rb_clear(i2c_slave_ring_buffer_t *ring);
++
++#endif
+Index: linux-2.6.24/drivers/i2c-slave/mxc_i2c_slave.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/mxc_i2c_slave.c	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,329 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <asm/io.h>
++#include <linux/pm.h>
++#include <linux/interrupt.h>
++#include <linux/ioport.h>
++#include <linux/platform_device.h>
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/mm.h>
++#include "i2c_slave_device.h"
++#include "mxc_i2c_slave.h"
++#include "mxc_i2c_slave_reg.h"
++
++struct mxc_i2c_slave_clk {
++	int reg_value;
++	int div;
++};
++
++static const struct mxc_i2c_slave_clk i2c_clk_table[] = {
++	{0x20, 22}, {0x21, 24}, {0x22, 26}, {0x23, 28},
++	{0, 30}, {1, 32}, {0x24, 32}, {2, 36},
++	{0x25, 36}, {0x26, 40}, {3, 42}, {0x27, 44},
++	{4, 48}, {0x28, 48}, {5, 52}, {0x29, 56},
++	{6, 60}, {0x2A, 64}, {7, 72}, {0x2B, 72},
++	{8, 80}, {0x2C, 80}, {9, 88}, {0x2D, 96},
++	{0xA, 104}, {0x2E, 112}, {0xB, 128}, {0x2F, 128},
++	{0xC, 144}, {0xD, 160}, {0x30, 160}, {0xE, 192},
++	{0x31, 192}, {0x32, 224}, {0xF, 240}, {0x33, 256},
++	{0x10, 288}, {0x11, 320}, {0x34, 320}, {0x12, 384},
++	{0x35, 384}, {0x36, 448}, {0x13, 480}, {0x37, 512},
++	{0x14, 576}, {0x15, 640}, {0x38, 640}, {0x16, 768},
++	{0x39, 768}, {0x3A, 896}, {0x17, 960}, {0x3B, 1024},
++	{0x18, 1152}, {0x19, 1280}, {0x3C, 1280}, {0x1A, 1536},
++	{0x3D, 1536}, {0x3E, 1792}, {0x1B, 1920}, {0x3F, 2048},
++	{0x1C, 2304}, {0x1D, 2560}, {0x1E, 3072}, {0x1F, 3840},
++	{0, 0}
++};
++
++extern void gpio_i2c_active(int i2c_num);
++extern void gpio_i2c_inactive(int i2c_num);
++
++static irqreturn_t interrupt_handler(int irq, void *dev_id)
++{
++	u16 status, ctl;
++	int num;
++	u16 data;
++	struct mxc_i2c_slave_device *mxc_i2c =
++	    (struct mxc_i2c_slave_device *)dev_id;
++
++	status = readw(mxc_i2c->reg_base + MXC_I2SR);
++	ctl = readw(mxc_i2c->reg_base + MXC_I2CR);
++
++	dev_dbg(mxc_i2c->dev->dev, "status=%x, ctl=%x\n", status, ctl);
++
++	if (status & MXC_I2SR_IAAS) {
++		if (status & MXC_I2SR_SRW) {
++			/*slave send */
++			num =
++			    i2c_slave_device_consume(mxc_i2c->dev, 1,
++						     (u8 *) &data);
++			if (num < 1) {
++				/*FIXME:not ready to send data */
++				printk(KERN_ERR
++				       " i2c-slave:%s:data not ready\n",
++				       __func__);
++			} else {
++				ctl |= MXC_I2CR_MTX;
++				writew(ctl, mxc_i2c->reg_base + MXC_I2CR);
++				/*send data */
++				writew(data, mxc_i2c->reg_base + MXC_I2DR);
++			}
++
++		} else {
++			/*slave receive */
++			ctl &= ~MXC_I2CR_MTX;
++			writew(ctl, mxc_i2c->reg_base + MXC_I2CR);
++
++			/*dummy read */
++			data = readw(mxc_i2c->reg_base + MXC_I2DR);
++		}
++	} else {
++		/*slave send */
++		if (ctl & MXC_I2CR_MTX) {
++			if (!(status & MXC_I2SR_RXAK)) {	/*ACK received */
++				num =
++				    i2c_slave_device_consume(mxc_i2c->dev, 1,
++							     (u8 *) &data);
++				if (num < 1) {
++					/*FIXME:not ready to send data */
++					printk(KERN_ERR
++					       " i2c-slave:%s:data not ready\n",
++					       __func__);
++				} else {
++					ctl |= MXC_I2CR_MTX;
++					writew(ctl,
++					       mxc_i2c->reg_base + MXC_I2CR);
++					writew(data,
++					       mxc_i2c->reg_base + MXC_I2DR);
++				}
++			} else {
++				/*no ACK. */
++				/*dummy read */
++				ctl &= ~MXC_I2CR_MTX;
++				writew(ctl, mxc_i2c->reg_base + MXC_I2CR);
++				data = readw(mxc_i2c->reg_base + MXC_I2DR);
++			}
++		} else {	/*read */
++			ctl &= ~MXC_I2CR_MTX;
++			writew(ctl, mxc_i2c->reg_base + MXC_I2CR);
++
++			/*read */
++			data = readw(mxc_i2c->reg_base + MXC_I2DR);
++			i2c_slave_device_produce(mxc_i2c->dev, 1,
++						 (u8 *) &data);
++		}
++
++	}
++
++	writew(0x0, mxc_i2c->reg_base + MXC_I2SR);
++
++	return IRQ_HANDLED;
++}
++
++static int start(i2c_slave_device_t *device)
++{
++	volatile unsigned int cr;
++	unsigned int addr;
++	struct mxc_i2c_slave_device *mxc_dev;
++
++	mxc_dev = (struct mxc_i2c_slave_device *)device->private_data;
++	if (!mxc_dev) {
++		dev_err(device->dev, "%s: get mxc_dev error\n", __func__);
++		return -ENODEV;
++	}
++
++	clk_enable(mxc_dev->clk);
++	/* Set the frequency divider */
++	writew(mxc_dev->clkdiv, mxc_dev->reg_base + MXC_IFDR);
++
++	/* Set the Slave bit */
++	cr = readw(mxc_dev->reg_base + MXC_I2CR);
++	cr &= (!MXC_I2CR_MSTA);
++	writew(cr, mxc_dev->reg_base + MXC_I2CR);
++
++	/*Set Slave Address */
++	addr = mxc_dev->dev->address << 1;
++	writew(addr, mxc_dev->reg_base + MXC_IADR);
++
++	/* Clear the status register */
++	writew(0x0, mxc_dev->reg_base + MXC_I2SR);
++
++	/* Enable I2C and its interrupts */
++	writew(MXC_I2CR_IEN, mxc_dev->reg_base + MXC_I2CR);
++	writew(MXC_I2CR_IEN | MXC_I2CR_IIEN, mxc_dev->reg_base + MXC_I2CR);
++
++	return 0;
++
++}
++
++static int stop(i2c_slave_device_t *device)
++{
++	struct mxc_i2c_slave_device *mxc_dev;
++
++	mxc_dev = (struct mxc_i2c_slave_device *)device->private_data;
++
++	writew(0x0, mxc_dev->reg_base + MXC_I2CR);
++	clk_disable(mxc_dev->clk);
++
++	return 0;
++}
++
++static int mxc_i2c_slave_probe(struct platform_device *pdev)
++{
++	int i;
++	u32 clk_freq;
++	struct resource *res;
++	struct mxc_i2c_slave_device *mxc_dev;
++
++	mxc_dev = kzalloc(sizeof(struct mxc_i2c_slave_device), GFP_KERNEL);
++	if (!mxc_dev) {
++		goto error0;
++	}
++	mxc_dev->dev = i2c_slave_device_alloc();
++	if (mxc_dev->dev == 0) {
++		dev_err(&pdev->dev, "%s: i2c_slave_device_alloc error\n",
++			__func__);
++		goto error1;
++	}
++
++	i2c_slave_device_set_address(mxc_dev->dev, MXC_I2C_SLAVE_ADDRESS);
++	i2c_slave_device_set_freq(mxc_dev->dev, MXC_I2C_SLAVE_FREQ);
++	i2c_slave_device_set_name(mxc_dev->dev, MXC_I2C_SLAVE_NAME);
++	mxc_dev->dev->start = start;
++	mxc_dev->dev->stop = stop;
++
++	mxc_dev->dev->private_data = mxc_dev;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (res == NULL) {
++		dev_err(&pdev->dev, "%s: get resource error\n", __func__);
++		goto error2;
++	}
++	mxc_dev->reg_base = IO_ADDRESS(res->start);
++
++	mxc_dev->irq = platform_get_irq(pdev, 0);
++	if (mxc_dev->irq < 0) {
++		dev_err(&pdev->dev, "%s: get irq error\n", __func__);
++		goto error2;
++	}
++	if (request_irq(mxc_dev->irq, interrupt_handler,
++			0, mxc_dev->dev->name, mxc_dev) < 0) {
++		dev_err(&pdev->dev, "%s: request_irq error\n", __func__);
++		goto error2;
++	}
++
++	/*i2c id on soc */
++	mxc_dev->id = pdev->id;
++
++	gpio_i2c_active(mxc_dev->id);
++
++	/*clock */
++	mxc_dev->clk = clk_get(&pdev->dev, "i2c_clk");
++	clk_freq = clk_get_rate(mxc_dev->clk);
++	mxc_dev->clkdiv = -1;
++	if (mxc_dev->dev->scl_freq) {
++		/* Calculate divider and round up any fractional part */
++		int div = (clk_freq + mxc_dev->dev->scl_freq - 1) /
++		    mxc_dev->dev->scl_freq;
++		for (i = 0; i2c_clk_table[i].div != 0; i++) {
++			if (i2c_clk_table[i].div >= div) {
++				mxc_dev->clkdiv = i2c_clk_table[i].reg_value;
++				break;
++			}
++		}
++	}
++	if (mxc_dev->clkdiv == -1) {
++		i--;
++		mxc_dev->clkdiv = 0x1F;	/* Use max divider */
++	}
++	dev_dbg(&pdev->dev,
++		"i2c slave speed is %d/%d = %d bps, reg val = 0x%02X\n",
++		clk_freq, i2c_clk_table[i].div, clk_freq / i2c_clk_table[i].div,
++		mxc_dev->clkdiv);
++
++	if (i2c_slave_device_register(mxc_dev->dev) < 0) {
++		dev_err(&pdev->dev, "%s: i2c_slave_device_register error\n",
++			__func__);
++		goto error3;
++	}
++
++	platform_set_drvdata(pdev, (void *)mxc_dev);
++
++	/*start(mxc_dev->dev); */
++	return 0;
++
++      error3:
++      error2:
++	i2c_slave_device_free(mxc_dev->dev);
++      error1:
++	kfree(mxc_dev);
++      error0:
++	return -ENODEV;
++}
++
++static int mxc_i2c_slave_remove(struct platform_device *pdev)
++{
++	struct mxc_i2c_slave_device *mxc_dev;
++	mxc_dev = (struct mxc_i2c_slave_device *)platform_get_drvdata(pdev);
++
++	i2c_slave_device_unregister(mxc_dev->dev);
++	kfree((void *)mxc_dev);
++
++	return 0;
++}
++
++static int mxc_i2c_slave_suspend(struct platform_device *pdev,
++				 pm_message_t state)
++{
++	return 0;
++}
++
++static int mxc_i2c_slave_resume(struct platform_device *pdev)
++{
++	return 0;
++}
++
++static struct platform_driver mxci2c_slave_driver = {
++	.driver = {
++		   .name = "mxc_i2c_slave",
++		   .owner = THIS_MODULE,
++		   },
++	.probe = mxc_i2c_slave_probe,
++	.remove = mxc_i2c_slave_remove,
++	.suspend = mxc_i2c_slave_suspend,
++	.resume = mxc_i2c_slave_resume,
++};
++
++static int __init mxc_i2c_slave_init(void)
++{
++	/* Register the device driver structure. */
++	return platform_driver_register(&mxci2c_slave_driver);
++}
++
++/*!
++ * This function is used to cleanup all resources before the driver exits.
++ */
++static void __exit mxc_i2c_slave_exit(void)
++{
++	platform_driver_unregister(&mxci2c_slave_driver);
++}
++
++module_init(mxc_i2c_slave_init);
++module_exit(mxc_i2c_slave_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("MXC I2C Slave Driver");
++MODULE_LICENSE("GPL");
+Index: linux-2.6.24/drivers/i2c-slave/mxc_i2c_slave.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/mxc_i2c_slave.h	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,44 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef __MXC_I2C_SLAVE_H__
++#define __MXC_I2C_SLAVE_H__
++
++#include <linux/clk.h>
++#include "i2c_slave_device.h"
++
++#define MXC_I2C_SLAVE_NAME "MXC_I2C_SLAVE"
++#define MXC_I2C_SLAVE_ADDRESS 0x55
++#define MXC_I2C_SLAVE_FREQ 1000*100
++
++struct mxc_i2c_slave_device {
++	/*!
++	 * The default clock divider value to be used.
++	 */
++	unsigned int clkdiv;
++
++	/*!
++	 * The clock source for the device.
++	 */
++	struct clk *clk;
++
++	/*i2c id on soc */
++	int id;
++
++	int irq;
++	unsigned long reg_base;
++	bool state;		/*0:stop, 1:start */
++	i2c_slave_device_t *dev;
++};
++
++#endif
+Index: linux-2.6.24/drivers/i2c-slave/mxc_i2c_slave_reg.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.24/drivers/i2c-slave/mxc_i2c_slave_reg.h	2009-01-24 22:04:02.000000000 +0100
+@@ -0,0 +1,41 @@
++/*
++ * Copyright 2007-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef __MXC_I2C_SLAVE_REG_H__
++#define __MXC_I2C_SLAVE_REG_H__
++
++/* Address offsets of the I2C registers */
++#define MXC_IADR                0x00	/* Address Register */
++#define MXC_IFDR                0x04	/* Freq div register */
++#define MXC_I2CR                0x08	/* Control regsiter */
++#define MXC_I2SR                0x0C	/* Status register */
++#define MXC_I2DR                0x10	/* Data I/O register */
++
++/* Bit definitions of I2CR */
++#define MXC_I2CR_IEN            0x0080
++#define MXC_I2CR_IIEN           0x0040
++#define MXC_I2CR_MSTA           0x0020
++#define MXC_I2CR_MTX            0x0010
++#define MXC_I2CR_TXAK           0x0008
++#define MXC_I2CR_RSTA           0x0004
++
++/* Bit definitions of I2SR */
++#define MXC_I2SR_ICF            0x0080
++#define MXC_I2SR_IAAS           0x0040
++#define MXC_I2SR_IBB            0x0020
++#define MXC_I2SR_IAL            0x0010
++#define MXC_I2SR_SRW            0x0004
++#define MXC_I2SR_IIF            0x0002
++#define MXC_I2SR_RXAK           0x0001
++
++#endif /* __MXC_I2C_REG_H__ */

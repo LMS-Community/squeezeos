@@ -1,0 +1,72 @@
+Index: linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-07-30 17:49:45.000000000 -0700
++++ linux-2.6.26/arch/arm/mach-mx25/mx25_baby_gpio.c	2009-07-30 17:49:46.000000000 -0700
+@@ -105,7 +105,8 @@
+ 	mxc_request_iomux   (BABY_MSP430_SBWTDIO     , MUX_CONFIG_GPIO);
+ 	mxc_request_iomux   (BABY_MSP430_INTERRUPT   , MUX_CONFIG_GPIO);
+ 
+-	mxc_iomux_set_pad     (BABY_MSP430_INTERRUPT, PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_NONE);
++	/* enable pullup on the interrupt pin.  HIGH = IDLE, LOW = interrupt pending */
++	mxc_iomux_set_pad     (BABY_MSP430_INTERRUPT, PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD | PAD_CTL_47K_PU);
+ 	mxc_set_gpio_direction(BABY_MSP430_INTERRUPT, GPIO_DIRECTION_INPUT);
+ 
+ 	/* Power up WLAN */
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2009-07-30 17:49:45.000000000 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2009-07-31 21:07:54.000000000 -0700
+@@ -194,7 +194,7 @@
+ static SENSOR_DEVICE_ATTR_2(sys_voltage          ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_SYS_POWER_REGISTER);
+ static SENSOR_DEVICE_ATTR_2(battery_vmon1_voltage,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON1_REGISTER	   );
+ static SENSOR_DEVICE_ATTR_2(battery_vmon2_voltage,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER	   );
+-static SENSOR_DEVICE_ATTR_2(battery_temperature  ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_VMON2_REGISTER	   );
++static SENSOR_DEVICE_ATTR_2(battery_temperature  ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_TEMP_REGISTER     );
+ static SENSOR_DEVICE_ATTR_2(wall_voltage         ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_BATT_DC_JACK_REGISTER  );
+ 
+ static SENSOR_DEVICE_ATTR_2(adc_0 		 ,   S_IRUGO, msp430_i2c_show, NULL, 2, I2C_ADC_BASE+0 );
+@@ -297,7 +297,7 @@
+ 	}
+ 
+ 	err = request_irq(client->irq, msp430_i2c_irq,
+-                          IRQF_TRIGGER_HIGH | IRQF_SAMPLE_RANDOM,
++                          IRQF_TRIGGER_LOW | IRQF_SAMPLE_RANDOM,
+                           client->dev.bus_id, data);
+ 
+         if (err != 0) {
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_programmer.c	2009-07-30 17:49:45.000000000 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c	2009-07-30 17:49:46.000000000 -0700
+@@ -16,6 +16,7 @@
+ #include <linux/firmware.h>
+ #include <linux/ctype.h>
+ #include <linux/i2c.h>
++#include <linux/delay.h>
+ 
+ #include <asm/arch/gpio.h>
+ 
+@@ -315,15 +316,21 @@
+ 
+ 	msp430_release_gpio();
+ 
++	/* the microcontroller needs some time to check all its voltages and
++	 * settle down since it doesn't know whether it was just programmed
++	 * or just booted up
++	 */
++	msleep(300);
++
+ 	/* verify firmware is running */
+ 	if (!i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val)
+ 	    || val[0] != I2C_ID_VALUE) {
+-		printk("msp430: firmware programming failed\n");
++		printk("msp430: firmware programming failed, bad id\n");
+ 		goto err;
+ 	}
+ 
+ 	if (!i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val)) {
+-		printk("msp430: firmware programming failed\n");
++		printk("msp430: firmware programming failed, bad version\n");
+ 		goto err;
+ 	}
+ 	mcu_version = (val[1] << 8) | val[0];

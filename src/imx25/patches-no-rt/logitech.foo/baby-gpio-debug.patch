@@ -1,0 +1,302 @@
+Index: linux-2.6.26/drivers/mxc/Kconfig
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/Kconfig	2009-06-17 10:26:48.000000000 +0100
++++ linux-2.6.26/drivers/mxc/Kconfig	2009-06-17 10:29:41.000000000 +0100
+@@ -34,6 +34,8 @@
+ source "drivers/mxc/mlb/Kconfig"
+ source "drivers/mxc/adc/Kconfig"
+ 
++source "drivers/mxc/baby/Kconfig"
++
+ endmenu
+ 
+ endif
+Index: linux-2.6.26/drivers/mxc/Makefile
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/Makefile	2009-06-17 10:26:48.000000000 +0100
++++ linux-2.6.26/drivers/mxc/Makefile	2009-06-17 10:29:41.000000000 +0100
+@@ -16,4 +16,6 @@
+ obj-$(CONFIG_MXC_BLUETOOTH)		+= bt/
+ obj-$(CONFIG_GPS_IOCTRL)		+= gps_ioctrl/
+ obj-$(CONFIG_MXC_MLB)                   += mlb/
++
++obj-$(CONFIG_MACH_MX25_BABY)            += baby/
+ obj-$(CONFIG_IMX_ADC)                   += adc/
+Index: linux-2.6.26/drivers/mxc/baby/Kconfig
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/Kconfig	2009-06-17 10:29:41.000000000 +0100
+@@ -0,0 +1,14 @@
++#
++# baby device driver configuration
++#
++
++menu "MXC Baby support"
++
++config MXC_BABY_DEBUG_GPIO
++	bool "Baby Debug GPIO"
++	depends on MACH_MX25_BABY
++	default n
++	---help---
++	This driver allows debugging Baby GPIOs via the /sys interface.
++
++endmenu
+Index: linux-2.6.26/drivers/mxc/baby/Makefile
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/Makefile	2009-06-17 10:29:41.000000000 +0100
+@@ -0,0 +1,5 @@
++#
++# Makefile for the Logitech Baby drivers.
++#
++
++obj-$(CONFIG_MXC_BABY_DEBUG_GPIO)       += baby_gpio.o
+Index: linux-2.6.26/drivers/mxc/baby/baby_gpio.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/drivers/mxc/baby/baby_gpio.c	2009-06-17 10:29:41.000000000 +0100
+@@ -0,0 +1,244 @@
++/*
++ * Copyright 2008 Logitech. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++#include <linux/platform_device.h>
++
++#include <asm/hardware.h>
++#include <asm/arch/gpio.h>
++//#include <asm/arch/mx35_baby.h>
++
++extern struct mxc_gpio_port mxc_gpio_ports[];
++
++enum gpio_reg {
++	GPIO_DR = 0x00,
++	GPIO_GDIR = 0x04,
++	GPIO_PSR = 0x08,
++	GPIO_ICR1 = 0x0C,
++	GPIO_ICR2 = 0x10,
++	GPIO_IMR = 0x14,
++	GPIO_ISR = 0x18,
++};
++
++#define MUX_I		0
++#define PAD_I		10
++#define RSVD_I		21
++
++#define PIN_TO_MUX_MASK	((1<<(PAD_I - MUX_I)) - 1)
++#define PIN_TO_PAD_MASK	((1<<(RSVD_I - PAD_I)) - 1)
++
++#define PIN_TO_IOMUX_MUX(pin) ((pin >> MUX_I) & PIN_TO_MUX_MASK)
++#define PIN_TO_IOMUX_PAD(pin) ((pin >> PAD_I) & PIN_TO_PAD_MASK)
++
++#if 0
++static ssize_t baby_gpio_show(struct device *dev,
++			      struct device_attribute *attr, char *buf)
++{
++	int i;
++	struct mxc_baby_gpio_platform_data *baby_gpio_data = dev->platform_data;
++
++	for (i=0; i<baby_gpio_data->nr_pins; i++) {
++		int datain;
++		u32 gpio, base;
++		int dr, gdir, psr;
++		u32 pin;
++		int input;
++
++		if (strcmp(attr->attr.name, baby_gpio_data->pins[i].name) != 0)
++			continue;
++
++		/* read gpio using offical api */
++		pin = baby_gpio_data->pins[i].gpio;
++		datain = mxc_get_gpio_datain(pin);
++
++		/* read gpio state from registers */
++		gpio = IOMUX_TO_GPIO(pin);
++		base = mxc_gpio_ports[GPIO_TO_PORT(gpio)].base;
++
++		dr = (__raw_readl(base + GPIO_DR) >> GPIO_TO_INDEX(gpio)) & 1;
++		gdir = (__raw_readl(base + GPIO_GDIR) >> GPIO_TO_INDEX(gpio)) & 1;
++		psr = (__raw_readl(base + GPIO_PSR) >> GPIO_TO_INDEX(gpio)) & 1;
++
++		//input = __raw_readl(IO_ADDRESS(IOMUXC_BASE_ADDR) + 0x7AC + (pin << 2));
++
++		return snprintf(buf, PAGE_SIZE, "name:\t%s\ndatain:\t%d\ngdir:\t%s\ndr:\t%d\npsr:\t%d\ninput:\t%d\n", attr->attr.name, datain, (gdir==0)?"input":"output", dr, psr, input);
++	}
++
++	return 0;
++}
++
++static ssize_t baby_gpio_store(struct device *dev,
++			       struct device_attribute *attr,
++			       const char *buf, size_t count)
++{
++	int i;
++	struct mxc_baby_gpio_platform_data *baby_gpio_data = dev->platform_data;
++	unsigned long val;
++	char *ptr;
++
++	val = simple_strtoul(buf, &ptr, 10);
++
++	for (i=0; i<baby_gpio_data->nr_pins; i++) {
++		if (strcmp(attr->attr.name, baby_gpio_data->pins[i].name) != 0)
++			continue;
++
++		/* set gpio using offical api */
++		mxc_set_gpio_dataout(baby_gpio_data->pins[i].gpio, val);
++
++		return count;
++	}
++
++	return count;
++}
++#endif
++
++
++static ssize_t hex_dump(u32 base, int begin, int len, char *buf)
++{
++	int i;
++	size_t buf_len = 0;
++
++	for (i=begin; i<=len; i+=4) {
++		if ((i % 16) == 0) {
++			buf_len += snprintf(buf + buf_len, PAGE_SIZE - buf_len, "%03x: ", i);
++		}
++		buf_len += snprintf(buf + buf_len, PAGE_SIZE - buf_len, "%08x%c", __raw_readl(base+i), ((i % 16) == 12)?'\n':' ');
++	}
++	if ((i % 16) != 12) {
++		buf_len += snprintf(buf + buf_len, PAGE_SIZE - buf_len, "\n");
++	}
++
++	return buf_len;
++}
++
++static ssize_t baby_iomux_mux_show(struct device *dev,
++				   struct device_attribute *attr, char *buf)
++{
++
++	return hex_dump(IO_ADDRESS(IOMUXC_BASE_ADDR), 0, 0x228, buf);
++}
++
++static DEVICE_ATTR(iomux_mux, S_IRUGO, baby_iomux_mux_show, NULL);
++
++
++static ssize_t baby_iomux_pad_show(struct device *dev,
++				   struct device_attribute *attr, char *buf)
++{
++
++	return hex_dump(IO_ADDRESS(IOMUXC_BASE_ADDR), 0x22c, 0x45c, buf);
++}
++
++static DEVICE_ATTR(iomux_pad, S_IRUGO, baby_iomux_pad_show, NULL);
++
++
++static ssize_t baby_iomux_input_show(struct device *dev,
++				     struct device_attribute *attr, char *buf)
++{
++
++	return hex_dump(IO_ADDRESS(IOMUXC_BASE_ADDR), 0x460, 0x580, buf);
++}
++
++static DEVICE_ATTR(iomux_input, S_IRUGO, baby_iomux_input_show, NULL);
++
++
++static int baby_probe(struct platform_device *pdev)
++{
++       	int i, err;
++	struct device *dev = &pdev->dev;
++
++	device_create_file(dev, &dev_attr_iomux_mux);
++	device_create_file(dev, &dev_attr_iomux_pad);
++	device_create_file(dev, &dev_attr_iomux_input);
++
++
++#if 0
++	struct mxc_baby_gpio_platform_data *baby_gpio_data = dev->platform_data;
++
++	for (i=0; i<baby_gpio_data->nr_pins; i++) {
++		struct device_attribute *attr;
++
++		attr = kmalloc(sizeof(struct device_attribute), GFP_KERNEL);
++
++		attr->attr.name = baby_gpio_data->pins[i].name;
++		attr->attr.owner = THIS_MODULE;
++		attr->attr.mode = S_IRUGO | S_IWUSR;
++		attr->show = baby_gpio_show;
++		attr->store = baby_gpio_store;
++
++		baby_gpio_data->pins[i].attr = attr;
++
++		if ((err = device_create_file(dev, attr))) {
++			dev_err(dev, "cannot attach resume attribute\n");
++			kfree(attr);
++		}
++	}
++#endif
++
++	return 0;
++}
++
++static int baby_remove(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++
++	device_remove_file(dev, &dev_attr_iomux_mux);
++	device_remove_file(dev, &dev_attr_iomux_pad);
++	device_remove_file(dev, &dev_attr_iomux_input);
++
++#if 0
++	int i;
++
++	struct mxc_baby_gpio_platform_data *baby_gpio_data = dev->platform_data;
++
++	for (i=0; i<baby_gpio_data->nr_pins; i++) {
++		if (baby_gpio_data->pins[i].attr) {
++			device_remove_file(dev, baby_gpio_data->pins[i].attr);
++
++			kfree(baby_gpio_data->pins[i].attr);
++			baby_gpio_data->pins[i].attr = NULL;
++		}
++	}
++#endif
++
++	return 0;
++}
++
++static struct platform_driver baby_gpio_driver = {
++	.probe = baby_probe,
++	.remove = baby_remove,
++	.driver = {
++		.name = "baby_gpio",
++	},
++};
++
++static int __init baby_gpio_init(void)
++{
++	return platform_driver_register(&baby_gpio_driver);
++}
++
++static void __exit baby_gpio_exit(void)
++{
++	platform_driver_unregister(&baby_gpio_driver);
++}
++
++
++MODULE_AUTHOR ("Richard Titmuss <richard_titmuss@logitech.com>");
++MODULE_DESCRIPTION("Baby GPIO debug driver");
++MODULE_LICENSE("GPL");
++
++module_init(baby_gpio_init)
++module_exit(baby_gpio_exit)

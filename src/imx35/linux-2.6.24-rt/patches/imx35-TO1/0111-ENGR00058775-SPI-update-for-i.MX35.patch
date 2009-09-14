@@ -1,0 +1,389 @@
+From 2ba0abf8fb6b71e44ea374eeeda4541142829f7d Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Wed, 2 Apr 2008 11:14:56 +0800
+Subject: [PATCH] ENGR00058775 SPI update for i.MX35
+
+SPI driver update for i.MX35
+
+Signed-off-by: Katherine Lu <r63906@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |   13 ++++-
+ arch/arm/configs/imx35evb_defconfig     |   13 ++++-
+ arch/arm/mach-mx35/devices.c            |   96 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx35/mx35_3stack_gpio.c   |   88 ++++++++++++++++++++++++++++
+ arch/arm/mach-mx35/mx35evb_gpio.c       |   88 ++++++++++++++++++++++++++++
+ drivers/spi/mxc_spi.c                   |    4 +
+ 6 files changed, 298 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 6a3d710..d4ccd40 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -738,8 +738,17 @@ CONFIG_I2C_MXC=y
+ #
+ # SPI support
+ #
+-# CONFIG_SPI is not set
+-# CONFIG_SPI_MASTER is not set
++CONFIG_SPI=y
++CONFIG_SPI_MASTER=y
++
++#
++# SPI Master Controller Drivers
++#
++CONFIG_SPI_BITBANG=y
++CONFIG_SPI_MXC=y
++# CONFIG_SPI_MXC_TEST_LOOPBACK is not set
++CONFIG_SPI_MXC_SELECT1=y
++# CONFIG_SPI_MXC_SELECT2 is not set
+ # CONFIG_W1 is not set
+ # CONFIG_POWER_SUPPLY is not set
+ # CONFIG_HWMON is not set
+diff --git a/arch/arm/configs/imx35evb_defconfig b/arch/arm/configs/imx35evb_defconfig
+index 5f27aeb..1e2ab3b 100644
+--- a/arch/arm/configs/imx35evb_defconfig
++++ b/arch/arm/configs/imx35evb_defconfig
+@@ -604,8 +604,17 @@ CONFIG_DEVPORT=y
+ #
+ # SPI support
+ #
+-# CONFIG_SPI is not set
+-# CONFIG_SPI_MASTER is not set
++CONFIG_SPI=y
++CONFIG_SPI_MASTER=y
++
++#
++# SPI Master Controller Drivers
++#
++CONFIG_SPI_BITBANG=y
++CONFIG_SPI_MXC=y
++# CONFIG_SPI_MXC_TEST_LOOPBACK is not set
++CONFIG_SPI_MXC_SELECT1=y
++# CONFIG_SPI_MXC_SELECT2 is not set
+ # CONFIG_W1 is not set
+ # CONFIG_POWER_SUPPLY is not set
+ # CONFIG_HWMON is not set
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index e6f6845..0af8ff0 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -178,6 +178,101 @@ static inline void mxc_init_ipu(void)
+ }
+ #endif
+ 
++/* SPI controller and device data */
++#if defined(CONFIG_SPI_MXC) || defined(CONFIG_SPI_MXC_MODULE)
++
++#ifdef CONFIG_SPI_MXC_SELECT1
++/*!
++ * Resource definition for the CSPI1
++ */
++static struct resource mxcspi1_resources[] = {
++	[0] = {
++	       .start = CSPI1_BASE_ADDR,
++	       .end = CSPI1_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_CSPI1,
++	       .end = MXC_INT_CSPI1,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Platform Data for MXC CSPI1 */
++static struct mxc_spi_master mxcspi1_data = {
++	.maxchipselect = 4,
++	.spi_version = 7,
++};
++
++/*! Device Definition for MXC CSPI1 */
++static struct platform_device mxcspi1_device = {
++	.name = "mxc_spi",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxcspi1_data,
++		},
++	.num_resources = ARRAY_SIZE(mxcspi1_resources),
++	.resource = mxcspi1_resources,
++};
++
++#endif				/* CONFIG_SPI_MXC_SELECT1 */
++
++#ifdef CONFIG_SPI_MXC_SELECT2
++/*!
++ * Resource definition for the CSPI2
++ */
++static struct resource mxcspi2_resources[] = {
++	[0] = {
++	       .start = CSPI2_BASE_ADDR,
++	       .end = CSPI2_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_CSPI2,
++	       .end = MXC_INT_CSPI2,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Platform Data for MXC CSPI2 */
++static struct mxc_spi_master mxcspi2_data = {
++	.maxchipselect = 4,
++	.spi_version = 7,
++};
++
++/*! Device Definition for MXC CSPI2 */
++static struct platform_device mxcspi2_device = {
++	.name = "mxc_spi",
++	.id = 1,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxcspi2_data,
++		},
++	.num_resources = ARRAY_SIZE(mxcspi2_resources),
++	.resource = mxcspi2_resources,
++};
++#endif				/* CONFIG_SPI_MXC_SELECT2 */
++
++static inline void mxc_init_spi(void)
++{
++	/* SPBA configuration for CSPI2 - MCU is set */
++	spba_take_ownership(SPBA_CSPI2, SPBA_MASTER_A);
++#ifdef CONFIG_SPI_MXC_SELECT1
++	if (platform_device_register(&mxcspi1_device) < 0)
++		printk(KERN_ERR "Error: Registering the SPI Controller_1\n");
++#endif				/* CONFIG_SPI_MXC_SELECT1 */
++#ifdef CONFIG_SPI_MXC_SELECT2
++	if (platform_device_register(&mxcspi2_device) < 0)
++		printk(KERN_ERR "Error: Registering the SPI Controller_2\n");
++#endif				/* CONFIG_SPI_MXC_SELECT2 */
++}
++#else
++static inline void mxc_init_spi(void)
++{
++}
++#endif
++
+ /* I2C controller and device data */
+ #if defined(CONFIG_I2C_MXC) || defined(CONFIG_I2C_MXC_MODULE)
+ 
+@@ -341,6 +436,7 @@ static int __init mxc_init_devices(void)
+ {
+ 	mxc_init_wdt();
+ 	mxc_init_ipu();
++	mxc_init_spi();
+ 	mxc_init_i2c();
+ 	mxc_init_rtc();
+ 	mxc_init_dma();
+diff --git a/arch/arm/mach-mx35/mx35_3stack_gpio.c b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+index 645509b..084d622 100644
+--- a/arch/arm/mach-mx35/mx35_3stack_gpio.c
++++ b/arch/arm/mach-mx35/mx35_3stack_gpio.c
+@@ -249,3 +249,91 @@ void gpio_i2c_inactive(int i2c_num)
+ }
+ 
+ EXPORT_SYMBOL(gpio_i2c_inactive);
++
++/*!
++ * Setup GPIO for a CSPI device to be active
++ *
++ * @param  cspi_mod         an CSPI device
++ */
++void gpio_spi_active(int cspi_mod)
++{
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_iomux(MX35_PIN_CSPI1_MOSI, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_MISO, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SS0, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SS1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SCLK, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SPI_RDY, MUX_CONFIG_FUNC);
++
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_MOSI,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_MISO,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SS0,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_ODE_CMOS |
++				  PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SS1,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_ODE_CMOS |
++				  PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SCLK,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SPI_RDY,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_DRV_NORMAL);
++		break;
++	case 1:
++		/* SPI2 */
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_spi_active);
++
++/*!
++ * Setup GPIO for a CSPI device to be inactive
++ *
++ * @param  cspi_mod         a CSPI device
++ */
++void gpio_spi_inactive(int cspi_mod)
++{
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_gpio(MX35_PIN_CSPI1_MOSI);
++		mxc_request_gpio(MX35_PIN_CSPI1_MISO);
++		mxc_request_gpio(MX35_PIN_CSPI1_SS0);
++		mxc_request_gpio(MX35_PIN_CSPI1_SS1);
++		mxc_request_gpio(MX35_PIN_CSPI1_SCLK);
++		mxc_request_gpio(MX35_PIN_CSPI1_SPI_RDY);
++
++		mxc_free_iomux(MX35_PIN_CSPI1_MOSI, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_MISO, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SS0, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SS1, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SCLK, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SPI_RDY, MUX_CONFIG_GPIO);
++		break;
++	case 1:
++		/* SPI2 */
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_spi_inactive);
+diff --git a/arch/arm/mach-mx35/mx35evb_gpio.c b/arch/arm/mach-mx35/mx35evb_gpio.c
+index 769c2ce..ee71f9e 100644
+--- a/arch/arm/mach-mx35/mx35evb_gpio.c
++++ b/arch/arm/mach-mx35/mx35evb_gpio.c
+@@ -186,3 +186,91 @@ void gpio_fec_inactive(void)
+ }
+ 
+ EXPORT_SYMBOL(gpio_fec_inactive);
++
++/*!
++ * Setup GPIO for a CSPI device to be active
++ *
++ * @param  cspi_mod         an CSPI device
++ */
++void gpio_spi_active(int cspi_mod)
++{
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_iomux(MX35_PIN_CSPI1_MOSI, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_MISO, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SS0, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SS1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SCLK, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SPI_RDY, MUX_CONFIG_FUNC);
++
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_MOSI,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_MISO,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SS0,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_ODE_CMOS |
++				  PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SS1,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_ODE_CMOS |
++				  PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SCLK,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SPI_RDY,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_DRV_NORMAL);
++		break;
++	case 1:
++		/* SPI2 */
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_spi_active);
++
++/*!
++ * Setup GPIO for a CSPI device to be inactive
++ *
++ * @param  cspi_mod         a CSPI device
++ */
++void gpio_spi_inactive(int cspi_mod)
++{
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_gpio(MX35_PIN_CSPI1_MOSI);
++		mxc_request_gpio(MX35_PIN_CSPI1_MISO);
++		mxc_request_gpio(MX35_PIN_CSPI1_SS0);
++		mxc_request_gpio(MX35_PIN_CSPI1_SS1);
++		mxc_request_gpio(MX35_PIN_CSPI1_SCLK);
++		mxc_request_gpio(MX35_PIN_CSPI1_SPI_RDY);
++
++		mxc_free_iomux(MX35_PIN_CSPI1_MOSI, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_MISO, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SS0, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SS1, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SCLK, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SPI_RDY, MUX_CONFIG_GPIO);
++		break;
++	case 1:
++		/* SPI2 */
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_spi_inactive);
+diff --git a/drivers/spi/mxc_spi.c b/drivers/spi/mxc_spi.c
+index b1ddc44..d8872b3 100644
+--- a/drivers/spi/mxc_spi.c
++++ b/drivers/spi/mxc_spi.c
+@@ -634,6 +634,10 @@ void mxc_spi_chipselect(struct spi_device *spi, int is_active)
+ 		if (spi->mode & SPI_CS_HIGH)
+ 			ctrl_reg |=
+ 			    spi_ver_def->mode_mask << spi_ver_def->ss_pol_shift;
++		if (spi_ver_def == &spi_ver_0_7)
++			ctrl_reg |=
++			    spi_ver_def->mode_mask << spi_ver_def->
++			    ss_ctrl_shift;
+ 
+ 		__raw_writel(ctrl_reg, master_drv_data->base + MXC_CSPICTRL);
+ 	}
+-- 
+1.5.4.4
+

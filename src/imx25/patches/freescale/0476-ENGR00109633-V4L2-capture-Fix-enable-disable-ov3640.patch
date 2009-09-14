@@ -1,0 +1,57 @@
+From c46e8e95194dc9b03bd2571e483d90fb587f0adf Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 17 Mar 2009 13:26:50 +0800
+Subject: [PATCH] ENGR00109633 V4L2 capture: Fix enable/disable ov3640 camera's mclk issue
+
+Remove unusable logic to check if camera's mclk is enabled or disabled before.
+Clock frame work will record the clock's use count.
+This makes the disabling logic be right if two capture features
+are run simultanesouly.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_capture.c |   17 +----------------
+ 1 files changed, 1 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+index f520a96..02a5ac1 100755
+--- a/drivers/mxc/ipu3/ipu_capture.c
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -29,8 +29,6 @@
+ #include "ipu_prv.h"
+ #include "ipu_regs.h"
+ 
+-static bool gipu_csi_get_mclk_flag[2] = {false, false};
+-
+ /*!
+  * ipu_csi_init_interface
+  *	Sets initial values for the CSI registers.
+@@ -173,24 +171,11 @@ int _ipu_csi_mclk_set(uint32_t pixel_clk, uint32_t csi)
+ int ipu_csi_enable_mclk(int csi, bool flag, bool wait)
+ {
+ 	if (flag) {
+-		if (gipu_csi_get_mclk_flag[csi] == true) {
+-			printk(KERN_WARNING "The clock of CSI%d has been enabled\n", csi);
+-			return 0;
+-		}
+-
+ 		clk_enable(g_csi_clk[csi]);
+ 		if (wait == true)
+ 			msleep(10);
+-		gipu_csi_get_mclk_flag[csi] = true;
+-	} else {
+-		if (gipu_csi_get_mclk_flag[csi] == false) {
+-			printk(KERN_WARNING "The clock of CSI%d has been disabled\n", csi);
+-			return 0;
+-		}
+-
++	} else
+ 		clk_disable(g_csi_clk[csi]);
+-		gipu_csi_get_mclk_flag[csi] = false;
+-	}
+ 
+ 	return 0;
+ }
+-- 
+1.5.4.4
+

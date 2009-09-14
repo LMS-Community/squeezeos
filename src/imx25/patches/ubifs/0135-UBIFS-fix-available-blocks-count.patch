@@ -1,0 +1,77 @@
+From 7c3aa78cfd72b435abf6e3185fb55d31f35bd85b Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Fri, 19 Dec 2008 19:26:29 +0200
+Subject: [PATCH] UBIFS: fix available blocks count
+
+Take into account that 2 eraseblocks are never available because
+they are reserved for the index. This gives more realistic count
+of FS blocks.
+
+To avoid future confusions like this, introduce a constant.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/budget.c |    9 ++-------
+ fs/ubifs/super.c  |    5 +++--
+ fs/ubifs/ubifs.h  |    8 ++++++++
+ 3 files changed, 13 insertions(+), 9 deletions(-)
+
+diff --git a/fs/ubifs/budget.c b/fs/ubifs/budget.c
+index d5a6503..e423425 100644
+--- a/fs/ubifs/budget.c
++++ b/fs/ubifs/budget.c
+@@ -280,13 +280,8 @@ int ubifs_calc_min_idx_lebs(struct ubifs_info *c)
+ 	 * extra LEB to compensate.
+ 	 */
+ 	ret += 1;
+-	/*
+-	 * At present the index needs at least 2 LEBs: one for the index head
+-	 * and one for in-the-gaps method (which currently does not cater for
+-	 * the index head and so excludes it from consideration).
+-	 */
+-	if (ret < 2)
+-		ret = 2;
++	if (ret < MIN_INDEX_LEBS)
++		ret = MIN_INDEX_LEBS;
+ 	return ret;
+ }
+ 
+diff --git a/fs/ubifs/super.c b/fs/ubifs/super.c
+index 4975163..e3797cd 100644
+--- a/fs/ubifs/super.c
++++ b/fs/ubifs/super.c
+@@ -693,9 +693,10 @@ static int init_constants_late(struct ubifs_info *c)
+ 	 * necessary to report something for the 'statfs()' call.
+ 	 *
+ 	 * Subtract the LEB reserved for GC, the LEB which is reserved for
+-	 * deletions, and assume only one journal head is available.
++	 * deletions, minimum LEBs for the index, and assume only one journal
++	 * head is available.
+ 	 */
+-	tmp64 = c->main_lebs - 2 - c->jhead_cnt + 1;
++	tmp64 = c->main_lebs - 1 - 1 - MIN_INDEX_LEBS - c->jhead_cnt + 1;
+ 	tmp64 *= (uint64_t)c->leb_size - c->leb_overhead;
+ 	tmp64 = ubifs_reported_space(c, tmp64);
+ 	c->block_cnt = tmp64 >> UBIFS_BLOCK_SHIFT;
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 18bda2a..1c68a36 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -63,6 +63,14 @@
+ #define SQNUM_WARN_WATERMARK 0xFFFFFFFF00000000ULL
+ #define SQNUM_WATERMARK      0xFFFFFFFFFF000000ULL
+ 
++/*
++ * Minimum amount of LEBs reserved for the index. At present the index needs at
++ * least 2 LEBs: one for the index head and one for in-the-gaps method (which
++ * currently does not cater for the index head and so excludes it from
++ * consideration).
++ */
++#define MIN_INDEX_LEBS 2
++
+ /* Minimum amount of data UBIFS writes to the flash */
+ #define MIN_WRITE_SZ (UBIFS_DATA_NODE_SZ + 8)
+ 
+-- 
+1.5.4.3
+

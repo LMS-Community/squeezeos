@@ -12,10 +12,15 @@ else
         exit 1
 fi
 
-echo "Cleaning out squeezeos-image and squeezeplay"
-bitbake squeezeos-image -c clean
-bitbake squeezeplay -c clean
+TMPDIR="${PARABUILD_BUILD_DIR}/build/tmp-${MACHINE}"
+
+if [ -d ${TMPDIR}/work ]
+then
+	echo "Cleaning out squeezeos-image and squeezeplay"
+	bitbake squeezeos-image -c clean
+	bitbake squeezeplay -c clean
+fi
 
 echo "Removing old binaries"
-rm -rf $PARABUILD_BUILD_DIR/build/tmp/deploy/images/${MACHINE}*bin
-rm -rf $PARABUILD_BUILD_DIR/build/tmp/deploy/images/squeezeos-image-${MACHINE}*
+rm -rf ${TMPDIR}/deploy/images/${MACHINE}*bin
+rm -rf ${TMPDIR}/deploy/images/squeezeos-image-${MACHINE}*

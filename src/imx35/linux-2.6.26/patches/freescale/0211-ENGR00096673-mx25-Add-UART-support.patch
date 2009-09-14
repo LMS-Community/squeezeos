@@ -1,0 +1,204 @@
+From b2da7e56675ed7a17eee9b3c13651c7de668f264 Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Wed, 22 Oct 2008 15:18:05 -0600
+Subject: [PATCH] ENGR00096673 mx25: Add UART support
+
+Add UART4 and UART5, both of which can use SDMA.
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ arch/arm/mach-mx25/board-mx25_3stack.h |   12 ++++-
+ arch/arm/mach-mx25/serial.c            |   90 ++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx25/serial.h            |   26 +++++++++
+ 3 files changed, 127 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx25/board-mx25_3stack.h b/arch/arm/mach-mx25/board-mx25_3stack.h
+index 77f3a72..9a504f5 100644
+--- a/arch/arm/mach-mx25/board-mx25_3stack.h
++++ b/arch/arm/mach-mx25/board-mx25_3stack.h
+@@ -64,13 +64,23 @@
+ /* UART 2 configuration */
+ #define UART2_MODE              MODE_DCE
+ #define UART2_IR                NO_IRDA
+-#define UART2_ENABLED           0
++#define UART2_ENABLED           1
+ 
+ /* UART 3 configuration */
+ #define UART3_MODE              MODE_DTE
+ #define UART3_IR                NO_IRDA
+ #define UART3_ENABLED           0
+ 
++/* UART 4 configuration */
++#define UART4_MODE              MODE_DTE
++#define UART4_IR                NO_IRDA
++#define UART4_ENABLED           0
++
++/* UART 5 configuration */
++#define UART5_MODE              MODE_DTE
++#define UART5_IR                NO_IRDA
++#define UART5_ENABLED           0
++
+ #define MXC_LL_UART_PADDR	UART1_BASE_ADDR
+ #define MXC_LL_UART_VADDR	AIPS1_IO_ADDRESS(UART1_BASE_ADDR)
+ 
+diff --git a/arch/arm/mach-mx25/serial.c b/arch/arm/mach-mx25/serial.c
+index 8696a4c..62dde42 100644
+--- a/arch/arm/mach-mx25/serial.c
++++ b/arch/arm/mach-mx25/serial.c
+@@ -116,6 +116,62 @@ static uart_mxc_port mxc_ports[] = {
+ 	       .rxd_mux = MXC_UART_RXDMUX,
+ 	       },
+ #endif
++#if UART4_ENABLED == 1
++	[3] = {
++	       .port = {
++			.membase = (void *)IO_ADDRESS(UART4_BASE_ADDR),
++			.mapbase = UART4_BASE_ADDR,
++			.iotype = SERIAL_IO_MEM,
++			.irq = UART4_INT1,
++			.fifosize = 32,
++			.flags = ASYNC_BOOT_AUTOCONF,
++			.line = 3,
++			},
++	       .ints_muxed = UART4_MUX_INTS,
++	       .irqs = {UART4_INT2, UART4_INT3},
++	       .mode = UART4_MODE,
++	       .ir_mode = UART4_IR,
++	       .enabled = UART4_ENABLED,
++	       .hardware_flow = UART4_HW_FLOW,
++	       .cts_threshold = UART4_UCR4_CTSTL,
++	       .dma_enabled = UART4_DMA_ENABLE,
++	       .dma_rxbuf_size = UART4_DMA_RXBUFSIZE,
++	       .rx_threshold = UART4_UFCR_RXTL,
++	       .tx_threshold = UART4_UFCR_TXTL,
++	       .shared = UART4_SHARED_PERI,
++	       .dma_tx_id = MXC_DMA_UART4_TX,
++	       .dma_rx_id = MXC_DMA_UART4_RX,
++	       .rxd_mux = MXC_UART_RXDMUX,
++	       },
++#endif
++#if UART5_ENABLED == 1
++	[4] = {
++	       .port = {
++			.membase = (void *)IO_ADDRESS(UART5_BASE_ADDR),
++			.mapbase = UART5_BASE_ADDR,
++			.iotype = SERIAL_IO_MEM,
++			.irq = UART5_INT1,
++			.fifosize = 32,
++			.flags = ASYNC_BOOT_AUTOCONF,
++			.line = 4,
++			},
++	       .ints_muxed = UART5_MUX_INTS,
++	       .irqs = {UART5_INT2, UART5_INT3},
++	       .mode = UART5_MODE,
++	       .ir_mode = UART5_IR,
++	       .enabled = UART5_ENABLED,
++	       .hardware_flow = UART5_HW_FLOW,
++	       .cts_threshold = UART5_UCR4_CTSTL,
++	       .dma_enabled = UART5_DMA_ENABLE,
++	       .dma_rxbuf_size = UART5_DMA_RXBUFSIZE,
++	       .rx_threshold = UART5_UFCR_RXTL,
++	       .tx_threshold = UART5_UFCR_TXTL,
++	       .shared = UART5_SHARED_PERI,
++	       .dma_tx_id = MXC_DMA_UART5_TX,
++	       .dma_rx_id = MXC_DMA_UART5_RX,
++	       .rxd_mux = MXC_UART_RXDMUX,
++	       },
++#endif
+ };
+ 
+ static struct platform_device mxc_uart_device1 = {
+@@ -143,6 +199,24 @@ static struct platform_device mxc_uart_device3 = {
+ 		},
+ };
+ #endif
++#if UART4_ENABLED == 1
++static struct platform_device mxc_uart_device4 = {
++	.name = "mxcintuart",
++	.id = 3,
++	.dev = {
++		.platform_data = &mxc_ports[3],
++		},
++};
++#endif
++#if UART5_ENABLED == 1
++static struct platform_device mxc_uart_device5 = {
++	.name = "mxcintuart",
++	.id = 4,
++	.dev = {
++		.platform_data = &mxc_ports[4],
++		},
++};
++#endif
+ 
+ static int __init mxc_init_uart(void)
+ {
+@@ -159,6 +233,22 @@ static int __init mxc_init_uart(void)
+ #endif				/* UART3_DMA_ENABLE */
+ 	platform_device_register(&mxc_uart_device3);
+ #endif				/* UART3_ENABLED */
++#if UART4_ENABLED == 1
++#if UART4_DMA_ENABLE == 1
++	spba_take_ownership(UART4_SHARED_PERI, (SPBA_MASTER_A | SPBA_MASTER_C));
++#else
++	spba_take_ownership(UART4_SHARED_PERI, SPBA_MASTER_A);
++#endif				/* UARTr_DMA_ENABLE */
++	platform_device_register(&mxc_uart_device4);
++#endif				/* UART4_ENABLED */
++#if UART5_ENABLED == 1
++#if UART5_DMA_ENABLE == 1
++	spba_take_ownership(UART5_SHARED_PERI, (SPBA_MASTER_A | SPBA_MASTER_C));
++#else
++	spba_take_ownership(UART5_SHARED_PERI, SPBA_MASTER_A);
++#endif				/* UART5_DMA_ENABLE */
++	platform_device_register(&mxc_uart_device5);
++#endif				/* UART5_ENABLED */
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx25/serial.h b/arch/arm/mach-mx25/serial.h
+index 28755ea..d7d5699 100644
+--- a/arch/arm/mach-mx25/serial.h
++++ b/arch/arm/mach-mx25/serial.h
+@@ -73,6 +73,20 @@
+ #define UART3_DMA_RXBUFSIZE     1024
+ #define UART3_UFCR_RXTL         16
+ #define UART3_UFCR_TXTL         16
++/* UART 4 configuration */
++#define UART4_HW_FLOW           1
++#define UART4_UCR4_CTSTL        16
++#define UART4_DMA_ENABLE        0
++#define UART4_DMA_RXBUFSIZE     1024
++#define UART4_UFCR_RXTL         16
++#define UART4_UFCR_TXTL         16
++/* UART 5 configuration */
++#define UART5_HW_FLOW           1
++#define UART5_UCR4_CTSTL        16
++#define UART5_DMA_ENABLE        0
++#define UART5_DMA_RXBUFSIZE     1024
++#define UART5_UFCR_RXTL         16
++#define UART5_UFCR_TXTL         16
+ 
+ /*
+  * UART Chip level Configuration that a user may not have to edit. These
+@@ -128,5 +142,17 @@
+ #define UART3_INT2              (-1)
+ #define UART3_INT3              (-1)
+ #define UART3_SHARED_PERI       SPBA_UART3
++/* UART 4 configuration */
++#define UART4_MUX_INTS          INTS_MUXED
++#define UART4_INT1              MXC_INT_UART4
++#define UART4_INT2              (-1)
++#define UART4_INT3              (-1)
++#define UART4_SHARED_PERI       SPBA_UART4
++/* UART 5 configuration */
++#define UART5_MUX_INTS          INTS_MUXED
++#define UART5_INT1              MXC_INT_UART5
++#define UART5_INT2              (-1)
++#define UART5_INT3              (-1)
++#define UART5_SHARED_PERI       SPBA_UART5
+ 
+ #endif				/* __ARCH_ARM_MACH_MX25_SERIAL_H__ */
+-- 
+1.5.4.4
+

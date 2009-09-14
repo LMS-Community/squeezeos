@@ -1,0 +1,152 @@
+From b7ebd3479bc13ef7b42b9372ccd5d19792894c5d Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Mon, 2 Feb 2009 11:15:43 +0800
+Subject: [PATCH] ENGR00106776 MX51: Add bluetooth support
+
+MX51: Add bluetooth support
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |    4 ++-
+ arch/arm/mach-mx51/board-mx51_3stack.h  |    2 +-
+ arch/arm/mach-mx51/mx51_3stack.c        |   38 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |    4 +-
+ drivers/mxc/bt/Kconfig                  |    2 +-
+ 5 files changed, 45 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index ecc87a3..332d71f 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Mon Jan 19 20:27:43 2009
++# Mon Feb  2 13:31:57 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1437,6 +1437,7 @@ CONFIG_RTC_INTF_DEV_UIE_EMUL=y
+ #
+ # CONFIG_RTC_MXC is not set
+ CONFIG_RTC_DRV_MXC_V2=y
++# CONFIG_RTC_DRV_IMXDI is not set
+ CONFIG_RTC_MC13892=m
+ # CONFIG_UIO is not set
+ 
+@@ -1519,6 +1520,7 @@ CONFIG_MXC_VPU_IRAM=y
+ #
+ # MXC Bluetooth support
+ #
++CONFIG_MXC_BLUETOOTH=m
+ 
+ #
+ # Broadcom GPS ioctrl support
+diff --git a/arch/arm/mach-mx51/board-mx51_3stack.h b/arch/arm/mach-mx51/board-mx51_3stack.h
+index 4b8918c..31ef604 100644
+--- a/arch/arm/mach-mx51/board-mx51_3stack.h
++++ b/arch/arm/mach-mx51/board-mx51_3stack.h
+@@ -70,7 +70,7 @@
+ /*! @} */
+ /* UART 2 configuration */
+ #define UART2_MODE		MODE_DCE
+-#define UART2_IR		IRDA
++#define UART2_IR		NO_IRDA
+ #define UART2_ENABLED		1
+ /* UART 3 configuration */
+ #define UART3_MODE		MODE_DTE
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index b5aa690..f79804e 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -935,6 +935,43 @@ static inline void mxc_sgtl5000_init(void)
+ {
+ }
+ #endif
++
++static void bt_reset(void)
++{
++	int err;
++
++	err = mxc_request_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_GPIO);
++	if (err) {
++		printk(KERN_ERR "Error: bt reset request gpio failed!\n");
++		return;
++	}
++	mxc_set_gpio_dataout(MX51_PIN_EIM_D19, 1);
++	mxc_set_gpio_direction(MX51_PIN_EIM_D19, 0);
++	mxc_free_iomux(MX51_PIN_EIM_D19, IOMUX_CONFIG_GPIO);
++}
++
++static struct mxc_bt_platform_data mxc_bt_data = {
++	.bt_vdd = NULL,
++	.bt_vdd_parent = NULL,
++	.bt_vusb = "SW4",
++	.bt_vusb_parent = NULL,
++	.bt_reset = bt_reset,
++};
++
++static struct platform_device mxc_bt_device = {
++	.name = "mxc_bt",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_bt_data,
++		},
++};
++
++static void mxc_init_bluetooth(void)
++{
++	(void)platform_device_register(&mxc_bt_device);
++}
++
+ /*!
+  * Board specific fixup function. It is called by \b setup_arch() in
+  * setup.c file very early on during kernel starts. It allows the user to
+@@ -1003,6 +1040,7 @@ static void __init mxc_board_init(void)
+ 	mxc_init_audio();
+ 
+ 	mxc_sgtl5000_init();
++	mxc_init_bluetooth();
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index f57a0fd..b5f2630 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -75,7 +75,7 @@ void gpio_uart_active(int port, int no_irda)
+ 				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
+ 				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
+ 		mxc_iomux_set_input(MUX_IN_UART2_IPP_UART_RXD_MUX_SELECT_INPUT,
+-				    INPUT_CTL_PATH0);
++				    INPUT_CTL_PATH2);
+ 		mxc_request_iomux(MX51_PIN_UART2_TXD, IOMUX_CONFIG_ALT0);
+ 		mxc_iomux_set_pad(MX51_PIN_UART2_TXD, PAD_CTL_HYS_NONE |
+ 				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PULL |
+@@ -86,7 +86,7 @@ void gpio_uart_active(int port, int no_irda)
+ 				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
+ 				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
+ 		mxc_iomux_set_input(MUX_IN_UART2_IPP_UART_RTS_B_SELECT_INPUT,
+-				    INPUT_CTL_PATH2);
++				    INPUT_CTL_PATH3);
+ 		/* UART2_CTS */
+ 		mxc_request_iomux(MX51_PIN_EIM_D25, IOMUX_CONFIG_ALT4);
+ 		mxc_iomux_set_pad(MX51_PIN_EIM_D25, PAD_CTL_HYS_NONE |
+diff --git a/drivers/mxc/bt/Kconfig b/drivers/mxc/bt/Kconfig
+index 0078e90..9dbfbe5 100644
+--- a/drivers/mxc/bt/Kconfig
++++ b/drivers/mxc/bt/Kconfig
+@@ -6,7 +6,7 @@ menu "MXC Bluetooth support"
+ 
+ config MXC_BLUETOOTH
+ 	tristate "MXC Bluetooth support"
+-	depends on MACH_MX31_3DS || MACH_MX35_3DS || MACH_MX37_3DS
++	depends on MACH_MX31_3DS || MACH_MX35_3DS || MACH_MX37_3DS || MACH_MX51_3DS
+ 	---help---
+          Say Y to get the third party Bluetooth service.
+ 
+-- 
+1.5.4.4
+

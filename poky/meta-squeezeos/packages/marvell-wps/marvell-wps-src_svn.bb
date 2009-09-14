@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "3.11"
-#PR = "r1"
+PR = "r1"
 
 PROVIDES = "marvell-wps"
 

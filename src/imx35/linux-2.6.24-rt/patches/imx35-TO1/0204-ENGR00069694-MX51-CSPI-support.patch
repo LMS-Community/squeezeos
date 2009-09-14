@@ -1,0 +1,203 @@
+From d7a4c12f13039624cad87f3cf30f88a663374ae0 Mon Sep 17 00:00:00 2001
+From: Katherine Lu <katherine.lu@freescale.com>
+Date: Tue, 10 Jun 2008 14:11:43 +0800
+Subject: [PATCH] ENGR00069694 MX51 CSPI support
+
+MX51 CSPI support
+
+Signed-off-by: Katherine Lu <katherine.lu@freescale.com>
+---
+ arch/arm/configs/imx51_3stack_defconfig |   23 +++++++-
+ arch/arm/mach-mx51/devices.c            |    8 ++--
+ arch/arm/mach-mx51/mx51_3stack_gpio.c   |   84 +++++++++++++++++++++++++++++++
+ drivers/spi/Kconfig                     |    2 +-
+ 4 files changed, 109 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/configs/imx51_3stack_defconfig b/arch/arm/configs/imx51_3stack_defconfig
+index 64d5bdf..ac20822 100644
+--- a/arch/arm/configs/imx51_3stack_defconfig
++++ b/arch/arm/configs/imx51_3stack_defconfig
+@@ -668,11 +668,28 @@ CONFIG_DEVPORT=y
+ # CONFIG_I2C is not set
+ # CONFIG_I2C_SLAVE is not set
+ 
++ #
++ # SPI support
++ #
++CONFIG_SPI=y
++CONFIG_SPI_MASTER=y
++
++#
++# SPI Master Controller Drivers
++#
++CONFIG_SPI_BITBANG=y
++CONFIG_SPI_MXC=y
++# CONFIG_SPI_MXC_TEST_LOOPBACK is not set
++CONFIG_SPI_MXC_SELECT1=y
++CONFIG_SPI_MXC_SELECT2=y
++# CONFIG_SPI_MXC_SELECT3 is not set
++
+ #
+-# SPI support
++# SPI Protocol Masters
+ #
+-# CONFIG_SPI is not set
+-# CONFIG_SPI_MASTER is not set
++# CONFIG_SPI_AT25 is not set
++# CONFIG_SPI_SPIDEV is not set
++# CONFIG_SPI_TLE62X0 is not set
+ # CONFIG_W1 is not set
+ # CONFIG_POWER_SUPPLY is not set
+ # CONFIG_HWMON is not set
+diff --git a/arch/arm/mach-mx51/devices.c b/arch/arm/mach-mx51/devices.c
+index 7a127c9..f029a3e 100644
+--- a/arch/arm/mach-mx51/devices.c
++++ b/arch/arm/mach-mx51/devices.c
+@@ -237,8 +237,8 @@ static struct resource mxcspi3_resources[] = {
+ 	       .flags = IORESOURCE_MEM,
+ 	       },
+ 	[1] = {
+-	       .start = MXC_INT_CSPI3,
+-	       .end = MXC_INT_CSPI3,
++	       .start = MXC_INT_CSPI,
++	       .end = MXC_INT_CSPI,
+ 	       .flags = IORESOURCE_IRQ,
+ 	       },
+ };
+@@ -246,7 +246,7 @@ static struct resource mxcspi3_resources[] = {
+ /*! Platform Data for MXC CSPI3 */
+ static struct mxc_spi_master mxcspi3_data = {
+ 	.maxchipselect = 4,
+-	.spi_version = 23,
++	.spi_version = 7,
+ };
+ 
+ /*! Device Definition for MXC CSPI3 */
+@@ -265,7 +265,7 @@ static struct platform_device mxcspi3_device = {
+ void __init mxc_init_spi(void)
+ {
+ 	/* SPBA configuration for CSPI2 - MCU is set */
+-	spba_take_ownership(SPBA_CSPI2, SPBA_MASTER_A);
++	spba_take_ownership(SPBA_CSPI1, SPBA_MASTER_A);
+ #ifdef CONFIG_SPI_MXC_SELECT1
+ 	if (platform_device_register(&mxcspi1_device) < 0)
+ 		printk(KERN_ERR "Error: Registering the SPI Controller_1\n");
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 6e0777e..666c531 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -191,7 +191,90 @@ EXPORT_SYMBOL(config_uartdma_event);
+  */
+ void gpio_spi_active(int cspi_mod)
+ {
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_iomux(MX51_PIN_CSPI1_MISO, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_MISO, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_CSPI1_MOSI, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_MOSI, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_CSPI1_RDY, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_RDY, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_CSPI1_SCLK, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_SCLK, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_CSPI1_SS0, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_SS0, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_CSPI1_SS1, IOMUX_CONFIG_ALT0);
++		mxc_iomux_set_pad(MX51_PIN_CSPI1_SS1, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_DRV_HIGH |
++				  PAD_CTL_SRE_FAST);
++		break;
++	case 1:
++		/* SPI2 */
++		mxc_request_iomux(MX51_PIN_NANDF_RB2, IOMUX_CONFIG_ALT2);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB2, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_PKE_ENABLE);
++
++		mxc_request_iomux(MX51_PIN_NANDF_RB3, IOMUX_CONFIG_ALT2);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB3, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_PKE_ENABLE);
++
++		mxc_request_iomux(MX51_PIN_NANDF_RB4, IOMUX_CONFIG_ALT2);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB4, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_PKE_ENABLE);
++
++		mxc_request_iomux(MX51_PIN_NANDF_RB7, IOMUX_CONFIG_ALT2);
++		mxc_iomux_set_pad(MX51_PIN_NANDF_RB7, PAD_CTL_DRV_VOT_HIGH |
++				  PAD_CTL_HYS_ENABLE | PAD_CTL_PKE_ENABLE |
++				  PAD_CTL_PUE_KEEPER | PAD_CTL_100K_PU |
++				  PAD_CTL_ODE_OPENDRAIN_NONE |
++				  PAD_CTL_DRV_HIGH);
++		break;
++	case 2:
++		/* SPI3 */
++		mxc_request_iomux(MX51_PIN_USBH1_NXT, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_USBH1_NXT, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_USBH1_DIR, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_USBH1_DIR, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_USBH1_CLK, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_USBH1_CLK, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++
++		mxc_request_iomux(MX51_PIN_USBH1_DATA5, IOMUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX51_PIN_USBH1_DATA5, PAD_CTL_HYS_ENABLE |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_KEEPER |
++				  PAD_CTL_DRV_HIGH | PAD_CTL_SRE_FAST);
++		break;
++	default:
++		break;
++	}
+ }
++EXPORT_SYMBOL(gpio_spi_active);
+ 
+ /*!
+  * Setup GPIO for a CSPI device to be inactive
+@@ -202,6 +285,7 @@ void gpio_spi_inactive(int cspi_mod)
+ {
+ 
+ }
++EXPORT_SYMBOL(gpio_spi_inactive);
+ 
+ /*!
+  * Setup 1-Wire to be active
+diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
+index b141fb8..1a00f8c 100644
+--- a/drivers/spi/Kconfig
++++ b/drivers/spi/Kconfig
+@@ -215,7 +215,7 @@ config SPI_MXC_SELECT2
+ 
+ config SPI_MXC_SELECT3
+ 	bool "CSPI3"
+-	depends on SPI_MXC && (ARCH_MX3 || ARCH_MX27 || ARCH_MX37)
++	depends on SPI_MXC && (ARCH_MX3 || ARCH_MX27 || ARCH_MX37 || ARCH_MX51)
+ 	default n
+ 
+ #
+-- 
+1.5.4.4
+

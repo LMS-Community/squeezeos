@@ -1,0 +1,56 @@
+From 14399eb9ebe348cb1ec4addf4f93a11f374fc789 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Thu, 24 Jul 2008 18:28:11 +0300
+Subject: [PATCH] UBI: always start the background thread
+
+This fix only affects UBI debugging.
+
+If the the background thread is disabled for debugging purposes,
+start it anyway, because otherwise we see tonns of kernel debugging
+complaints like this:
+
+INFO: task ubi_bgt0d:26857 blocked for more than 120 seconds.
+"echo 0 > /proc/sys/kernel/hung_task_timeout_secs" disables this message.
+ubi_bgt0d     D dd37bf94     0 26857      2
+       dd37bfcc 00000086 f8e17cea dd37bf94 00000046 00000000 00000000 f5c62430
+       f5c62430 f5c62590 c2a09c80 f6cbd498 dd8e9cbc 00000296 dd37bfb0 00000296
+       dd8e9cb8 dd8e9cbc dd37bfcc c0119774 00000000 00000000 c0132e89 f6961560
+Call Trace:
+ [<f8e17cea>] ? ubi_thread+0x0/0x127 [ubi]
+ [<c0119774>] ? complete+0x43/0x4b
+ [<c0132e89>] ? kthread+0x0/0x5b
+ [<f8e17cea>] ? ubi_thread+0x0/0x127 [ubi]
+ [<c0132eae>] kthread+0x25/0x5b
+ [<c0132e89>] ? kthread+0x0/0x5b
+ [<c0104953>] kernel_thread_helper+0x7/0x14
+ =======================
+
+So start it, and go sleep inside it, instead of creating it and never
+start.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/ubi/build.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/ubi/build.c b/drivers/mtd/ubi/build.c
+index eba760b..c7630a2 100644
+--- a/drivers/mtd/ubi/build.c
++++ b/drivers/mtd/ubi/build.c
+@@ -870,11 +870,9 @@ int ubi_attach_mtd_dev(struct mtd_info *mtd, int ubi_num, int vid_hdr_offset)
+ 		ubi->beb_rsvd_pebs);
+ 	ubi_msg("max/mean erase counter: %d/%d", ubi->max_ec, ubi->mean_ec);
+ 
+-	/* Enable the background thread */
+-	if (!DBG_DISABLE_BGT) {
++	if (!DBG_DISABLE_BGT)
+ 		ubi->thread_enabled = 1;
+-		wake_up_process(ubi->bgt_thread);
+-	}
++	wake_up_process(ubi->bgt_thread);
+ 
+ 	ubi_devices[ubi_num] = ubi;
+ 	return ubi_num;
+-- 
+1.5.4.3
+

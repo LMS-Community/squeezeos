@@ -1,0 +1,1934 @@
+From 7ff60e8bc033ab63dacbe83838c7f48a4124c96e Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Fri, 10 Oct 2008 11:04:05 +0800
+Subject: [PATCH] ENGR00069672-3 IPU: ipu changes for capture feature
+
+ipu common code changes for capture feature
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/ipu/ipu_common.c     |   19 +-
+ drivers/mxc/ipu/ipu_csi.c        |   12 +-
+ drivers/mxc/ipu/ipu_device.c     |   13 +-
+ drivers/mxc/ipu/ipu_sdc.c        |    6 +-
+ drivers/mxc/ipu3/Makefile        |    2 +-
+ drivers/mxc/ipu3/ipu_capture.c   |  740 ++++++++++++++++++++++++++++++++++++++
+ drivers/mxc/ipu3/ipu_common.c    |  283 ++++++++++++++-
+ drivers/mxc/ipu3/ipu_ic.c        |    8 +-
+ drivers/mxc/ipu3/ipu_param_mem.h |    5 +
+ drivers/mxc/ipu3/ipu_prv.h       |   10 +-
+ drivers/mxc/ipu3/ipu_regs.h      |  151 ++++++++-
+ drivers/video/mxc/mxcfb.c        |    4 +-
+ include/asm-arm/arch-mxc/ipu.h   |   62 +++-
+ include/asm-arm/arch-mxc/mxc.h   |    1 +
+ 14 files changed, 1257 insertions(+), 59 deletions(-)
+
+diff --git a/drivers/mxc/ipu/ipu_common.c b/drivers/mxc/ipu/ipu_common.c
+index c8a9eb7..f083a34 100644
+--- a/drivers/mxc/ipu/ipu_common.c
++++ b/drivers/mxc/ipu/ipu_common.c
+@@ -510,28 +510,27 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 	unsigned long lock_flags;
+ 	uint32_t reg;
+ 	uint32_t dma_chan;
+-	uint32_t stride_bytes;
+ 
+ 	dma_chan = channel_2_dma(channel, type);
+-	stride_bytes = stride * bytes_per_pixel(pixel_fmt);
++
++	if (stride < width * bytes_per_pixel(pixel_fmt))
++		stride = width * bytes_per_pixel(pixel_fmt);
+ 
+ 	if (dma_chan == IDMA_CHAN_INVALID)
+ 		return -EINVAL;
+ 
+-	if (stride_bytes % 4) {
++	if (stride % 4) {
+ 		dev_err(g_ipu_dev,
+-			"Stride length must be 32-bit aligned, stride = %d, bytes = %d\n",
+-			stride, stride_bytes);
++			"Stride must be 32-bit aligned, stride = %d\n", stride);
+ 		return -EINVAL;
+ 	}
+-	/* IC channels' stride must be multiple of 8 pixels     */
+-	if ((dma_chan <= 13) && (stride % 8)) {
+-		dev_err(g_ipu_dev, "Stride must be 8 pixel multiple\n");
++	/* IC channels' width must be multiple of 8 pixels     */
++	if ((dma_chan <= 13) && (width % 8)) {
++		dev_err(g_ipu_dev, "width must be 8 pixel multiple\n");
+ 		return -EINVAL;
+ 	}
+ 	/* Build parameter memory data for DMA channel */
+-	_ipu_ch_param_set_size(params, pixel_fmt, width, height, stride_bytes,
+-			       u, v);
++	_ipu_ch_param_set_size(params, pixel_fmt, width, height, stride, u, v);
+ 	_ipu_ch_param_set_buffer(params, phyaddr_0, phyaddr_1);
+ 	_ipu_ch_param_set_rotation(params, rot_mode);
+ 	/* Some channels (rotation) have restriction on burst length */
+diff --git a/drivers/mxc/ipu/ipu_csi.c b/drivers/mxc/ipu/ipu_csi.c
+index ece04f0..e9f0549 100644
+--- a/drivers/mxc/ipu/ipu_csi.c
++++ b/drivers/mxc/ipu/ipu_csi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -169,9 +169,11 @@ int ipu_csi_read_mclk_flag(void)
+  *
+  * @param       width        pointer to window width
+  * @param       height       pointer to window height
++ * @param       dummy        dummy for IPUv1 to keep the same interface with IPUv3
+  *
+  */
+-void ipu_csi_get_window_size(uint32_t * width, uint32_t * height)
++void ipu_csi_get_window_size(uint32_t *width, uint32_t *height,
++		uint32_t dummy)
+ {
+ 	uint32_t reg;
+ 
+@@ -185,9 +187,10 @@ void ipu_csi_get_window_size(uint32_t * width, uint32_t * height)
+  *
+  * @param       width        window width
+  * @param       height       window height
++ * @param       dummy        dummy for IPUv1 to keep the same interface with IPUv3
+  *
+  */
+-void ipu_csi_set_window_size(uint32_t width, uint32_t height)
++void ipu_csi_set_window_size(uint32_t width, uint32_t height, uint32_t dummy)
+ {
+ 	__raw_writel((width - 1) | (height - 1) << 16, CSI_ACT_FRM_SIZE);
+ }
+@@ -197,9 +200,10 @@ void ipu_csi_set_window_size(uint32_t width, uint32_t height)
+  *
+  * @param       left        uint32 window x start
+  * @param       top         uint32 window y start
++ * @param       dummy       dummy for IPUv1 to keep the same interface with IPUv3
+  *
+  */
+-void ipu_csi_set_window_pos(uint32_t left, uint32_t top)
++void ipu_csi_set_window_pos(uint32_t left, uint32_t top, uint32_t dummy)
+ {
+ 	uint32_t temp = __raw_readl(CSI_OUT_FRM_CTRL);
+ 	temp &= 0xffff0000;
+diff --git a/drivers/mxc/ipu/ipu_device.c b/drivers/mxc/ipu/ipu_device.c
+index 3ef5a9e..36b6c04 100644
+--- a/drivers/mxc/ipu/ipu_device.c
++++ b/drivers/mxc/ipu/ipu_device.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -321,7 +321,7 @@ static int mxc_ipu_ioctl(struct inode *inode, struct file *file,
+ 				return -EFAULT;
+ 			}
+ 			ret =
+-			    ipu_sdc_set_window_pos(pos.channel, pos.x_pos,
++			    ipu_disp_set_window_pos(pos.channel, pos.x_pos,
+ 						   pos.y_pos);
+ 
+ 		}
+@@ -508,7 +508,8 @@ static int mxc_ipu_ioctl(struct inode *inode, struct file *file,
+ 	case IPU_CSI_GET_WIN_SIZE:
+ 		{
+ 			ipu_csi_window_size w;
+-			ipu_csi_get_window_size(&w.width, &w.height);
++			int dummy = 0;
++			ipu_csi_get_window_size(&w.width, &w.height, dummy);
+ 			if (copy_to_user
+ 			    ((ipu_csi_window_size *) arg, &w, sizeof(w)))
+ 				return -EFAULT;
+@@ -517,19 +518,21 @@ static int mxc_ipu_ioctl(struct inode *inode, struct file *file,
+ 	case IPU_CSI_SET_WIN_SIZE:
+ 		{
+ 			ipu_csi_window_size w;
++			int dummy = 0;
+ 			if (copy_from_user
+ 			    (&w, (ipu_csi_window_size *) arg, sizeof(w)))
+ 				return -EFAULT;
+-			ipu_csi_set_window_size(w.width, w.height);
++			ipu_csi_set_window_size(w.width, w.height, dummy);
+ 		}
+ 		break;
+ 	case IPU_CSI_SET_WINDOW:
+ 		{
+ 			ipu_csi_window p;
++			int dummy = 0;
+ 			if (copy_from_user
+ 			    (&p, (ipu_csi_window *) arg, sizeof(p)))
+ 				return -EFAULT;
+-			ipu_csi_set_window_pos(p.left, p.top);
++			ipu_csi_set_window_pos(p.left, p.top, dummy);
+ 		}
+ 		break;
+ 	case IPU_PF_SET_PAUSE_ROW:
+diff --git a/drivers/mxc/ipu/ipu_sdc.c b/drivers/mxc/ipu/ipu_sdc.c
+index 6636146..b552611 100644
+--- a/drivers/mxc/ipu/ipu_sdc.c
++++ b/drivers/mxc/ipu/ipu_sdc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -291,7 +291,7 @@ int32_t ipu_sdc_set_brightness(uint8_t value)
+  *
+  * @return      This function returns 0 on success or negative error code on fail
+  */
+-int32_t ipu_sdc_set_window_pos(ipu_channel_t channel, int16_t x_pos,
++int32_t ipu_disp_set_window_pos(ipu_channel_t channel, int16_t x_pos,
+ 			       int16_t y_pos)
+ {
+ 	x_pos += g_h_start_width;
+@@ -354,4 +354,4 @@ EXPORT_SYMBOL(ipu_sdc_init_panel);
+ EXPORT_SYMBOL(ipu_sdc_set_global_alpha);
+ EXPORT_SYMBOL(ipu_sdc_set_color_key);
+ EXPORT_SYMBOL(ipu_sdc_set_brightness);
+-EXPORT_SYMBOL(ipu_sdc_set_window_pos);
++EXPORT_SYMBOL(ipu_disp_set_window_pos);
+diff --git a/drivers/mxc/ipu3/Makefile b/drivers/mxc/ipu3/Makefile
+index 8b34e90..5cb1e5b 100644
+--- a/drivers/mxc/ipu3/Makefile
++++ b/drivers/mxc/ipu3/Makefile
+@@ -1,4 +1,4 @@
+ obj-$(CONFIG_MXC_IPU_V3) = mxc_ipu.o
+ 
+-mxc_ipu-objs := ipu_common.o ipu_ic.o ipu_disp.o
++mxc_ipu-objs := ipu_common.o ipu_ic.o ipu_disp.o ipu_capture.o
+ 
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+new file mode 100755
+index 0000000..750b456
+--- /dev/null
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -0,0 +1,740 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file ipu_capture.c
++ *
++ * @brief IPU capture dase functions
++ *
++ * @ingroup IPU
++ */
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/errno.h>
++#include <linux/spinlock.h>
++#include <linux/delay.h>
++#include <asm/arch/ipu.h>
++#include <asm/arch/clock.h>
++
++#include "ipu_prv.h"
++#include "ipu_regs.h"
++
++static bool gipu_csi_get_mclk_flag[2] = {false, false};
++
++/*!
++ * ipu_csi_init_interface
++ *	Sets initial values for the CSI registers.
++ *	The width and height of the sensor and the actual frame size will be
++ *	set to the same values.
++ * @param	width		Sensor width
++ * @param       height		Sensor height
++ * @param       pixel_fmt	pixel format
++ * @param       cfg_param	ipu_csi_signal_cfg_t structure
++ * @param       csi             csi 0 or csi 1
++ *
++ * @return      0 for success, -EINVAL for error
++ */
++int32_t
++ipu_csi_init_interface(uint16_t width, uint16_t height, uint32_t pixel_fmt,
++	ipu_csi_signal_cfg_t cfg_param)
++{
++	uint32_t data = 0;
++	uint32_t csi = cfg_param.csi;
++	unsigned long lock_flags;
++
++	/* Set SENS_DATA_FORMAT bits (8, 9 and 10)
++	   RGB or YUV444 is 0 which is current value in data so not set
++	   explicitly
++	   This is also the default value if attempts are made to set it to
++	   something invalid. */
++	switch (pixel_fmt) {
++	case IPU_PIX_FMT_YUYV:
++		cfg_param.data_fmt = CSI_SENS_CONF_DATA_FMT_YUV422_YUYV;
++		break;
++	case IPU_PIX_FMT_UYVY:
++		cfg_param.data_fmt = CSI_SENS_CONF_DATA_FMT_YUV422_UYVY;
++		break;
++	case IPU_PIX_FMT_RGB24:
++	case IPU_PIX_FMT_BGR24:
++		cfg_param.data_fmt = CSI_SENS_CONF_DATA_FMT_RGB_YUV444;
++		break;
++	case IPU_PIX_FMT_GENERIC:
++		cfg_param.data_fmt = CSI_SENS_CONF_DATA_FMT_BAYER;
++		break;
++	case IPU_PIX_FMT_RGB565:
++		cfg_param.data_fmt = CSI_SENS_CONF_DATA_FMT_RGB565;
++		break;
++	case IPU_PIX_FMT_RGB555:
++		cfg_param.data_fmt = CSI_SENS_CONF_DATA_FMT_RGB555;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	/* Set the CSI_SENS_CONF register remaining fields */
++	data |= cfg_param.data_width << CSI_SENS_CONF_DATA_WIDTH_SHIFT |
++		cfg_param.data_fmt << CSI_SENS_CONF_DATA_FMT_SHIFT |
++		cfg_param.data_pol << CSI_SENS_CONF_DATA_POL_SHIFT |
++		cfg_param.Vsync_pol << CSI_SENS_CONF_VSYNC_POL_SHIFT |
++		cfg_param.Hsync_pol << CSI_SENS_CONF_HSYNC_POL_SHIFT |
++		cfg_param.pixclk_pol << CSI_SENS_CONF_PIX_CLK_POL_SHIFT |
++		cfg_param.ext_vsync << CSI_SENS_CONF_EXT_VSYNC_SHIFT |
++		cfg_param.clk_mode << CSI_SENS_CONF_SENS_PRTCL_SHIFT |
++		cfg_param.pack_tight << CSI_SENS_CONF_PACK_TIGHT_SHIFT |
++		cfg_param.force_eof << CSI_SENS_CONF_FORCE_EOF_SHIFT |
++		cfg_param.data_en_pol << CSI_SENS_CONF_DATA_EN_POL_SHIFT;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	__raw_writel(data, CSI_SENS_CONF(csi));
++
++	/* Setup sensor frame size */
++	__raw_writel((width - 1) | (height - 1) << 16, CSI_SENS_FRM_SIZE(csi));
++
++	/* Set CCIR registers */
++	if ((cfg_param.clk_mode == IPU_CSI_CLK_MODE_CCIR656_PROGRESSIVE) ||
++	    (cfg_param.clk_mode == IPU_CSI_CLK_MODE_CCIR656_INTERLACED)) {
++		_ipu_csi_ccir_err_detection_enable(csi);
++		__raw_writel(0x40030, CSI_CCIR_CODE_1(csi));
++		__raw_writel(0xFF0000, CSI_CCIR_CODE_3(csi));
++	} else if ((cfg_param.clk_mode ==
++			IPU_CSI_CLK_MODE_CCIR1120_PROGRESSIVE_DDR) ||
++		(cfg_param.clk_mode ==
++			IPU_CSI_CLK_MODE_CCIR1120_PROGRESSIVE_SDR) ||
++		(cfg_param.clk_mode ==
++			IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_DDR) ||
++		(cfg_param.clk_mode ==
++			IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_SDR)) {
++		_ipu_csi_ccir_err_detection_enable(csi);
++		__raw_writel(0x40030, CSI_CCIR_CODE_1(csi));
++		__raw_writel(0xFF0000, CSI_CCIR_CODE_3(csi));
++	} else if ((cfg_param.clk_mode == IPU_CSI_CLK_MODE_GATED_CLK) ||
++		   (cfg_param.clk_mode == IPU_CSI_CLK_MODE_NONGATED_CLK)) {
++		_ipu_csi_ccir_err_detection_disable(csi);
++	}
++
++	dev_dbg(g_ipu_dev, "CSI_SENS_CONF = 0x%08X\n",
++		__raw_readl(CSI_SENS_CONF(csi)));
++	dev_dbg(g_ipu_dev, "CSI_ACT_FRM_SIZE = 0x%08X\n",
++		__raw_readl(CSI_ACT_FRM_SIZE(csi)));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++
++	return 0;
++}
++EXPORT_SYMBOL(ipu_csi_init_interface);
++
++/*! _ipu_csi_mclk_set
++ *
++ * @param	pixel_clk   desired pixel clock frequency in Hz
++ * @param	csi         csi 0 or csi 1
++ *
++ * @return	Returns 0 on success or negative error code on fail
++ */
++int _ipu_csi_mclk_set(uint32_t pixel_clk, uint32_t csi)
++{
++	uint32_t temp;
++	uint32_t div_ratio;
++	unsigned long lock_flags;
++
++	div_ratio = (clk_get_rate(g_ipu_clk) / pixel_clk) - 1;
++
++	if (div_ratio > 0xFF || div_ratio < 0) {
++		dev_dbg(g_ipu_dev, "The value of pixel_clk extends normal range\n");
++		return -EINVAL;
++	}
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_SENS_CONF(csi));
++	temp &= ~CSI_SENS_CONF_DIVRATIO_MASK;
++	__raw_writel(temp | (div_ratio << CSI_SENS_CONF_DIVRATIO_SHIFT),
++			CSI_SENS_CONF(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++
++	return 0;
++}
++
++/*!
++ * ipu_csi_enable_mclk
++ *
++ * @param	csi         csi 0 or csi 1
++ * @param       flag        true to enable mclk, false to disable mclk
++ * @param       wait        true to wait 100ms make clock stable, false not wait
++ *
++ * @return      Returns 0 on success
++ */
++int ipu_csi_enable_mclk(int csi, bool flag, bool wait)
++{
++	if (flag) {
++		if (gipu_csi_get_mclk_flag[csi] == true) {
++			printk(KERN_WARNING "The clock of CSI%d has been enabled\n", csi);
++			return 0;
++		}
++
++		clk_enable(g_csi_clk[csi]);
++		if (wait == true)
++			msleep(10);
++		gipu_csi_get_mclk_flag[csi] = true;
++	} else {
++		if (gipu_csi_get_mclk_flag[csi] == false) {
++			printk(KERN_WARNING "The clock of CSI%d has been disabled\n", csi);
++			return 0;
++		}
++
++		clk_disable(g_csi_clk[csi]);
++		gipu_csi_get_mclk_flag[csi] = false;
++	}
++
++	return 0;
++}
++EXPORT_SYMBOL(ipu_csi_enable_mclk);
++
++/*!
++ * ipu_csi_get_window_size
++ *
++ * @param	width	pointer to window width
++ * @param	height	pointer to window height
++ * @param	csi	csi 0 or csi 1
++ */
++void ipu_csi_get_window_size(uint32_t *width, uint32_t *height, uint32_t csi)
++{
++	uint32_t reg;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	reg = __raw_readl(CSI_ACT_FRM_SIZE(csi));
++	*width = (reg & 0xFFFF) + 1;
++	*height = (reg >> 16 & 0xFFFF) + 1;
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++EXPORT_SYMBOL(ipu_csi_get_window_size);
++
++/*!
++ * ipu_csi_set_window_size
++ *
++ * @param	width	window width
++ * @param       height	window height
++ * @param       csi	csi 0 or csi 1
++ */
++void ipu_csi_set_window_size(uint32_t width, uint32_t height, uint32_t csi)
++{
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	__raw_writel((width - 1) | (height - 1) << 16, CSI_ACT_FRM_SIZE(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++EXPORT_SYMBOL(ipu_csi_set_window_size);
++
++/*!
++ * ipu_csi_set_window_pos
++ *
++ * @param       left	uint32 window x start
++ * @param       top	uint32 window y start
++ * @param       csi	csi 0 or csi 1
++ */
++void ipu_csi_set_window_pos(uint32_t left, uint32_t top, uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_OUT_FRM_CTRL(csi));
++	temp &= ~(CSI_HSC_MASK | CSI_VSC_MASK);
++	temp |= ((top << CSI_VSC_SHIFT) | (left << CSI_HSC_SHIFT));
++	__raw_writel(temp, CSI_OUT_FRM_CTRL(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++EXPORT_SYMBOL(ipu_csi_set_window_pos);
++
++/*!
++ * _ipu_csi_horizontal_downsize_enable
++ *	Enable horizontal downsizing(decimation) by 2.
++ *
++ * @param	csi	csi 0 or csi 1
++ */
++void _ipu_csi_horizontal_downsize_enable(uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_OUT_FRM_CTRL(csi));
++	temp |= CSI_HORI_DOWNSIZE_EN;
++	__raw_writel(temp, CSI_OUT_FRM_CTRL(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * _ipu_csi_horizontal_downsize_disable
++ *	Disable horizontal downsizing(decimation) by 2.
++ *
++ * @param	csi	csi 0 or csi 1
++ */
++void _ipu_csi_horizontal_downsize_disable(uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_OUT_FRM_CTRL(csi));
++	temp &= ~CSI_HORI_DOWNSIZE_EN;
++	__raw_writel(temp, CSI_OUT_FRM_CTRL(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * _ipu_csi_vertical_downsize_enable
++ *	Enable vertical downsizing(decimation) by 2.
++ *
++ * @param	csi	csi 0 or csi 1
++ */
++void _ipu_csi_vertical_downsize_enable(uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_OUT_FRM_CTRL(csi));
++	temp |= CSI_VERT_DOWNSIZE_EN;
++	__raw_writel(temp, CSI_OUT_FRM_CTRL(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * _ipu_csi_vertical_downsize_disable
++ *	Disable vertical downsizing(decimation) by 2.
++ *
++ * @param	csi	csi 0 or csi 1
++ */
++void _ipu_csi_vertical_downsize_disable(uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_OUT_FRM_CTRL(csi));
++	temp &= ~CSI_VERT_DOWNSIZE_EN;
++	__raw_writel(temp, CSI_OUT_FRM_CTRL(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * ipu_csi_set_test_generator
++ *
++ * @param	active       1 for active and 0 for inactive
++ * @param       r_value	     red value for the generated pattern of even pixel
++ * @param       g_value      green value for the generated pattern of even
++ *			     pixel
++ * @param       b_value      blue value for the generated pattern of even pixel
++ * @param	pixel_clk   desired pixel clock frequency in Hz
++ * @param       csi          csi 0 or csi 1
++ */
++void ipu_csi_set_test_generator(bool active, uint32_t r_value,
++	uint32_t g_value, uint32_t b_value, uint32_t pix_clk, uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_TST_CTRL(csi));
++
++	if (active == false) {
++		temp &= ~CSI_TEST_GEN_MODE_EN;
++		__raw_writel(temp, CSI_TST_CTRL(csi));
++	} else {
++		/* Set sensb_mclk div_ratio*/
++		_ipu_csi_mclk_set(pix_clk, csi);
++
++		temp &= ~(CSI_TEST_GEN_R_MASK | CSI_TEST_GEN_G_MASK |
++			CSI_TEST_GEN_B_MASK);
++		temp |= CSI_TEST_GEN_MODE_EN;
++		temp |= (r_value << CSI_TEST_GEN_R_SHIFT) |
++			(g_value << CSI_TEST_GEN_G_SHIFT) |
++			(b_value << CSI_TEST_GEN_B_SHIFT);
++		__raw_writel(temp, CSI_TST_CTRL(csi));
++	}
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++EXPORT_SYMBOL(ipu_csi_set_test_generator);
++
++/*!
++ * _ipu_csi_ccir_err_detection_en
++ *	Enable error detection and correction for
++ *	CCIR interlaced mode with protection bit.
++ *
++ * @param	csi	csi 0 or csi 1
++ */
++void _ipu_csi_ccir_err_detection_enable(uint32_t csi)
++{
++	uint32_t temp;
++
++	temp = __raw_readl(CSI_CCIR_CODE_1(csi));
++	temp |= CSI_CCIR_ERR_DET_EN;
++	__raw_writel(temp, CSI_CCIR_CODE_1(csi));
++}
++
++/*!
++ * _ipu_csi_ccir_err_detection_disable
++ *	Disable error detection and correction for
++ *	CCIR interlaced mode with protection bit.
++ *
++ * @param	csi	csi 0 or csi 1
++ */
++void _ipu_csi_ccir_err_detection_disable(uint32_t csi)
++{
++	uint32_t temp;
++
++	temp = __raw_readl(CSI_CCIR_CODE_1(csi));
++	temp &= ~CSI_CCIR_ERR_DET_EN;
++	__raw_writel(temp, CSI_CCIR_CODE_1(csi));
++}
++
++/*!
++ * _ipu_csi_set_mipi_di
++ *
++ * @param	num	MIPI data identifier 0-3 handled by CSI
++ * @param	di_val	data identifier value
++ * @param	csi	csi 0 or csi 1
++ *
++ * @return	Returns 0 on success or negative error code on fail
++ */
++int _ipu_csi_set_mipi_di(uint32_t num, uint32_t di_val, uint32_t csi)
++{
++	uint32_t temp;
++	int retval = 0;
++	unsigned long lock_flags;
++
++	if (di_val > 0xFFL) {
++		retval = -EINVAL;
++		goto err;
++	}
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_MIPI_DI(csi));
++
++	switch (num) {
++	case IPU_CSI_MIPI_DI0:
++		temp &= ~CSI_MIPI_DI0_MASK;
++		temp |= (di_val << CSI_MIPI_DI0_SHIFT);
++		__raw_writel(temp, CSI_MIPI_DI(csi));
++		break;
++	case IPU_CSI_MIPI_DI1:
++		temp &= ~CSI_MIPI_DI1_MASK;
++		temp |= (di_val << CSI_MIPI_DI1_SHIFT);
++		__raw_writel(temp, CSI_MIPI_DI(csi));
++		break;
++	case IPU_CSI_MIPI_DI2:
++		temp &= ~CSI_MIPI_DI2_MASK;
++		temp |= (di_val << CSI_MIPI_DI2_SHIFT);
++		__raw_writel(temp, CSI_MIPI_DI(csi));
++		break;
++	case IPU_CSI_MIPI_DI3:
++		temp &= ~CSI_MIPI_DI3_MASK;
++		temp |= (di_val << CSI_MIPI_DI3_SHIFT);
++		__raw_writel(temp, CSI_MIPI_DI(csi));
++		break;
++	default:
++		retval = -EINVAL;
++		goto err;
++	}
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++err:
++	return retval;
++}
++
++/*!
++ * _ipu_csi_set_skip_isp
++ *
++ * @param	skip		select frames to be skipped and set the
++ *				correspond bits to 1
++ * @param	max_ratio	number of frames in a skipping set and the
++ * 				maximum value of max_ratio is 5
++ * @param	csi		csi 0 or csi 1
++ *
++ * @return	Returns 0 on success or negative error code on fail
++ */
++int _ipu_csi_set_skip_isp(uint32_t skip, uint32_t max_ratio, uint32_t csi)
++{
++	uint32_t temp;
++	int retval = 0;
++	unsigned long lock_flags;
++
++	if (max_ratio > 5) {
++		retval = -EINVAL;
++		goto err;
++	}
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_SKIP(csi));
++	temp &= ~(CSI_MAX_RATIO_SKIP_ISP_MASK | CSI_SKIP_ISP_MASK);
++	temp |= (max_ratio << CSI_MAX_RATIO_SKIP_ISP_SHIFT) |
++		(skip << CSI_SKIP_ISP_SHIFT);
++	__raw_writel(temp, CSI_SKIP(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++err:
++	return retval;
++}
++
++/*!
++ * _ipu_csi_set_skip_smfc
++ *
++ * @param	skip		select frames to be skipped and set the
++ *				correspond bits to 1
++ * @param	max_ratio	number of frames in a skipping set and the
++ *				maximum value of max_ratio is 5
++ * @param	id		csi to smfc skipping id
++ * @param	csi		csi 0 or csi 1
++ *
++ * @return	Returns 0 on success or negative error code on fail
++ */
++int _ipu_csi_set_skip_smfc(uint32_t skip, uint32_t max_ratio,
++	uint32_t id, uint32_t csi)
++{
++	uint32_t temp;
++	int retval = 0;
++	unsigned long lock_flags;
++
++	if (max_ratio > 5 || id > 3) {
++		retval = -EINVAL;
++		goto err;
++	}
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(CSI_SKIP(csi));
++	temp &= ~(CSI_MAX_RATIO_SKIP_SMFC_MASK | CSI_ID_2_SKIP_MASK |
++			CSI_SKIP_SMFC_MASK);
++	temp |= (max_ratio << CSI_MAX_RATIO_SKIP_SMFC_SHIFT) |
++			(id << CSI_ID_2_SKIP_SHIFT) |
++			(skip << CSI_SKIP_SMFC_SHIFT);
++	__raw_writel(temp, CSI_SKIP(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++err:
++	return retval;
++}
++
++/*!
++ * _ipu_smfc_init
++ *	Map CSI frames to IDMAC channels.
++ *
++ * @param	channel		IDMAC channel 0-3
++ * @param	mipi_id		mipi id number 0-3
++ * @param	csi		csi0 or csi1
++ */
++void _ipu_smfc_init(ipu_channel_t channel, uint32_t mipi_id, uint32_t csi)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(SMFC_MAP);
++
++	switch (channel) {
++	case CSI_MEM0:
++		temp &= ~SMFC_MAP_CH0_MASK;
++		temp |= ((csi << 2) | mipi_id) << SMFC_MAP_CH0_SHIFT;
++		break;
++	case CSI_MEM1:
++		temp &= ~SMFC_MAP_CH1_MASK;
++		temp |= ((csi << 2) | mipi_id) << SMFC_MAP_CH1_SHIFT;
++		break;
++	case CSI_MEM2:
++		temp &= ~SMFC_MAP_CH2_MASK;
++		temp |= ((csi << 2) | mipi_id) << SMFC_MAP_CH2_SHIFT;
++		break;
++	case CSI_MEM3:
++		temp &= ~SMFC_MAP_CH3_MASK;
++		temp |= ((csi << 2) | mipi_id) << SMFC_MAP_CH3_SHIFT;
++		break;
++	default:
++		return;
++	}
++
++	__raw_writel(temp, SMFC_MAP);
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * _ipu_smfc_set_wmc
++ *	Caution: The number of required channels,  the enabled channels
++ *	and the FIFO size per channel are configured restrictedly.
++ *
++ * @param	channel		IDMAC channel 0-3
++ * @param	set		set 1 or clear 0
++ * @param	level		water mark level when FIFO is on the
++ *				relative size
++ */
++void _ipu_smfc_set_wmc(ipu_channel_t channel, bool set, uint32_t level)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(SMFC_WMC);
++
++	switch (channel) {
++	case CSI_MEM0:
++		if (set == true) {
++			temp &= ~SMFC_WM0_SET_MASK;
++			temp |= level << SMFC_WM0_SET_SHIFT;
++		} else {
++			temp &= ~SMFC_WM0_CLR_MASK;
++			temp |= level << SMFC_WM0_CLR_SHIFT;
++		}
++		break;
++	case CSI_MEM1:
++		if (set == true) {
++			temp &= ~SMFC_WM1_SET_MASK;
++			temp |= level << SMFC_WM1_SET_SHIFT;
++		} else {
++			temp &= ~SMFC_WM1_CLR_MASK;
++			temp |= level << SMFC_WM1_CLR_SHIFT;
++		}
++		break;
++	case CSI_MEM2:
++		if (set == true) {
++			temp &= ~SMFC_WM2_SET_MASK;
++			temp |= level << SMFC_WM2_SET_SHIFT;
++		} else {
++			temp &= ~SMFC_WM2_CLR_MASK;
++			temp |= level << SMFC_WM2_CLR_SHIFT;
++		}
++		break;
++	case CSI_MEM3:
++		if (set == true) {
++			temp &= ~SMFC_WM3_SET_MASK;
++			temp |= level << SMFC_WM3_SET_SHIFT;
++		} else {
++			temp &= ~SMFC_WM3_CLR_MASK;
++			temp |= level << SMFC_WM3_CLR_SHIFT;
++		}
++		break;
++	default:
++		return;
++	}
++
++	__raw_writel(temp, SMFC_WMC);
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * _ipu_smfc_set_burst_size
++ *
++ * @param	channel		IDMAC channel 0-3
++ * @param	bs		burst size of IDMAC channel,
++ *				the value programmed here shoud be BURST_SIZE-1
++ */
++void _ipu_smfc_set_burst_size(ipu_channel_t channel, uint32_t bs)
++{
++	uint32_t temp;
++	unsigned long lock_flags;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	temp = __raw_readl(SMFC_BS);
++
++	switch (channel) {
++	case CSI_MEM0:
++		temp &= ~SMFC_BS0_MASK;
++		temp |= bs << SMFC_BS0_SHIFT;
++		break;
++	case CSI_MEM1:
++		temp &= ~SMFC_BS1_MASK;
++		temp |= bs << SMFC_BS1_SHIFT;
++		break;
++	case CSI_MEM2:
++		temp &= ~SMFC_BS2_MASK;
++		temp |= bs << SMFC_BS2_SHIFT;
++		break;
++	case CSI_MEM3:
++		temp &= ~SMFC_BS3_MASK;
++		temp |= bs << SMFC_BS3_SHIFT;
++		break;
++	default:
++		return;
++	}
++
++	__raw_writel(temp, SMFC_BS);
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++
++/*!
++ * _ipu_csi_init
++ *
++ * @param	channel      IDMAC channel
++ * @param	csi	     csi 0 or csi 1
++ *
++ * @return	Returns 0 on success or negative error code on fail
++ */
++int _ipu_csi_init(ipu_channel_t channel, uint32_t csi)
++{
++	uint32_t csi_sens_conf, csi_dest;
++	int retval = 0;
++	unsigned long lock_flags;
++
++	switch (channel) {
++	case CSI_MEM0:
++	case CSI_MEM1:
++	case CSI_MEM2:
++	case CSI_MEM3:
++		csi_dest = CSI_DATA_DEST_IDMAC;
++		break;
++	case CSI_PRP_ENC_MEM:
++	case CSI_PRP_VF_MEM:
++		csi_dest = CSI_DATA_DEST_IC;
++		break;
++	default:
++		retval = -EINVAL;
++		goto err;
++	}
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	csi_sens_conf = __raw_readl(CSI_SENS_CONF(csi));
++	csi_sens_conf &= ~CSI_SENS_CONF_DATA_DEST_MASK;
++	__raw_writel(csi_sens_conf | (csi_dest <<
++		CSI_SENS_CONF_DATA_DEST_SHIFT), CSI_SENS_CONF(csi));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++err:
++	return retval;
++}
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index c78e93b..4d2c9b8 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -44,8 +44,9 @@ struct ipu_irq_node {
+ struct clk *g_ipu_clk;
+ bool g_ipu_clk_enabled;
+ struct clk *g_di_clk[2];
+-struct clk *g_ipu_csi_clk;
++struct clk *g_csi_clk[2];
+ unsigned char g_dc_di_assignment[10];
++ipu_channel_t g_ipu_csi_channel[2];
+ int g_ipu_irq[2];
+ int g_ipu_hw_rev;
+ bool g_sec_chan_en[21];
+@@ -59,9 +60,11 @@ static const char driver_name[] = "mxc_ipu";
+ static int ipu_dc_use_count;
+ static int ipu_dp_use_count;
+ static int ipu_dmfc_use_count;
++static int ipu_smfc_use_count;
+ static int ipu_ic_use_count;
+ static int ipu_rot_use_count;
+ static int ipu_di_use_count[2];
++static int ipu_csi_use_count[2];
+ 
+ u32 *ipu_cm_reg;
+ u32 *ipu_idmac_reg;
+@@ -71,6 +74,8 @@ u32 *ipu_dc_reg;
+ u32 *ipu_dc_tmpl_reg;
+ u32 *ipu_dmfc_reg;
+ u32 *ipu_di_reg[2];
++u32 *ipu_smfc_reg;
++u32 *ipu_csi_reg[2];
+ u32 *ipu_cpmem_base;
+ u32 *ipu_tpmem_base;
+ u32 *ipu_disp_base[2];
+@@ -83,6 +88,26 @@ static inline uint32_t channel_2_dma(ipu_channel_t ch, ipu_buffer_t type)
+ 	return ((uint32_t) ch >> (6 * type)) & 0x3F;
+ };
+ 
++static inline int _ipu_is_ic_chan(uint32_t dma_chan)
++{
++	return ((dma_chan >= 11) && (dma_chan <= 22));
++}
++
++static inline int _ipu_is_irt_chan(uint32_t dma_chan)
++{
++	return ((dma_chan >= 45) && (dma_chan <= 50));
++}
++
++static inline int _ipu_is_dmfc_chan(uint32_t dma_chan)
++{
++	return ((dma_chan >= 23) && (dma_chan <= 29));
++}
++
++static inline int _ipu_is_smfc_chan(uint32_t dma_chan)
++{
++	return ((dma_chan >= 0) && (dma_chan <= 3));
++}
++
+ #define idma_is_valid(ch)	(ch != NO_DMA)
+ #define idma_mask(ch)		(idma_is_valid(ch) ? (1UL << (ch & 0x1F)) : 0)
+ #define idma_is_set(reg, dma)	(__raw_readl(reg(dma)) & idma_mask(dma))
+@@ -139,6 +164,9 @@ static int ipu_probe(struct platform_device *pdev)
+ 	ipu_dmfc_reg = ioremap(ipu_base + IPU_DMFC_REG_BASE, PAGE_SIZE);
+ 	ipu_di_reg[0] = ioremap(ipu_base + IPU_DI0_REG_BASE, PAGE_SIZE);
+ 	ipu_di_reg[1] = ioremap(ipu_base + IPU_DI1_REG_BASE, PAGE_SIZE);
++	ipu_smfc_reg = ioremap(ipu_base + IPU_SMFC_REG_BASE, PAGE_SIZE);
++	ipu_csi_reg[0] = ioremap(ipu_base + IPU_CSI0_REG_BASE, PAGE_SIZE);
++	ipu_csi_reg[1] = ioremap(ipu_base + IPU_CSI1_REG_BASE, PAGE_SIZE);
+ 	ipu_cpmem_base = ioremap(ipu_base + IPU_CPMEM_REG_BASE, PAGE_SIZE);
+ 	ipu_tpmem_base = ioremap(ipu_base + IPU_TPM_REG_BASE, SZ_64K);
+ 	ipu_dc_tmpl_reg = ioremap(ipu_base + IPU_DC_TMPL_REG_BASE, SZ_128K);
+@@ -152,6 +180,9 @@ static int ipu_probe(struct platform_device *pdev)
+ 	dev_dbg(g_ipu_dev, "IPU DMFC Regs = %p\n", ipu_dmfc_reg);
+ 	dev_dbg(g_ipu_dev, "IPU DI0 Regs = %p\n", ipu_di_reg[0]);
+ 	dev_dbg(g_ipu_dev, "IPU DI1 Regs = %p\n", ipu_di_reg[1]);
++	dev_dbg(g_ipu_dev, "IPU SMFC Regs = %p\n", ipu_smfc_reg);
++	dev_dbg(g_ipu_dev, "IPU CSI0 Regs = %p\n", ipu_csi_reg[0]);
++	dev_dbg(g_ipu_dev, "IPU CSI1 Regs = %p\n", ipu_csi_reg[1]);
+ 	dev_dbg(g_ipu_dev, "IPU CPMem = %p\n", ipu_cpmem_base);
+ 	dev_dbg(g_ipu_dev, "IPU TPMem = %p\n", ipu_tpmem_base);
+ 	dev_dbg(g_ipu_dev, "IPU DC Template Mem = %p\n", ipu_dc_tmpl_reg);
+@@ -167,6 +198,9 @@ static int ipu_probe(struct platform_device *pdev)
+ 	g_di_clk[0] = plat_data->di_clk[0];
+ 	g_di_clk[1] = plat_data->di_clk[1];
+ 
++	g_csi_clk[0] = clk_get(&pdev->dev, "csi_mclk1");
++	g_csi_clk[1] = clk_get(&pdev->dev, "csi_mclk2");
++
+ 	__raw_writel(0x807FFFFF, IPU_MEM_RST);
+ 	while (__raw_readl(IPU_MEM_RST) & 0x80000000) ;
+ 
+@@ -209,6 +243,9 @@ int ipu_remove(struct platform_device *pdev)
+ 	iounmap(ipu_dmfc_reg);
+ 	iounmap(ipu_di_reg[0]);
+ 	iounmap(ipu_di_reg[1]);
++	iounmap(ipu_smfc_reg);
++	iounmap(ipu_csi_reg[0]);
++	iounmap(ipu_csi_reg[1]);
+ 	iounmap(ipu_cpmem_base);
+ 	iounmap(ipu_tpmem_base);
+ 	iounmap(ipu_dc_tmpl_reg);
+@@ -253,6 +290,8 @@ void ipu_dump_registers(void)
+ 	       __raw_readl(IPU_FS_PROC_FLOW2));
+ 	printk(KERN_DEBUG "IPU_FS_PROC_FLOW3 = \t0x%08X\n",
+ 	       __raw_readl(IPU_FS_PROC_FLOW3));
++	printk(KERN_DEBUG "IPU_FS_DISP_FLOW1 = \t0x%08X\n",
++	       __raw_readl(IPU_FS_DISP_FLOW1));
+ }
+ 
+ /*!
+@@ -294,6 +333,92 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 	}
+ 
+ 	switch (channel) {
++	case CSI_MEM0:
++	case CSI_MEM1:
++	case CSI_MEM2:
++	case CSI_MEM3:
++		if (params->csi_mem.csi > 1) {
++			ret = -EINVAL;
++			goto err;
++		}
++
++		ipu_smfc_use_count++;
++		ipu_csi_use_count[params->csi_mem.csi]++;
++		g_ipu_csi_channel[params->csi_mem.csi] = channel;
++
++		/*SMFC setting*/
++		if (params->csi_mem.mipi_en) {
++			ipu_conf |= (1 << (IPU_CONF_CSI0_DATA_SOURCE_OFFSET +
++				params->csi_mem.csi));
++			_ipu_smfc_init(channel, params->csi_mem.mipi_id,
++				params->csi_mem.csi);
++		} else {
++			ipu_conf &= ~(1 << (IPU_CONF_CSI0_DATA_SOURCE_OFFSET +
++				params->csi_mem.csi));
++			_ipu_smfc_init(channel, 0, params->csi_mem.csi);
++		}
++
++		/*CSI data (include compander) dest*/
++		_ipu_csi_init(channel, params->csi_mem.csi);
++		break;
++	case CSI_PRP_ENC_MEM:
++		if (params->csi_prp_enc_mem.csi > 1) {
++			ret = -EINVAL;
++			goto err;
++		}
++
++		ipu_ic_use_count++;
++		ipu_csi_use_count[params->csi_prp_enc_mem.csi]++;
++		g_ipu_csi_channel[params->csi_prp_enc_mem.csi] = channel;
++
++		/*Without SMFC, CSI only support parallel data source*/
++		ipu_conf &= ~(1 << (IPU_CONF_CSI0_DATA_SOURCE_OFFSET +
++			params->csi_prp_enc_mem.csi));
++
++		/*CSI0/1 feed into IC*/
++		ipu_conf &= ~IPU_CONF_IC_INPUT;
++		if (params->csi_prp_enc_mem.csi)
++			ipu_conf |= IPU_CONF_CSI_SEL;
++		else
++			ipu_conf &= ~IPU_CONF_CSI_SEL;
++
++		/*PRP skip buffer in memory, only valid when RWS_EN is true*/
++		reg = __raw_readl(IPU_FS_PROC_FLOW1);
++		__raw_writel(reg & ~FS_ENC_IN_VALID, IPU_FS_PROC_FLOW1);
++
++		/*CSI data (include compander) dest*/
++		_ipu_csi_init(channel, params->csi_prp_enc_mem.csi);
++		_ipu_ic_init_prpenc(params, true);
++		break;
++	case CSI_PRP_VF_MEM:
++		if (params->csi_prp_vf_mem.csi > 1) {
++			ret = -EINVAL;
++			goto err;
++		}
++
++		ipu_ic_use_count++;
++		ipu_csi_use_count[params->csi_prp_vf_mem.csi]++;
++		g_ipu_csi_channel[params->csi_prp_vf_mem.csi] = channel;
++
++		/*Without SMFC, CSI only support parallel data source*/
++		ipu_conf &= ~(1 << (IPU_CONF_CSI0_DATA_SOURCE_OFFSET +
++			params->csi_prp_vf_mem.csi));
++
++		/*CSI0/1 feed into IC*/
++		ipu_conf &= ~IPU_CONF_IC_INPUT;
++		if (params->csi_prp_vf_mem.csi)
++			ipu_conf |= IPU_CONF_CSI_SEL;
++		else
++			ipu_conf &= ~IPU_CONF_CSI_SEL;
++
++		/*PRP skip buffer in memory, only valid when RWS_EN is true*/
++		reg = __raw_readl(IPU_FS_PROC_FLOW1);
++		__raw_writel(reg & ~FS_VF_IN_VALID, IPU_FS_PROC_FLOW1);
++
++		/*CSI data (include compander) dest*/
++		_ipu_csi_init(channel, params->csi_prp_vf_mem.csi);
++		_ipu_ic_init_prpvf(params, true);
++		break;
+ 	case MEM_PRP_VF_MEM:
+ 		ipu_ic_use_count++;
+ 		reg = __raw_readl(IPU_FS_PROC_FLOW1);
+@@ -414,6 +539,12 @@ int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params)
+ 		ipu_conf |= IPU_CONF_DI1_EN;
+ 		clk_enable(g_di_clk[1]);
+ 	}
++	if (ipu_smfc_use_count == 1)
++		ipu_conf |= IPU_CONF_SMFC_EN;
++	if (ipu_csi_use_count[0] == 1)
++		ipu_conf |= IPU_CONF_CSI0_EN;
++	if (ipu_csi_use_count[1] == 1)
++		ipu_conf |= IPU_CONF_CSI1_EN;
+ 
+ 	__raw_writel(ipu_conf, IPU_CONF);
+ 
+@@ -465,6 +596,41 @@ void ipu_uninit_channel(ipu_channel_t channel)
+ 	g_sec_chan_en[IPU_CHAN_ID(channel)] = false;
+ 
+ 	switch (channel) {
++	case CSI_MEM0:
++	case CSI_MEM1:
++	case CSI_MEM2:
++	case CSI_MEM3:
++		ipu_smfc_use_count--;
++		if (g_ipu_csi_channel[0] == channel) {
++			g_ipu_csi_channel[0] = CHAN_NONE;
++			ipu_csi_use_count[0]--;
++		} else if (g_ipu_csi_channel[1] == channel) {
++			g_ipu_csi_channel[1] = CHAN_NONE;
++			ipu_csi_use_count[1]--;
++		}
++		break;
++	case CSI_PRP_ENC_MEM:
++		ipu_ic_use_count--;
++		_ipu_ic_uninit_prpenc();
++		if (g_ipu_csi_channel[0] == channel) {
++			g_ipu_csi_channel[0] = CHAN_NONE;
++			ipu_csi_use_count[0]--;
++		} else if (g_ipu_csi_channel[1] == channel) {
++			g_ipu_csi_channel[1] = CHAN_NONE;
++			ipu_csi_use_count[1]--;
++		}
++		break;
++	case CSI_PRP_VF_MEM:
++		ipu_ic_use_count--;
++		_ipu_ic_uninit_prpvf();
++		if (g_ipu_csi_channel[0] == channel) {
++			g_ipu_csi_channel[0] = CHAN_NONE;
++			ipu_csi_use_count[0]--;
++		} else if (g_ipu_csi_channel[1] == channel) {
++			g_ipu_csi_channel[1] = CHAN_NONE;
++			ipu_csi_use_count[1]--;
++		}
++		break;
+ 	case MEM_PRP_VF_MEM:
+ 		ipu_ic_use_count--;
+ 		_ipu_ic_uninit_prpvf();
+@@ -552,6 +718,12 @@ void ipu_uninit_channel(ipu_channel_t channel)
+ 		ipu_conf &= ~IPU_CONF_DI1_EN;
+ 		clk_disable(g_di_clk[1]);
+ 	}
++	if (ipu_smfc_use_count == 0)
++		ipu_conf &= ~IPU_CONF_SMFC_EN;
++	if (ipu_csi_use_count[0] == 0)
++		ipu_conf &= ~IPU_CONF_CSI0_EN;
++	if (ipu_csi_use_count[1] == 0)
++		ipu_conf &= ~IPU_CONF_CSI1_EN;
+ 
+ 	__raw_writel(ipu_conf, IPU_CONF);
+ 
+@@ -567,6 +739,7 @@ void ipu_uninit_channel(ipu_channel_t channel)
+ 	WARN_ON(ipu_dc_use_count < 0);
+ 	WARN_ON(ipu_dp_use_count < 0);
+ 	WARN_ON(ipu_dmfc_use_count < 0);
++	WARN_ON(ipu_smfc_use_count < 0);
+ }
+ EXPORT_SYMBOL(ipu_uninit_channel);
+ 
+@@ -626,13 +799,15 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 
+ 	if (stride < width * bytes_per_pixel(pixel_fmt))
+ 		stride = width * bytes_per_pixel(pixel_fmt);
++
+ 	if (stride % 4) {
+ 		dev_err(g_ipu_dev,
+ 			"Stride not 32-bit aligned, stride = %d\n", stride);
+ 		return -EINVAL;
+ 	}
+-	/* IC channels' width must be multiple of 8 pixels     */
+-	if ((IPU_CHAN_ID(channel) <= 6) && (width % 8)) {
++	/* IC & IRT channels' width must be multiple of 8 pixels */
++	if ((_ipu_is_ic_chan(dma_chan) || _ipu_is_irt_chan(dma_chan))
++		&& (width % 8)) {
+ 		dev_err(g_ipu_dev, "Width must be 8 pixel multiple\n");
+ 		return -EINVAL;
+ 	}
+@@ -644,25 +819,34 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 		_ipu_ch_param_set_rotation(dma_chan, rot_mode);
+ 
+ 	/* IC and ROT channels have restriction of 8 or 16 pix burst length */
+-	if ((channel == MEM_PRP_ENC_MEM) || (channel == MEM_PRP_VF_MEM) ||
+-	    (channel == MEM_PP_MEM)) {
++	if (_ipu_is_ic_chan(dma_chan)) {
+ 		if ((width % 16) == 0)
+ 			_ipu_ch_param_set_burst_size(dma_chan, 16);
+ 		else
+ 			_ipu_ch_param_set_burst_size(dma_chan, 8);
+-	} else if ((channel == MEM_ROT_ENC_MEM) ||
+-		   (channel == MEM_ROT_VF_MEM) || (channel == MEM_ROT_PP_MEM)) {
++	} else if (_ipu_is_irt_chan(dma_chan)) {
+ 		_ipu_ch_param_set_burst_size(dma_chan, 8);
+ 		_ipu_ch_param_set_block_mode(dma_chan);
+-	}
+-
+-	_ipu_dmfc_set_wait4eot(dma_chan, width);
++	} else if (_ipu_is_dmfc_chan(dma_chan))
++		_ipu_dmfc_set_wait4eot(dma_chan, width);
+ 
+ 	if (_ipu_chan_is_interlaced(channel))
+ 		_ipu_ch_param_set_interlaced_scan(dma_chan);
+ 
+-	burst_size = _ipu_ch_param_get_burst_size(dma_chan);
+-	_ipu_ic_idma_init(dma_chan, width, height, burst_size, rot_mode);
++	if (_ipu_is_ic_chan(dma_chan) || _ipu_is_irt_chan(dma_chan)) {
++		burst_size = _ipu_ch_param_get_burst_size(dma_chan);
++		_ipu_ic_idma_init(dma_chan, width, height, burst_size,
++			rot_mode);
++	} else if (_ipu_is_smfc_chan(dma_chan)) {
++		burst_size = _ipu_ch_param_get_burst_size(dma_chan);
++		if ((pixel_fmt == IPU_PIX_FMT_GENERIC) &&
++			((_ipu_ch_param_get_bpp(dma_chan) == 5) ||
++			(_ipu_ch_param_get_bpp(dma_chan) == 3)))
++			burst_size = burst_size >> 4;
++		else
++			burst_size = burst_size >> 2;
++		_ipu_smfc_set_burst_size(channel, burst_size-1);
++	}
+ 
+ 	if (idma_is_set(IDMAC_CHA_PRI, dma_chan))
+ 		_ipu_ch_param_set_high_priority(dma_chan);
+@@ -762,10 +946,13 @@ int32_t ipu_select_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ }
+ EXPORT_SYMBOL(ipu_select_buffer);
+ 
++#define NA	-1
+ static int proc_dest_sel[] =
+-    { 0, 1, 2, 3, 5, 5, 4, 7, 8, 9, 10, 11, 12, 14, 15 };
+-static int proc_src_sel[] = { 0, 6, 7, 6, 7, 8, 5, };
+-static int disp_src_sel[] = { 0, 6, 7, 8, 3, 4, 5, };
++    { 0, 1, 1, 3, 5, 5, 4, 7, 8, 9, 10, 11, 12, 14, 15 };
++static int proc_src_sel[] = { 0, 6, 7, 6, 7, 8, 5, NA, NA, NA,
++NA, NA, NA, NA, NA, 1, 2, 3, 4, 7, 8 };
++static int disp_src_sel[] = { 0, 6, 7, 8, 3, 4, 5, NA, NA, NA,
++NA, NA, NA, NA, NA, 1, NA, 2, NA, 3, 4 };
+ 
+ /*!
+  * This function links 2 channels together for automatic frame
+@@ -787,15 +974,53 @@ int32_t ipu_link_channels(ipu_channel_t src_ch, ipu_channel_t dest_ch)
+ 	unsigned long lock_flags;
+ 	uint32_t fs_proc_flow1;
+ 	uint32_t fs_proc_flow2;
++	uint32_t fs_proc_flow3;
+ 	uint32_t fs_disp_flow1;
+ 
+ 	spin_lock_irqsave(&ipu_lock, lock_flags);
+ 
+ 	fs_proc_flow1 = __raw_readl(IPU_FS_PROC_FLOW1);
+ 	fs_proc_flow2 = __raw_readl(IPU_FS_PROC_FLOW2);
++	fs_proc_flow3 = __raw_readl(IPU_FS_PROC_FLOW3);
+ 	fs_disp_flow1 = __raw_readl(IPU_FS_DISP_FLOW1);
+ 
+ 	switch (src_ch) {
++	case CSI_MEM0:
++		fs_proc_flow3 &= ~FS_SMFC0_DEST_SEL_MASK;
++		fs_proc_flow3 |=
++			proc_dest_sel[IPU_CHAN_ID(dest_ch)] <<
++			FS_SMFC0_DEST_SEL_OFFSET;
++		break;
++	case CSI_MEM1:
++		fs_proc_flow3 &= ~FS_SMFC1_DEST_SEL_MASK;
++		fs_proc_flow3 |=
++			proc_dest_sel[IPU_CHAN_ID(dest_ch)] <<
++			FS_SMFC1_DEST_SEL_OFFSET;
++		break;
++	case CSI_MEM2:
++		fs_proc_flow3 &= ~FS_SMFC2_DEST_SEL_MASK;
++		fs_proc_flow3 |=
++			proc_dest_sel[IPU_CHAN_ID(dest_ch)] <<
++			FS_SMFC2_DEST_SEL_OFFSET;
++		break;
++	case CSI_MEM3:
++		fs_proc_flow3 &= ~FS_SMFC3_DEST_SEL_MASK;
++		fs_proc_flow3 |=
++			proc_dest_sel[IPU_CHAN_ID(dest_ch)] <<
++			FS_SMFC3_DEST_SEL_OFFSET;
++		break;
++	case CSI_PRP_ENC_MEM:
++		fs_proc_flow2 &= ~FS_PRPENC_DEST_SEL_MASK;
++		fs_proc_flow2 |=
++			proc_dest_sel[IPU_CHAN_ID(dest_ch)] <<
++			FS_PRPENC_DEST_SEL_OFFSET;
++		break;
++	case CSI_PRP_VF_MEM:
++		fs_proc_flow2 &= ~FS_PRPVF_DEST_SEL_MASK;
++		fs_proc_flow2 |=
++			proc_dest_sel[IPU_CHAN_ID(dest_ch)] <<
++			FS_PRPVF_DEST_SEL_OFFSET;
++		break;
+ 	case MEM_PP_MEM:
+ 		fs_proc_flow2 &= ~FS_PP_DEST_SEL_MASK;
+ 		fs_proc_flow2 |=
+@@ -912,6 +1137,7 @@ int32_t ipu_link_channels(ipu_channel_t src_ch, ipu_channel_t dest_ch)
+ 
+ 	__raw_writel(fs_proc_flow1, IPU_FS_PROC_FLOW1);
+ 	__raw_writel(fs_proc_flow2, IPU_FS_PROC_FLOW2);
++	__raw_writel(fs_proc_flow3, IPU_FS_PROC_FLOW3);
+ 	__raw_writel(fs_disp_flow1, IPU_FS_DISP_FLOW1);
+ 
+ err:
+@@ -939,15 +1165,35 @@ int32_t ipu_unlink_channels(ipu_channel_t src_ch, ipu_channel_t dest_ch)
+ 	unsigned long lock_flags;
+ 	uint32_t fs_proc_flow1;
+ 	uint32_t fs_proc_flow2;
++	uint32_t fs_proc_flow3;
+ 	uint32_t fs_disp_flow1;
+ 
+ 	spin_lock_irqsave(&ipu_lock, lock_flags);
+ 
+ 	fs_proc_flow1 = __raw_readl(IPU_FS_PROC_FLOW1);
+ 	fs_proc_flow2 = __raw_readl(IPU_FS_PROC_FLOW2);
++	fs_proc_flow3 = __raw_readl(IPU_FS_PROC_FLOW3);
+ 	fs_disp_flow1 = __raw_readl(IPU_FS_DISP_FLOW1);
+ 
+ 	switch (src_ch) {
++	case CSI_MEM0:
++		fs_proc_flow3 &= ~FS_SMFC0_DEST_SEL_MASK;
++		break;
++	case CSI_MEM1:
++		fs_proc_flow3 &= ~FS_SMFC1_DEST_SEL_MASK;
++		break;
++	case CSI_MEM2:
++		fs_proc_flow3 &= ~FS_SMFC2_DEST_SEL_MASK;
++		break;
++	case CSI_MEM3:
++		fs_proc_flow3 &= ~FS_SMFC3_DEST_SEL_MASK;
++		break;
++	case CSI_PRP_ENC_MEM:
++		fs_proc_flow2 &= ~FS_PRPENC_DEST_SEL_MASK;
++		break;
++	case CSI_PRP_VF_MEM:
++		fs_proc_flow2 &= ~FS_PRPVF_DEST_SEL_MASK;
++		break;
+ 	case MEM_PP_MEM:
+ 		fs_proc_flow2 &= ~FS_PP_DEST_SEL_MASK;
+ 		break;
+@@ -1015,6 +1261,7 @@ int32_t ipu_unlink_channels(ipu_channel_t src_ch, ipu_channel_t dest_ch)
+ 
+ 	__raw_writel(fs_proc_flow1, IPU_FS_PROC_FLOW1);
+ 	__raw_writel(fs_proc_flow2, IPU_FS_PROC_FLOW2);
++	__raw_writel(fs_proc_flow3, IPU_FS_PROC_FLOW3);
+ 	__raw_writel(fs_disp_flow1, IPU_FS_DISP_FLOW1);
+ 
+ err:
+@@ -1057,7 +1304,8 @@ int32_t ipu_enable_channel(ipu_channel_t channel)
+ 	    (channel == MEM_FG_SYNC))
+ 		_ipu_dp_dc_enable(channel);
+ 
+-	if (IPU_CHAN_ID(channel) <= IPU_CHAN_ID(MEM_PP_MEM))
++	if (_ipu_is_ic_chan(in_dma) || _ipu_is_ic_chan(out_dma) ||
++		_ipu_is_irt_chan(in_dma) || _ipu_is_irt_chan(out_dma))
+ 		_ipu_ic_enable_task(channel);
+ 
+ 	spin_unlock_irqrestore(&ipu_lock, lock_flags);
+@@ -1114,7 +1362,8 @@ int32_t ipu_disable_channel(ipu_channel_t channel, bool wait_for_stop)
+ 	spin_lock_irqsave(&ipu_lock, lock_flags);
+ 
+ 	/* Disable IC task */
+-	if (IPU_CHAN_ID(channel) < IPU_CHAN_ID(MEM_DC_SYNC))
++	if (_ipu_is_ic_chan(in_dma) || _ipu_is_ic_chan(out_dma) ||
++		_ipu_is_irt_chan(in_dma) || _ipu_is_irt_chan(out_dma))
+ 		_ipu_ic_disable_task(channel);
+ 
+ 	/* Disable DMA channel(s) */
+diff --git a/drivers/mxc/ipu3/ipu_ic.c b/drivers/mxc/ipu3/ipu_ic.c
+index db2f5fd..8759f7b 100644
+--- a/drivers/mxc/ipu3/ipu_ic.c
++++ b/drivers/mxc/ipu3/ipu_ic.c
+@@ -60,12 +60,14 @@ void _ipu_ic_enable_task(ipu_channel_t channel)
+ 
+ 	ic_conf = __raw_readl(IC_CONF);
+ 	switch (channel) {
++	case CSI_PRP_VF_MEM:
+ 	case MEM_PRP_VF_MEM:
+ 		ic_conf |= IC_CONF_PRPVF_EN;
+ 		break;
+ 	case MEM_ROT_VF_MEM:
+ 		ic_conf |= IC_CONF_PRPVF_ROT_EN;
+ 		break;
++	case CSI_PRP_ENC_MEM:
+ 	case MEM_PRP_ENC_MEM:
+ 		ic_conf |= IC_CONF_PRPENC_EN;
+ 		break;
+@@ -90,12 +92,14 @@ void _ipu_ic_disable_task(ipu_channel_t channel)
+ 
+ 	ic_conf = __raw_readl(IC_CONF);
+ 	switch (channel) {
++	case CSI_PRP_VF_MEM:
+ 	case MEM_PRP_VF_MEM:
+ 		ic_conf &= ~IC_CONF_PRPVF_EN;
+ 		break;
+ 	case MEM_ROT_VF_MEM:
+ 		ic_conf &= ~IC_CONF_PRPVF_ROT_EN;
+ 		break;
++	case CSI_PRP_ENC_MEM:
+ 	case MEM_PRP_ENC_MEM:
+ 		ic_conf &= ~IC_CONF_PRPENC_EN;
+ 		break;
+@@ -487,9 +491,9 @@ static void _init_csc(uint8_t ic_task, ipu_color_space_t in_format,
+ 	uint32_t param;
+ 	uint32_t *base = NULL;
+ 
+-	if (ic_task == IC_TASK_VIEWFINDER) {
++	if (ic_task == IC_TASK_ENCODER) {
+ 		base = ipu_tpmem_base + 0x2008 / 4;
+-	} else if (ic_task == IC_TASK_ENCODER) {
++	} else if (ic_task == IC_TASK_VIEWFINDER) {
+ 		base = ipu_tpmem_base + 0x4028 / 4;
+ 	} else if (ic_task == IC_TASK_POST_PROCESSOR) {
+ 		base = ipu_tpmem_base + 0x6060 / 4;
+diff --git a/drivers/mxc/ipu3/ipu_param_mem.h b/drivers/mxc/ipu3/ipu_param_mem.h
+index bf812e1..fee4b10 100644
+--- a/drivers/mxc/ipu3/ipu_param_mem.h
++++ b/drivers/mxc/ipu3/ipu_param_mem.h
+@@ -290,6 +290,11 @@ static inline int _ipu_ch_param_get_burst_size(uint32_t ch)
+ 	return ipu_ch_param_read_field(ipu_ch_param_addr(ch), 1, 78, 7) + 1;
+ };
+ 
++static inline int _ipu_ch_param_get_bpp(uint32_t ch)
++{
++	return ipu_ch_param_read_field(ipu_ch_param_addr(ch), 0, 107, 3);
++};
++
+ static inline void _ipu_ch_param_set_buffer(uint32_t ch, int bufNum,
+ 					    dma_addr_t phyaddr)
+ {
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index d4eadec..4ac3268 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -25,7 +25,7 @@ extern spinlock_t ipu_lock;
+ extern bool g_ipu_clk_enabled;
+ extern struct clk *g_ipu_clk;
+ extern struct clk *g_di_clk[2];
+-extern struct clk *g_ipu_csi_clk;
++extern struct clk *g_csi_clk[2];
+ extern unsigned char g_dc_di_assignment[];
+ 
+ #define IDMA_CHAN_INVALID	0xFF
+@@ -74,6 +74,14 @@ void _ipu_ic_init_rotate_pp(ipu_channel_params_t *params);
+ void _ipu_ic_uninit_rotate_pp(void);
+ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ 		      int burst_size, ipu_rotate_mode_t rot);
++int _ipu_csi_init(ipu_channel_t channel, uint32_t csi);
++void ipu_csi_set_test_generator(bool active, uint32_t r_value,
++		uint32_t g_value, uint32_t b_value,
++		uint32_t pix_clk, uint32_t csi);
++void _ipu_csi_ccir_err_detection_enable(uint32_t csi);
++void _ipu_csi_ccir_err_detection_disable(uint32_t csi);
++void _ipu_smfc_init(ipu_channel_t channel, uint32_t mipi_id, uint32_t csi);
++void _ipu_smfc_set_burst_size(ipu_channel_t channel, uint32_t bs);
+ void _ipu_dp_set_csc_coefficients(ipu_channel_t channel, int32_t param[][3]);
+ 
+ #endif				/* __INCLUDE_IPU_PRV_H__ */
+diff --git a/drivers/mxc/ipu3/ipu_regs.h b/drivers/mxc/ipu3/ipu_regs.h
+index 6ddceb8..e3e4d5d 100644
+--- a/drivers/mxc/ipu3/ipu_regs.h
++++ b/drivers/mxc/ipu3/ipu_regs.h
+@@ -52,6 +52,8 @@ extern u32 *ipu_dc_reg;
+ extern u32 *ipu_dc_tmpl_reg;
+ extern u32 *ipu_dmfc_reg;
+ extern u32 *ipu_di_reg[];
++extern u32 *ipu_smfc_reg;
++extern u32 *ipu_csi_reg[];
+ extern u32 *ipu_tpmem_base;
+ extern u32 *ipu_disp_base[];
+ 
+@@ -100,6 +102,32 @@ extern u32 *ipu_disp_base[];
+ #define IPUIRQ_2_MASK(irq)	(1UL << ((irq) & 0x1F))
+ 
+ /* CMOS Sensor Interface Registers */
++#define CSI_SENS_CONF(csi)	(ipu_csi_reg[csi])
++#define CSI_SENS_FRM_SIZE(csi)	(ipu_csi_reg[csi] + 0x0004/4)
++#define CSI_ACT_FRM_SIZE(csi)	(ipu_csi_reg[csi] + 0x0008/4)
++#define CSI_OUT_FRM_CTRL(csi)	(ipu_csi_reg[csi] + 0x000C/4)
++#define CSI_TST_CTRL(csi)	(ipu_csi_reg[csi] + 0x0010/4)
++#define CSI_CCIR_CODE_1(csi)	(ipu_csi_reg[csi] + 0x0014/4)
++#define CSI_CCIR_CODE_2(csi)	(ipu_csi_reg[csi] + 0x0018/4)
++#define CSI_CCIR_CODE_3(csi)	(ipu_csi_reg[csi] + 0x001C/4)
++#define CSI_MIPI_DI(csi)	(ipu_csi_reg[csi] + 0x0020/4)
++#define CSI_SKIP(csi)		(ipu_csi_reg[csi] + 0x0024/4)
++#define CSI_CPD_CTRL(csi)	(ipu_csi_reg[csi] + 0x0028/4)
++#define CSI_CPD_RC(csi, n)	(ipu_csi_reg[csi] + 0x002C/4 + n)
++#define CSI_CPD_RS(csi, n)	(ipu_csi_reg[csi] + 0x004C/4 + n)
++#define CSI_CPD_GRC(csi, n)	(ipu_csi_reg[csi] + 0x005C/4 + n)
++#define CSI_CPD_GRS(csi, n)	(ipu_csi_reg[csi] + 0x007C/4 + n)
++#define CSI_CPD_GBC(csi, n)	(ipu_csi_reg[csi] + 0x008C/4 + n)
++#define CSI_CPD_GBS(csi, n)	(ipu_csi_reg[csi] + 0x00AC/4 + n)
++#define CSI_CPD_BC(csi, n)	(ipu_csi_reg[csi] + 0x00BC/4 + n)
++#define CSI_CPD_BS(csi, n)	(ipu_csi_reg[csi] + 0x00DC/4 + n)
++#define CSI_CPD_OFFSET1(csi)	(ipu_csi_reg[csi] + 0x00EC/4)
++#define CSI_CPD_OFFSET2(csi)	(ipu_csi_reg[csi] + 0x00F0/4)
++
++/*SMFC Registers */
++#define SMFC_MAP	(ipu_smfc_reg)
++#define SMFC_WMC	(ipu_smfc_reg + 0x0004/4)
++#define SMFC_BS		(ipu_smfc_reg + 0x0008/4)
+ 
+ /* Image Converter Registers */
+ #define IC_CONF			(ipu_ic_reg)
+@@ -228,14 +256,22 @@ enum {
+ 	IPU_CONF_CSI1_EN = 0x00000002,
+ 	IPU_CONF_IC_EN = 0x00000004,
+ 	IPU_CONF_ROT_EN = 0x00000008,
++	IPU_CONF_ISP_EN = 0x00000010,
+ 	IPU_CONF_DP_EN = 0x00000020,
+ 	IPU_CONF_DI0_EN = 0x00000040,
+ 	IPU_CONF_DI1_EN = 0x00000080,
+ 	IPU_CONF_DMFC_EN = 0x00000400,
++	IPU_CONF_SMFC_EN = 0x00000100,
+ 	IPU_CONF_DC_EN = 0x00000200,
+ 	IPU_CONF_IDMAC_DIS = 0x00400000,
+ 	IPU_CONF_IC_DMFC_SEL = 0x02000000,
+ 	IPU_CONF_IC_DMFC_SYNC = 0x04000000,
++	IPU_CONF_VDI_DMFC_SYNC = 0x08000000,
++	IPU_CONF_CSI0_DATA_SOURCE = 0x10000000,
++	IPU_CONF_CSI0_DATA_SOURCE_OFFSET = 28,
++	IPU_CONF_CSI1_DATA_SOURCE = 0x20000000,
++	IPU_CONF_IC_INPUT = 0x40000000,
++	IPU_CONF_CSI_SEL = 0x80000000,
+ 
+ 	DI0_COUNTER_RELEASE = 0x01000000,
+ 	DI1_COUNTER_RELEASE = 0x02000000,
+@@ -257,7 +293,7 @@ enum {
+ 	FS_PRPENC_DEST_SEL_OFFSET = 0,
+ 	FS_PRPVF_DEST_SEL_MASK = 0x000000F0,
+ 	FS_PRPVF_DEST_SEL_OFFSET = 4,
+-	FS_PRPVF_ROT_DEST_SEL_MASK = 0x000000F0,
++	FS_PRPVF_ROT_DEST_SEL_MASK = 0x00000F00,
+ 	FS_PRPVF_ROT_DEST_SEL_OFFSET = 8,
+ 	FS_PP_DEST_SEL_MASK = 0x0000F000,
+ 	FS_PP_DEST_SEL_OFFSET = 12,
+@@ -266,6 +302,15 @@ enum {
+ 	FS_PRPENC_ROT_DEST_SEL_MASK = 0x00F00000,
+ 	FS_PRPENC_ROT_DEST_SEL_OFFSET = 20,
+ 
++	FS_SMFC0_DEST_SEL_MASK = 0x0000000F,
++	FS_SMFC0_DEST_SEL_OFFSET = 0,
++	FS_SMFC1_DEST_SEL_MASK = 0x00000070,
++	FS_SMFC1_DEST_SEL_OFFSET = 4,
++	FS_SMFC2_DEST_SEL_MASK = 0x00000780,
++	FS_SMFC2_DEST_SEL_OFFSET = 7,
++	FS_SMFC3_DEST_SEL_MASK = 0x00003800,
++	FS_SMFC3_DEST_SEL_OFFSET = 11,
++
+ 	FS_DC1_SRC_SEL_MASK = 0x00F00000,
+ 	FS_DC1_SRC_SEL_OFFSET = 20,
+ 	FS_DC2_SRC_SEL_MASK = 0x000F0000,
+@@ -351,20 +396,114 @@ enum {
+ 	IC_IDMAC_3_PP_WIDTH_OFFSET = 20,
+ 
+ 	CSI_SENS_CONF_DATA_FMT_SHIFT = 8,
+-	CSI_SENS_CONF_DATA_FMT_RGB_YUV444 = 0x00000000L,
+-	CSI_SENS_CONF_DATA_FMT_YUV422 = 0x00000200L,
+-	CSI_SENS_CONF_DATA_FMT_BAYER = 0x00000300L,
++	CSI_SENS_CONF_DATA_FMT_MASK = 0x00000700,
++	CSI_SENS_CONF_DATA_FMT_RGB_YUV444 = 0L,
++	CSI_SENS_CONF_DATA_FMT_YUV422_YUYV = 1L,
++	CSI_SENS_CONF_DATA_FMT_YUV422_UYVY = 2L,
++	CSI_SENS_CONF_DATA_FMT_BAYER = 3L,
++	CSI_SENS_CONF_DATA_FMT_RGB565 = 4L,
++	CSI_SENS_CONF_DATA_FMT_RGB555 = 5L,
++	CSI_SENS_CONF_DATA_FMT_RGB444 = 6L,
++	CSI_SENS_CONF_DATA_FMT_JPEG = 7L,
+ 
+ 	CSI_SENS_CONF_VSYNC_POL_SHIFT = 0,
+ 	CSI_SENS_CONF_HSYNC_POL_SHIFT = 1,
+ 	CSI_SENS_CONF_DATA_POL_SHIFT = 2,
+ 	CSI_SENS_CONF_PIX_CLK_POL_SHIFT = 3,
+ 	CSI_SENS_CONF_SENS_PRTCL_SHIFT = 4,
+-	CSI_SENS_CONF_SENS_CLKSRC_SHIFT = 7,
+-	CSI_SENS_CONF_DATA_WIDTH_SHIFT = 10,
++	CSI_SENS_CONF_PACK_TIGHT_SHIFT = 7,
++	CSI_SENS_CONF_DATA_WIDTH_SHIFT = 11,
+ 	CSI_SENS_CONF_EXT_VSYNC_SHIFT = 15,
+ 	CSI_SENS_CONF_DIVRATIO_SHIFT = 16,
+ 
++	CSI_SENS_CONF_DIVRATIO_MASK = 0x00FF0000L,
++	CSI_SENS_CONF_DATA_DEST_SHIFT = 24,
++	CSI_SENS_CONF_DATA_DEST_MASK = 0x07000000L,
++	CSI_SENS_CONF_JPEG8_EN_SHIFT = 27,
++	CSI_SENS_CONF_JPEG_EN_SHIFT = 28,
++	CSI_SENS_CONF_FORCE_EOF_SHIFT = 29,
++	CSI_SENS_CONF_DATA_EN_POL_SHIFT = 31,
++
++	CSI_DATA_DEST_ISP = 1L,
++	CSI_DATA_DEST_IC = 2L,
++	CSI_DATA_DEST_IDMAC = 4L,
++
++	CSI_CCIR_ERR_DET_EN = 0x01000000L,
++	CSI_HORI_DOWNSIZE_EN = 0x80000000L,
++	CSI_VERT_DOWNSIZE_EN = 0x40000000L,
++	CSI_TEST_GEN_MODE_EN = 0x01000000L,
++
++	CSI_HSC_MASK = 0x1FFF0000,
++	CSI_HSC_SHIFT = 16,
++	CSI_VSC_MASK = 0x00000FFF,
++	CSI_VSC_SHIFT = 0,
++
++	CSI_TEST_GEN_R_MASK = 0x000000FFL,
++	CSI_TEST_GEN_R_SHIFT = 0,
++	CSI_TEST_GEN_G_MASK = 0x0000FF00L,
++	CSI_TEST_GEN_G_SHIFT = 8,
++	CSI_TEST_GEN_B_MASK = 0x00FF0000L,
++	CSI_TEST_GEN_B_SHIFT = 16,
++
++	CSI_MIPI_DI0_MASK = 0x000000FFL,
++	CSI_MIPI_DI0_SHIFT = 0,
++	CSI_MIPI_DI1_MASK = 0x0000FF00L,
++	CSI_MIPI_DI1_SHIFT = 8,
++	CSI_MIPI_DI2_MASK = 0x00FF0000L,
++	CSI_MIPI_DI2_SHIFT = 16,
++	CSI_MIPI_DI3_MASK = 0xFF000000L,
++	CSI_MIPI_DI3_SHIFT = 24,
++
++	CSI_MAX_RATIO_SKIP_ISP_MASK = 0x00070000L,
++	CSI_MAX_RATIO_SKIP_ISP_SHIFT = 16,
++	CSI_SKIP_ISP_MASK = 0x00F80000L,
++	CSI_SKIP_ISP_SHIFT = 19,
++	CSI_MAX_RATIO_SKIP_SMFC_MASK = 0x00000007L,
++	CSI_MAX_RATIO_SKIP_SMFC_SHIFT = 0,
++	CSI_SKIP_SMFC_MASK = 0x000000F8L,
++	CSI_SKIP_SMFC_SHIFT = 3,
++	CSI_ID_2_SKIP_MASK = 0x00000300L,
++	CSI_ID_2_SKIP_SHIFT = 8,
++
++	CSI_COLOR_FIRST_ROW_MASK = 0x00000002L,
++	CSI_COLOR_FIRST_COMP_MASK = 0x00000001L,
++
++	SMFC_MAP_CH0_MASK = 0x00000007L,
++	SMFC_MAP_CH0_SHIFT = 0,
++	SMFC_MAP_CH1_MASK = 0x00000038L,
++	SMFC_MAP_CH1_SHIFT = 3,
++	SMFC_MAP_CH2_MASK = 0x000001C0L,
++	SMFC_MAP_CH2_SHIFT = 6,
++	SMFC_MAP_CH3_MASK = 0x00000E00L,
++	SMFC_MAP_CH3_SHIFT = 9,
++
++	SMFC_WM0_SET_MASK = 0x00000007L,
++	SMFC_WM0_SET_SHIFT = 0,
++	SMFC_WM1_SET_MASK = 0x000001C0L,
++	SMFC_WM1_SET_SHIFT = 6,
++	SMFC_WM2_SET_MASK = 0x00070000L,
++	SMFC_WM2_SET_SHIFT = 16,
++	SMFC_WM3_SET_MASK = 0x01C00000L,
++	SMFC_WM3_SET_SHIFT = 22,
++
++	SMFC_WM0_CLR_MASK = 0x00000038L,
++	SMFC_WM0_CLR_SHIFT = 3,
++	SMFC_WM1_CLR_MASK = 0x00000E00L,
++	SMFC_WM1_CLR_SHIFT = 9,
++	SMFC_WM2_CLR_MASK = 0x00380000L,
++	SMFC_WM2_CLR_SHIFT = 19,
++	SMFC_WM3_CLR_MASK = 0x0E000000L,
++	SMFC_WM3_CLR_SHIFT = 25,
++
++	SMFC_BS0_MASK = 0x0000000FL,
++	SMFC_BS0_SHIFT = 0,
++	SMFC_BS1_MASK = 0x000000F0L,
++	SMFC_BS1_SHIFT = 4,
++	SMFC_BS2_MASK = 0x00000F00L,
++	SMFC_BS2_SHIFT = 8,
++	SMFC_BS3_MASK = 0x0000F000L,
++	SMFC_BS3_SHIFT = 12,
++
+ 	PF_CONF_TYPE_MASK = 0x00000007,
+ 	PF_CONF_TYPE_SHIFT = 0,
+ 	PF_CONF_PAUSE_EN = 0x00000010,
+diff --git a/drivers/video/mxc/mxcfb.c b/drivers/video/mxc/mxcfb.c
+index 247b5da..7efd5f8 100644
+--- a/drivers/video/mxc/mxcfb.c
++++ b/drivers/video/mxc/mxcfb.c
+@@ -246,7 +246,7 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 							 &fbi->modelist);
+ 	}
+ 
+-	ipu_sdc_set_window_pos(mxc_fbi->ipu_ch, 0, 0);
++	ipu_disp_set_window_pos(mxc_fbi->ipu_ch, 0, 0);
+ 
+ 	mxc_fbi->cur_ipu_buf = 1;
+ 	sema_init(&mxc_fbi->flip_sem, 1);
+@@ -655,7 +655,7 @@ static int mxcfb_ioctl_ovl(struct fb_info *fbi, unsigned int cmd,
+ 				retval = -EFAULT;
+ 				break;
+ 			}
+-			retval = ipu_sdc_set_window_pos(mxc_fbi->ipu_ch,
++			retval = ipu_disp_set_window_pos(mxc_fbi->ipu_ch,
+ 							pos.x, pos.y);
+ 			break;
+ 		}
+diff --git a/include/asm-arm/arch-mxc/ipu.h b/include/asm-arm/arch-mxc/ipu.h
+index 517430b..91f9156 100644
+--- a/include/asm-arm/arch-mxc/ipu.h
++++ b/include/asm-arm/arch-mxc/ipu.h
+@@ -211,6 +211,16 @@ typedef enum {
+ 	DIRECT_ASYNC0 = _MAKE_CHAN(13, NO_DMA, NO_DMA, NO_DMA, NO_DMA),
+ 	DIRECT_ASYNC1 = _MAKE_CHAN(14, NO_DMA, NO_DMA, NO_DMA, NO_DMA),
+ 
++	CSI_MEM0 = _MAKE_CHAN(15, NO_DMA, NO_DMA, NO_DMA, 0),
++	CSI_MEM1 = _MAKE_CHAN(16, NO_DMA, NO_DMA, NO_DMA, 1),
++	CSI_MEM2 = _MAKE_CHAN(17, NO_DMA, NO_DMA, NO_DMA, 2),
++	CSI_MEM3 = _MAKE_CHAN(18, NO_DMA, NO_DMA, NO_DMA, 3),
++
++	CSI_MEM = CSI_MEM0,
++
++	CSI_PRP_ENC_MEM = _MAKE_CHAN(19, NO_DMA, NO_DMA, NO_DMA, 20),
++	CSI_PRP_VF_MEM = _MAKE_CHAN(20, NO_DMA, NO_DMA, NO_DMA, 21),
++
+ 	MEM_PP_ADC = CHAN_NONE,
+ 	ADC_SYS2 = CHAN_NONE,
+ #endif
+@@ -270,7 +280,9 @@ typedef enum {
+  */
+ typedef union {
+ 	struct {
+-		uint32_t temp;
++		uint32_t csi;
++		bool mipi_en;
++		uint32_t mipi_id;
+ 	} csi_mem;
+ 	struct {
+ 		uint32_t in_width;
+@@ -279,6 +291,7 @@ typedef union {
+ 		uint32_t out_width;
+ 		uint32_t out_height;
+ 		uint32_t out_pixel_fmt;
++		uint32_t csi;
+ 	} csi_prp_enc_mem;
+ 	struct {
+ 		uint32_t in_width;
+@@ -306,6 +319,7 @@ typedef union {
+ 		bool graphics_combine_en;
+ 		bool global_alpha_en;
+ 		bool key_color_en;
++		uint32_t csi;
+ 	} csi_prp_vf_mem;
+ 	struct {
+ 		uint32_t in_width;
+@@ -483,6 +497,7 @@ enum ipu_irq_line {
+ 
+ 	IPU_IRQ_BREAKRQ = 64,
+ 	IPU_IRQ_SDC_BG_OUT_EOF = 65,
++	IPU_IRQ_BG_SF_END = IPU_IRQ_SDC_BG_OUT_EOF,
+ 	IPU_IRQ_SDC_FG_OUT_EOF = 66,
+ 	IPU_IRQ_SDC_MASK_OUT_EOF = 67,
+ 	IPU_IRQ_ADC_SERIAL_DATA_OUT = 68,
+@@ -546,6 +561,10 @@ enum ipu_irq_line {
+ 	IPU_IRQ_AHB_M1_ERR = 142,
+ 	IPU_IRQ_AHB_M12_ERR = 143,
+ #else
++	IPU_IRQ_CSI0_OUT_EOF = 0,
++	IPU_IRQ_CSI1_OUT_EOF = 1,
++	IPU_IRQ_CSI2_OUT_EOF = 2,
++	IPU_IRQ_CSI3_OUT_EOF = 3,
+ 	IPU_IRQ_PP_IN_EOF = 11,
+ 	IPU_IRQ_PRP_IN_EOF = 12,
+ 	IPU_IRQ_PRP_GRAPH_IN_EOF = 14,
+@@ -579,6 +598,7 @@ enum ipu_irq_line {
+ 
+ 	IPU_IRQ_DP_SF_START = 448 + 2,
+ 	IPU_IRQ_DP_SF_END = 448 + 3,
++	IPU_IRQ_BG_SF_END = IPU_IRQ_DP_SF_END,
+ 	IPU_IRQ_DC_FC_0 = 448 + 8,
+ 	IPU_IRQ_DC_FC_1 = 448 + 9,
+ 	IPU_IRQ_DC_FC_2 = 448 + 10,
+@@ -612,15 +632,22 @@ typedef struct {
+ /*!
+  * Bitfield of CSI signal polarities and modes.
+  */
++
+ typedef struct {
+-	unsigned data_width:3;
+-	unsigned clk_mode:2;
++	unsigned data_width:4;
++	unsigned clk_mode:3;
+ 	unsigned ext_vsync:1;
+ 	unsigned Vsync_pol:1;
+ 	unsigned Hsync_pol:1;
+ 	unsigned pixclk_pol:1;
+ 	unsigned data_pol:1;
+ 	unsigned sens_clksrc:1;
++	unsigned pack_tight:1;
++	unsigned force_eof:1;
++	unsigned data_en_pol:1;
++	unsigned data_fmt;
++	unsigned csi;
++	unsigned mclk;
+ } ipu_csi_signal_cfg_t;
+ 
+ /*!
+@@ -641,6 +668,17 @@ enum {
+ 	IPU_CSI_CLK_MODE_NONGATED_CLK,
+ 	IPU_CSI_CLK_MODE_CCIR656_PROGRESSIVE,
+ 	IPU_CSI_CLK_MODE_CCIR656_INTERLACED,
++	IPU_CSI_CLK_MODE_CCIR1120_PROGRESSIVE_DDR,
++	IPU_CSI_CLK_MODE_CCIR1120_PROGRESSIVE_SDR,
++	IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_DDR,
++	IPU_CSI_CLK_MODE_CCIR1120_INTERLACED_SDR,
++};
++
++enum {
++	IPU_CSI_MIPI_DI0,
++	IPU_CSI_MIPI_DI1,
++	IPU_CSI_MIPI_DI2,
++	IPU_CSI_MIPI_DI3,
+ };
+ 
+ typedef enum {
+@@ -834,8 +872,6 @@ int32_t ipu_sdc_init_panel(ipu_panel_t panel,
+ 			   uint16_t vSyncWidth, uint16_t vEndWidth,
+ 			   ipu_di_signal_cfg_t sig);
+ 
+-int32_t ipu_sdc_set_window_pos(ipu_channel_t channel, int16_t x_pos,
+-			       int16_t y_pos);
+ int32_t ipu_sdc_set_global_alpha(bool enable, uint8_t alpha);
+ int32_t ipu_sdc_set_color_key(ipu_channel_t channel, bool enable,
+ 			      uint32_t colorKey);
+@@ -896,15 +932,25 @@ int32_t ipu_csi_init_interface(uint16_t width, uint16_t height,
+ 
+ int32_t ipu_csi_enable_mclk(int src, bool flag, bool wait);
+ 
++static inline int32_t ipu_csi_enable_mclk_if(int src, uint32_t csi,
++		bool flag, bool wait)
++{
++#ifdef CONFIG_MXC_IPU_V1
++	return ipu_csi_enable_mclk(src, flag, wait);
++#else
++	return ipu_csi_enable_mclk(csi, flag, wait);
++#endif
++}
++
+ int ipu_csi_read_mclk_flag(void);
+ 
+ void ipu_csi_flash_strobe(bool flag);
+ 
+-void ipu_csi_get_window_size(uint32_t * width, uint32_t * height);
++void ipu_csi_get_window_size(uint32_t *width, uint32_t *height, uint32_t csi);
+ 
+-void ipu_csi_set_window_size(uint32_t width, uint32_t height);
++void ipu_csi_set_window_size(uint32_t width, uint32_t height, uint32_t csi);
+ 
+-void ipu_csi_set_window_pos(uint32_t left, uint32_t top);
++void ipu_csi_set_window_pos(uint32_t left, uint32_t top, uint32_t csi);
+ 
+ /* Post Filter functions */
+ int32_t ipu_pf_set_pause_row(uint32_t pause_row);
+diff --git a/include/asm-arm/arch-mxc/mxc.h b/include/asm-arm/arch-mxc/mxc.h
+index bcc75cb..7178eb2 100644
+--- a/include/asm-arm/arch-mxc/mxc.h
++++ b/include/asm-arm/arch-mxc/mxc.h
+@@ -149,6 +149,7 @@ struct mxc_camera_platform_data {
+ 	char *analog_regulator;
+ 	char *gpo_regulator;
+ 	u32 mclk;
++	u32 csi;
+ };
+ 
+ /*gpo1-3 is in fixed state by hardware design,
+-- 
+1.5.4.4
+

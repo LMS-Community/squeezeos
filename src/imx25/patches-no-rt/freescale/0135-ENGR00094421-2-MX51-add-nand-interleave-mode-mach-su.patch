@@ -1,0 +1,87 @@
+From 2bfb854ae2a4bacdedd3efe01db0a36b158c5343 Mon Sep 17 00:00:00 2001
+From: Jason <r64343@freescale.com>
+Date: Thu, 9 Oct 2008 17:26:03 +0800
+Subject: [PATCH] ENGR00094421-2 MX51:add nand interleave mode mach support
+
+add nand interleave mode mach support
+
+Signed-off-by:Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx51/mx51_3stack.c      |   18 ++++++++++++++++++
+ arch/arm/mach-mx51/mx51_3stack_gpio.c |   27 +++++++++++++++++++++++++++
+ 2 files changed, 45 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx51/mx51_3stack.c b/arch/arm/mach-mx51/mx51_3stack.c
+index f7a2e73..7ff194b 100644
+--- a/arch/arm/mach-mx51/mx51_3stack.c
++++ b/arch/arm/mach-mx51/mx51_3stack.c
+@@ -154,10 +154,28 @@ static struct mtd_partition mxc_nand_partitions[] = {
+ 	 .size = MTDPART_SIZ_FULL},
+ };
+ 
++extern void gpio_nand_active(void);
++extern void gpio_nand_inactive(void);
++
++static int nand_init(void)
++{
++	/* Configure the pins */
++	gpio_nand_active();
++	return 0;
++}
++
++static void nand_exit(void)
++{
++	/* Free the pins */
++	gpio_nand_inactive();
++}
++
+ static struct flash_platform_data mxc_nand_data = {
+ 	.parts = mxc_nand_partitions,
+ 	.nr_parts = ARRAY_SIZE(mxc_nand_partitions),
+ 	.width = 1,
++	.init = nand_init,
++	.exit = nand_exit,
+ };
+ 
+ static struct platform_device mxc_nandv2_mtd_device = {
+diff --git a/arch/arm/mach-mx51/mx51_3stack_gpio.c b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+index 87fa180..b765fa2 100644
+--- a/arch/arm/mach-mx51/mx51_3stack_gpio.c
++++ b/arch/arm/mach-mx51/mx51_3stack_gpio.c
+@@ -951,6 +951,33 @@ void gpio_ata_inactive(void)
+ 
+ EXPORT_SYMBOL(gpio_ata_inactive);
+ 
++void gpio_nand_active(void)
++{
++	mxc_request_iomux(MX51_PIN_NANDF_CS0, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS1, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS2, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS3, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS4, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS5, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS6, IOMUX_CONFIG_ALT0);
++	mxc_request_iomux(MX51_PIN_NANDF_CS7, IOMUX_CONFIG_ALT0);
++}
++
++EXPORT_SYMBOL(gpio_nand_active);
++
++void gpio_nand_inactive(void)
++{
++	mxc_free_iomux(MX51_PIN_NANDF_CS0, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS1, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS2, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS3, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS4, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS5, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS6, IOMUX_CONFIG_ALT0);
++	mxc_free_iomux(MX51_PIN_NANDF_CS7, IOMUX_CONFIG_ALT0);
++}
++
++EXPORT_SYMBOL(gpio_nand_inactive);
+ /*!
+  * Setup GPIO for Keypad  to be active
+  *
+-- 
+1.5.4.4
+

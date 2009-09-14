@@ -1,0 +1,78 @@
+From e1452e83f1ea2216e5753f19b307e0a8aa1126f3 Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Fri, 13 Mar 2009 10:30:35 +0800
+Subject: [PATCH] ENGR00106026-2 MX35: Add IIM platform device
+
+Add IIM platform device for MX35.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |    1 +
+ arch/arm/mach-mx35/devices.c            |   32 +++++++++++++++++++++++++++++++
+ 2 files changed, 33 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 452af55..db8b9ea 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -735,6 +735,7 @@ CONFIG_HW_CONSOLE=y
+ CONFIG_DEVKMEM=y
+ # CONFIG_SERIAL_NONSTANDARD is not set
+ CONFIG_FM_SI4702=m
++CONFIG_MXC_IIM=m
+ 
+ #
+ # Serial drivers
+diff --git a/arch/arm/mach-mx35/devices.c b/arch/arm/mach-mx35/devices.c
+index d0a1427..be984e2 100644
+--- a/arch/arm/mach-mx35/devices.c
++++ b/arch/arm/mach-mx35/devices.c
+@@ -737,6 +737,37 @@ static inline void mxc_init_rngc(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_MXC_IIM) || defined(CONFIG_MXC_IIM_MODULE)
++static struct resource mxc_iim_resources[] = {
++	{
++	 .start = IIM_BASE_ADDR,
++	 .end = IIM_BASE_ADDR + SZ_4K - 1,
++	 .flags = IORESOURCE_MEM,
++	 },
++};
++
++static struct platform_device mxc_iim_device = {
++	.name = "mxc_iim",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		},
++	.num_resources = ARRAY_SIZE(mxc_iim_resources),
++	.resource = mxc_iim_resources
++};
++
++static inline void mxc_init_iim(void)
++{
++	if (platform_device_register(&mxc_iim_device) < 0)
++		dev_err(&mxc_iim_device.dev,
++			"Unable to register mxc iim device\n");
++}
++#else
++static inline void mxc_init_iim(void)
++{
++}
++#endif
++
+ int __init mxc_init_devices(void)
+ {
+ 	mxc_init_wdt();
+@@ -753,6 +784,7 @@ int __init mxc_init_devices(void)
+ 	mxc_init_asrc();
+ 	mxc_init_flexcan();
+ 	mxc_init_rngc();
++	mxc_init_iim();
+ 
+ 	/* SPBA configuration for SSI2 - SDMA and MCU are set */
+ 	spba_take_ownership(SPBA_SSI2, SPBA_MASTER_C | SPBA_MASTER_A);
+-- 
+1.5.4.4
+

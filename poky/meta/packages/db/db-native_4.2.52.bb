@@ -10,6 +10,11 @@ require db_${PV}.bb
 
 inherit native
 
+do_configure() {
+	oe_runconf
+	sed -i -e 's/^LIBSO_LIBS=.*/LIBSO_LIBS=	-lpthread/' ../build_unix/Makefile
+}
+
 do_stage() {
         # The .h files get installed read-only, the autostage
         # function just uses cp -pPR, so do this by hand

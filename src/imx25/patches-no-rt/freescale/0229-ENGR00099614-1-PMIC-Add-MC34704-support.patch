@@ -1,0 +1,806 @@
+From c83e703907dc3a3622a55a85081fca76341e7bea Mon Sep 17 00:00:00 2001
+From: Quinn Jensen <quinn.jensen@freescale.com>
+Date: Fri, 14 Nov 2008 15:57:18 -0700
+Subject: [PATCH] ENGR00099614-1 PMIC: Add MC34704 support
+
+Add MC34704 PMIC support including:
+- I2C interface
+- Support for regulators 1-5 (as utilized on the 3stack)
+- Standard regulator driver (on/off, voltage adjustment, constraints)
+- MXC PMIC event driver with polled event handling
+
+Signed-off-by: Ross Wille <wille@freescale.com>
+---
+ drivers/mxc/pmic/Kconfig                 |    7 +
+ drivers/mxc/pmic/core/Makefile           |    3 +
+ drivers/mxc/pmic/core/mc34704.c          |  317 ++++++++++++++++++++++++++++++
+ drivers/regulator/Kconfig                |    6 +
+ drivers/regulator/Makefile               |    1 +
+ drivers/regulator/mc34704/Makefile       |    5 +
+ drivers/regulator/mc34704/reg-mc34704.c  |  291 +++++++++++++++++++++++++++
+ include/asm-arm/arch-mxc/pmic_external.h |   66 ++++++-
+ 8 files changed, 695 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/pmic/Kconfig b/drivers/mxc/pmic/Kconfig
+index 4da37d3..a0e853c 100644
+--- a/drivers/mxc/pmic/Kconfig
++++ b/drivers/mxc/pmic/Kconfig
+@@ -23,6 +23,13 @@ config MXC_PMIC_MC13892
+ 	  This is the MXC MC13892(PMIC) support. It include
+ 	  ADC, Battery, Connectivity, Light, Power and RTC.
+ 
++config MXC_PMIC_MC34704
++	tristate "MC34704 PMIC"
++	depends on ARCH_MXC && I2C
++	select MXC_PMIC
++	  ---help---
++	  This is the MXC MC34704 PMIC support.
++
+ config MXC_PMIC_MC9SDZ60
+ 	tristate "MC9sDZ60 PMIC"
+ 	depends on ARCH_MXC && I2C
+diff --git a/drivers/mxc/pmic/core/Makefile b/drivers/mxc/pmic/core/Makefile
+index b7768c7..d196f80 100644
+--- a/drivers/mxc/pmic/core/Makefile
++++ b/drivers/mxc/pmic/core/Makefile
+@@ -10,5 +10,8 @@ pmic_mc9sdz60_mod-objs := pmic_external.o pmic_event.o mcu_pmic_core.o max8660.o
+ obj-$(CONFIG_MXC_PMIC_MC13892) += pmic_mc13892_mod.o
+ pmic_mc13892_mod-objs := pmic_external.o pmic_event.o pmic_core_i2c.o mc13892.o
+ 
++obj-$(CONFIG_MXC_PMIC_MC34704) += pmic_mc34704_mod.o
++pmic_mc34704_mod-objs := pmic_external.o pmic_event.o mc34704.o
++
+ obj-$(CONFIG_MXC_PMIC_CHARDEV)	+= pmic-dev.o
+ 
+diff --git a/drivers/mxc/pmic/core/mc34704.c b/drivers/mxc/pmic/core/mc34704.c
+new file mode 100644
+index 0000000..b695775
+--- /dev/null
++++ b/drivers/mxc/pmic/core/mc34704.c
+@@ -0,0 +1,317 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file pmic/core/mc34704.c
++ * @brief This file contains MC34704 specific PMIC code.
++ *
++ * @ingroup PMIC_CORE
++ */
++
++/*
++ * Includes
++ */
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/platform_device.h>
++#include <linux/interrupt.h>
++#include <linux/i2c.h>
++#include <linux/uaccess.h>
++
++#include <asm/mach-types.h>
++#include <asm/arch/gpio.h>
++#include <asm/arch/pmic_external.h>
++#include <asm/arch/pmic_status.h>
++
++#include "pmic.h"
++
++/*
++ * Globals
++ */
++static pmic_version_t mxc_pmic_version = {
++	.id = PMIC_MC34704,
++	.revision = 0,
++};
++static unsigned int events_enabled;
++unsigned int active_events[MAX_ACTIVE_EVENTS];
++struct i2c_client *mc34704_client;
++static void pmic_trigger_poll(void);
++
++#define MAX_MC34704_REG 0x59
++static unsigned int mc34704_reg_readonly[MAX_MC34704_REG / 32 + 1] = {
++	(1 << 0x03) || (1 << 0x05) || (1 << 0x07) || (1 << 0x09) ||
++	    (1 << 0x0B) || (1 << 0x0E) || (1 << 0x11) || (1 << 0x14) ||
++	    (1 << 0x17) || (1 << 0x18),
++	0,
++};
++static unsigned int mc34704_reg_written[MAX_MC34704_REG / 32 + 1];
++static unsigned char mc34704_shadow_regs[MAX_MC34704_REG - 1];
++#define IS_READONLY(r) ((1 << ((r) % 32)) & mc34704_reg_readonly[(r) / 32])
++#define WAS_WRITTEN(r) ((1 << ((r) % 32)) & mc34704_reg_written[(r) / 32])
++#define MARK_WRITTEN(r) do { \
++	mc34704_reg_written[(r) / 32] |= (1 << ((r) % 32)); \
++} while (0)
++
++int pmic_read(int reg_nr, unsigned int *reg_val)
++{
++	int c;
++
++	/*
++	 * Use the shadow register if we've written to it
++	 */
++	if (WAS_WRITTEN(reg_nr)) {
++		*reg_val = mc34704_shadow_regs[reg_nr];
++		return PMIC_SUCCESS;
++	}
++
++	/*
++	 * Otherwise, actually read the real register.
++	 * Write-only registers will read as zero.
++	 */
++	c = i2c_smbus_read_byte_data(mc34704_client, reg_nr);
++	if (c == -1) {
++		pr_debug("mc34704: error reading register 0x%02x\n", reg_nr);
++		return PMIC_ERROR;
++	} else {
++		*reg_val = c;
++		return PMIC_SUCCESS;
++	}
++}
++
++int pmic_write(int reg_nr, const unsigned int reg_val)
++{
++	int ret;
++
++	ret = i2c_smbus_write_byte_data(mc34704_client, reg_nr, reg_val);
++	if (ret == -1) {
++		return PMIC_ERROR;
++	} else {
++		/*
++		 * Update our software copy of the register since you
++		 * can't read what you wrote.
++		 */
++		if (!IS_READONLY(reg_nr)) {
++			mc34704_shadow_regs[reg_nr] = reg_val;
++			MARK_WRITTEN(reg_nr);
++		}
++		return PMIC_SUCCESS;
++	}
++}
++
++unsigned int pmic_get_active_events(unsigned int *active_events)
++{
++	unsigned int count = 0;
++	unsigned int faults;
++	int bit_set;
++
++	/* Check for any relevant PMIC faults */
++	pmic_read(REG_MC34704_FAULTS, &faults);
++	faults &= events_enabled;
++
++	/*
++	 * Mask all active events, because there is no way to acknowledge
++	 * or dismiss them in the PMIC -- they're sticky.
++	 */
++	events_enabled &= ~faults;
++
++	/* Account for all unmasked faults */
++	while (faults) {
++		bit_set = ffs(faults) - 1;
++		*(active_events + count) = bit_set;
++		count++;
++		faults ^= (1 << bit_set);
++	}
++	return count;
++}
++
++int pmic_event_unmask(type_event event)
++{
++	unsigned int event_bit = 0;
++	unsigned int prior_events = events_enabled;
++
++	event_bit = (1 << event);
++	events_enabled |= event_bit;
++
++	pr_debug("Enable Event : %d\n", event);
++
++	/* start the polling task as needed */
++	if (events_enabled && prior_events == 0)
++		pmic_trigger_poll();
++
++	return 0;
++}
++
++int pmic_event_mask(type_event event)
++{
++	unsigned int event_bit = 0;
++
++	event_bit = (1 << event);
++	events_enabled &= ~event_bit;
++
++	pr_debug("Disable Event : %d\n", event);
++
++	return 0;
++}
++
++/*!
++ * PMIC event polling task.  This task is called periodically to poll
++ * for possible MC34704 events (No interrupt supplied by the hardware).
++ */
++static void pmic_event_task(struct work_struct *work);
++DECLARE_DELAYED_WORK(pmic_ws, pmic_event_task);
++
++static void pmic_trigger_poll(void)
++{
++	schedule_delayed_work(&pmic_ws, HZ / 10);
++}
++
++static void pmic_event_task(struct work_struct *work)
++{
++	unsigned int count = 0;
++	int i;
++
++	count = pmic_get_active_events(active_events);
++	pr_debug("active events number %d\n", count);
++
++	/* call handlers for all active events */
++	for (i = 0; i < count; i++)
++		pmic_event_callback(active_events[i]);
++
++	/* re-trigger this task, but only if somebody is watching */
++	if (events_enabled)
++		pmic_trigger_poll();
++
++	return;
++}
++
++pmic_version_t pmic_get_version(void)
++{
++	return mxc_pmic_version;
++}
++EXPORT_SYMBOL(pmic_get_version);
++
++int __devinit pmic_init_registers(void)
++{
++	/*
++	 * Set some registers to what they should be,
++	 * if for no other reason than to initialize our
++	 * software register copies.
++	 */
++	CHECK_ERROR(pmic_write(REG_MC34704_GENERAL2, 0x09));
++	CHECK_ERROR(pmic_write(REG_MC34704_VGSET1, 0));
++	CHECK_ERROR(pmic_write(REG_MC34704_REG2SET1, 0));
++	CHECK_ERROR(pmic_write(REG_MC34704_REG3SET1, 0));
++	CHECK_ERROR(pmic_write(REG_MC34704_REG4SET1, 0));
++	CHECK_ERROR(pmic_write(REG_MC34704_REG5SET1, 0));
++
++	return PMIC_SUCCESS;
++}
++
++static int __devinit is_chip_onboard(struct i2c_client *client)
++{
++	int val;
++
++	/*
++	 * This PMIC has no version or ID register, so just see
++	 * if it ACK's and returns 0 on some write-only register as
++	 * evidence of its presence.
++	 */
++	val = i2c_smbus_read_byte_data(client, REG_MC34704_GENERAL2);
++	if (val != 0)
++		return -1;
++
++	return 0;
++}
++
++static int __devinit pmic_probe(struct i2c_client *client,
++				const struct i2c_device_id *id)
++{
++	int ret = 0;
++
++	ret = is_chip_onboard(client);
++
++	if (ret == -1)
++		return -ENODEV;
++
++	mc34704_client = client;
++
++	/* Initialize the PMIC event handling */
++	pmic_event_list_init();
++
++	/* Initialize PMI registers */
++	if (pmic_init_registers() != PMIC_SUCCESS)
++		return PMIC_ERROR;
++
++	/* Tickle the regulator driver */
++	reg_mc34704_probe();
++
++	dev_info(&client->dev, "Loaded\n");
++
++	return PMIC_SUCCESS;
++}
++
++static int pmic_remove(struct i2c_client *client)
++{
++	return 0;
++}
++
++static int pmic_suspend(struct i2c_client *client, pm_message_t state)
++{
++	return 0;
++}
++
++static int pmic_resume(struct i2c_client *client)
++{
++	return 0;
++}
++
++static const struct i2c_device_id mc34704_id[] = {
++	{"mc34704", 0},
++	{},
++};
++
++MODULE_DEVICE_TABLE(i2c, mc34704_id);
++
++static struct i2c_driver pmic_driver = {
++	.driver = {
++		   .name = "mc34704",
++		   .bus = NULL,
++		   },
++	.probe = pmic_probe,
++	.remove = pmic_remove,
++	.suspend = pmic_suspend,
++	.resume = pmic_resume,
++	.id_table = mc34704_id,
++};
++
++static int __init pmic_init(void)
++{
++	return i2c_add_driver(&pmic_driver);
++}
++
++static void __exit pmic_exit(void)
++{
++	i2c_del_driver(&pmic_driver);
++}
++
++/*
++ * Module entry points
++ */
++subsys_initcall_sync(pmic_init);
++module_exit(pmic_exit);
++
++MODULE_DESCRIPTION("MC34704 PMIC driver");
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index c9bc775..279733b 100644
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -29,6 +29,12 @@ config REGULATOR_MC13892
+ 	depends on MXC_PMIC_MC13892
+ 	default y
+ 
++config REGULATOR_MC34704
++	tristate "MC34704 Regulator Support"
++	depends on REGULATOR
++	depends on MXC_PMIC_MC34704
++	default y
++
+ config REGULATOR_MAX8660
+ 	tristate "MAX8660 Regulator Support"
+ 	depends on REGULATOR
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index cfb08ca..8e61c0c 100644
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -12,4 +12,5 @@ obj-$(CONFIG_REGULATOR_MC13783)  += mc13783/
+ obj-$(CONFIG_REGULATOR_WM8350)  += wm8350/
+ obj-$(CONFIG_REGULATOR_MAX8660) += max8660/
+ obj-$(CONFIG_REGULATOR_MC13892) += mc13892/
++obj-$(CONFIG_REGULATOR_MC34704) += mc34704/
+ 
+diff --git a/drivers/regulator/mc34704/Makefile b/drivers/regulator/mc34704/Makefile
+new file mode 100644
+index 0000000..516853f
+--- /dev/null
++++ b/drivers/regulator/mc34704/Makefile
+@@ -0,0 +1,5 @@
++#
++# Makefile for regulator driver for MC34704.
++#
++
++obj-$(CONFIG_REGULATOR_MC34704) += reg-mc34704.o
+diff --git a/drivers/regulator/mc34704/reg-mc34704.c b/drivers/regulator/mc34704/reg-mc34704.c
+new file mode 100644
+index 0000000..99971bf
+--- /dev/null
++++ b/drivers/regulator/mc34704/reg-mc34704.c
+@@ -0,0 +1,291 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/bitops.h>
++#include <linux/err.h>
++#include <linux/ioctl.h>
++#include <linux/regulator/regulator-platform.h>
++#include <linux/regulator/regulator-drv.h>
++#include <linux/platform_device.h>
++#include <asm/arch/pmic_status.h>
++#include <asm/arch/pmic_external.h>
++
++#define MC34704_ONOFFA	0x8
++#define MC34704_ONOFFC	0x4
++#define MC34704_ONOFFD	0x2
++#define MC34704_ONOFFE	0x1
++
++enum {
++	MC34704_BKLT,		/* REG1 5V for Backlight */
++	MC34704_CPU,		/* REG2 3.3V for CPU & CPU board peripherals */
++	MC34704_CORE,		/* REG3 1.45V for CPU Core */
++	MC34704_DDR,		/* REG4 1.8V for DDR */
++	MC34704_PERS,		/* REG5 3.3V for Personality board */
++	MC34704_REG6,		/* REG6 not used */
++	MC34704_REG7,		/* REG7 not used */
++	MC34704_REG8,		/* REG8 not used */
++} MC34704_regulator;
++
++/* Regulator voltages in mV and dynamic voltage scaling limits in percent */
++
++#define REG1_V_MV		5000
++#define REG1_DVS_MIN_PCT	(-10)
++#define REG1_DVS_MAX_PCT	10
++
++#define REG2_V_MV		3300
++#define REG2_DVS_MIN_PCT	(-20)
++#define REG2_DVS_MAX_PCT	17.5
++
++#define REG3_V_MV		1450
++#define REG3_DVS_MIN_PCT	(-20)
++#define REG3_DVS_MAX_PCT	17.5
++
++#define REG4_V_MV		1800
++#define REG4_DVS_MIN_PCT	(-20)
++#define REG4_DVS_MAX_PCT	17.5
++
++#define REG5_V_MV		3300
++#define REG5_DVS_MIN_PCT	(-20)
++#define REG5_DVS_MAX_PCT	17.5
++
++/* Private data for MC34704 regulators */
++
++struct reg_mc34704_priv {
++	short enable;		/* enable bit, if available */
++	short v_default;	/* default regulator voltage in mV */
++	int dvs_min;		/* minimum voltage change in units of 2.5% */
++	int dvs_max;		/* maximum voltage change in units of 2.5% */
++	char i2c_dvs;		/* i2c DVS register number */
++	char i2c_stat;		/* i2c status register number */
++};
++struct reg_mc34704_priv mc34704_reg1_bklt_priv = {
++	.v_default = REG1_V_MV,
++	.dvs_min = REG1_DVS_MIN_PCT / 2.5,
++	.dvs_max = REG1_DVS_MAX_PCT / 2.5,
++	.i2c_dvs = 0x4,
++	.i2c_stat = 0x5,
++	.enable = MC34704_ONOFFA,
++};
++struct reg_mc34704_priv mc34704_reg2_cpu_priv = {
++	.v_default = REG2_V_MV,
++	.dvs_min = REG2_DVS_MIN_PCT / 2.5,
++	.dvs_max = REG2_DVS_MAX_PCT / 2.5,
++	.i2c_dvs = 0x6,
++	.i2c_stat = 0x7,
++};
++struct reg_mc34704_priv mc34704_reg3_core_priv = {
++	.v_default = REG3_V_MV,
++	.dvs_min = REG3_DVS_MIN_PCT / 2.5,
++	.dvs_max = REG3_DVS_MAX_PCT / 2.5,
++	.i2c_dvs = 0x8,
++	.i2c_stat = 0x9,
++};
++struct reg_mc34704_priv mc34704_reg4_ddr_priv = {
++	.v_default = REG4_V_MV,
++	.dvs_min = REG4_DVS_MIN_PCT / 2.5,
++	.dvs_max = REG4_DVS_MAX_PCT / 2.5,
++	.i2c_dvs = 0xA,
++	.i2c_stat = 0xB,
++};
++struct reg_mc34704_priv mc34704_reg5_pers_priv = {
++	.v_default = REG5_V_MV,
++	.dvs_min = REG5_DVS_MIN_PCT / 2.5,
++	.dvs_max = REG5_DVS_MAX_PCT / 2.5,
++	.i2c_dvs = 0xC,
++	.i2c_stat = 0xE,
++	.enable = MC34704_ONOFFE,
++};
++
++static int mc34704_set_voltage(struct regulator *reg, int uV)
++{
++	struct reg_mc34704_priv *priv = regulator_get_drvdata(reg);
++	int mV = uV / 1000;
++	int dV = mV - priv->v_default;
++
++	/* compute dynamic voltage scaling value */
++	int dvs = 1000 * dV / priv->v_default / 25;
++
++	/* clip to regulator limits */
++	if (dvs > priv->dvs_max)
++		dvs = priv->dvs_max;
++	if (dvs < priv->dvs_min)
++		dvs = priv->dvs_min;
++
++	return pmic_write_reg(priv->i2c_dvs, dvs << 1, 0x1E);
++}
++
++static int mc34704_get_voltage(struct regulator *reg)
++{
++	int mV;
++	struct reg_mc34704_priv *priv = regulator_get_drvdata(reg);
++	int val, dvs;
++
++	CHECK_ERROR(pmic_read_reg(priv->i2c_dvs, &val, 0xF));
++
++	dvs = (val >> 1) & 0xF;
++
++	/* dvs is 4-bit 2's complement; sign-extend it */
++	if (dvs & 8)
++		dvs |= -1 & ~0xF;
++
++	/* Regulator voltage is adjusted by (dvs * 2.5%) */
++	mV = priv->v_default * (1000 + 25 * dvs) / 1000;
++
++	return 1000 * mV;
++}
++
++static int mc34704_enable_reg(struct regulator *reg)
++{
++	struct reg_mc34704_priv *priv = regulator_get_drvdata(reg);
++
++	if (priv->enable)
++		return pmic_write_reg(REG_MC34704_GENERAL2, -1, priv->enable);
++
++	return PMIC_ERROR;
++}
++
++static int mc34704_disable_reg(struct regulator *reg)
++{
++	struct reg_mc34704_priv *priv = regulator_get_drvdata(reg);
++
++	if (priv->enable)
++		return pmic_write_reg(REG_MC34704_GENERAL2, 0, priv->enable);
++
++	return PMIC_ERROR;
++}
++
++static int mc34704_is_reg_enabled(struct regulator *reg)
++{
++	struct reg_mc34704_priv *priv = regulator_get_drvdata(reg);
++	int val;
++
++	if (priv->enable) {
++		CHECK_ERROR(pmic_read_reg(REG_MC34704_GENERAL2, &val,
++					  priv->enable));
++		return val ? 1 : 0;
++	} else {
++		return PMIC_ERROR;
++	}
++}
++
++static struct regulator_ops mc34704_full_ops = {
++	.set_voltage = mc34704_set_voltage,
++	.get_voltage = mc34704_get_voltage,
++	.enable = mc34704_enable_reg,
++	.disable = mc34704_disable_reg,
++	.is_enabled = mc34704_is_reg_enabled,
++};
++
++static struct regulator_ops mc34704_partial_ops = {
++	.set_voltage = mc34704_set_voltage,
++	.get_voltage = mc34704_get_voltage,
++};
++
++struct regulation_constraints mc34704_reg1_bklt_constraints = {
++	.min_uV = mV_to_uV(REG1_V_MV * (1000 + REG1_DVS_MIN_PCT * 10) / 1000),
++	.max_uV = mV_to_uV(REG1_V_MV * (1000 + REG1_DVS_MAX_PCT * 10) / 1000),
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++};
++struct regulation_constraints mc34704_reg2_cpu_constraints = {
++	.min_uV = mV_to_uV(REG2_V_MV * (1000 + REG2_DVS_MIN_PCT * 10) / 1000),
++	.max_uV = mV_to_uV(REG2_V_MV * (1000 + REG2_DVS_MAX_PCT * 10) / 1000),
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++};
++struct regulation_constraints mc34704_reg3_core_constraints = {
++	.min_uV = mV_to_uV(REG3_V_MV * (1000 + REG3_DVS_MIN_PCT * 10) / 1000),
++	.max_uV = mV_to_uV(REG3_V_MV * (1000 + REG3_DVS_MAX_PCT * 10) / 1000),
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++};
++struct regulation_constraints mc34704_reg4_ddr_constraints = {
++	.min_uV = mV_to_uV(REG4_V_MV * (1000 + REG4_DVS_MIN_PCT * 10) / 1000),
++	.max_uV = mV_to_uV(REG4_V_MV * (1000 + REG4_DVS_MAX_PCT * 10) / 1000),
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++};
++struct regulation_constraints mc34704_reg5_pers_constraints = {
++	.min_uV = mV_to_uV(REG5_V_MV * (1000 + REG5_DVS_MIN_PCT * 10) / 1000),
++	.max_uV = mV_to_uV(REG5_V_MV * (1000 + REG5_DVS_MAX_PCT * 10) / 1000),
++	.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++};
++
++static struct regulator reg_mc34704[] = {
++	{
++	 .name = "REG1_BKLT",
++	 .id = MC34704_BKLT,
++	 .ops = &mc34704_full_ops,
++	 .constraints = &mc34704_reg1_bklt_constraints,
++	 .use_count = 1,
++	 .reg_data = &mc34704_reg1_bklt_priv,
++	}, {
++	 .name = "REG2_CPU",
++	 .id = MC34704_CPU,
++	 .ops = &mc34704_partial_ops,
++	 .constraints = &mc34704_reg2_cpu_constraints,
++	 .use_count = 1,
++	 .reg_data = &mc34704_reg2_cpu_priv,
++	}, {
++	 .name = "REG3_CORE",
++	 .id = MC34704_CORE,
++	 .ops = &mc34704_partial_ops,
++	 .constraints = &mc34704_reg3_core_constraints,
++	 .use_count = 1,
++	 .reg_data = &mc34704_reg3_core_priv,
++	}, {
++	 .name = "REG4_DDR",
++	 .id = MC34704_DDR,
++	 .ops = &mc34704_partial_ops,
++	 .constraints = &mc34704_reg4_ddr_constraints,
++	 .reg_data = &mc34704_reg4_ddr_priv,
++	}, {
++	 .name = "REG5_PERS",
++	 .id = MC34704_PERS,
++	 .ops = &mc34704_full_ops,
++	 .constraints = &mc34704_reg5_pers_constraints,
++	 .use_count = 1,
++	 .reg_data = &mc34704_reg5_pers_priv,
++	},
++};
++
++int reg_mc34704_probe(void)
++{
++	int ret;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(reg_mc34704); i++) {
++		ret = regulator_register(reg_mc34704 + i);
++		regulator_set_platform_constraints(reg_mc34704[i].name,
++						   reg_mc34704[i].constraints);
++		if (ret < 0) {
++			printk(KERN_ERR "%s: failed to register %s err %d\n",
++			       __func__, reg_mc34704[i].name, ret);
++			i--;
++			for (; i >= 0; i--)
++				regulator_unregister(reg_mc34704 + i);
++
++			return ret;
++		}
++	}
++
++	printk(KERN_INFO "MC34704 regulator successfully probed\n");
++
++	return 0;
++}
++EXPORT_SYMBOL(reg_mc34704_probe);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("MC34704 Regulator Driver");
++MODULE_LICENSE("GPL");
+diff --git a/include/asm-arm/arch-mxc/pmic_external.h b/include/asm-arm/arch-mxc/pmic_external.h
+index 930ed2a..464168a 100644
+--- a/include/asm-arm/arch-mxc/pmic_external.h
++++ b/include/asm-arm/arch-mxc/pmic_external.h
+@@ -42,7 +42,8 @@
+ typedef enum {
+ 	PMIC_MC13783 = 1,	/*!< MC13783 */
+ 	PMIC_SC55112 = 2,	/*!< SC55112 */
+-	PMIC_MC13892 = 3
++	PMIC_MC13892 = 3,
++	PMIC_MC34704 = 4
+ } pmic_id_t;
+ 
+ /*!
+@@ -1052,6 +1053,64 @@ typedef enum {
+ 
+ #endif				/* MXC_PMIC_MC9SDZ60 */
+ 
++#if defined(CONFIG_MXC_PMIC_MC34704_MODULE) || defined(CONFIG_MXC_PMIC_MC34704)
++
++typedef enum {
++	/* register names for mc34704 */
++	REG_MC34704_GENERAL1 = 0x01,
++	REG_MC34704_GENERAL2 = 0x02,
++	REG_MC34704_GENERAL3 = 0x03,
++	REG_MC34704_VGSET1 = 0x04,
++	REG_MC34704_VGSET2 = 0x05,
++	REG_MC34704_REG2SET1 = 0x06,
++	REG_MC34704_REG2SET2 = 0x07,
++	REG_MC34704_REG3SET1 = 0x08,
++	REG_MC34704_REG3SET2 = 0x09,
++	REG_MC34704_REG4SET1 = 0x0A,
++	REG_MC34704_REG4SET2 = 0x0B,
++	REG_MC34704_REG5SET1 = 0x0C,
++	REG_MC34704_REG5SET2 = 0x0D,
++	REG_MC34704_REG5SET3 = 0x0E,
++	REG_MC34704_REG6SET1 = 0x0F,
++	REG_MC34704_REG6SET2 = 0x10,
++	REG_MC34704_REG6SET3 = 0x11,
++	REG_MC34704_REG7SET1 = 0x12,
++	REG_MC34704_REG7SET2 = 0x13,
++	REG_MC34704_REG7SET3 = 0x14,
++	REG_MC34704_REG8SET1 = 0x15,
++	REG_MC34704_REG8SET2 = 0x16,
++	REG_MC34704_REG8SET3 = 0x17,
++	REG_MC34704_FAULTS = 0x18,
++	REG_MC34704_I2CSET1 = 0x19,
++	REG_MC34704_REG3DAC = 0x49,
++	REG_MC34704_REG7CR0 = 0x58,
++	REG_MC34704_REG7DAC = 0x59,
++	REG_NB = 0x60,
++} pmic_reg;
++
++typedef enum {
++	/* events for mc34704 */
++	EVENT_FLT1 = 0,
++	EVENT_FLT2,
++	EVENT_FLT3,
++	EVENT_FLT4,
++	EVENT_FLT5,
++	EVENT_FLT6,
++	EVENT_FLT7,
++	EVENT_FLT8,
++	EVENT_NB,
++} type_event;
++
++typedef enum {
++	MCU_SENSOR_NOT_SUPPORT
++} t_sensor;
++
++typedef enum {
++	MCU_SENSOR_BIT_NOT_SUPPORT
++} t_sensor_bits;
++
++#endif				/* MXC_PMIC_MC34704 */
++
+ /* EXPORTED FUNCTIONS */
+ #ifdef __KERNEL__
+ 
+@@ -1162,6 +1221,11 @@ static inline int reg_mc13892_probe(void)
+ 	return 0;
+ };
+ #endif
++
++#ifdef CONFIG_REGULATOR_MC34704
++int reg_mc34704_probe(void);
++#endif
++
+ #endif				/* __KERNEL__ */
+ /* CONFIG_MXC_PMIC_MC13783 || CONFIG_MXC_PMIC_MC9SDZ60 */
+ 
+-- 
+1.5.4.4
+

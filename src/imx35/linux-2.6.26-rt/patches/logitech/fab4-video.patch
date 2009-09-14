@@ -1,0 +1,102 @@
+---
+ drivers/video/logo/Kconfig                      |    5 
+ drivers/video/logo/Makefile                     |    1 
+ drivers/video/logo/logo.c                       |    5 
+ drivers/video/logo/logo_logitech_fab4_clut224.c | 3992 ++++++++++++++++++++++++
+ drivers/video/mxc/mxcfb.c                       |    8 
+ drivers/video/mxc/mxcfb_modedb.c                |   17 
+ 6 files changed, 4028 insertions(+)
+
+Index: linux-2.6.26/drivers/video/mxc/mxcfb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/mxc/mxcfb.c	2009-04-23 16:55:36.000000000 +0100
++++ linux-2.6.26/drivers/video/mxc/mxcfb.c	2009-04-23 16:55:36.000000000 +0100
+@@ -87,7 +87,11 @@
+ static struct mxcfb_data mxcfb_drv_data;
+ 
+ static char *fb_mode = NULL;
++#if CONFIG_MACH_FAB4
++static unsigned long default_bpp = 32;
++#else
+ static unsigned long default_bpp = 16;
++#endif
+ #ifdef CONFIG_FB_MXC_INTERNAL_MEM
+ static struct clk *iram_clk;
+ #endif
+@@ -228,8 +232,12 @@
+ 		if (ipu_sdc_init_panel(mode,
+ 				       (PICOS2KHZ(fbi->var.pixclock)) * 1000UL,
+ 				       fbi->var.xres, fbi->var.yres,
++#if CONFIG_MACH_FAB4
++				       IPU_PIX_FMT_RGB24,
++#else
+ 				       (fbi->var.sync & FB_SYNC_SWAP_RGB) ?
+ 				       IPU_PIX_FMT_BGR666 : IPU_PIX_FMT_RGB666,
++#endif
+ 				       fbi->var.left_margin,
+ 				       fbi->var.hsync_len,
+ 				       fbi->var.right_margin,
+Index: linux-2.6.26/drivers/video/mxc/mxcfb_modedb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/mxc/mxcfb_modedb.c	2009-04-23 16:53:02.000000000 +0100
++++ linux-2.6.26/drivers/video/mxc/mxcfb_modedb.c	2009-04-23 17:23:21.000000000 +0100
+@@ -16,6 +16,22 @@
+ 
+ struct fb_videomode mxcfb_modedb[] = {
+ 	{
++		"Wintek-480x272", // name
++		60, // refresh
++		480, // xres
++		272, // yres
++		111111, // pixel clock period in pico-second; 9MHz
++		2, // left_margin
++		2, // right_margin
++		2, // upper_margin
++		2, // lower_margin
++		41, // hsync_len
++		10, // vsync_len
++		0, // sync;
++		FB_VMODE_NONINTERLACED, // vmode
++		0 // flag
++	},
++	{
+ 	 /* 240x320 @ 60 Hz */
+ 	 "Sharp-QVGA", 60, 240, 320, 185925, 9, 16, 7, 9, 1, 1,
+ 	 FB_SYNC_HOR_HIGH_ACT | FB_SYNC_SHARP_MODE |
+Index: linux-2.6.26/drivers/mxc/ipu/ipu_regs.h
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/ipu/ipu_regs.h	2009-04-23 16:52:41.000000000 +0100
++++ linux-2.6.26/drivers/mxc/ipu/ipu_regs.h	2009-04-23 16:55:36.000000000 +0100
+@@ -248,6 +248,7 @@
+ 	SDC_COM_GWSEL = 0x00000020UL,
+ 	SDC_COM_GLB_A = 0x00000040UL,
+ 	SDC_COM_KEY_COLOR_G = 0x00000080UL,
++	SDC_COM_MASK_EN = 0x00000100UL,
+ 	SDC_COM_BG_EN = 0x00000200UL,
+ 	SDC_COM_SHARP = 0x00001000UL,
+ 
+Index: linux-2.6.26/drivers/mxc/ipu/ipu_sdc.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/ipu/ipu_sdc.c	2009-04-23 16:53:00.000000000 +0100
++++ linux-2.6.26/drivers/mxc/ipu/ipu_sdc.c	2009-04-23 16:55:36.000000000 +0100
+@@ -31,7 +31,11 @@
+ static uint32_t g_v_start_width;
+ 
+ static const uint32_t di_mappings[] = {
++#if CONFIG_MACH_FAB4
++	0x00070000, 0x000F0000, 0x00170000, 1,	/* RGB888 */
++#else
+ 	0x1600AAAA, 0x00E05555, 0x00070000, 3,	/* RGB888 */
++#endif
+ 	0x0005000F, 0x000B000F, 0x0011000F, 1,	/* RGB666 */
+ 	0x0011000F, 0x000B000F, 0x0005000F, 1,	/* BGR666 */
+ 	0x0004003F, 0x000A000F, 0x000F003F, 1	/* RGB565 */
+@@ -314,7 +318,7 @@
+ 
+ 	/* Enable FG channel */
+ 	reg = __raw_readl(SDC_COM_CONF);
+-	__raw_writel(reg | SDC_COM_FG_EN | SDC_COM_BG_EN, SDC_COM_CONF);
++	__raw_writel(reg | SDC_COM_FG_EN | SDC_COM_BG_EN | SDC_COM_MASK_EN, SDC_COM_CONF);
+ }
+ 
+ uint32_t _ipu_sdc_fg_uninit(void)

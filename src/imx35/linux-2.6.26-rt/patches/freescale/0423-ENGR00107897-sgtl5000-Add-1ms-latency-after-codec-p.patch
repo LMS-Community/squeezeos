@@ -1,0 +1,35 @@
+From c9ee445b90872b66be81c31b58c30e4c696ae442 Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Wed, 18 Feb 2009 17:36:28 +0800
+Subject: [PATCH] ENGR00107897 sgtl5000: Add 1ms latency after codec power enable
+
+The SGTL5000 has an internal reset that is deasserted 8 SYS_MCLK
+cycles after all power rails have been brought up. After this
+time communication can start..
+Without this latency, some platform will failed to read the
+sgtl5000 chip id right after codec power up.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ sound/soc/imx/imx-3stack-sgtl5000.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-3stack-sgtl5000.c b/sound/soc/imx/imx-3stack-sgtl5000.c
+index d531162..f4ba2c1 100644
+--- a/sound/soc/imx/imx-3stack-sgtl5000.c
++++ b/sound/soc/imx/imx-3stack-sgtl5000.c
+@@ -488,6 +488,11 @@ static int mach_probe(struct snd_soc_machine *machine)
+ 		regulator_enable(priv->reg_vddd);
+ 	}
+ 
++	/* The SGTL5000 has an internal reset that is deasserted 8 SYS_MCLK
++	   cycles after all power rails have been brought up. After this time
++	   communication can start */
++	msleep(1);
++
+ 	codec_data->vddio = plat->vddio / 1000; /* uV to mV */
+ 	codec_data->vdda = plat->vdda / 1000;
+ 	codec_data->vddd = plat->vddd / 1000;
+-- 
+1.5.4.4
+
