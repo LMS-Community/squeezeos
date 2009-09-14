@@ -11,8 +11,8 @@
 
 Index: linux-2.6.26/sound/soc/codecs/Makefile
 ===================================================================
---- linux-2.6.26.orig/sound/soc/codecs/Makefile	2009-08-12 09:38:05.000000000 -0700
-+++ linux-2.6.26/sound/soc/codecs/Makefile	2009-08-12 09:39:00.000000000 -0700
+--- linux-2.6.26.orig/sound/soc/codecs/Makefile	2009-09-14 14:15:52.000000000 +0100
++++ linux-2.6.26/sound/soc/codecs/Makefile	2009-09-14 14:16:25.000000000 +0100
 @@ -12,6 +12,7 @@
  snd-soc-wm8580-objs := wm8580.o
  snd-soc-sgtl5000-objs := sgtl5000.o
@@ -28,8 +28,8 @@ Index: linux-2.6.26/sound/soc/codecs/Makefile
 +obj-$(CONFIG_SND_SOC_TLV320AIC3104)	+= snd-soc-tlv320aic3104.o
 Index: linux-2.6.26/sound/soc/imx/Kconfig
 ===================================================================
---- linux-2.6.26.orig/sound/soc/imx/Kconfig	2009-08-12 09:38:05.000000000 -0700
-+++ linux-2.6.26/sound/soc/imx/Kconfig	2009-08-12 09:39:00.000000000 -0700
+--- linux-2.6.26.orig/sound/soc/imx/Kconfig	2009-09-14 14:15:52.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/Kconfig	2009-09-14 14:16:25.000000000 +0100
 @@ -66,3 +66,11 @@
   help
     Say Y if you want to add support for SoC audio on IMX 3STACK
@@ -44,8 +44,8 @@ Index: linux-2.6.26/sound/soc/imx/Kconfig
 +   Say Y if you would like your baby to speak
 Index: linux-2.6.26/sound/soc/imx/Makefile
 ===================================================================
---- linux-2.6.26.orig/sound/soc/imx/Makefile	2009-08-12 09:38:05.000000000 -0700
-+++ linux-2.6.26/sound/soc/imx/Makefile	2009-08-12 09:39:00.000000000 -0700
+--- linux-2.6.26.orig/sound/soc/imx/Makefile	2009-09-14 14:15:52.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/Makefile	2009-09-14 14:16:25.000000000 +0100
 @@ -20,4 +20,6 @@
  obj-$(CONFIG_SND_SOC_IMX_3STACK_SGTL5000) += snd-soc-imx-3stack-sgtl5000.o
  snd-soc-imx-3stack-bt-objs := imx-3stack-bt.o
@@ -55,8 +55,8 @@ Index: linux-2.6.26/sound/soc/imx/Makefile
  
 Index: linux-2.6.26/sound/soc/imx/imx-ssi.c
 ===================================================================
---- linux-2.6.26.orig/sound/soc/imx/imx-ssi.c	2009-08-12 09:38:05.000000000 -0700
-+++ linux-2.6.26/sound/soc/imx/imx-ssi.c	2009-08-12 09:39:00.000000000 -0700
+--- linux-2.6.26.orig/sound/soc/imx/imx-ssi.c	2009-09-14 14:15:58.000000000 +0100
++++ linux-2.6.26/sound/soc/imx/imx-ssi.c	2009-09-14 14:16:25.000000000 +0100
 @@ -276,7 +276,8 @@
  	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
  	case SND_SOC_DAIFMT_CBS_CFS:
@@ -67,7 +67,7 @@ Index: linux-2.6.26/sound/soc/imx/imx-ssi.c
  		if (((fmt & SND_SOC_DAIFMT_FORMAT_MASK) == SND_SOC_DAIFMT_I2S)
  		    && (fmt & SND_SOC_DAIFMT_TDM)) {
  			scr &= ~SSI_SCR_I2S_MODE_MASK;
-@@ -716,7 +717,7 @@
+@@ -722,7 +723,7 @@
  
  static irqreturn_t ssi1_irq(int irq, void *dev_id)
  {
@@ -79,8 +79,8 @@ Index: linux-2.6.26/sound/soc/imx/imx-ssi.c
 Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ linux-2.6.26/sound/soc/codecs/tlv320aic3104.c	2009-08-13 14:07:16.000000000 -0700
-@@ -0,0 +1,1775 @@
++++ linux-2.6.26/sound/soc/codecs/tlv320aic3104.c	2009-09-14 20:06:34.000000000 +0100
+@@ -0,0 +1,1758 @@
 +/*
 + * tlv320aic3104.c
 + *
@@ -163,7 +163,6 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 +static int aic3104_dapm_event(struct snd_soc_codec *codec, int event);
 +static int aic3104_i2c_read(void *control_data, long data, int);
 +static void aic3104_timer_callback(unsigned long ptr);
-+
 +
 +static struct i2c_client *aic3104_i2c_client;
 +
@@ -266,7 +265,7 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 +			     unsigned int value)
 +{
 +	struct aic3104_priv *aic3104 = codec->private_data;
-+        u8 data[2];
++        u8 data[3];
 +	int page, len;
 +
 +        mutex_lock(&aic3104->lock);
@@ -293,21 +292,15 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 +	if (reg & WRITE_WORD) {
 +		data[0] = (reg & 0x7f);
 +		data[1] = (value >> 8) & 0xff;
++		data[2] =  value & 0xff;
 +
-+		//printk("AIC3104 MSB WRITE %d: %08x\n", data[0], data[1]);
++		// printk("AIC3104 WRITE (REG,REG+1)=(MSB,LSB): (%d:%d)=(%02x:%02x)\n", data[0], data[0]+1, data[1], data[2]);
 +
-+		aic3104_write_reg_cache(codec, reg, data[1]);
-+		len = codec->mach_write(codec->control_data, (long)data, 2);
-+		if (len != 2)
++		aic3104_write_reg_cache(codec, reg,     data[1]);
++		aic3104_write_reg_cache(codec, reg + 1, data[2]);
++		len = codec->mach_write(codec->control_data, (long)data, 3);
++		if (len != 3)
 +			goto write_err;
-+
-+		data[0] = (reg & 0x7f) + 1;
-+		data[1] = value & 0xff;
-+
-+		//printk("AIC3104 LSB WRITE %d: %08x\n", data[0], data[1]);
-+
-+		aic3104_write_reg_cache(codec, reg + 1, data[1]);
-+		len = codec->mach_write(codec->control_data, (long)data, 2);
 +	}
 +	else {
 +		data[0] = reg & 0x7f;
@@ -319,10 +312,9 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 +
 +		aic3104_write_reg_cache(codec, reg, value);
 +		len = codec->mach_write(codec->control_data, (long)data, 2);
++		if (len != 2)
++			goto write_err;
 +	}
-+
-+	if (len != 2)
-+		goto write_err;
 +
 +        mutex_unlock(&aic3104->lock);
 +	return 0;
@@ -1147,56 +1139,32 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 +
 +/* AIC3104 codec mclk clock divider coefficients */
 +static const struct aic3104_rate_divs aic3104_divs[] = {
++	/* FIXME:
++	 * For now, Only support 44.1 and 48k with 12MHz clock.
++	 * This is because the DSP filters need to run at
++	 * that rate.
++	 */
++
 +	/* 8k */
-+	{12000000, 8000, 48000, 0xa, 16, 3840},
-+	{19200000, 8000, 48000, 0xa, 10, 2400},
-+	{22579200, 8000, 48000, 0xa, 8, 7075},
-+	{33868800, 8000, 48000, 0xa, 5, 8049},
++	//{12000000, 8000, 48000, 0xa, 16, 3840},
 +	/* 11.025k */
-+	{12000000, 11025, 44100, 0x6, 15, 528},
-+	{19200000, 11025, 44100, 0x6, 9, 4080},
-+	{22579200, 11025, 44100, 0x6, 8, 0},
-+	{33868800, 11025, 44100, 0x6, 5, 3333},
++	//{12000000, 11025, 44100, 0x6, 15, 528},
 +	/* 16k */
-+	{12000000, 16000, 48000, 0x4, 16, 3840},
-+	{19200000, 16000, 48000, 0x4, 10, 2400},
-+	{22579200, 16000, 48000, 0x4, 8, 7075},
-+	{33868800, 16000, 48000, 0x4, 5, 8049},
++	//{12000000, 16000, 48000, 0x4, 16, 3840},
 +	/* 22.05k */
-+	{12000000, 22050, 44100, 0x2, 15, 528},
-+	{19200000, 22050, 44100, 0x2, 9, 4080},
-+	{22579200, 22050, 44100, 0x2, 8, 0},
-+	{33868800, 22050, 44100, 0x2, 5, 3333},
++	//{12000000, 22050, 44100, 0x2, 15, 528},
 +	/* 32k */
-+	{12000000, 32000, 48000, 0x1, 16, 3840},
-+	{19200000, 32000, 48000, 0x1, 10, 2400},
-+	{22579200, 32000, 48000, 0x1, 8, 7075},
-+	{33868800, 32000, 48000, 0x1, 5, 8049},
++	//{12000000, 32000, 48000, 0x1, 16, 3840},
 +	/* 44.1k */
-+	{12000000, 44100, 44100, 0x0, 15, 528},
-+	{19200000, 44100, 44100, 0x0, 9, 4080},
-+	{22579200, 44100, 44100, 0x0, 8, 0},
-+	{33868800, 44100, 44100, 0x0, 5, 3333},
++	{12000000, 44100, 44100, 0x0, 7, 5264},
 +	/* 48k */
-+	{12000000, 48000, 48000, 0x0, 16, 3840},
-+	{19200000, 48000, 48000, 0x0, 10, 2400},
-+	{22579200, 48000, 48000, 0x0, 8, 7075},
-+	{33868800, 48000, 48000, 0x0, 5, 8049},
++	{12000000, 48000, 48000, 0x0, 8, 1920},
 +	/* 64k */
-+	{12000000, 64000, 96000, 0x1, 16, 3840},
-+	{19200000, 64000, 96000, 0x1, 10, 2400},
-+	{22579200, 64000, 96000, 0x1, 8, 7075},
-+	{33868800, 64000, 96000, 0x1, 5, 8049},
++	//{12000000, 64000, 96000, 0x1, 16, 3840},
 +	/* 88.2k */
-+	{12000000, 88200, 88200, 0x0, 15, 528},
-+	{19200000, 88200, 88200, 0x0, 9, 4080},
-+	{22579200, 88200, 88200, 0x0, 8, 0},
-+	{33868800, 88200, 88200, 0x0, 5, 3333},
++	//{12000000, 88200, 88200, 0x0, 15, 528},
 +	/* 96k */
-+	{12000000, 96000, 96000, 0x0, 16, 3840},
-+	{19200000, 96000, 96000, 0x0, 10, 2400},
-+	{22579200, 96000, 96000, 0x0, 8, 7075},
-+	{33868800, 96000, 96000, 0x0, 5, 8049},
++	//{12000000, 96000, 96000, 0x0, 16, 3840},
 +};
 +
 +static inline int aic3104_get_divs(int mclk, int rate)
@@ -1243,23 +1211,38 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 +		data |= FSREF_48000 | DUAL_RATE_MODE;
 +		break;
 +	}
-+	aic3104_write_reg(codec, AIC3X_CODEC_DATAPATH_REG, data);
++	aic3104_write_reg(codec, AIC3X_CODEC_DATAPATH_REG, data); /*  reg 7 */
 +
 +	/* codec sample rate select */
 +	data = aic3104_divs[i].sr_reg;
 +	data |= (data << 4);
-+	aic3104_write_reg(codec, AIC3X_SAMPLE_RATE_SEL_REG, data);
++	aic3104_write_reg(codec, AIC3X_SAMPLE_RATE_SEL_REG, data); /* reg 2 */
 +
 +	/* Use PLL for generation Fsref by equation:
 +	 * Fsref = (MCLK * K * R)/(2048 * P);
-+	 * Fix P = 2 and R = 1 and calculate K, if
++	 * Fix P = 1 and R = 1 and calculate K, if
 +	 * K = J.D, i.e. J - an interger portion of K and D is the fractional
 +	 * one with 4 digits of precision;
 +	 * Example:
-+	 * For MCLK = 22.5792 MHz and Fsref = 48kHz:
-+	 * Select P = 2, R= 1, K = 8.7074, which results in J = 8, D = 7074
++	 * Our MCLK is 12MHz, therefore P must be 1 (page 29 of aic3104 datasheet)
++	 *
++	 **************
++	 * Restrictions:
++	 * 10 MHz <= PLLCLK_IN/P <= 20 MHz
++	 * 80 MHz <= PLLCLK_IN x K x R/P <= 110 MHz
++	 * 4 <= J <= 11
++	 * R = 1
++	 *
++	 **************
++	 * Example:
++	 * MCLK = 12 MHz and fS(ref) = 44.1 kHz
++	 * Select P = 1, R = 1, K = 7.5264, which results in J = 7, D = 5264
++	 * Example:
++	 * MCLK = 12 MHz and fS(ref) = 48 kHz
++	 * Select P = 1, R = 1, K = 8.192, which results in J = 8, D = 1920
 +	 */
-+	pll_p = 2;
++
++	pll_p = 1;
 +	pll_r = 1;
 +	pll_j = aic3104_divs[i].pllj_reg;
 +	pll_d = aic3104_divs[i].plld_reg;
@@ -1859,7 +1842,7 @@ Index: linux-2.6.26/sound/soc/codecs/tlv320aic3104.c
 Index: linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c	2009-08-12 09:39:00.000000000 -0700
++++ linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c	2009-09-14 14:16:25.000000000 +0100
 @@ -0,0 +1,643 @@
 +/*
 + * baby-tlv320aic3104.c
@@ -2506,8 +2489,8 @@ Index: linux-2.6.26/sound/soc/imx/baby-tlv320aic3104.c
 +MODULE_LICENSE("GPL");
 Index: linux-2.6.26/sound/soc/codecs/Kconfig
 ===================================================================
---- linux-2.6.26.orig/sound/soc/codecs/Kconfig	2009-08-12 09:38:05.000000000 -0700
-+++ linux-2.6.26/sound/soc/codecs/Kconfig	2009-08-12 09:39:00.000000000 -0700
+--- linux-2.6.26.orig/sound/soc/codecs/Kconfig	2009-09-14 14:15:52.000000000 +0100
++++ linux-2.6.26/sound/soc/codecs/Kconfig	2009-09-14 14:16:25.000000000 +0100
 @@ -69,3 +69,7 @@
  	tristate
  	depends on SND_SOC
@@ -2518,8 +2501,8 @@ Index: linux-2.6.26/sound/soc/codecs/Kconfig
 +
 Index: linux-2.6.26/sound/soc/soc-core.c
 ===================================================================
---- linux-2.6.26.orig/sound/soc/soc-core.c	2009-08-12 09:38:58.000000000 -0700
-+++ linux-2.6.26/sound/soc/soc-core.c	2009-08-13 14:56:53.000000000 -0700
+--- linux-2.6.26.orig/sound/soc/soc-core.c	2009-09-14 14:16:24.000000000 +0100
++++ linux-2.6.26/sound/soc/soc-core.c	2009-09-14 20:06:37.000000000 +0100
 @@ -351,10 +351,16 @@
  	cpu_dai->runtime = NULL;
  
