@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r22"
+PR = "r23"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 DEPENDS += "lua lua-native luatolua++"
