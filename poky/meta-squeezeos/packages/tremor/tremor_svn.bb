@@ -2,10 +2,12 @@ SECTION = "libs"
 PRIORITY = "optional"
 DESCRIPTION = "tremor is a low memory fixed point implementation of the vorbis codec."
 LICENSE = "BSD"
-SRCDATE = "${PV}"
+##SRCDATE = "${PV}"
 PR = "r1"
 
-SRC_URI = "svn://svn.xiph.org/branches/lowmem-branch;module=Tremor;rev=${PV};proto=http"
+PV = "${DISTRO_VERSION}+svnr${SRCREV}"
+
+SRC_URI = "svn://svn.slimdevices.com/repos/jive/7.4/trunk/squeezeplay/src;module=Tremor;proto=http"
 
 S = "${WORKDIR}/Tremor"
 
