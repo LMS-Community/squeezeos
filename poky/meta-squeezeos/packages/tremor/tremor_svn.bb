@@ -3,7 +3,7 @@ PRIORITY = "optional"
 DESCRIPTION = "tremor is a low memory fixed point implementation of the vorbis codec."
 LICENSE = "BSD"
 ##SRCDATE = "${PV}"
-PR = "r1"
+PR = "r2"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
 
