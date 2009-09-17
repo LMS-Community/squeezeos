@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay - SqueezeOS specific code"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r2"
+PR = "r3"
 
 DEPENDS += "squeezeplay"
 
@@ -22,6 +22,7 @@ do_install() {
 	rm ${D}${libdir}/* 
 	mkdir -p ${D}${libdir}/lua/5.1
 	install -m 0755 .libs/jiveWireless.so ${D}${libdir}/lua/5.1/jiveWireless.so
+        install -m 0755 .libs/squeezeos_bsp.so ${D}${libdir}/lua/5.1/squeezeos_bsp.so
 }
 
 
