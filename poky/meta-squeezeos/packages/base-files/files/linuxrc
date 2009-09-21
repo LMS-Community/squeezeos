@@ -30,11 +30,12 @@ MOUNT_OK=$?
 FACTORY_RESET=$?
 
 # Forced factory reset
-SQUEEZEOS_VERSION=`/usr/bin/head -1 /mnt/storage/etc/squeezeos.version | /usr/bin/cut -dr -f2`
+SQUEEZEOS_VERSION=`/usr/bin/head -1 /mnt/storage/etc/squeezeos.version | /usr/bin/cut -dr -f1`
+SQUEEZEOS_REVISION=`/usr/bin/head -1 /mnt/storage/etc/squeezeos.version | /usr/bin/cut -dr -f2`
 
 /bin/grep -q Fab4 /proc/cpuinfo
 if [ $? -eq 0 ]; then
-    if [ $SQUEEZEOS_VERSION -lt 4398 ]; then
+    if [ $SQUEEZEOS_REVISION -lt 4398 ]; then
         FACTORY_RESET=0
      fi
 fi
@@ -63,11 +64,27 @@ else
 	if [ $? -ne 0 ]
 	then
 		# Remove modified files
-		/bin/echo "SqueezeOS Upgraded"
+		/bin/echo "SqueezeOS upgraded from $SQUEEZEOS_VERSION"
 		/usr/bin/find /mnt/storage/ -type f | /bin/grep -v -f /etc/keep-after-upgrade | /usr/bin/xargs /bin/rm -f
 
 		# Delete udev cache
 		/bin/rm -f /etc/dev.tar
+
+		# Previous version
+		echo $SQUEEZEOS_VERSION 7.4 | awk  '{ if ($1 < $2) exit 1 }'
+		if [ $? -ne 0 ]
+		then
+			# Upgrade networking configuration
+			SSID=`awk 'BEGIN { FS="\""; ssid="?" } /ssid="/ { last=$2; if (ssid=="?") {ssid=$2}} /disabled=1/ {if (ssid==last) {ssid="?"}} END { print ssid }' /mnt/storage/etc/wpa_supplicant.conf`
+			SSID=`echo $SSID | sed -e 's/\s/_/g'`
+
+			/bin/echo "Upgrading interfaces, ssid=$SSID"
+
+			if [ "x$SSID" != "x" ]
+			then
+				echo "auto eth0=$SSID" >> /mnt/storage/etc/network/interfaces
+			fi
+		fi
 
 		# Store version
 		/bin/mkdir -p /mnt/storage/etc
