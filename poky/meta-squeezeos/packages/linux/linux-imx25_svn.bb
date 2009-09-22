@@ -12,7 +12,7 @@ inherit kernel
 
 SRC_URI = " \
           ${KERNELORG_MIRROR}pub/linux/kernel/v2.6/linux-2.6.26.tar.bz2 \
-          ${SQUEEZEOS_SVN};proto=https;module=${LINUX_ARCH} \
+          ${SQUEEZEOS_SVN};module=${LINUX_ARCH} \
           "
 
 S = "${WORKDIR}/linux-${LINUX_VERSION}"

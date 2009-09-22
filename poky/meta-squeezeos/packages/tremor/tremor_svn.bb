@@ -7,7 +7,7 @@ PR = "r3"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
 
-SRC_URI = "svn://svn.slimdevices.com/repos/jive/7.4/trunk/squeezeplay/src;module=Tremor;proto=http"
+SRC_URI = "${SQUEEZEPLAY_SCM};module=Tremor"
 
 S = "${WORKDIR}/Tremor"
 

@@ -10,7 +10,7 @@ PROVIDES = "marvell-sdio-module"
 DEPENDS = "virtual/kernel"
 RDEPENDS = "wireless-tools marvell-wlan-tools"
 
-SRC_URI = "${SQUEEZEOS_SVN};module=marvell_SD8686_v9;proto=https \
+SRC_URI = "${SQUEEZEOS_SVN};module=marvell_SD8686_v9 \
 	file://wlan-sdio \
 	"
 

@@ -16,7 +16,7 @@ RDEPENDS += "libdevel-nytprof-perl"
 
 # BROKEN: libencode-detect-perl
 
-SRC_URI = "svn://svn.slimdevices.com/repos/slim/7.4/branches;proto=http;module=noweb-sqlite \
+SRC_URI = "${SQUEEZECENTER_SCM};module=noweb-sqlite \
 	file://squeezecenter"
 	
 S = "${WORKDIR}/noweb-sqlite"
