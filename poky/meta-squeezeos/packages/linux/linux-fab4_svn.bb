@@ -2,6 +2,7 @@ DESCRIPTION = "Linux kernel for jive devices"
 SECTION = "kernel"
 LICENSE = "GPL"
 
+LINUX_ARCH = imx35
 LINUX_VERSION = "2.6.26"
 PV = "${LINUX_VERSION}+${DISTRO_VERSION}+svnr${SRCREV}"
 PR = "r9"
@@ -10,7 +11,7 @@ inherit kernel
 
 SRC_URI = " \
           ${KERNELORG_MIRROR}pub/linux/kernel/v2.6/linux-${LINUX_VERSION}.tar.bz2 \
-          ${SQUEEZEOS_SVN}/imx35;proto=https;module=linux-${LINUX_VERSION}-rt \
+          ${SQUEEZEOS_SVN};module=${LINUX_ARCH} \
           "
 
 S = "${WORKDIR}/linux-${LINUX_VERSION}"
@@ -21,7 +22,7 @@ COMPATIBLE_MACHINE = "(fab4)"
 # the kernel patches are managed by quilt, and checked into svn. modify patch
 # to simply apply the patchset using quilt.
 do_patch() {
-	cp -r ${WORKDIR}/linux-${LINUX_VERSION}-rt/patches ${S}
+	cp -r ${WORKDIR}/${LINUX_ARCH}/patches ${S}
 	cd ${S}
 	quilt push -a
 }

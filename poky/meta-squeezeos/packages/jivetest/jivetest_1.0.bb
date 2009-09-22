@@ -3,7 +3,7 @@ DESCRIPTION = "Jive test software"
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
 PR = "r3"
 
-SRC_URI="${SQUEEZEOS_SVN};module=jivetest;proto=https"
+SRC_URI="${SQUEEZEOS_SVN};module=jivetest"
 
 S = "${WORKDIR}/jivetest"
 
