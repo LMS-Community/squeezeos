@@ -5,9 +5,9 @@ DESCRIPTION = "Library for interacting with ID3 tags + patches from Audio::Scan"
 LICENSE = "GPL"
 
 PV = "svnr${SRCREV}"
-PR = "r15"
+PR = "r16"
 
-SRC_URI = "svn://svn.slimdevices.com/repos/opensource/tags/Audio-Scan/temp;proto=http;module=libid3tag \
+SRC_URI = "svn://svn.slimdevices.com/repos/opensource/tags/Audio-Scan/0.43;proto=http;module=libid3tag \
 	file://id3tag.pc"
 
 S = "${WORKDIR}/libid3tag"
