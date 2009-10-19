@@ -1,7 +1,7 @@
 DESCRIPTION = "IO::AIO - Asynchronous Input/Output"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r1"
+PR = "r2"
 
 SRC_URI = "http://backpan.perl.org/authors/id/M/ML/MLEHMANN/IO-AIO-${PV}.tar.gz \
 	file://libio-aio-perl-config.h \

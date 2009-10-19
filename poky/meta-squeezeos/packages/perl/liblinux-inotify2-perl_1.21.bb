@@ -1,7 +1,7 @@
 DESCRIPTION = "Linux::Inotify2 - scalable directory/file change notification"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r1"
+PR = "r2"
 
 SRC_URI = "http://backpan.perl.org/authors/id/M/ML/MLEHMANN/Linux-Inotify2-${PV}.tar.gz"
 
