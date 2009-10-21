@@ -1,0 +1,243 @@
+Index: linux-2.6.26/drivers/mxc/baby/baby_buttons.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/baby_buttons.c	2009-10-21 10:17:10.000000000 +0100
++++ linux-2.6.26/drivers/mxc/baby/baby_buttons.c	2009-10-21 10:18:15.000000000 +0100
+@@ -16,7 +16,7 @@
+ #include <asm/arch/gpio.h>
+ 
+ 
+-#define DEBOUNCE_TIME (5 * HZ/1000)
++#define DEBOUNCE_TIME (50 * HZ/1000)
+ 
+ #define NUM_BUTTONS 3
+ 
+@@ -33,158 +33,112 @@
+ 	BUTTON_RELEASED,
+ };
+ 
+-struct baby_buttons {
++struct baby_button {
++	int bnum;
+ 	struct input_dev *inputdev;
+ 	struct timer_list timer;
+-
+-	unsigned int gpio[NUM_BUTTONS];
+-	int value[NUM_BUTTONS];
+-	enum button_state bstate[NUM_BUTTONS];
+-	unsigned int *code;
++	unsigned int gpio;
++	enum button_state bstate;
++	unsigned int code;
++};
++struct  baby_buttons {
++	struct baby_button buttons[NUM_BUTTONS];
+ };
+ 
+-
+-static void button_handler(struct baby_buttons *state, int bnum)
++static void button_timer_callback(unsigned long data)
+ {
+-	unsigned int gpio = state->gpio[bnum];
+-	u32 irq = IOMUX_TO_IRQ(gpio);
+-
+-	switch (state->bstate[bnum]) {
++	struct baby_button *state = (struct baby_button *) data;
++	unsigned int gpio = state->gpio;
++	int pressed = !mxc_get_gpio_datain(gpio);
++	switch (state->bstate) {
+ 	case BUTTON_IDLE:
+-		/* H -> L just occurred (called by IRQ). */
+-		irq_desc[irq].chip->mask(irq);
+-		disable_irq(irq);
+-
+-		state->bstate[bnum] = BUTTON_PRESSED;
+-		mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
+-
+-		input_report_key(state->inputdev, state->code[bnum], 1);
++		printk(KERN_ERR "button_timer_callback:  should not be in timer callback when state is idle.\n");
+ 		break;
+-
+ 	case BUTTON_PRESSED:
+-		/* H -> L timeout has passed.
+-		 * button could be high (un-pressed) or low still pressed.
+-		 */
+-		if (mxc_get_gpio_datain(gpio)) {
+-			/* It was already released
+-			 * Since we could be in the release debounce time,
+-			 * start the debounce timer again.
+-			 */
+-			state->bstate[bnum] = BUTTON_RELEASED;
+-
+-			mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
+-			input_report_key(state->inputdev, state->code[bnum], 0);
+-		}
+-		else {
+-			/* Button still pressed.
+-			 * Wait for it to be released with IRQ.
+-			 */
+-			state->bstate[bnum] = BUTTON_HOLD;
+-
+-			set_irq_type(irq, IRQ_TYPE_EDGE_RISING);
+-			enable_irq(irq);
+-		}
++		state->bstate = BUTTON_HOLD;
+ 		break;
+-
+ 	case BUTTON_HOLD:
+-		irq_desc[irq].chip->mask(irq);
+-		disable_irq(irq);
+-
+-		state->bstate[bnum] = BUTTON_RELEASED;
+-		mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
+-
+-		input_report_key(state->inputdev, state->code[bnum], 0);
++		if (!pressed) {
++			state->bstate = BUTTON_RELEASED;
++			input_report_key(state->inputdev, state->code, 0);
++		}
+ 		break;
+-
+ 	case BUTTON_RELEASED:
+-		state->bstate[bnum] = BUTTON_IDLE;
+-
+-		set_irq_type(irq, IRQ_TYPE_EDGE_FALLING);
+-		enable_irq(irq);
++		state->bstate = BUTTON_IDLE;
+ 		break;
+ 	}
+-}
+-
+-
+-static void button_timer_callback(unsigned long data)
+-{
+-	struct baby_buttons *state = (struct baby_buttons *) data;
+-	int i;
+-
+-	for (i=0; i<NUM_BUTTONS; i++) {
+-		if (state->bstate[i] == BUTTON_PRESSED ||
+-		    state->bstate[i] == BUTTON_RELEASED) {
+-			button_handler(state, i);
+-		}
++	if (state->bstate != BUTTON_IDLE) {
++		mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
+ 	}
+ }
+ 
+ 
+ static irqreturn_t button_irq(int irq, void *data)
+ {
+-	struct baby_buttons *state = (struct baby_buttons *) data;
+-	int i;
+-
+-	for (i=0; i<NUM_BUTTONS; i++) {
+-		if (IOMUX_TO_IRQ(state->gpio[i]) == irq) {
+-			button_handler(state, i);
++	struct baby_button *state = (struct baby_button *) data;
++	int bnum;
++	for (bnum=0; bnum<NUM_BUTTONS; bnum++) {
++		if (IOMUX_TO_IRQ(state[bnum].gpio) == irq) {
++			if (state->bstate == BUTTON_IDLE) {
++				/* Only start state machine if we're in IDLE.  Otherwise
++				   ignore any state transitions */
++				mod_timer(&state->timer, jiffies + DEBOUNCE_TIME);
++				state->bstate = BUTTON_PRESSED;
++				input_report_key(state->inputdev, state->code, 1);
++			}
+ 		}
+ 	}
+-
+ 	return IRQ_HANDLED;
+ }
+ 
+ 
+ static int baby_buttons_probe(struct platform_device *pdev)
+ {
+-	struct baby_buttons *state;
+-	int i, ret;
+-
+-	state = kmalloc(sizeof(struct baby_buttons), GFP_KERNEL);
++	struct baby_button *state;
++	int bnum, ret;
++	struct input_dev *inputdev;
++	state = kmalloc(sizeof(struct baby_button[NUM_BUTTONS]), GFP_KERNEL);
+ 	if (!state) {
+ 		goto err0;
+ 	}
+-
+-	state->code = button_codes;
+-
+-	init_timer(&state->timer);
+-	state->timer.data = (unsigned long)state;
+-	state->timer.function = button_timer_callback;
+-
+-	state->inputdev = input_allocate_device();
+-	if (!state->inputdev) {
++	inputdev = input_allocate_device();
++	if (!inputdev) {
+ 		goto err1;
+ 	}
+-
+-	state->inputdev->name = "front panel";
+-	state->inputdev->evbit[0] = BIT(EV_KEY);
+-	state->inputdev->id.bustype = BUS_HOST;
+-
+-	for (i=0; i<NUM_BUTTONS; i++) {
+-		unsigned int gpio = platform_get_resource(pdev, IORESOURCE_MEM, i)->start;
+-
+-		__set_bit(state->code[i], state->inputdev->keybit);
+-
+-		state->gpio[i] = gpio;
+-		state->value[i] = mxc_get_gpio_datain(gpio);
+-
++	inputdev->name = "front panel";
++	inputdev->evbit[0] = BIT(EV_KEY);
++	inputdev->id.bustype = BUS_HOST;
++
++	for (bnum = 0; bnum < NUM_BUTTONS; bnum++) {
++		unsigned int gpio;
++		state[bnum].bnum = bnum;
++		state[bnum].code = button_codes[bnum];
++		init_timer(&state[bnum].timer);
++		state[bnum].timer.data     = (unsigned long)(&(state[bnum]));
++		state[bnum].timer.function = button_timer_callback;
++		state[bnum].inputdev = inputdev;
++
++		gpio = platform_get_resource(pdev, IORESOURCE_MEM, bnum)->start;
++		__set_bit(state[bnum].code, state->inputdev->keybit);
++		state[bnum].gpio = gpio;
++		set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_FALLING);
+ 		if (mxc_get_gpio_datain(gpio)) {
+-			state->bstate[i] = BUTTON_IDLE;
+-			set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_FALLING);
++			state[bnum].bstate = BUTTON_IDLE;
+ 		}
+ 		else {
+-			state->bstate[i] = BUTTON_HOLD;
+-			set_irq_type(IOMUX_TO_IRQ(gpio), IRQ_TYPE_EDGE_RISING);
++			/* Go ahead and start the button state machine */
++			state[bnum].bstate = BUTTON_HOLD;
++			mod_timer(&state[bnum].timer, jiffies + DEBOUNCE_TIME);
+ 		}
+ 
+-		ret = request_irq(IOMUX_TO_IRQ(gpio), button_irq, IRQF_DISABLED | IRQF_SAMPLE_RANDOM, pdev->name, state);
++		ret = request_irq(IOMUX_TO_IRQ(gpio), button_irq, IRQF_DISABLED | IRQF_SAMPLE_RANDOM, pdev->name, &state[bnum]);
+ 		if (ret) {
+ 			printk(KERN_ERR "Can't allocate irq\n");
+ 			continue;
+ 		}
+ 	}
+ 
+-	ret = input_register_device(state->inputdev);
++	ret = input_register_device(inputdev);
+ 	if (ret < 0) {
+ 		goto err2;
+ 	}
+@@ -192,7 +146,7 @@
+ 	return 0;
+ 
+  err2:
+-	input_free_device(state->inputdev);
++	input_free_device(inputdev);
+  err1:
+ 	kfree(state);
+  err0:
