@@ -1,7 +1,7 @@
 DESCRIPTION = "DBD::SQLite - SQLite driver for the Perl5 Database Interface (DBI)"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r2"
+PR = "r5"
 
 DEPENDS = "libdbi-perl libdbd-sqlite-perl-native"
 DEPENDS = "libdbi-perl libdbi-perl-native sqlite3"
