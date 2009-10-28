@@ -1,6 +1,6 @@
 require libdbd-sqlite-perl_${PV}.bb
 inherit native
 
-PR = "r5"
+PR = "r6"
 
 DEPENDS = "libdbi-perl sqlite3"
