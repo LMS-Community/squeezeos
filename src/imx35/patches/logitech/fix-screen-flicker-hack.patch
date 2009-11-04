@@ -1,0 +1,48 @@
+Index: linux-2.6.26/drivers/video/mxc/mxcfb.c
+===================================================================
+--- linux-2.6.26.orig/drivers/video/mxc/mxcfb.c	2009-11-04 14:52:54.000000000 +0000
++++ linux-2.6.26/drivers/video/mxc/mxcfb.c	2009-11-04 14:55:41.000000000 +0000
+@@ -488,6 +488,7 @@
+ 	case MXCFB_WAIT_FOR_VSYNC:
+ 		{
+ #ifndef CONFIG_ARCH_MX3
++#ifndef CONFIG_MACH_FAB4
+ 			mxcfb_drv_data.vsync_flag = 0;
+ 			ipu_enable_irq(IPU_IRQ_SDC_DISP3_VSYNC);
+ 			if (!wait_event_interruptible_timeout
+@@ -504,6 +505,7 @@
+ 				break;
+ 			}
+ #endif
++#endif
+ 			break;
+ 		}
+ #ifdef CONFIG_FB_MXC_TVOUT
+@@ -818,7 +820,11 @@
+ 	base *= (var->bits_per_pixel) / 8;
+ 	base += info->fix.smem_start;
+ 
++#ifndef CONFIG_MACH_FAB4
++	/* see comment below */
+ 	down(&mxc_fbi->flip_sem);
++	printk("DOWN!\n");
++#endif
+ 
+ 	spin_lock_irqsave(&mxc_fbi->fb_lock, lock_flags);
+ 
+@@ -830,8 +836,15 @@
+ 				      mxc_fbi->cur_ipu_buf, base) == 0) {
+ 		ipu_select_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 				  mxc_fbi->cur_ipu_buf);
++#ifndef CONFIG_MACH_FAB4
++		/* it's possible were missing an irq here, and that can
++		 * cause the screen to flicker. the application design
++		 * means this check should not be required, so we need
++		 * to test without this.
++		 */
+ 		ipu_clear_irq(mxc_fbi->ipu_ch_irq);
+ 		ipu_enable_irq(mxc_fbi->ipu_ch_irq);
++#endif
+ 	} else {
+ 		dev_err(info->device,
+ 			"Error updating SDC buf %d to address=0x%08lX\n",
