@@ -1,0 +1,194 @@
+Fix a sleeping function called in invalid context backtrace on the fab4.
+
+This patch solves this oops:
+__________________________________________________________________________________
+BUG: sleeping function called from invalid context
+firmware/ir_con(352) at kernel/rtmutex.c:743
+in_atomic():0 [00000000], irqs_disabled():128
+[<c02fb664>] (dump_stack+0x0/0x14) from [<c0048060>] (__might_sleep+0x108/0x12c)
+[<c0047f58>] (__might_sleep+0x0/0x12c) from [<c02fe2b8>] (__rt_spin_lock+0x38/0x68) r4:c040c810
+[<c02fe280>] (__rt_spin_lock+0x0/0x68) from [<c02fe2f8>](rt_spin_lock+0x10/0x14) r5:c040c810 r4:c040c7f4
+[<c02fe2e8>] (rt_spin_lock+0x0/0x14) from [<c003fbec>] (mxc_set_gpio_dataout+0x4c/0x70)
+[<c003fba0>] (mxc_set_gpio_dataout+0x0/0x70) from [<c022e534>] (psoc_reset+0x20/0x44) r7:c7d1a860 r6:c7e0bf8c r5:00418930 r4:c7d1a860
+[<c022e514>] (psoc_reset+0x0/0x44) from [<c022ebb4>] (fab4_prog_firmware+0x224/0x474) r5:c7e0bf88 r4:40000013
+[<c022e990>] (fab4_prog_firmware+0x0/0x474) from [<c01c3068>] (request_firmware_work_func+0x68/0x90)
+[<c01c3000>] (request_firmware_work_func+0x0/0x90) from [<c0063ed0>] (kthread+0x54/0x80) r5:c01c3000 r4:c7e40720
+[<c0063e7c>] (kthread+0x0/0x80) from [<c005211c>] (do_exit+0x0/0x670) r5:00000000 r4:00000000
+______________
+____________________________________________________________________
+
+What happens is this:
+In file drivers/mxc/fab4/fab4_ir.c:643 the routine 'psoc_reset()' is being called.
+Prior to calling this routine the interrupts are being disabled because the action needs to
+be completed within 125 usec according to the comments in the code.
+To accomplish this the interrupts are being disabled. Instead of
+disabling interrupts also 'preempt_disable()/preempt_enable()' could be used, but that
+does not disable interrupts, it only prevents scheduling to another task.
+Since I do not know how much room there is and if preempt_disable() would work,
+we leave the code as is and make the gpio layer code safe to be called with
+interrupts disabled.
+The psoc_reset() calls mxc_set_gpio_dataout() with interrupts disabled, but this
+routine tries to lock a normal spinlock which is in fact a mutex on preempt-rt.
+A mutex can sleep what is not allowed with interrupts disabled, so this results
+in the backtrace above...
+
+We fix this by using a raw_spinlock type instead of a normal spinlock
+raw_spinlocks just disables interrupts itself and are thus
+safe to be used while interrupts are dsiabled.
+This might introduce some additional latencies, but since the lock is only
+used locally the additional latencies are likely to be low enough to remain
+unnoticed.
+
+This change will influence all code that does do something with GPIOs.
+
+Further there is a call to msleep() in the code with interrupts disabled.
+This sleep takes steps of 10msec up to 100msec. There is no need to keep
+the interrupts locked during this time, and it is even not allowed to
+schedule() with interrupts locked. So, we give up this lock just before
+this sleep, and reclaim it directly after it.
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ arch/arm/plat-mxc/gpio.c   |    2 +-
+ drivers/mxc/fab4/fab4_ir.c |   37 ++++++++++++++++++++++++-------------
+ 2 files changed, 25 insertions(+), 14 deletions(-)
+
+Index: linux-2.6.26/arch/arm/plat-mxc/gpio.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/gpio.c	2009-10-17 17:03:46.000000000 +0200
++++ linux-2.6.26/arch/arm/plat-mxc/gpio.c	2009-10-17 17:05:48.000000000 +0200
+@@ -75,7 +75,7 @@ struct gpio_port {
+ 	u32 irq_is_level_map;	/*!< if a pin's irq is level sensitive. default is edge */
+ 	u32 suspend_wakeup;
+ 	u32 saved_wakeup;
+-	spinlock_t lock;	/*!< lock when operating on the port */
++	raw_spinlock_t lock;	/*!< lock when operating on the port */
+ };
+ static struct gpio_port gpio_port[GPIO_PORT_NUM];
+ 
+Index: linux-2.6.26/drivers/mxc/fab4/fab4_ir.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/fab4/fab4_ir.c	2009-10-17 17:53:43.000000000 +0200
++++ linux-2.6.26/drivers/mxc/fab4/fab4_ir.c	2009-10-17 18:18:35.000000000 +0200
+@@ -560,7 +560,7 @@ static u8 psoc_read_byte(struct fab4_ir_
+ 	return val;
+ }
+ 
+-static int psoc_wait_and_poll(struct fab4_ir_data *data)
++static int psoc_wait_and_poll(struct fab4_ir_data *data, unsigned long *flags)
+ {
+ 	int i;
+ 
+@@ -571,12 +571,22 @@ static int psoc_wait_and_poll(struct fab
+ 	/* Wait for HIGH to LOW transition */
+ 	i = 0;
+ 	while (mxc_get_gpio_datain(data->sdata) != 0) {
++		int irqflags;
+ 		i += PSOC_WAIT_MDELAY;
+ 		if (i >= PSOC_WAIT_MTIMEOUT) {
+ 			return -1;
+ 		}
+ 
++		/* Do NOT call msleep with interrupts disabled */
++		irqflags = irqs_disabled();
++		if (unlikely(irqflags))
++			local_irq_restore(*flags);
++
+ 		msleep(PSOC_WAIT_MDELAY);
++
++		if (unlikely(irqflags))
++			local_irq_save(*flags);
++
+ 	}
+ 
+ 	/* Apply a bit stream of 40 zero bits */
+@@ -590,13 +600,14 @@ static int psoc_wait_and_poll(struct fab
+ 	return 0;
+ }
+ 
+-static void psoc_send_vectors(struct fab4_ir_data *data, u32 vectors[], size_t len)
++static void psoc_send_vectors(struct fab4_ir_data *data, u32 vectors[],
++			      size_t len, unsigned long *flags)
+ {
+ 	int i;
+ 
+ 	for (i=0; i<len; i++) {
+ 		if (vectors[i] == WAIT_AND_POLL) {
+-			psoc_wait_and_poll(data);
++			psoc_wait_and_poll(data, flags);
+ 		}
+ 		else {
+ 			psoc_write_vector(data, vectors[i]);
+@@ -643,11 +654,11 @@ static void fab4_prog_firmware(const str
+ 	psoc_reset(data);
+ 
+ 	/* initialize target */
+-	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init));
++	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init), &flags);
+  	local_irq_restore(flags);
+ 
+ 	/* verify silicon id */
+-	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup));
++	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup), &flags);
+ 	silicon_id = psoc_read_byte(data, 0x78) << 8;
+ 	silicon_id |= psoc_read_byte(data, 0x79);
+ 
+@@ -657,7 +668,7 @@ static void fab4_prog_firmware(const str
+ 	}
+ 
+ 	/* checksum */
+-	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup));
++	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup), &flags);
+ 	chksum = psoc_read_byte(data, 0x79) << 8;
+ 	chksum |= psoc_read_byte(data, 0x78);
+ 
+@@ -669,22 +680,22 @@ static void fab4_prog_firmware(const str
+ 	printk(KERN_INFO "FAB4 IR: programming fw (checksum was %x)\n", chksum);
+ 
+ 	/* bulk erase */
+-	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase));
++	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase), &flags);
+ 
+ 	/* program */
+ 	for (block=0; block<64; block++) {
+ 		psoc_write_block(data, data->program + (block * 64));
+ 
+ 		psoc_write_vector(data, 0x27D007 | (block << 3));
+-		psoc_send_vectors(data, psoc_program, ARRAY_SIZE(psoc_program));
++		psoc_send_vectors(data, psoc_program, ARRAY_SIZE(psoc_program), &flags);
+ 	}
+ 
+ 	/* secure */
+ 	psoc_write_block(data, data->secure);
+-	psoc_send_vectors(data, psoc_secure, ARRAY_SIZE(psoc_secure));
++	psoc_send_vectors(data, psoc_secure, ARRAY_SIZE(psoc_secure), &flags);
+ 
+ 	/* checksum */
+-	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup));
++	psoc_send_vectors(data, psoc_checksum_setup, ARRAY_SIZE(psoc_checksum_setup), &flags);
+ 	chksum = psoc_read_byte(data, 0x79) << 8;
+ 	chksum |= psoc_read_byte(data, 0x78);
+ 
+@@ -738,11 +749,11 @@ static void fab4_erase_firmware(struct f
+ 	psoc_reset(data);
+ 
+ 	/* initialize target */
+-	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init));
++	psoc_send_vectors(data, psoc_init, ARRAY_SIZE(psoc_init), &flags);
+  	local_irq_restore(flags);
+ 
+ 	/* verify silicon id */
+-	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup));
++	psoc_send_vectors(data, psoc_id_setup, ARRAY_SIZE(psoc_id_setup), &flags);
+ 	silicon_id = psoc_read_byte(data, 0x78) << 8;
+ 	silicon_id |= psoc_read_byte(data, 0x79);
+ 
+@@ -752,7 +763,7 @@ static void fab4_erase_firmware(struct f
+ 	}
+ 
+ 	/* bulk erase */
+-	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase));
++	psoc_send_vectors(data, psoc_bluk_erase, ARRAY_SIZE(psoc_bluk_erase), &flags);
+ 
+ 	printk(KERN_INFO "FAB4 IR: fw erase ok\n");
+ 
