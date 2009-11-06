@@ -37,6 +37,7 @@ do_install() {
 	for i in radio.png cover.png; do
 		cp ${D}/${prefix}/squeezecenter/HTML.tmp/Default/html/images/$i ${D}/${prefix}/squeezecenter/HTML/Default/html/images
 	done
+	mv ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/errors ${D}/${prefix}/squeezecenter/HTML/Default/html
 	rm -r ${D}/${prefix}/squeezecenter/HTML.tmp
 	
 	# Leave firmware version files in place, just remove the binaries
