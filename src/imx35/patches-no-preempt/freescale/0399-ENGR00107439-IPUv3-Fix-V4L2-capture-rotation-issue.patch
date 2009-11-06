@@ -1,0 +1,124 @@
+From 98f8a2f647e14f95724d61d1ab2bec97bbcd0c4c Mon Sep 17 00:00:00 2001
+From: Liu Ying <b17645@freescale.com>
+Date: Tue, 10 Feb 2009 17:05:42 +0800
+Subject: [PATCH] ENGR00107439 IPUv3: Fix V4L2 capture rotation issue
+
+Add horizontal flip enable bit setting in register IC_IDMAC_1 to support
+horizontal filp or 180 rotation operations done by IC(PP, VF, ENC) channels.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+---
+ drivers/mxc/Kconfig            |    1 +
+ drivers/mxc/ipu3/Kconfig       |    2 ++
+ drivers/mxc/ipu3/ipu_ic.c      |   21 ++++++++++++++++++++-
+ include/asm-arm/arch-mxc/ipu.h |    6 +++---
+ 4 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/Kconfig b/drivers/mxc/Kconfig
+index 4e5bfb9..8d4429e 100644
+--- a/drivers/mxc/Kconfig
++++ b/drivers/mxc/Kconfig
+@@ -11,6 +11,7 @@ config MXC_IPU
+ 	depends on !ARCH_MX25
+ 	select MXC_IPU_V1 if !ARCH_MX37 && !ARCH_MX51
+ 	select MXC_IPU_V3 if ARCH_MX37 || ARCH_MX51
++	select MXC_IPU_V3D if ARCH_MX37
+ 	help
+ 	  If you plan to use the Image Processing unit, say
+ 	  Y here. IPU is needed by Framebuffer and V4L2 drivers.
+diff --git a/drivers/mxc/ipu3/Kconfig b/drivers/mxc/ipu3/Kconfig
+index d484e94..0ae0ffa 100644
+--- a/drivers/mxc/ipu3/Kconfig
++++ b/drivers/mxc/ipu3/Kconfig
+@@ -1,3 +1,5 @@
+ config MXC_IPU_V3
+ 	bool
+ 
++config MXC_IPU_V3D
++	bool
+diff --git a/drivers/mxc/ipu3/ipu_ic.c b/drivers/mxc/ipu3/ipu_ic.c
+index 8759f7b..f43b920 100644
+--- a/drivers/mxc/ipu3/ipu_ic.c
++++ b/drivers/mxc/ipu3/ipu_ic.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -374,6 +374,7 @@ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ {
+ 	u32 ic_idmac_1, ic_idmac_2, ic_idmac_3;
+ 	u32 temp_rot = bitrev8(rot) >> 5;
++	bool need_hor_flip = false;
+ 
+ 	if ((burst_size != 8) && (burst_size != 16)) {
+ 		dev_dbg(g_ipu_dev, "Illegal burst length for IC\n");
+@@ -383,6 +384,9 @@ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ 	width--;
+ 	height--;
+ 
++	if (temp_rot & 0x2)	/* Need horizontal flip */
++		need_hor_flip = true;
++
+ 	ic_idmac_1 = __raw_readl(IC_IDMAC_1);
+ 	ic_idmac_2 = __raw_readl(IC_IDMAC_2);
+ 	ic_idmac_3 = __raw_readl(IC_IDMAC_3);
+@@ -392,6 +396,11 @@ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ 		else
+ 			ic_idmac_1 &= ~IC_IDMAC_1_CB2_BURST_16;
+ 
++		if (need_hor_flip)
++			ic_idmac_1 |= IC_IDMAC_1_PP_FLIP_RS;
++		else
++			ic_idmac_1 &= ~IC_IDMAC_1_PP_FLIP_RS;
++
+ 		ic_idmac_2 &= ~IC_IDMAC_2_PP_HEIGHT_MASK;
+ 		ic_idmac_2 |= height << IC_IDMAC_2_PP_HEIGHT_OFFSET;
+ 
+@@ -421,6 +430,11 @@ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ 		else
+ 			ic_idmac_1 &= ~IC_IDMAC_1_CB0_BURST_16;
+ 
++		if (need_hor_flip)
++			ic_idmac_1 |= IC_IDMAC_1_PRPENC_FLIP_RS;
++		else
++			ic_idmac_1 &= ~IC_IDMAC_1_PRPENC_FLIP_RS;
++
+ 		ic_idmac_2 &= ~IC_IDMAC_2_PRPENC_HEIGHT_MASK;
+ 		ic_idmac_2 |= height << IC_IDMAC_2_PRPENC_HEIGHT_OFFSET;
+ 
+@@ -438,6 +452,11 @@ int _ipu_ic_idma_init(int dma_chan, uint16_t width, uint16_t height,
+ 		else
+ 			ic_idmac_1 &= ~IC_IDMAC_1_CB1_BURST_16;
+ 
++		if (need_hor_flip)
++			ic_idmac_1 |= IC_IDMAC_1_PRPVF_FLIP_RS;
++		else
++			ic_idmac_1 &= ~IC_IDMAC_1_PRPVF_FLIP_RS;
++
+ 		ic_idmac_2 &= ~IC_IDMAC_2_PRPVF_HEIGHT_MASK;
+ 		ic_idmac_2 |= height << IC_IDMAC_2_PRPVF_HEIGHT_OFFSET;
+ 
+diff --git a/include/asm-arm/arch-mxc/ipu.h b/include/asm-arm/arch-mxc/ipu.h
+index 09a4bfc..a28d44e 100644
+--- a/include/asm-arm/arch-mxc/ipu.h
++++ b/include/asm-arm/arch-mxc/ipu.h
+@@ -824,10 +824,10 @@ void ipu_uninit_channel(ipu_channel_t channel);
+ 
+ static inline bool ipu_can_rotate_in_place(ipu_rotate_mode_t rot)
+ {
+-#ifdef CONFIG_MXC_IPU_V1
+-	return (rot < IPU_ROTATE_90_RIGHT);
+-#else
++#ifdef CONFIG_MXC_IPU_V3D
+ 	return (rot < IPU_ROTATE_HORIZ_FLIP);
++#else
++	return (rot < IPU_ROTATE_90_RIGHT);
+ #endif
+ }
+ 
+-- 
+1.5.4.4
+

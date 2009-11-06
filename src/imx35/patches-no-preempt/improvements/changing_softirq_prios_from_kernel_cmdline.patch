@@ -1,0 +1,227 @@
+The RT-patch originally creates all its softirq-threads at
+priority 50. Of course, this is not a usable default for many
+realtime systems and therefor these priorities has to be tuneable
+for each RT-system. But, currently there is no way within the
+kernel to adjust this to the needs of the user. Some scripts
+are floating around to do this from userspace, but for several
+applications the priorities should already be set properly by
+the kernel itself before userland is started.
+
+This patch changes this by adding a kernel cmd-line option that
+can handle a map of priorities.
+
+Remarks:
+* Priorities are only set at creation time of the softirq.
+* Priorities has to be set per-cpu.
+* If userland overrules, it is NOT restored by this code.
+* if no new kernel cmdline options are given, the kernel works
+  as before, and all softirqs start at 50.
+* No wildcards are supported on the cmdline.
+
+See kernel/Documentation/kernel-parameters.txt for usage info.
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+
+---
+ Documentation/kernel-parameters.txt |   10 +++
+ kernel/Kconfig.preempt              |   16 +++++
+ kernel/softirq.c                    |  109 ++++++++++++++++++++++++++++++------
+ 3 files changed, 118 insertions(+), 17 deletions(-)
+
+Index: linux-2.6.26/Documentation/kernel-parameters.txt
+===================================================================
+--- linux-2.6.26.orig/Documentation/kernel-parameters.txt	2009-03-15 21:48:21.000000000 +0100
++++ linux-2.6.26/Documentation/kernel-parameters.txt	2009-03-15 21:48:21.000000000 +0100
+@@ -887,6 +887,16 @@ and is between 256 and 4096 characters. 
+ 			Format: pmap_hirq=megasas:90,eth0:40,50
+ 			The first field without ':', is the default prio.
+ 
++	pmap_sirq=	[IRQ-threading] List of priorities each softirq
++			thread must have. Used to overrule the list provided
++			by CONFIG_PREEMPT_SOFTIRQS_PRIORITIES
++			Format: pmap_sirq=block/0:90,sched/0:75,50
++			The priorities have to be specified per-cpu.
++			The first field without ':', is the default prio.
++			The names have to match the softirq_names[] table in
++			kernel/softirq.c, (thus without 'softirq-' prefix) to
++			keep the cmd-line short.
++
+ 	ports=		[IP_VS_FTP] IPVS ftp helper module
+ 			Default is 21.
+ 			Up to 8 (IP_VS_APP_MAX_PORTS) ports
+Index: linux-2.6.26/kernel/softirq.c
+===================================================================
+--- linux-2.6.26.orig/kernel/softirq.c	2009-03-15 21:43:08.000000000 +0100
++++ linux-2.6.26/kernel/softirq.c	2009-03-15 21:55:50.000000000 +0100
+@@ -68,6 +68,9 @@ struct softirqdata {
+ 
+ static DEFINE_PER_CPU(struct softirqdata [MAX_SOFTIRQ], ksoftirqd);
+ 
++static char *cmdline;
++
++
+ #ifdef CONFIG_PREEMPT_SOFTIRQS
+ /*
+  * Preempting the softirq causes cases that would not be a
+@@ -725,10 +728,28 @@ EXPORT_SYMBOL(tasklet_unlock_wait);
+ 
+ #endif
+ 
++static const char *softirq_names [] =
++{
++  [HI_SOFTIRQ]		= "high",
++  [SCHED_SOFTIRQ]	= "sched",
++  [TIMER_SOFTIRQ]	= "timer",
++  [NET_TX_SOFTIRQ]	= "net-tx",
++  [NET_RX_SOFTIRQ]	= "net-rx",
++  [BLOCK_SOFTIRQ]	= "block",
++  [TASKLET_SOFTIRQ]	= "tasklet",
++#ifdef CONFIG_HIGH_RES_TIMERS
++  [HRTIMER_SOFTIRQ]	= "hrtimer",
++#endif
++  [RCU_SOFTIRQ]		= "rcu",
++};
++
++static int get_softirq_prio(const char *name);
++
+ static int ksoftirqd(void * __data)
+ {
+-	struct sched_param param = { .sched_priority = MAX_USER_RT_PRIO/2 };
++	struct sched_param param = { 0, };
+ 	struct softirqdata *data = __data;
++	char buf[50];
+ 	u32 softirq_mask = (1 << data->nr);
+ 	struct softirq_action *h;
+ 	int cpu = data->cpu;
+@@ -736,8 +757,12 @@ static int ksoftirqd(void * __data)
+ #ifdef CONFIG_PREEMPT_SOFTIRQS
+ 	init_waitqueue_head(&data->wait);
+ #endif
+-
++	/* Lookup the priority of this softirq, and set the prio accordingly */
++	snprintf(buf, sizeof(buf), "%s/%lu",
++		 softirq_names[data->nr], data->cpu);
++	param.sched_priority = get_softirq_prio(buf);
+ 	sys_sched_setscheduler(current->pid, SCHED_FIFO, &param);
++
+ 	current->flags |= PF_SOFTIRQ;
+ 	set_current_state(TASK_INTERRUPTIBLE);
+ 
+@@ -873,21 +898,6 @@ void takeover_tasklets(unsigned int cpu)
+ }
+ #endif /* CONFIG_HOTPLUG_CPU */
+ 
+-static const char *softirq_names [] =
+-{
+-  [HI_SOFTIRQ]		= "high",
+-  [SCHED_SOFTIRQ]	= "sched",
+-  [TIMER_SOFTIRQ]	= "timer",
+-  [NET_TX_SOFTIRQ]	= "net-tx",
+-  [NET_RX_SOFTIRQ]	= "net-rx",
+-  [BLOCK_SOFTIRQ]	= "block",
+-  [TASKLET_SOFTIRQ]	= "tasklet",
+-#ifdef CONFIG_HIGH_RES_TIMERS
+-  [HRTIMER_SOFTIRQ]	= "hrtimer",
+-#endif
+-  [RCU_SOFTIRQ]		= "rcu",
+-};
+-
+ static int __cpuinit cpu_callback(struct notifier_block *nfb,
+ 				  unsigned long action,
+ 				  void *hcpu)
+@@ -1014,3 +1024,68 @@ int on_each_cpu(void (*func) (void *info
+ }
+ EXPORT_SYMBOL(on_each_cpu);
+ #endif
++
++static int check_prio_range(int prio)
++{
++	if ((prio <= 0) || (prio >= MAX_USER_RT_PRIO))
++		prio = MAX_USER_RT_PRIO/2;
++
++	return prio;
++}
++
++static int get_default_irq_prio(const char *prio_map)
++{
++	int prio;
++
++	if (!get_map_option(prio_map, NULL, &prio))
++		prio = MAX_USER_RT_PRIO/2;
++
++	return prio;
++}
++
++/*
++ * Lookup the softirq thread priority.
++ * A map for the priorities can be given on the kernel commandline or Kconfig.
++ * if name is NULL the default prio is used.
++ */
++static int get_softirq_prio(const char *name)
++{
++	int  prio;
++	char *prio_map = cmdline;
++
++	/* If no commandline options, use thread prio defaults from Kconfig.*/
++#ifdef CONFIG_PREEMPT_SOFTIRQS_PRIORITIES
++	if (!prio_map)
++		prio_map = CONFIG_PREEMPT_SOFTIRQS_PRIORITIES;
++#endif
++	if (!get_map_option(prio_map, name, &prio))
++		prio = get_default_irq_prio(prio_map);
++
++	prio = check_prio_range(prio);
++
++	return prio;
++}
++
++/*
++ * Store the pointer to the arguments in a global var, and store the
++ * default prio globally
++ */
++static int __init softirq_prio_map_setup(char *str)
++{
++	if (!str) /* sanity check */
++		return 1;
++
++	cmdline		= str; /* store it for later use */
++	return 1;
++}
++
++/*
++ * The commandline looks like this:
++ *                 pmap_sirq=block/0:90,sched/0:75,50
++ * The first field without the ':' is used as the default for all
++ * soft-irq-threads. The priorities are only set on creation of the
++ * softirq threads. Unknown or redundant fields are ignored.
++ * The names have to match the softirq_names[] table without 'softirq-' prefix
++ * to keep the cmd-line short.
++ */
++__setup("pmap_sirq=", softirq_prio_map_setup);
+Index: linux-2.6.26/kernel/Kconfig.preempt
+===================================================================
+--- linux-2.6.26.orig/kernel/Kconfig.preempt	2009-03-15 21:48:21.000000000 +0100
++++ linux-2.6.26/kernel/Kconfig.preempt	2009-03-15 21:48:21.000000000 +0100
+@@ -102,6 +102,22 @@ config PREEMPT_SOFTIRQS
+ 
+ 	  Say N if you are unsure.
+ 
++config PREEMPT_SOFTIRQS_PRIORITIES
++	string "Thread Softirqs priorities"
++	default "50"
++	depends on PREEMPT_SOFTIRQS
++	help
++	  This option specifies the priority of each soft-irq thread.
++
++	  Format: "block/0:90,sched/0:75,50"
++	  The priorities have to be specified per-cpu.
++	  The first field without ':', is the default prio.
++	  The names have to match the softirq_names[] table in
++	  kernel/softirq.c, (thus without 'softirq-' prefix) to
++	  keep the cmd-line short.
++
++	  Leave default (50) if you are unsure.
++
+ config PREEMPT_HARDIRQS
+ 	bool "Thread Hardirqs"
+ 	default n

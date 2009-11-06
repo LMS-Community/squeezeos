@@ -1,0 +1,33 @@
+From ef2b1a2eab432816ca40eb6a0631fedd522ae191 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 21 Dec 2007 00:27:47 -0500
+Subject: [PATCH] Unionfs: use locking around i_size_write in 32-bit systems
+
+CC: Hugh Dickins <hugh@veritas.com>
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/super.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 0ff9a9e..ed3eb04 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -69,7 +69,13 @@ static void unionfs_read_inode(struct inode *inode)
+  */
+ static void unionfs_delete_inode(struct inode *inode)
+ {
++#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
++	spin_lock(&inode->i_lock);
++#endif
+ 	i_size_write(inode, 0);	/* every f/s seems to do that */
++#if BITS_PER_LONG == 32 && defined(CONFIG_SMP)
++	spin_unlock(&inode->i_lock);
++#endif
+ 
+ 	if (inode->i_data.nrpages)
+ 		truncate_inode_pages(&inode->i_data, 0);
+-- 
+1.5.4.3
+

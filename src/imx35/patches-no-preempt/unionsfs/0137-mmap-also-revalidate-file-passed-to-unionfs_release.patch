@@ -1,0 +1,49 @@
+From 4c9cc310d02d026223d57b3b2fe5e405732e32e8 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 19 May 2007 19:17:30 -0400
+Subject: [PATCH] mmap: also revalidate file passed to unionfs_release
+
+Conflicts:
+
+	fs/unionfs/commonfops.c
+---
+ fs/unionfs/commonfops.c |   12 ++++++++++--
+ 1 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index fd2e546..b0ec71b 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -603,12 +603,19 @@ out_nofree:
+ int unionfs_file_release(struct inode *inode, struct file *file)
+ {
+ 	struct file *hidden_file = NULL;
+-	struct unionfs_file_info *fileinfo = UNIONFS_F(file);
+-	struct unionfs_inode_info *inodeinfo = UNIONFS_I(inode);
++	struct unionfs_file_info *fileinfo;
++	struct unionfs_inode_info *inodeinfo;
+ 	struct super_block *sb = inode->i_sb;
+ 	int bindex, bstart, bend;
+ 	int fgen, err = 0;
+ 
++	unionfs_read_lock(sb);
++	if ((err = unionfs_file_revalidate(file, 1)))
++		goto out;
++	fileinfo = UNIONFS_F(file);
++	BUG_ON(file->f_dentry->d_inode != inode);
++	inodeinfo = UNIONFS_I(inode);
++
+ 	unionfs_check_file(file);
+ 	unionfs_read_lock(sb);
+ 	/*
+@@ -618,6 +625,7 @@ int unionfs_file_release(struct inode *inode, struct file *file)
+ 	 */
+ 	if ((err = unionfs_file_revalidate(file, 1)))
+ 		goto out;
++
+ 	/* fput all the hidden files */
+ 	fgen = atomic_read(&fileinfo->generation);
+ 	bstart = fbstart(file);
+-- 
+1.5.4.3
+

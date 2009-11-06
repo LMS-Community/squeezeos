@@ -1,0 +1,2239 @@
+---
+ arch/arm/kernel/setup.c              |   23 
+ arch/arm/mach-mx3/time.c             |  152 +++++
+ arch/arm/mach-mx35/Kconfig           |    8 
+ arch/arm/mach-mx35/Makefile          |    1 
+ arch/arm/mach-mx35/board-mx35_fab4.h |  107 ++++
+ arch/arm/mach-mx35/devices.c         |   80 +++
+ arch/arm/mach-mx35/mx35_3stack_irq.c |    1 
+ arch/arm/mach-mx35/mx35_fab4.c       |  741 ++++++++++++++++++++++++++++
+ arch/arm/mach-mx35/mx35_fab4_gpio.c  |  909 +++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx35/serial.c          |    1 
+ arch/arm/tools/mach-types            |    1 
+ 11 files changed, 2024 insertions(+)
+
+Index: linux-2.6.26/arch/arm/mach-mx3/time.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/arch/arm/mach-mx3/time.c	2009-04-29 14:18:43.000000000 +0100
+@@ -0,0 +1,152 @@
++/*
++ * System Timer Interrupt reconfigured to run in free-run mode.
++ * Author: Vitaly Wool
++ * Copyright 2004 MontaVista Software Inc.
++ * Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++/*!
++ * @file time.c
++ * @brief This file contains OS tick and wdog timer implementations.
++ *
++ * This file contains OS tick and wdog timer implementations.
++ *
++ * @ingroup Timers
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <asm/hardware.h>
++#include <asm/mach/time.h>
++#include <asm/io.h>
++#include <asm/arch/common.h>
++
++/*!
++ * This is the timer interrupt service routine to do required tasks.
++ * It also services the WDOG timer at the frequency of twice per WDOG
++ * timeout value. For example, if the WDOG's timeout value is 4 (2
++ * seconds since the WDOG runs at 0.5Hz), it will be serviced once
++ * every 2/2=1 second.
++ *
++ * @param  irq          GPT interrupt source number (not used)
++ * @param  dev_id       this parameter is not used
++ * @return always returns \b IRQ_HANDLED as defined in
++ *         include/linux/interrupt.h.
++ */
++static irqreturn_t mxc_timer_interrupt(int irq, void *dev_id)
++{
++	unsigned int next_match;
++
++	write_seqlock(&xtime_lock);
++
++	if (__raw_readl(MXC_GPT_GPTSR) & GPTSR_OF1) {
++		do {
++			timer_tick();
++			next_match = __raw_readl(MXC_GPT_GPTOCR1) + LATCH;
++			__raw_writel(GPTSR_OF1, MXC_GPT_GPTSR);
++			__raw_writel(next_match, MXC_GPT_GPTOCR1);
++		} while ((signed long)(next_match -
++				       __raw_readl(MXC_GPT_GPTCNT)) <= 0);
++	}
++
++	write_sequnlock(&xtime_lock);
++
++	return IRQ_HANDLED;
++}
++
++/*!
++ * This function is used to obtain the number of microseconds since the last
++ * timer interrupt. Note that interrupts is disabled by do_gettimeofday().
++ *
++ * @return the number of microseconds since the last timer interrupt.
++ */
++static unsigned long mxc_gettimeoffset(void)
++{
++	unsigned long ticks_to_match, elapsed, usec, tick_usec, i;
++
++	/* Get ticks before next timer match */
++	ticks_to_match =
++	    __raw_readl(MXC_GPT_GPTOCR1) - __raw_readl(MXC_GPT_GPTCNT);
++
++	/* We need elapsed ticks since last match */
++	elapsed = LATCH - ticks_to_match;
++
++	/* Now convert them to usec */
++	/* Insure no overflow when calculating the usec below */
++	for (i = 1, tick_usec = tick_nsec / 1000;; i *= 2) {
++		tick_usec /= i;
++		if ((0xFFFFFFFF / tick_usec) > elapsed)
++			break;
++	}
++	usec = (unsigned long)(elapsed * tick_usec) / (LATCH / i);
++
++	return usec;
++}
++
++/*!
++ * The OS tick timer interrupt structure.
++ */
++static struct irqaction timer_irq = {
++	.name = "MXC Timer Tick",
++	.flags = IRQF_DISABLED | IRQF_TIMER,
++	.handler = mxc_timer_interrupt
++};
++
++/*!
++ * This function is used to initialize the GPT to produce an interrupt
++ * based on HZ.  It is called by start_kernel() during system startup.
++ */
++void __init mxc_init_time(void)
++{
++	u32 reg, v;
++	reg = __raw_readl(MXC_GPT_GPTCR);
++	reg &= ~GPTCR_ENABLE;
++	__raw_writel(reg, MXC_GPT_GPTCR);
++	reg |= GPTCR_SWR;
++	__raw_writel(reg, MXC_GPT_GPTCR);
++
++	while ((__raw_readl(MXC_GPT_GPTCR) & GPTCR_SWR) != 0)
++		cpu_relax();
++
++	reg = GPTCR_FRR | GPTCR_CLKSRC_HIGHFREQ;
++	__raw_writel(reg, MXC_GPT_GPTCR);
++
++	/* TODO: get timer rate from clk driver */
++	v = 66500000;
++
++	__raw_writel((v / CLOCK_TICK_RATE) - 1, MXC_GPT_GPTPR);
++
++	if ((v % CLOCK_TICK_RATE) != 0) {
++		pr_info("\nWARNING: Can't generate CLOCK_TICK_RATE at %d Hz\n",
++			CLOCK_TICK_RATE);
++	}
++	pr_info("Actual CLOCK_TICK_RATE is %d Hz\n",
++		v / ((__raw_readl(MXC_GPT_GPTPR) & 0xFFF) + 1));
++
++	reg = __raw_readl(MXC_GPT_GPTCNT);
++	reg += LATCH;
++	__raw_writel(reg, MXC_GPT_GPTOCR1);
++
++	setup_irq(MXC_INT_GPT, &timer_irq);
++
++	reg = __raw_readl(MXC_GPT_GPTCR);
++	reg =
++	    GPTCR_FRR | GPTCR_CLKSRC_HIGHFREQ | GPTCR_STOPEN | GPTCR_DOZEN |
++	    GPTCR_WAITEN | GPTCR_ENMOD | GPTCR_ENABLE;
++	__raw_writel(reg, MXC_GPT_GPTCR);
++
++	__raw_writel(GPTIR_OF1IE, MXC_GPT_GPTIR);
++}
++
++struct sys_timer mxc_timer = {
++	.init = mxc_init_time,
++	.offset = mxc_gettimeoffset,
++};
+Index: linux-2.6.26/arch/arm/mach-mx35/board-mx35_fab4.h
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/arch/arm/mach-mx35/board-mx35_fab4.h	2009-04-29 14:18:43.000000000 +0100
+@@ -0,0 +1,107 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef __ASM_ARCH_MXC_BOARD_MX35_FAB4_H__
++#define __ASM_ARCH_MXC_BOARD_MX35_FAB4_H__
++
++#ifdef CONFIG_MACH_FAB4
++
++/*!
++ * @defgroup BRDCFG_MX35 Board Configuration Options
++ * @ingroup MSL_MX35
++ */
++
++/*!
++ * @file mach-mx35/board-mx35_fab4.h
++ *
++ * @brief This file contains all the board level configuration options.
++ *
++ * It currently hold the options defined for Logitech MX35 Fab4 Platform.
++ *
++ * @ingroup BRDCFG_MX35
++ */
++
++/*
++ * Include Files
++ */
++#include <asm/arch/mxc_uart.h>
++
++/*!
++ * @name MXC UART EVB board level configurations
++ */
++/*! @{ */
++/*!
++ * Specifies if the Irda transmit path is inverting
++ */
++#define MXC_IRDA_TX_INV         0
++/*!
++ * Specifies if the Irda receive path is inverting
++ */
++#define MXC_IRDA_RX_INV         0
++
++/* UART 1 configuration */
++/*!
++ * This define specifies if the UART port is configured to be in DTE or
++ * DCE mode. There exists a define like this for each UART port. Valid
++ * values that can be used are \b MODE_DTE or \b MODE_DCE.
++ */
++#define UART1_MODE              MODE_DCE
++/*!
++ * This define specifies if the UART is to be used for IRDA. There exists a
++ * define like this for each UART port. Valid values that can be used are
++ * \b IRDA or \b NO_IRDA.
++ */
++#define UART1_IR                NO_IRDA
++/*!
++ * This define is used to enable or disable a particular UART port. If
++ * disabled, the UART will not be registered in the file system and the user
++ * will not be able to access it. There exists a define like this for each UART
++ * port. Specify a value of 1 to enable the UART and 0 to disable it.
++ */
++#define UART1_ENABLED           1
++/*! @} */
++/* UART 2 configuration */
++#define UART2_MODE              MODE_DCE
++#define UART2_IR                NO_IRDA
++#define UART2_ENABLED           1
++
++/* UART 3 configuration */
++#define UART3_MODE              MODE_DTE
++#define UART3_IR                NO_IRDA
++#define UART3_ENABLED           0
++
++#define MXC_LL_UART_PADDR	UART1_BASE_ADDR
++#define MXC_LL_UART_VADDR	AIPS1_IO_ADDRESS(UART1_BASE_ADDR)
++
++#define MXC_PSEUDO_PARENT	MXC_INT_RESV0
++
++
++#define AHB_FREQ                133000000
++#define IPG_FREQ                66500000
++
++
++extern void mxc_map_io(void);
++extern void mxc_init_irq(void);
++extern void mxc_cpu_init(void) __init;
++extern void mx35_fab4_gpio_init(void) __init;
++extern struct sys_timer mxc_timer;
++extern void mxc_cpu_common_init(void);
++extern int mxc_clocks_init(void);
++extern void __init early_console_setup(char *);
++extern void gpio_tsc_active(void);
++extern void gpio_tsc_inactive(void);
++extern unsigned int sdhc_get_card_det_status(struct device *dev);
++extern int sdhc_get_card_wp_status(struct device *dev);
++
++#endif				/* CONFIG_MACH_FAB4 */
++#endif				/* __ASM_ARCH_MXC_BOARD_MX35_FAB4_H__ */
+Index: linux-2.6.26/arch/arm/mach-mx35/devices.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/devices.c	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx35/devices.c	2009-04-29 14:18:43.000000000 +0100
+@@ -26,6 +26,10 @@
+ #include "sdma_script_code.h"
+ #include "sdma_script_code_v2.h"
+ #include "board-mx35_3stack.h"
++#include "board-mx35_fab4.h"
++
++extern void gpio_spdif_on(void);
++extern void gpio_spdif_off(void);
+ 
+ void mxc_sdma_get_script_info(sdma_script_start_addrs * sdma_script_addr)
+ {
+@@ -392,6 +396,7 @@
+ };
+ #endif
+ 
++#ifdef CONFIG_I2C_MXC_SELECT2
+ /*!
+  * Resource definition for the I2C2
+  */
+@@ -412,6 +417,7 @@
+ static struct mxc_i2c_platform_data mxci2c2_data = {
+ 	.i2c_clk = 100000,
+ };
++#endif
+ 
+ #ifdef CONFIG_I2C_MXC_SELECT3
+ /*!
+@@ -449,6 +455,7 @@
+ 	 .num_resources = ARRAY_SIZE(mxci2c1_resources),
+ 	 .resource = mxci2c1_resources,},
+ #endif
++#ifdef CONFIG_I2C_MXC_SELECT2
+ 	{
+ 	 .name = "mxc_i2c_slave",
+ 	 .id = 1,
+@@ -458,6 +465,7 @@
+ 		 },
+ 	 .num_resources = ARRAY_SIZE(mxci2c2_resources),
+ 	 .resource = mxci2c2_resources,},
++#endif
+ #ifdef CONFIG_I2C_MXC_SELECT3
+ 	{
+ 	 .name = "mxc_i2c",
+@@ -521,6 +529,7 @@
+ 	(void)platform_device_register(&mxc_dma_device);
+ }
+ 
++#ifdef CONFIG_SND_MXC_SPDIF
+ static struct resource spdif_resources[] = {
+ 	{
+ 	 .start = SPDIF_BASE_ADDR,
+@@ -529,6 +538,44 @@
+ 	 },
+ };
+ 
++#ifdef CONFIG_MACH_FAB4
++static void fab4_spdif_set_clk(int sample_rate)
++{
++	switch (sample_rate) {
++	case 96000:
++	case 48000:
++	case 32000:
++		mxc_set_gpio_dataout(MX35_PIN_TX4_RX1, 1);
++		break;
++
++	default:
++		mxc_set_gpio_dataout(MX35_PIN_TX4_RX1, 0);
++		break;
++	}
++}
++
++static void fab4_spdif_enable(int enable)
++{
++	if (enable) {
++		gpio_spdif_on();
++	}
++	else {
++		gpio_spdif_off();
++	}
++}
++
++static struct mxc_spdif_platform_data mxc_spdif_data = {
++	.spdif_tx = 1,
++	.spdif_rx = 0,          /* disable spdif rx */
++	.spdif_clk_44100 = 0,	/* audio osc source */
++	.spdif_clk_48000 = 0,	/* audio osc source */
++	.spdif_clkid = 0,
++	.spdif_clk = NULL,	/* spdif bus clk */
++	.spdif_core_clk = NULL,	/* spdif core bus clk */
++	.spdif_set_clk = &fab4_spdif_set_clk , /* OSC_SEL1 */
++	.spdif_enable = &fab4_spdif_enable,
++};
++#else
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_tx = 1,
+ 	.spdif_rx = 1,
+@@ -537,6 +584,7 @@
+ 	.spdif_clkid = 0,
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
++#endif
+ 
+ static struct platform_device mxc_alsa_spdif_device = {
+ 	.name = "mxc_alsa_spdif",
+@@ -557,7 +605,13 @@
+ 	clk_put(mxc_spdif_data.spdif_core_clk);
+ 	platform_device_register(&mxc_alsa_spdif_device);
+ }
++#else
++static inline void mxc_init_spdif(void)
++{
++}
++#endif
+ 
++#ifdef CONFIG_SND_SOC_IMX_3STACK_AK4647
+ static struct mxc_audio_platform_data mxc_audio_data;
+ 
+ static struct platform_device mxc_alsa_device = {
+@@ -577,10 +631,20 @@
+ 	mxc_audio_data.ssi_num = 1;
+ 	mxc_audio_data.src_port = 1;
+ 	mxc_audio_data.ext_port = 4;
++#ifdef CONFIG_MACH_FAB4
++	mxc_audio_data.intr_id_hp = 0; // FIXME if required
++#else
+ 	mxc_audio_data.intr_id_hp = MXC_PSEUDO_IRQ_HEADPHONE;
++#endif
+ 	platform_device_register(&mxc_alsa_device);
+ }
++#else
++static void mxc_init_audio(void)
++{
++}
++#endif
+ 
++#ifdef CONFIG_SND_SOC_IMX_3STACK_WM8580
+ static struct platform_device mxc_alsa_surround_device = {
+ 	.name = "imx-3stack-wm8580",
+ 	.id = 0,
+@@ -613,7 +677,16 @@
+ 	mxc_bt_audio_data.ext_ram = 1;
+ 	platform_device_register(&mxc_bt_alsa_device);
+ }
++#else
++static void mxc_init_surround_audio(void)
++{
++}
++static void mxc_init_bt_audio(void)
++{
++}
++#endif
+ 
++#ifdef CONFIG_MXC_ASRC
+ static struct resource asrc_resources[] = {
+ 	{
+ 	 .start = ASRC_BASE_ADDR,
+@@ -649,6 +722,12 @@
+ 	clk_put(mxc_asrc_data.asrc_audio_clk);
+ 	platform_device_register(&mxc_asrc_device);
+ }
++#else
++static inline void mxc_init_asrc(void)
++{
++}
++#endif
++
+ 
+ #if defined(CONFIG_CAN_FLEXCAN) || defined(CONFIG_CAN_FLEXCAN_MODULE)
+ 
+Index: linux-2.6.26/arch/arm/mach-mx35/Kconfig
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/Kconfig	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx35/Kconfig	2009-04-29 14:18:43.000000000 +0100
+@@ -26,6 +26,14 @@
+ 	  Include support for MX35EVB platform. This includes specific
+ 	  configurations for the board and its peripherals.
+ 
++config MACH_FAB4
++	bool "Support Logitech Fab4 platforms"
++	default n
++	select MXC_PSEUDO_IRQS if MXC_PMIC
++	help
++	  Include support for Logitech Fab4 platform. This includes specific
++	  configurations for the board and its peripherals.
++
+ config MX35_DOZE_DURING_IDLE
+ 	bool "Enter Doze mode during idle"
+ 	help
+Index: linux-2.6.26/arch/arm/mach-mx35/Makefile
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/Makefile	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx35/Makefile	2009-04-29 14:18:43.000000000 +0100
+@@ -8,6 +8,7 @@
+ obj-$(CONFIG_MXC_SDMA_API) 	+= dma.o
+ obj-$(CONFIG_MACH_MX35_3DS)	+= mx35_3stack.o mx35_3stack_gpio.o mx35_3stack_cpld.o dvfs.o
+ obj-$(CONFIG_MACH_MX35EVB)	+= mx35evb.o mx35evb_cpld.o mx35evb_gpio.o
++obj-$(CONFIG_MACH_FAB4)		+= mx35_fab4.o mx35_fab4_gpio.o
+ 
+ obj-$(CONFIG_MXC_PSEUDO_IRQS)	+= mx35_3stack_irq.o
+ obj-$(CONFIG_PM) 		+= pm.o
+Index: linux-2.6.26/arch/arm/mach-mx35/mx35_3stack_irq.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/mx35_3stack_irq.c	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx35/mx35_3stack_irq.c	2009-04-29 14:18:43.000000000 +0100
+@@ -30,6 +30,7 @@
+ #include <asm/arch/gpio.h>
+ 
+ #include "board-mx35_3stack.h"
++#include "board-mx35_fab4.h"
+ #include "iomux.h"
+ 
+ /*!
+Index: linux-2.6.26/arch/arm/mach-mx35/mx35_fab4.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/arch/arm/mach-mx35/mx35_fab4.c	2009-05-01 12:35:10.000000000 +0100
+@@ -0,0 +1,752 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/types.h>
++#include <linux/sched.h>
++#include <linux/interrupt.h>
++#include <linux/init.h>
++#include <linux/input.h>
++#include <linux/nodemask.h>
++#include <linux/clk.h>
++#include <linux/i2c.h>
++#include <linux/platform_device.h>
++#if defined(CONFIG_MTD) || defined(CONFIG_MTD_MODULE)
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/map.h>
++#include <linux/mtd/partitions.h>
++
++#include <asm/mach/flash.h>
++#endif
++
++#include <asm/hardware.h>
++#include <asm/irq.h>
++#include <asm/setup.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/irq.h>
++#include <asm/arch/memory.h>
++#include <asm/arch/gpio.h>
++#include <asm/arch/mmc.h>
++#include <asm/arch/mx35_fab4.h>
++
++#include "board-mx35_fab4.h"
++#include "crm_regs.h"
++#include "iomux.h"
++
++/*!
++ * @file mach-mx35/mx35_fab4.c
++ *
++ * @brief This file contains the board specific initialization routines.
++ *
++ * @ingroup MSL_MX35
++ */
++
++extern int mxc_init_devices(void);
++
++unsigned int mx35_fab4_board_io;
++
++static void mxc_nop_release(struct device *dev)
++{
++	/* Nothing */
++}
++
++/* MTD NAND flash */
++
++#if defined(CONFIG_MTD_NAND_MXC) || defined(CONFIG_MTD_NAND_MXC_MODULE)	\
++|| defined(CONFIG_MTD_NAND_MXC_V2) || defined(CONFIG_MTD_NAND_MXC_V2_MODULE)
++
++static struct mtd_partition mxc_nand_partitions_pa2[] = {
++	{
++	 .name = "redboot",
++	 .offset = 0,
++	 .size = 2 * 64 * 2048},
++	{
++	 .name = "ubi",
++	 .offset = 2 * 64 * 2048,
++	 .size = 1016 * 64 * 2048},
++};
++
++static struct mtd_partition mxc_nand_partitions_pa3[] = {
++	{
++	 .name = "redboot",
++	 .offset = 0,
++	 .size = 4 * 64 * 2048},
++	{
++	 .name = "ubi",
++	 .offset = 4 * 64 * 2048,
++	 .size = 1014 * 64 * 2048},
++};
++
++static struct flash_platform_data mxc_nand_data = {
++	.parts = mxc_nand_partitions_pa3,
++	.nr_parts = ARRAY_SIZE(mxc_nand_partitions_pa3),
++	.width = 1,
++};
++
++static struct platform_device mxc_nand_mtd_device = {
++	.name = "mxc_nandv2_flash",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_nand_data,
++		},
++};
++
++static void mxc_init_nand_mtd(void)
++{
++	if (__raw_readl(MXC_CCM_RCSR) & MXC_CCM_RCSR_NF16B)
++		mxc_nand_data.width = 2;
++
++	if (system_rev <= 2) {
++		mxc_nand_data.parts = mxc_nand_partitions_pa2;
++		mxc_nand_data.nr_parts = ARRAY_SIZE(mxc_nand_partitions_pa2);
++	}
++
++	platform_device_register(&mxc_nand_mtd_device);
++}
++#else
++static inline void mxc_init_nand_mtd(void)
++{
++}
++#endif
++
++static struct mxc_lcd_platform_data lcd_data = {
++	.io_reg = "LCD"
++};
++
++static struct platform_device lcd_dev = {
++	.name = "lcd_claa",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = (void *)&lcd_data,
++		},
++};
++
++static void mxc_init_lcd(void)
++{
++	platform_device_register(&lcd_dev);
++}
++
++#if defined(CONFIG_FB_MXC_SYNC_PANEL) || defined(CONFIG_FB_MXC_SYNC_PANEL_MODULE)
++/* mxc lcd driver */
++static struct platform_device mxc_fb_device = {
++	.name = "mxc_sdc_fb",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.coherent_dma_mask = 0xFFFFFFFF,
++		},
++};
++
++static void mxc_init_fb(void)
++{
++	(void)platform_device_register(&mxc_fb_device);
++}
++#else
++static inline void mxc_init_fb(void)
++{
++}
++#endif
++
++#if defined(CONFIG_BACKLIGHT_MXC)
++static struct platform_device mxcbl_devices[] = {
++#if defined(CONFIG_BACKLIGHT_MXC_IPU) || defined(CONFIG_BACKLIGHT_MXC_IPU_MODULE)
++	{
++	 .name = "mxc_ipu_bl",
++	 .id = 0,
++	 .dev = {
++		 .platform_data = (void *)3,	/* DISP # for this backlight */
++		 },
++	 }
++#endif
++};
++
++static inline void mxc_init_bl(void)
++{
++	int i;
++	for (i = 0; i < ARRAY_SIZE(mxcbl_devices); i++) {
++		platform_device_register(&mxcbl_devices[i]);
++	}
++}
++#else
++static inline void mxc_init_bl(void)
++{
++}
++#endif
++
++static struct resource ir_resources[] = {
++	[0] = {
++	       .start = MX35_PIN_ATA_DA2,
++	       .end = MX35_PIN_ATA_DA2,
++	       .flags = IORESOURCE_MEM,
++	       .name = "xres",
++	       },
++	[1] = {
++	       .start = MX35_PIN_ATA_DA1,
++	       .end = MX35_PIN_ATA_DA1,
++	       .flags = IORESOURCE_MEM,
++	       .name = "sdata",
++	       },
++	[2] = {
++	       .start = MX35_PIN_ATA_DA0,
++	       .end = MX35_PIN_ATA_DA0,
++	       .flags = IORESOURCE_MEM,
++	       .name = "sclk",
++	       },
++};
++
++static struct i2c_board_info mxc_i2c_board_info[] __initdata = {
++	{
++		I2C_BOARD_INFO("clearpad", 0x20),
++		.irq = IOMUX_TO_IRQ(MX35_PIN_I2C2_CLK),
++	},
++	{
++		/* really a tmp100 */
++		I2C_BOARD_INFO("lm75", 0x48),
++	},
++	{
++		I2C_BOARD_INFO("tsl2569", 0x39),
++	},
++	{
++		I2C_BOARD_INFO("fab4-ir", 0x47),
++		.platform_data = ir_resources,
++		.irq = IOMUX_TO_IRQ(MX35_PIN_I2C2_DAT),
++	},
++	{
++		I2C_BOARD_INFO("wm8974-i2c", 0x1A),
++	},
++};
++
++#if defined(CONFIG_FEC) || defined(CONFIG_FEC_MODULE)
++unsigned int expio_intr_fec;
++
++EXPORT_SYMBOL(expio_intr_fec);
++#endif
++
++#if defined(CONFIG_MMC_IMX_ESDHCI) || defined(CONFIG_MMC_IMX_ESDHCI_MODULE)
++static struct mxc_mmc_platform_data mmc_data1 = {
++	.ocr_mask = MMC_VDD_32_33,
++	.caps = MMC_CAP_4_BIT_DATA,
++	.min_clk = 400000,
++	.max_clk = 52000000,
++	.card_inserted_state = 1,
++	.status = sdhc_get_card_det_status,
++	.clock_mmc = "sdhc_clk",
++};
++
++/*!
++ * Resource definition for the SDHC1
++ */
++static struct resource mxcsdhc1_resources[] = {
++	[0] = {
++	       .start = MMC_SDHC1_BASE_ADDR,
++	       .end = MMC_SDHC1_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_MMC_SDHC1,
++	       .end = MXC_INT_MMC_SDHC1,
++	       .flags = IORESOURCE_IRQ,
++	       },
++	[2] = {
++	       /* No card detect irq */
++	       .start = 0,
++	       .end = 0,
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Device Definition for MXC SDHC1 */
++static struct platform_device mxcsdhc1_device = {
++	.name = "mxsdhci",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mmc_data1,
++		},
++	.num_resources = ARRAY_SIZE(mxcsdhc1_resources),
++	.resource = mxcsdhc1_resources,
++};
++
++static struct mxc_mmc_platform_data mmc_data2 = {
++	.ocr_mask = MMC_VDD_32_33,
++	.min_clk = 400000,
++	.max_clk = 52000000,
++	.card_inserted_state = 1,
++	.status = sdhc_get_card_det_status,
++	.wp_status = sdhc_get_card_wp_status,
++	.clock_mmc = "sdhc_clk",
++};
++
++/*!
++ * Resource definition for the SDHC2
++ */
++static struct resource mxcsdhc2_resources[] = {
++	[0] = {
++	       .start = MMC_SDHC2_BASE_ADDR,
++	       .end = MMC_SDHC2_BASE_ADDR + SZ_4K - 1,
++	       .flags = IORESOURCE_MEM,
++	       },
++	[1] = {
++	       .start = MXC_INT_MMC_SDHC2,
++	       .end = MXC_INT_MMC_SDHC2,
++	       .flags = IORESOURCE_IRQ,
++	       },
++	[2] = {
++	       .start = IOMUX_TO_IRQ(MX35_PIN_ATA_CS0),
++	       .end = IOMUX_TO_IRQ(MX35_PIN_ATA_CS0),
++	       .flags = IORESOURCE_IRQ,
++	       },
++};
++
++/*! Device Definition for MXC SDHC2 */
++static struct platform_device mxcsdhc2_device = {
++	.name = "mxsdhci",
++	.id = 1,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mmc_data2,
++		},
++	.num_resources = ARRAY_SIZE(mxcsdhc2_resources),
++	.resource = mxcsdhc2_resources,
++};
++
++static inline void mxc_init_mmc(void)
++{
++	/* WLAN */
++	(void)platform_device_register(&mxcsdhc1_device);
++
++	/* SD Card */
++	(void)platform_device_register(&mxcsdhc2_device);
++}
++#else
++static inline void mxc_init_mmc(void)
++{
++}
++#endif
++
++#ifdef CONFIG_SND_SOC_FAB4_AK4420
++static void fab4_ak4420_set_clk(int sample_rate)
++{
++	switch (sample_rate) {
++	case 96000:
++	case 48000:
++	case 32000:
++	case 16000:
++	case 8000:
++		mxc_set_gpio_dataout(MX35_PIN_TX4_RX1, 1);
++		break;
++
++	default:
++		mxc_set_gpio_dataout(MX35_PIN_TX4_RX1, 0);
++		break;
++	}
++}
++
++static struct resource ak4420_resources[] = {
++	[0] = {
++		.start = MX35_PIN_ATA_INTRQ,
++		.end = MX35_PIN_ATA_INTRQ,
++		.flags = IORESOURCE_MEM,
++		.name = "smute",
++	},
++	[1] = {
++		.start = MX35_PIN_ATA_RESET_B,
++		.end = MX35_PIN_ATA_RESET_B,
++		.flags = IORESOURCE_MEM,
++		.name = "hdp_en",
++	},
++	[2] = {
++		.start = MX35_PIN_TX0,
++		.end = MX35_PIN_TX0,
++		.flags = IORESOURCE_MEM,
++		.name = "hdp_en1",
++	},
++};
++
++static struct mxc_audio_platform_data mxc_audio_data = {
++	.ssi_num = 1,
++	.src_port = 1,
++	.ext_port = 4,
++	.audio_set_clk = &fab4_ak4420_set_clk,	/* OSC_SEL1 */
++};
++
++static struct platform_device mxc_alsa_ak4420_device = {
++	.name = "fab4-ak4420",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_audio_data,
++		},
++	.num_resources = ARRAY_SIZE(ak4420_resources),
++	.resource = ak4420_resources,
++};
++
++static void mxc_init_ak4420_audio(void)
++{
++	platform_device_register(&mxc_alsa_ak4420_device);
++}
++#else
++static void mxc_init_ak4420_audio(void)
++{
++}
++#endif
++
++#ifdef CONFIG_SND_SOC_FAB4_WM8974
++static void fab4_wm8974_set_clk(int sample_rate)
++{
++	switch (sample_rate) {
++	case 96000:
++	case 48000:
++	case 32000:
++	case 16000:
++	case 8000:
++		mxc_set_gpio_dataout(MX35_PIN_TX5_RX0, 1);
++		break;
++
++	default:
++		mxc_set_gpio_dataout(MX35_PIN_TX5_RX0, 0);
++		break;
++	}
++}
++
++static struct mxc_audio_platform_data mxc_wm8974_data = {
++	.ssi_num = 2,
++	.src_port = 2,
++	.ext_port = 5,
++	.intr_id_hp = 0,
++	.audio_set_clk = &fab4_wm8974_set_clk,	/* OSC_SEL2 */
++};
++
++static struct platform_device mxc_alsa_wm8974_device = {
++	.name = "fab4-wm8974",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &mxc_wm8974_data,
++		},
++
++};
++
++static void mxc_init_wm8974_audio(void)
++{
++	platform_device_register(&mxc_alsa_wm8974_device);
++}
++#else
++static void mxc_init_wm8974_audio(void)
++{
++}
++#endif
++
++/*!
++ * Board specific fixup function. It is called by \b setup_arch() in
++ * setup.c file very early on during kernel starts. It allows the user to
++ * statically fill in the proper values for the passed-in parameters. None of
++ * the parameters is used currently.
++ *
++ * @param  desc         pointer to \b struct \b machine_desc
++ * @param  tags         pointer to \b struct \b tag
++ * @param  cmdline      pointer to the command line
++ * @param  mi           pointer to \b struct \b meminfo
++ */
++static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
++				   char **cmdline, struct meminfo *mi)
++{
++	mxc_cpu_init();
++
++#ifdef CONFIG_DISCONTIGMEM
++	do {
++		int nid;
++		mi->nr_banks = MXC_NUMNODES;
++		for (nid = 0; nid < mi->nr_banks; nid++)
++			SET_NODE(mi, nid);
++	} while (0);
++#endif
++}
++
++/* PLATFORM DEVICES REVIEWED BELOW THIS POINT */
++
++#ifdef CONFIG_MXC_FAB4_DEBUG_GPIO
++
++/* GPIO debug  initialization. */
++static struct mxc_fab4_gpio_pins fab4_gpio_pins[] = {
++	{
++	 .name = "FAIL_SAFE#",
++	 .gpio = MX35_PIN_FST,
++	 },
++	{
++	 .name = "SD_CD#",
++	 .gpio = MX35_PIN_ATA_CS0,
++	 },
++	{
++	 .name = "SD_WP#",
++	 .gpio = MX35_PIN_ATA_DMARQ,
++	 },
++	{
++	 .name = "I2C_ATTN1#",
++	 .gpio = MX35_PIN_I2C2_CLK,
++	 },
++	{
++	 .name = "I2C_ATTN2#",
++	 .gpio = MX35_PIN_I2C2_DAT,
++	 },
++	{
++	 .name = "IR_SENSOR#",
++	 .gpio = MX35_PIN_CAPTURE,
++	 },
++	{
++	 .name = "IR_LED",
++	 .gpio = MX35_PIN_GPIO1_1,
++	 },
++	{
++	 .name = "OSC_SEL2",
++	 .gpio = MX35_PIN_TX5_RX0,
++	 },
++	{
++	 .name = "OSC_SEL1",
++	 .gpio = MX35_PIN_TX4_RX1,
++	 },
++	{
++	 .name = "HDP_EN0",
++	 .gpio = MX35_PIN_ATA_RESET_B,
++	 },
++	{
++	 .name = "HDP_EN1",
++	 .gpio = MX35_PIN_TX0,
++	 },
++	{
++	 .name = "LCD_DISP",
++	 .gpio = MX35_PIN_D3_SPL,
++	 },
++	{
++	 .name = "HDP_DET",
++	 .gpio = MX35_PIN_ATA_DIOW,
++	 },
++	{
++	 .name = "WIFI_PD#",
++	 .gpio = MX35_PIN_ATA_DIOR,
++	 },
++	{
++	 .name = "WIFI_RESET#",
++	 .gpio = MX35_PIN_ATA_CS1,
++	 },
++	{
++	 .name = "DAC1_SMUTE",
++	 .gpio = MX35_PIN_ATA_INTRQ,
++	 },
++};
++
++static struct mxc_fab4_gpio_platform_data fab4_gpio_data = {
++	.pins = fab4_gpio_pins,
++	.nr_pins = ARRAY_SIZE(fab4_gpio_pins),
++};
++
++static struct platform_device fab4_gpio_device = {
++	.name = "fab4_gpio",
++	.id = 0,
++	.dev = {
++		.release = mxc_nop_release,
++		.platform_data = &fab4_gpio_data,
++		},
++};
++
++static inline void fab4_gpio_debug_init(void)
++{
++	platform_device_register(&fab4_gpio_device);
++}
++#else
++static inline void fab4_gpio_debug_init(void)
++{
++}
++#endif
++
++/*!
++ * Board specific initialization.
++ */
++static void __init mxc_board_init(void)
++{
++	const char *rest;
++
++	mxc_cpu_common_init();
++
++	mxc_clocks_init();
++	early_console_setup(saved_command_line);
++	mxc_gpio_init();
++	mxc_init_devices();
++	mx35_fab4_gpio_init();
++	mxc_init_nand_mtd();
++
++	mxc_init_lcd();
++	mxc_init_fb();
++	mxc_init_bl();
++
++	i2c_register_board_info(0, mxc_i2c_board_info,
++				ARRAY_SIZE(mxc_i2c_board_info));
++
++	mxc_init_mmc();
++
++	mxc_init_ak4420_audio();
++
++	if (system_rev >= 3) {
++		/* Changed to use i2c from PA3/PB1 build */
++		mxc_init_wm8974_audio();
++	}
++
++	fab4_gpio_debug_init();
++
++	switch (__raw_readl(MXC_CCM_RCSR) & 0xF) {
++	case 0x0:
++		rest = "Power On";
++		break;
++	case 0x4:
++		rest = "External";
++		break;
++	case 0x8:
++		rest = "Watchdog timeout";
++		break;
++	case 0x2:
++		rest = "JTAG";
++		break;
++	default:
++		rest = "unknown";
++		break;
++	}
++	printk(KERN_INFO "Reset status: %s\n", rest);
++}
++
++#define PLL_PCTL_REG(brmo, pd, mfd, mfi, mfn)		\
++		(((brmo) << 31) + (((pd) - 1) << 26) + (((mfd) - 1) << 16) + \
++		((mfi)  << 10) + mfn)
++
++/* For 24MHz input clock */
++#define PLL_665MHZ		PLL_PCTL_REG(1, 1, 48, 13, 41)
++#define PLL_532MHZ		PLL_PCTL_REG(1, 1, 12, 11, 1)
++#define PLL_399MHZ		PLL_PCTL_REG(0, 1, 16, 8, 5)
++
++/* working point(wp): 0,1 - 133MHz; 2,3 - 266MHz; 4,5 - 399MHz;*/
++/* auto input clock table */
++static struct cpu_wp cpu_wp_auto[] = {
++	{
++	 .pll_reg = PLL_399MHZ,
++	 .pll_rate = 399000000,
++	 .cpu_rate = 133000000,
++	 .pdr0_reg = (0x2 << MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_399MHZ,
++	 .pll_rate = 399000000,
++	 .cpu_rate = 133000000,
++	 .pdr0_reg = (0x6 << MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_399MHZ,
++	 .pll_rate = 399000000,
++	 .cpu_rate = 266000000,
++	 .pdr0_reg = (0x1 << MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_399MHZ,
++	 .pll_rate = 399000000,
++	 .cpu_rate = 266000000,
++	 .pdr0_reg = (0x5 << MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_399MHZ,
++	 .pll_rate = 399000000,
++	 .cpu_rate = 399000000,
++	 .pdr0_reg = (0x0 << MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_399MHZ,
++	 .pll_rate = 399000000,
++	 .cpu_rate = 399000000,
++	 .pdr0_reg = (0x6 << MXC_CCM_PDR0_AUTO_MUX_DIV_OFFSET),},
++};
++
++/* consumer input clock table */
++static struct cpu_wp cpu_wp_con[] = {
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 133000000,
++	 .pdr0_reg = (0x6 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 133000000,
++	 .pdr0_reg = (0xE << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 266000000,
++	 .pdr0_reg = (0x2 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 266000000,
++	 .pdr0_reg = (0xA << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 399000000,
++	 .pdr0_reg = (0x1 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 399000000,
++	 .pdr0_reg = (0x9 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 532000000,
++	 .pdr0_reg = (0x0 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_532MHZ,
++	 .pll_rate = 532000000,
++	 .cpu_rate = 532000000,
++	 .pdr0_reg = (0x8 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++	{
++	 .pll_reg = PLL_665MHZ,
++	 .pll_rate = 665000000,
++	 .cpu_rate = 665000000,
++	 .pdr0_reg = (0x7 << MXC_CCM_PDR0_CON_MUX_DIV_OFFSET),},
++};
++
++struct cpu_wp *get_cpu_wp(int *wp)
++{
++	if (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1) {
++		*wp = 9;
++		return cpu_wp_con;
++	} else {
++		if (__raw_readl(MXC_CCM_PDR0) & MXC_CCM_PDR0_AUTO_CON) {
++			*wp = 9;
++			return cpu_wp_con;
++		} else {
++			*wp = 6;
++			return cpu_wp_auto;
++		}
++	}
++}
++
++/*
++ * The following uses standard kernel macros define in arch.h in order to
++ * initialize __mach_desc_FAB4 data structure.
++ */
++/* *INDENT-OFF* */
++MACHINE_START(FAB4, "Logitech Fab4 Board")
++	/* Maintainer: Logitech */
++	.phys_io = AIPS1_BASE_ADDR,
++	.io_pg_offst = ((AIPS1_BASE_ADDR_VIRT) >> 18) & 0xfffc,
++	.boot_params = PHYS_OFFSET + 0x100,
++	.fixup = fixup_mxc_board,
++	.map_io = mxc_map_io,
++	.init_irq = mxc_init_irq,
++	.init_machine = mxc_board_init,
++	.timer = &mxc_timer,
++MACHINE_END
+Index: linux-2.6.26/arch/arm/mach-mx35/mx35_fab4_gpio.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ linux-2.6.26/arch/arm/mach-mx35/mx35_fab4_gpio.c	2009-04-29 14:18:43.000000000 +0100
+@@ -0,0 +1,934 @@
++/*
++ * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/errno.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/delay.h>
++#include <asm/io.h>
++#include <asm/hardware.h>
++#include <asm/arch/gpio.h>
++#include "board-mx35_fab4.h"
++#include "crm_regs.h"
++#include "iomux.h"
++
++/*!
++ * @file mach-mx35/mx35_fab4_gpio.c
++ *
++ * @brief This file contains all the GPIO setup functions for the board.
++ *
++ * @ingroup GPIO_MX35
++ */
++
++/*!
++ * This system-wise GPIO function initializes the pins during system startup.
++ * All the statically linked device drivers should put the proper GPIO
++ * initialization code inside this function. It is called by \b fixup_mx31ads()
++ * during system startup. This function is board specific.
++ */
++void mx35_fab4_gpio_init(void)
++{
++	/* I2C_ATTN1# */
++	mxc_request_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_ALT5);
++	mxc_iomux_set_input(MUX_IN_GPIO2_IN_26, INPUT_CTL_PATH0);
++	mxc_iomux_set_pad(MX35_PIN_I2C2_CLK, 0);
++	mxc_set_gpio_direction(MX35_PIN_I2C2_CLK, 1);
++
++	/* I2C_ATTN2# */
++	mxc_request_iomux(MX35_PIN_I2C2_DAT, MUX_CONFIG_ALT5);
++	mxc_iomux_set_input(MUX_IN_GPIO2_IN_27, INPUT_CTL_PATH0);
++	mxc_iomux_set_pad(MX35_PIN_I2C2_DAT, 0);
++	mxc_set_gpio_direction(MX35_PIN_I2C2_DAT, 1);
++
++	/* DAC1_SMUTE : muted on boot */
++	/* output, ATA_INTRQ/GPIO2_29 */
++	mxc_request_iomux(MX35_PIN_ATA_INTRQ, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_ATA_INTRQ, 0);
++	mxc_set_gpio_dataout(MX35_PIN_ATA_INTRQ, 1);
++	mxc_set_gpio_direction(MX35_PIN_ATA_INTRQ, 0);
++
++	/* OSC_SEL1 */
++	/* output, TX4_RX1/GPIO1_11 */
++	mxc_request_iomux(MX35_PIN_TX4_RX1, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_TX4_RX1, 0);
++	mxc_set_gpio_dataout(MX35_PIN_TX4_RX1, 0);
++	mxc_set_gpio_direction(MX35_PIN_TX4_RX1, 0);
++
++	/* OSC_SEL2 */
++	/* output, TX5_RX0/GPIO1_10 */
++	mxc_request_iomux(MX35_PIN_TX5_RX0, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_TX5_RX0, 0);
++	mxc_set_gpio_dataout(MX35_PIN_TX5_RX0, 0);
++	mxc_set_gpio_direction(MX35_PIN_TX5_RX0, 0);
++
++	/* PB1 HDP_EN : disabled on boot, or the analogue outs pop */
++	/* output, ATA_RESET#/GPIO2_11 */
++	mxc_request_iomux(MX35_PIN_ATA_RESET_B, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_ATA_RESET_B, 0);
++	mxc_set_gpio_dataout(MX35_PIN_ATA_RESET_B, 0);
++	mxc_set_gpio_direction(MX35_PIN_ATA_RESET_B, 0);
++
++	/* MPQ HDP_EN : enable on boot, or the analogue outs pop */
++	/* output, SPI1_SS3#/GPIO1_15 */
++	mxc_set_gpio_dataout(MX35_PIN_TX0, 1);
++	mxc_set_gpio_direction(MX35_PIN_TX0, 0);
++	mxc_iomux_set_pad(MX35_PIN_TX0, 0);
++	mxc_request_iomux(MX35_PIN_TX0, MUX_CONFIG_ALT5);
++
++	/* HDP_DET */
++	/* input, ATA_DIOW/GPIO2_9 */
++	mxc_request_iomux(MX35_PIN_ATA_DIOW, MUX_CONFIG_ALT5);
++	mxc_iomux_set_input(MUX_IN_GPIO2_IN_9, INPUT_CTL_PATH1);
++	if (system_rev <= 2) {
++		/* pull-up missing on PA2 */
++		mxc_iomux_set_pad(MX35_PIN_ATA_DIOW, PAD_CTL_100K_PU);
++	}
++	else {
++		mxc_iomux_set_pad(MX35_PIN_ATA_DIOW, 0);
++	}
++	mxc_set_gpio_direction(MX35_PIN_ATA_DIOW, 1);
++
++	/* WIFI_PD# */
++	/* output, ATA_DIOR/GPIO2_8 */
++	mxc_request_iomux(MX35_PIN_ATA_DIOR, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_ATA_DIOR, 0);
++	mxc_set_gpio_dataout(MX35_PIN_ATA_DIOR, 0);
++	mxc_set_gpio_direction(MX35_PIN_ATA_DIOR, 0);
++
++	/* WIFI_RESET# */
++	/* output, ATA_CS1/GPIO2_7 */
++	mxc_request_iomux(MX35_PIN_ATA_CS1, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_ATA_CS1, 0);
++	mxc_set_gpio_dataout(MX35_PIN_ATA_CS1, 0);
++	mxc_set_gpio_direction(MX35_PIN_ATA_CS1, 0);
++
++	/* FAIL_SAFE# */
++	/* input, FST/GPIO1_8 */
++	mxc_request_iomux(MX35_PIN_FST, MUX_CONFIG_ALT5);
++	mxc_iomux_set_input(MUX_IN_GPIO1_IN_8, INPUT_CTL_PATH1);
++	mxc_iomux_set_pad(MX35_PIN_FST, 0);
++	mxc_set_gpio_direction(MX35_PIN_FST, 1);
++
++	/* LCDP_DISP */
++	// FIXME we may not want this enabled (high)
++	// output, D3_SPL/GPIO1_5
++	mxc_request_iomux(MX35_PIN_D3_SPL, MUX_CONFIG_ALT5);
++	mxc_iomux_set_pad(MX35_PIN_D3_SPL, 0);
++	mxc_set_gpio_dataout(MX35_PIN_D3_SPL, 1);
++	mxc_set_gpio_direction(MX35_PIN_D3_SPL, 0);
++
++	/* Power up WLAN */
++	/* FIXME move this to wlan sdi driver */
++	mxc_set_gpio_dataout(MX35_PIN_ATA_CS1, 0); /* reset is active */
++	mxc_set_gpio_dataout(MX35_PIN_ATA_DIOR, 1); /* power-down is inactive */
++	msleep(50); /* wait 50 ms */
++	mxc_set_gpio_dataout(MX35_PIN_ATA_CS1, 1); /* reset is inactive */
++	msleep(1000); /* wait 1000 ms, to allow the wifi to boot */
++}
++
++/*!
++ * Setup GPIO for a UART port to be active
++ *
++ * @param  port         a UART port
++ * @param  no_irda      indicates if the port is used for SIR
++ */
++void gpio_uart_active(int port, int no_irda)
++{
++	/*
++	 * Configure the IOMUX control registers for the UART signals
++	 */
++	switch (port) {
++		/* UART 1 IOMUX Configs */
++	case 0:
++		mxc_request_iomux(MX35_PIN_RXD1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_TXD1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_RTS1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CTS1, MUX_CONFIG_FUNC);
++
++		mxc_iomux_set_pad(MX35_PIN_RXD1,
++				  PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++		mxc_iomux_set_pad(MX35_PIN_TXD1,
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PD);
++		mxc_iomux_set_pad(MX35_PIN_RTS1,
++				  PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++		mxc_iomux_set_pad(MX35_PIN_CTS1,
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PD);
++
++		break;
++		/* UART 2 IOMUX Configs */
++	case 1:
++		mxc_request_iomux(MX35_PIN_TXD2, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_RXD2, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_RTS2, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CTS2, MUX_CONFIG_FUNC);
++		mxc_iomux_set_pad(MX35_PIN_RXD2,
++				  PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++		mxc_iomux_set_pad(MX35_PIN_TXD2,
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PD);
++		mxc_iomux_set_pad(MX35_PIN_RTS2,
++				  PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++		mxc_iomux_set_pad(MX35_PIN_CTS2,
++				  PAD_CTL_PUE_PUD | PAD_CTL_100K_PD);
++		break;
++		/* UART 3 IOMUX Configs */
++	case 2:
++		mxc_request_iomux(MX35_PIN_FEC_TX_CLK, MUX_CONFIG_ALT2);
++		mxc_request_iomux(MX35_PIN_FEC_RX_CLK, MUX_CONFIG_ALT2);
++		mxc_request_iomux(MX35_PIN_FEC_COL, MUX_CONFIG_ALT2);
++		mxc_request_iomux(MX35_PIN_FEC_RX_DV, MUX_CONFIG_ALT2);
++
++		mxc_iomux_set_input(MUX_IN_UART3_UART_RTS_B, INPUT_CTL_PATH2);
++		mxc_iomux_set_input(MUX_IN_UART3_UART_RXD_MUX, INPUT_CTL_PATH3);
++		break;
++	default:
++		break;
++	}
++
++}
++
++EXPORT_SYMBOL(gpio_uart_active);
++
++/*!
++ * Setup GPIO for a UART port to be inactive
++ *
++ * @param  port         a UART port
++ * @param  no_irda      indicates if the port is used for SIR
++ */
++void gpio_uart_inactive(int port, int no_irda)
++{
++	switch (port) {
++	case 0:
++		mxc_request_gpio(MX35_PIN_RXD1);
++		mxc_request_gpio(MX35_PIN_TXD1);
++		mxc_request_gpio(MX35_PIN_RTS1);
++		mxc_request_gpio(MX35_PIN_CTS1);
++
++		mxc_free_iomux(MX35_PIN_RXD1, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_TXD1, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_RTS1, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CTS1, MUX_CONFIG_GPIO);
++		break;
++	case 1:
++		mxc_request_gpio(MX35_PIN_RXD2);
++		mxc_request_gpio(MX35_PIN_TXD2);
++		mxc_request_gpio(MX35_PIN_RTS2);
++		mxc_request_gpio(MX35_PIN_CTS2);
++
++		mxc_free_iomux(MX35_PIN_RXD2, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_TXD2, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_RTS2, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CTS2, MUX_CONFIG_GPIO);
++		break;
++	case 2:
++		mxc_request_gpio(MX35_PIN_FEC_TX_CLK);
++		mxc_request_gpio(MX35_PIN_FEC_RX_CLK);
++		mxc_request_gpio(MX35_PIN_FEC_COL);
++		mxc_request_gpio(MX35_PIN_FEC_RX_DV);
++
++		mxc_free_iomux(MX35_PIN_FEC_TX_CLK, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_FEC_RX_CLK, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_FEC_COL, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_FEC_RX_DV, MUX_CONFIG_GPIO);
++
++		mxc_iomux_set_input(MUX_IN_UART3_UART_RTS_B, INPUT_CTL_PATH0);
++		mxc_iomux_set_input(MUX_IN_UART3_UART_RXD_MUX, INPUT_CTL_PATH0);
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_uart_inactive);
++
++/*!
++ * Configure the IOMUX GPR register to receive shared SDMA UART events
++ *
++ * @param  port         a UART port
++ */
++void config_uartdma_event(int port)
++{
++}
++
++EXPORT_SYMBOL(config_uartdma_event);
++
++void gpio_fec_active(void)
++{
++	mxc_request_iomux(MX35_PIN_FEC_TX_CLK, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RX_CLK, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RX_DV, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_COL, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RDATA0, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_TDATA0, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_TX_EN, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_MDC, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_MDIO, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_TX_ERR, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RX_ERR, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_CRS, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RDATA1, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_TDATA1, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RDATA2, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_TDATA2, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_RDATA3, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_FEC_TDATA3, MUX_CONFIG_FUNC);
++
++#define FEC_PAD_CTL_COMMON (PAD_CTL_DRV_3_3V|PAD_CTL_PUE_PUD| \
++			PAD_CTL_ODE_CMOS|PAD_CTL_DRV_NORMAL|PAD_CTL_SRE_SLOW)
++	mxc_iomux_set_pad(MX35_PIN_FEC_TX_CLK, FEC_PAD_CTL_COMMON |
++			  PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE |
++			  PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RX_CLK,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RX_DV,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_COL,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RDATA0,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_TDATA0,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_TX_EN,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_MDC,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_MDIO,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_22K_PU);
++	mxc_iomux_set_pad(MX35_PIN_FEC_TX_ERR,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RX_ERR,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_CRS,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RDATA1,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_TDATA1,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RDATA2,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_TDATA2,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_RDATA3,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_SCHMITZ |
++			  PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD);
++	mxc_iomux_set_pad(MX35_PIN_FEC_TDATA3,
++			  FEC_PAD_CTL_COMMON | PAD_CTL_HYS_CMOS |
++			  PAD_CTL_PKE_NONE | PAD_CTL_100K_PD);
++#undef FEC_PAD_CTL_COMMON
++}
++
++EXPORT_SYMBOL(gpio_fec_active);
++
++void gpio_fec_inactive(void)
++{
++	mxc_request_gpio(MX35_PIN_FEC_TX_CLK);
++	mxc_request_gpio(MX35_PIN_FEC_RX_CLK);
++	mxc_request_gpio(MX35_PIN_FEC_RX_DV);
++	mxc_request_gpio(MX35_PIN_FEC_COL);
++	mxc_request_gpio(MX35_PIN_FEC_RDATA0);
++	mxc_request_gpio(MX35_PIN_FEC_TDATA0);
++	mxc_request_gpio(MX35_PIN_FEC_TX_EN);
++	mxc_request_gpio(MX35_PIN_FEC_MDC);
++	mxc_request_gpio(MX35_PIN_FEC_MDIO);
++	mxc_request_gpio(MX35_PIN_FEC_TX_ERR);
++	mxc_request_gpio(MX35_PIN_FEC_RX_ERR);
++	mxc_request_gpio(MX35_PIN_FEC_CRS);
++	mxc_request_gpio(MX35_PIN_FEC_RDATA1);
++	mxc_request_gpio(MX35_PIN_FEC_TDATA1);
++	mxc_request_gpio(MX35_PIN_FEC_RDATA2);
++	mxc_request_gpio(MX35_PIN_FEC_TDATA2);
++	mxc_request_gpio(MX35_PIN_FEC_RDATA3);
++	mxc_request_gpio(MX35_PIN_FEC_TDATA3);
++
++	mxc_free_iomux(MX35_PIN_FEC_TX_CLK, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RX_CLK, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RX_DV, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_COL, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RDATA0, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_TDATA0, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_TX_EN, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_MDC, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_MDIO, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_TX_ERR, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RX_ERR, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_CRS, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RDATA1, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_TDATA1, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RDATA2, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_TDATA2, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_RDATA3, MUX_CONFIG_GPIO);
++	mxc_free_iomux(MX35_PIN_FEC_TDATA3, MUX_CONFIG_GPIO);
++}
++
++EXPORT_SYMBOL(gpio_fec_inactive);
++
++/*!
++ * Setup GPIO for an I2C device to be active
++ *
++ * @param  i2c_num         an I2C device
++ */
++void gpio_i2c_active(int i2c_num)
++{
++
++#define PAD_CONFIG (PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD | PAD_CTL_ODE_OpenDrain)
++
++	switch (i2c_num) {
++	case 0:
++		mxc_request_iomux(MX35_PIN_I2C1_CLK, MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_I2C1_DAT, MUX_CONFIG_SION);
++
++		mxc_iomux_set_pad(MX35_PIN_I2C1_CLK, PAD_CONFIG);
++		mxc_iomux_set_pad(MX35_PIN_I2C1_DAT, PAD_CONFIG);
++		break;
++	case 1:
++		mxc_request_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_I2C2_DAT, MUX_CONFIG_SION);
++
++		mxc_iomux_set_pad(MX35_PIN_I2C2_CLK, PAD_CONFIG);
++		mxc_iomux_set_pad(MX35_PIN_I2C2_DAT, PAD_CONFIG);
++
++		break;
++	case 2:
++		mxc_request_iomux(MX35_PIN_TX3_RX2, MUX_CONFIG_ALT1);
++		mxc_request_iomux(MX35_PIN_TX2_RX3, MUX_CONFIG_ALT1);
++		mxc_iomux_set_pad(MX35_PIN_TX3_RX2, PAD_CONFIG);
++		mxc_iomux_set_pad(MX35_PIN_TX2_RX3, PAD_CONFIG);
++		break;
++	default:
++		break;
++	}
++
++#undef PAD_CONFIG
++
++}
++
++EXPORT_SYMBOL(gpio_i2c_active);
++
++/*!
++ * Setup GPIO for an I2C device to be inactive
++ *
++ * @param  i2c_num         an I2C device
++ */
++void gpio_i2c_inactive(int i2c_num)
++{
++	switch (i2c_num) {
++	case 0:
++		break;
++	case 1:
++		break;
++	case 2:
++		mxc_request_iomux(MX35_PIN_TX3_RX2, MUX_CONFIG_GPIO);
++		mxc_request_iomux(MX35_PIN_TX2_RX3, MUX_CONFIG_GPIO);
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_i2c_inactive);
++
++/*!
++ * Setup GPIO for a CSPI device to be active
++ *
++ * @param  cspi_mod         an CSPI device
++ */
++void gpio_spi_active(int cspi_mod)
++{
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_iomux(MX35_PIN_CSPI1_MOSI, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_MISO, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SS0, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SS1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SCLK, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_CSPI1_SPI_RDY, MUX_CONFIG_FUNC);
++
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_MOSI,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_MISO,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SS0,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_ODE_CMOS |
++				  PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SS1,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_ODE_CMOS |
++				  PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SCLK,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PD | PAD_CTL_DRV_NORMAL);
++		mxc_iomux_set_pad(MX35_PIN_CSPI1_SPI_RDY,
++				  PAD_CTL_DRV_3_3V | PAD_CTL_HYS_SCHMITZ |
++				  PAD_CTL_PKE_ENABLE | PAD_CTL_PUE_PUD |
++				  PAD_CTL_100K_PU | PAD_CTL_DRV_NORMAL);
++		break;
++	case 1:
++		/* SPI2 */
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_spi_active);
++
++/*!
++ * Setup GPIO for a CSPI device to be inactive
++ *
++ * @param  cspi_mod         a CSPI device
++ */
++void gpio_spi_inactive(int cspi_mod)
++{
++	switch (cspi_mod) {
++	case 0:
++		/* SPI1 */
++		mxc_request_gpio(MX35_PIN_CSPI1_MOSI);
++		mxc_request_gpio(MX35_PIN_CSPI1_MISO);
++		mxc_request_gpio(MX35_PIN_CSPI1_SS0);
++		mxc_request_gpio(MX35_PIN_CSPI1_SS1);
++		mxc_request_gpio(MX35_PIN_CSPI1_SCLK);
++		mxc_request_gpio(MX35_PIN_CSPI1_SPI_RDY);
++
++		mxc_free_iomux(MX35_PIN_CSPI1_MOSI, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_MISO, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SS0, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SS1, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SCLK, MUX_CONFIG_GPIO);
++		mxc_free_iomux(MX35_PIN_CSPI1_SPI_RDY, MUX_CONFIG_GPIO);
++		break;
++	case 1:
++		/* SPI2 */
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_spi_inactive);
++
++/*!
++ * Setup GPIO for LCD to be active
++ */
++void gpio_lcd_active(void)
++{
++	mxc_request_iomux(MX35_PIN_LD0, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD1, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD2, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD3, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD4, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD5, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD6, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD7, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD8, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD9, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD10, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD11, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD12, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD13, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD14, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD15, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD16, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD17, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD18, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD19, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD20, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD21, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD22, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_LD23, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_D3_VSYNC, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_D3_HSYNC, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_D3_FPSHIFT, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_D3_DRDY, MUX_CONFIG_FUNC);
++	mxc_request_iomux(MX35_PIN_CONTRAST, MUX_CONFIG_FUNC);
++}
++
++EXPORT_SYMBOL(gpio_lcd_active);
++
++/*!
++ * Setup GPIO for LCD to be inactive
++ */
++void gpio_lcd_inactive(void)
++{
++}
++
++EXPORT_SYMBOL(gpio_lcd_inactive);
++
++/*!
++ * Setup GPIO for SDHC to be active
++ *
++ * @param module SDHC module number
++ */
++void gpio_sdhc_active(int module)
++{
++	unsigned int pad_val;
++
++	switch (module) {
++	case 0:
++		/* WLAN Module */
++		mxc_request_iomux(MX35_PIN_SD1_CLK,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD1_CMD,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD1_DATA0,
++				  MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SD1_DATA1,
++				  MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SD1_DATA2,
++				  MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SD1_DATA3,
++				  MUX_CONFIG_FUNC);
++
++		pad_val = PAD_CTL_DRV_3_3V | PAD_CTL_HYS_CMOS |
++			PAD_CTL_PUE_PUD | PAD_CTL_PKE_ENABLE |
++			PAD_CTL_47K_PU | PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_FAST;
++
++		mxc_iomux_set_pad(MX35_PIN_SD1_CLK, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD1_CMD, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA0, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA1, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA2, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA3, pad_val);
++		break;
++	case 1:
++		/* SD Card */
++		mxc_request_iomux(MX35_PIN_SD2_CLK,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_CMD,
++				  MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_request_iomux(MX35_PIN_SD2_DATA0, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SD2_DATA1, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SD2_DATA2, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SD2_DATA3, MUX_CONFIG_FUNC);
++
++		pad_val = PAD_CTL_DRV_MAX | PAD_CTL_PUE_PUD |
++			PAD_CTL_PKE_ENABLE | PAD_CTL_22K_PU |
++			PAD_CTL_SRE_FAST;
++
++		mxc_iomux_set_pad(MX35_PIN_SD2_CLK, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_CMD, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA0, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA1, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA2, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA3, pad_val);
++
++		/* Chip select and write protect */
++		mxc_request_iomux(MX35_PIN_ATA_CS0, MUX_CONFIG_ALT5);
++		mxc_iomux_set_input(MUX_IN_GPIO2_IN_6, INPUT_CTL_PATH1);
++		mxc_iomux_set_pad(MX35_PIN_ATA_CS0, 0);
++		mxc_set_gpio_direction(MX35_PIN_ATA_CS0, 1);
++
++		mxc_request_iomux(MX35_PIN_ATA_DMARQ, MUX_CONFIG_ALT5);
++		mxc_iomux_set_input(MUX_IN_GPIO2_IN_31, INPUT_CTL_PATH1);
++		mxc_iomux_set_pad(MX35_PIN_ATA_DMARQ, 0);
++		mxc_set_gpio_direction(MX35_PIN_ATA_DMARQ, 1);
++
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_sdhc_active);
++
++/*!
++ * Setup GPIO for SDHC1 to be inactive
++ *
++ * @param module SDHC module number
++ */
++void gpio_sdhc_inactive(int module)
++{
++	switch (module) {
++	case 0:
++		/* WLAN Module */
++		mxc_free_iomux(MX35_PIN_SD1_CLK,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_CMD,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA0,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA1,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA2,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD1_DATA3,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++
++		mxc_iomux_set_pad(MX35_PIN_SD1_CLK,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD1_CMD,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA0,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA1,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA2,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD1_DATA3,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		break;
++	case 1:
++		/* SD Card */
++		mxc_free_iomux(MX35_PIN_SD2_CLK,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_CMD,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA0,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA1,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA2,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++		mxc_free_iomux(MX35_PIN_SD2_DATA3,
++			       MUX_CONFIG_FUNC | MUX_CONFIG_SION);
++
++		mxc_iomux_set_pad(MX35_PIN_SD2_CLK,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_CMD,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA0,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA1,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA2,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++		mxc_iomux_set_pad(MX35_PIN_SD2_DATA3,
++				  (PAD_CTL_DRV_NORMAL | PAD_CTL_SRE_SLOW));
++
++		/* Chip select and write protect */
++		mxc_free_iomux(MX35_PIN_ATA_CS0, MUX_CONFIG_FUNC);
++		mxc_free_iomux(MX35_PIN_ATA_DMARQ, MUX_CONFIG_FUNC);
++
++		break;
++	default:
++		break;
++	}
++}
++
++EXPORT_SYMBOL(gpio_sdhc_inactive);
++
++/*
++ * Probe for the card. If present the GPIO data would be set.
++ */
++unsigned int sdhc_get_card_det_status(struct device *dev)
++{
++	if (to_platform_device(dev)->id == 0) {
++		/* WLAN Module - always available */
++		return 0;
++	}
++	else if (to_platform_device(dev)->id == 1) {
++		/* SD Card */
++		return mxc_get_gpio_datain(MX35_PIN_ATA_CS0);
++	} else {
++		return 0;
++	}
++}
++
++EXPORT_SYMBOL(sdhc_get_card_det_status);
++
++/*
++ * Write protect for the card. If present the GPIO data would be set.
++ */
++int sdhc_get_card_wp_status(struct device *dev)
++{
++	unsigned int ret;
++
++	/* SD Card */
++	ret = mxc_get_gpio_datain(MX35_PIN_ATA_DMARQ);
++	return ret;
++}
++
++EXPORT_SYMBOL(sdhc_get_card_wp_status);
++
++/*
++ *  USB Host2
++ */
++int gpio_usbh2_active(void)
++{
++	mxc_request_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_ALT2);
++	mxc_iomux_set_pad(MX35_PIN_I2C2_CLK, 0x0040);
++
++	mxc_request_iomux(MX35_PIN_I2C2_DAT, MUX_CONFIG_ALT2);
++	mxc_iomux_set_input(MUX_IN_USB_UH2_USB_OC, INPUT_CTL_PATH1);
++	mxc_iomux_set_pad(MX35_PIN_I2C2_DAT, 0x01c0);
++
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_usbh2_active);
++
++void gpio_usbh2_inactive(void)
++{
++	mxc_request_gpio(MX35_PIN_I2C2_DAT);
++	mxc_free_iomux(MX35_PIN_I2C2_DAT, MUX_CONFIG_GPIO);
++	mxc_request_gpio(MX35_PIN_I2C2_CLK);
++	mxc_free_iomux(MX35_PIN_I2C2_CLK, MUX_CONFIG_GPIO);
++}
++
++EXPORT_SYMBOL(gpio_usbh2_inactive);
++
++/*
++ *  USB OTG UTMI
++ */
++int gpio_usbotg_utmi_active(void)
++{
++	mxc_request_iomux(MX35_PIN_USBOTG_PWR, MUX_CONFIG_FUNC);
++	mxc_iomux_set_pad(MX35_PIN_USBOTG_PWR, 0x0040);
++	mxc_request_iomux(MX35_PIN_USBOTG_OC, MUX_CONFIG_FUNC);
++	mxc_iomux_set_pad(MX35_PIN_USBOTG_OC, 0x01c0);
++
++	return 0;
++}
++
++EXPORT_SYMBOL(gpio_usbotg_utmi_active);
++
++void gpio_usbotg_utmi_inactive(void)
++{
++	mxc_request_gpio(MX35_PIN_USBOTG_PWR);
++	mxc_free_iomux(MX35_PIN_USBOTG_PWR, MUX_CONFIG_GPIO);
++	mxc_request_gpio(MX35_PIN_USBOTG_OC);
++	mxc_free_iomux(MX35_PIN_USBOTG_OC, MUX_CONFIG_GPIO);
++}
++
++EXPORT_SYMBOL(gpio_usbotg_utmi_inactive);
++
++/*!
++ * Setup GPIO for spdif tx/rx to be active
++ */
++void gpio_spdif_active(void)
++{
++	/* turn off spdif led */
++	mxc_request_iomux(MX35_PIN_CTS2, MUX_CONFIG_ALT5);
++	mxc_set_gpio_direction(MX35_PIN_CTS2, 0);
++	if (system_rev <= 2) {
++		mxc_set_gpio_dataout(MX35_PIN_CTS2, 1);
++	}
++	else {
++		mxc_set_gpio_dataout(MX35_PIN_CTS2, 0);
++	}
++}
++
++EXPORT_SYMBOL(gpio_spdif_active);
++
++void gpio_spdif_on(void)
++{
++	/* SPDIF OUT */
++	mxc_free_iomux(MX35_PIN_CTS2, MUX_CONFIG_GPIO);
++
++	mxc_request_iomux(MX35_PIN_CTS2, MUX_CONFIG_ALT1);
++	mxc_iomux_set_pad(MX35_PIN_CTS2, PAD_CTL_PKE_NONE | PAD_CTL_PUE_PUD);
++}
++
++EXPORT_SYMBOL(gpio_spdif_on);
++
++void gpio_spdif_off(void)
++{
++	/* SPDIF OUT */
++	mxc_free_iomux(MX35_PIN_CTS2, MUX_CONFIG_ALT1);
++
++	/* turn off spdif led */
++	mxc_request_iomux(MX35_PIN_CTS2, MUX_CONFIG_ALT5);
++	mxc_set_gpio_direction(MX35_PIN_CTS2, 0);
++	if (system_rev <= 2) {
++		mxc_set_gpio_dataout(MX35_PIN_CTS2, 1);
++	}
++	else {
++		mxc_set_gpio_dataout(MX35_PIN_CTS2, 0);
++	}
++}
++
++EXPORT_SYMBOL(gpio_spdif_off);
++
++/*!
++ * Setup GPIO for spdif tx/rx to be inactive
++ */
++void gpio_spdif_inactive(void)
++{
++	/* SPDIF OUT */
++	mxc_free_iomux(MX35_PIN_CTS2, MUX_CONFIG_ALT1);
++}
++
++EXPORT_SYMBOL(gpio_spdif_inactive);
++
++
++/*!
++ * This function activates DAM ports 3 to enable
++ * audio I/O.
++ */
++void gpio_activate_audio_ports(int ssi_port)
++{
++	unsigned int pad_val;
++	u32 reg;
++
++	if (ssi_port == 1) {
++		/* Select osc_audio for SSI1 audio clock */
++		reg = __raw_readl(MXC_CCM_ACMR);
++		reg &= ~MXC_CCM_ACMR_SSI1_CLK_SEL_MASK;
++		reg |= (0x01 << MXC_CCM_ACMR_SSI1_CLK_SEL_OFFSET);
++		__raw_writel(reg, MXC_CCM_ACMR);
++
++		mxc_request_iomux(MX35_PIN_STXD4, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SRXD4, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SCK4, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_STXFS4, MUX_CONFIG_FUNC);
++
++		pad_val = PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD |
++			PAD_CTL_PUE_PUD;
++
++		mxc_iomux_set_pad(MX35_PIN_STXD4, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SRXD4, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SCK4, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_STXFS4, pad_val);
++	}
++	else {
++		mxc_request_iomux(MX35_PIN_STXD5, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SRXD5, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_SCK5, MUX_CONFIG_FUNC);
++		mxc_request_iomux(MX35_PIN_STXFS5, MUX_CONFIG_FUNC);
++
++		pad_val = PAD_CTL_HYS_SCHMITZ | PAD_CTL_PKE_ENABLE | PAD_CTL_100K_PD |
++			PAD_CTL_PUE_PUD;
++		mxc_iomux_set_pad(MX35_PIN_STXD5, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SRXD5, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_SCK5, pad_val);
++		mxc_iomux_set_pad(MX35_PIN_STXFS5, pad_val);
++	}
++}
++
++EXPORT_SYMBOL(gpio_activate_audio_ports);
+Index: linux-2.6.26/arch/arm/mach-mx35/serial.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/serial.c	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/arch/arm/mach-mx35/serial.c	2009-04-29 14:18:43.000000000 +0100
+@@ -26,6 +26,7 @@
+ #include "serial.h"
+ #include "board-mx35evb.h"
+ #include "board-mx35_3stack.h"
++#include "board-mx35_fab4.h"
+ 
+ #if defined(CONFIG_SERIAL_MXC) || defined(CONFIG_SERIAL_MXC_MODULE)
+ 
+Index: linux-2.6.26/arch/arm/tools/mach-types
+===================================================================
+--- linux-2.6.26.orig/arch/arm/tools/mach-types	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/arch/arm/tools/mach-types	2009-04-29 14:18:43.000000000 +0100
+@@ -1689,6 +1689,7 @@
+ mv2120			MACH_MV2120		MV2120			1693
+ csb737			MACH_CSB737		CSB737			1695
+ mx51_3ds		MACH_MX51_3DS		MX51_3DS		1696
++fab4			MACH_FAB4		FAB4			1804
+ g900			MACH_G900		G900			1697
+ apf27			MACH_APF27		APF27			1698
+ ggus2000		MACH_GGUS2000		GGUS2000		1699
+Index: linux-2.6.26/include/asm-arm/arch-mxc/hardware.h
+===================================================================
+--- linux-2.6.26.orig/include/asm-arm/arch-mxc/hardware.h	2009-04-29 14:18:27.000000000 +0100
++++ linux-2.6.26/include/asm-arm/arch-mxc/hardware.h	2009-04-29 14:18:43.000000000 +0100
+@@ -41,7 +41,14 @@
+ 
+ #define mxc_cpu()		(system_rev >> 12)
+ #define mxc_is_cpu(part)	((mxc_cpu() == part) ? 1 : 0)
+-#define mxc_cpu_rev()		(system_rev & 0xFF)
++/*
++ * Fab4 system_rev < 4 has MX35 TO1, later boards have MX35 TO2
++ *
++ * Freescale use the system_rev for the cpu type and version, but we use
++ * it for the board revision. This code has been changed to work on Fab4.
++ */
++#define mxc_cpu_rev()		((system_rev < 4) ? CHIP_REV_1_0 : CHIP_REV_2_0)
++//#define mxc_cpu_rev()		(system_rev & 0xFF)
+ #define mxc_cpu_rev_major()	((system_rev >> 4) & 0xF)
+ #define mxc_cpu_rev_minor()	(system_rev & 0xF)
+ #define mxc_cpu_is_rev(rev)	\

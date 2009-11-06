@@ -1,0 +1,203 @@
+From 88fa409a89b3db75821b3555adcd4f52b675d8cc Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 24 Mar 2007 19:41:58 -0400
+Subject: [PATCH] cleanup: keep all top-of-function automatic variables clustered together
+
+---
+ fs/unionfs/branchman.c  |    1 -
+ fs/unionfs/commonfops.c |    3 ---
+ fs/unionfs/copyup.c     |    2 --
+ fs/unionfs/dentry.c     |    1 -
+ fs/unionfs/dirhelper.c  |    2 --
+ fs/unionfs/lookup.c     |    1 -
+ fs/unionfs/main.c       |    4 ++--
+ fs/unionfs/super.c      |    1 +
+ fs/unionfs/union.h      |    4 ++++
+ 9 files changed, 7 insertions(+), 12 deletions(-)
+
+diff --git a/fs/unionfs/branchman.c b/fs/unionfs/branchman.c
+index eba2221..3163e4e 100644
+--- a/fs/unionfs/branchman.c
++++ b/fs/unionfs/branchman.c
+@@ -28,7 +28,6 @@ int unionfs_ioctl_queryfile(struct file *file, unsigned int cmd,
+ {
+ 	int err = 0;
+ 	fd_set branchlist;
+-
+ 	int bstart = 0, bend = 0, bindex = 0;
+ 	struct dentry *dentry, *hidden_dentry;
+ 
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 778901f..de567a2 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -30,7 +30,6 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 	const int countersize = sizeof(counter) * 2;
+ 	const int nlen = sizeof(".unionfs") + i_inosize + countersize - 1;
+ 	char name[nlen + 1];
+-
+ 	int err;
+ 	struct dentry *tmp_dentry = NULL;
+ 	struct dentry *hidden_dentry;
+@@ -194,7 +193,6 @@ static int open_highest_file(struct file *file, int willwrite)
+ 	int bindex, bstart, bend, err = 0;
+ 	struct file *hidden_file;
+ 	struct dentry *hidden_dentry;
+-
+ 	struct dentry *dentry = file->f_dentry;
+ 	struct inode *parent_inode = dentry->d_parent->d_inode;
+ 	struct super_block *sb = dentry->d_sb;
+@@ -288,7 +286,6 @@ int unionfs_file_revalidate(struct file *file, int willwrite)
+ 	int sbgen, fgen, dgen;
+ 	int bstart, bend;
+ 	int size;
+-
+ 	int err = 0;
+ 
+ 	dentry = file->f_dentry;
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 8fae308..2797231 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -620,10 +620,8 @@ static struct dentry *create_parents_named(struct inode *dir,
+ 	struct dentry *hidden_dentry = NULL;
+ 	const char *childname;
+ 	unsigned int childnamelen;
+-
+ 	int nr_dentry;
+ 	int count;
+-
+ 	int old_bstart;
+ 	int old_bend;
+ 	struct dentry **path = NULL;
+diff --git a/fs/unionfs/dentry.c b/fs/unionfs/dentry.c
+index 463cf4c..e85bcf4 100644
+--- a/fs/unionfs/dentry.c
++++ b/fs/unionfs/dentry.c
+@@ -36,7 +36,6 @@ static int __unionfs_d_revalidate_one(struct dentry *dentry,
+ 	int positive = 0;
+ 	int locked = 0;
+ 	int interpose_flag;
+-
+ 	struct nameidata lowernd; /* TODO: be gentler to the stack */
+ 
+ 	if (nd)
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index cbea6c1..de22b30 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -30,7 +30,6 @@ int do_delete_whiteouts(struct dentry *dentry, int bindex,
+ 	struct dentry *hidden_dentry;
+ 	char *name = NULL, *p;
+ 	struct inode *hidden_dir;
+-
+ 	int i;
+ 	struct list_head *pos;
+ 	struct filldir_node *cursor;
+@@ -94,7 +93,6 @@ int delete_whiteouts(struct dentry *dentry, int bindex,
+ 	struct super_block *sb;
+ 	struct dentry *hidden_dir_dentry;
+ 	struct inode *hidden_dir;
+-
+ 	struct sioq_args args;
+ 
+ 	sb = dentry->d_sb;
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index 67412be..5fe9bfd 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -87,7 +87,6 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 	int locked_parent = 0;
+ 	int locked_child = 0;
+ 	int allocated_new_info = 0;
+-
+ 	int opaque;
+ 	char *whname = NULL;
+ 	const char *name;
+diff --git a/fs/unionfs/main.c b/fs/unionfs/main.c
+index 2f7da45..d458210 100644
+--- a/fs/unionfs/main.c
++++ b/fs/unionfs/main.c
+@@ -232,6 +232,7 @@ int __parse_branch_mode(const char *name)
+ int parse_branch_mode(const char *name)
+ {
+ 	int perms =  __parse_branch_mode(name);
++
+ 	if (perms == 0)
+ 		perms = MAY_READ | MAY_WRITE;
+ 	return perms;
+@@ -248,7 +249,6 @@ static int parse_dirs_option(struct super_block *sb, struct unionfs_dentry_info
+ 	int bindex = 0;
+ 	int i = 0;
+ 	int j = 0;
+-
+ 	struct dentry *dent1;
+ 	struct dentry *dent2;
+ 
+@@ -511,7 +511,6 @@ static int unionfs_read_super(struct super_block *sb, void *raw_data,
+ 			      int silent)
+ {
+ 	int err = 0;
+-
+ 	struct unionfs_dentry_info *hidden_root_info = NULL;
+ 	int bindex, bstart, bend;
+ 
+@@ -663,6 +662,7 @@ static struct file_system_type unionfs_fs_type = {
+ static int __init init_unionfs_fs(void)
+ {
+ 	int err;
++
+ 	printk("Registering unionfs " UNIONFS_VERSION "\n");
+ 
+ 	if ((err = unionfs_init_filldir_cache()))
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 25380f3..a94d1ea 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -213,6 +213,7 @@ static noinline int do_remount_del_option(char *optarg, int cur_branches,
+ 	int err = -EINVAL;
+ 	int idx;
+ 	struct nameidata nd;
++
+ 	/* optarg contains the branch name to delete */
+ 
+ 	/*
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index 664caff..4bb3b24 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -210,6 +210,7 @@ struct unionfs_data *alloc_new_data(int objs);
+ static inline off_t rdstate2offset(struct unionfs_dir_state *buf)
+ {
+ 	off_t tmp;
++
+ 	tmp = ((buf->cookie & MAXRDCOOKIE) << RDOFFBITS)
+ 		| (buf->offset & DIREOF);
+ 	return tmp;
+@@ -367,6 +368,7 @@ static inline int set_branchperms(struct super_block *sb, int index, int perms)
+ static inline int is_robranch_super(const struct super_block *sb, int index)
+ {
+ 	int ret;
++
+ 	unionfs_read_lock(sb);
+   	ret = (!(branchperms(sb, index) & MAY_WRITE)) ? -EROFS : 0;
+ 	unionfs_read_unlock(sb);
+@@ -455,6 +457,7 @@ static inline struct vfsmount *unionfs_mntget(struct dentry *dentry,
+ 					      int bindex)
+ {
+ 	struct vfsmount *mnt;
++ 
+ 	if (!dentry) {
+ 		if (bindex < 0)
+ 			return NULL;
+@@ -473,6 +476,7 @@ static inline struct vfsmount *unionfs_mntget(struct dentry *dentry,
+ static inline void unionfs_mntput(struct dentry *dentry, int bindex)
+ {
+ 	struct vfsmount *mnt;
++
+ 	if (!dentry) {
+ 		if (bindex < 0)
+ 			return;
+-- 
+1.5.4.3
+

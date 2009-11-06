@@ -1,0 +1,32 @@
+From f1b7ce38b468e0530f942889f02f220b3ac37e0c Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 19 Feb 2009 10:32:54 +0800
+Subject: [PATCH] ENGR00107027 SD: System in the dead-loop after unsafe sd card removal
+
+System may run into a dead-loop after remove the sd card when
+the data write operation is in progress.
+Solution:reset the entire controller after the sd card is removed.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ drivers/mmc/host/mx_sdhci.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/mx_sdhci.c b/drivers/mmc/host/mx_sdhci.c
+index 3fc6e2c..9603318 100644
+--- a/drivers/mmc/host/mx_sdhci.c
++++ b/drivers/mmc/host/mx_sdhci.c
+@@ -1397,6 +1397,10 @@ static void esdhc_cd_callback(struct work_struct *work)
+ 	spin_lock_irqsave(&host->lock, flags);
+ 
+ 	if (!(host->flags & SDHCI_CD_PRESENT)) {
++		printk(KERN_INFO
++		       "%s: Card removed and resetting controller.\n",
++		       mmc_hostname(host->mmc));
++		sdhci_init(host);
+ 		if (host->mrq) {
+ 			printk(KERN_ERR
+ 			       "%s: Card removed during transfer!\n",
+-- 
+1.5.4.4
+

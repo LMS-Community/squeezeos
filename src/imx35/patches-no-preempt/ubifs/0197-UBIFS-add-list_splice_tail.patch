@@ -1,0 +1,47 @@
+From 384cf875091e4089e6b94eb7d26a85da869a1d03 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 7 Apr 2009 18:14:47 +0300
+Subject: [PATCH] UBIFS: add list_splice_tail
+
+Back-port it from 2.6.28
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/debug.h |   23 +++++++++++++++++++++++
+ 1 files changed, 23 insertions(+), 0 deletions(-)
+
+diff --git a/fs/ubifs/debug.h b/fs/ubifs/debug.h
+index c1cd73b..e19874a 100644
+--- a/fs/ubifs/debug.h
++++ b/fs/ubifs/debug.h
+@@ -470,4 +470,27 @@ void dbg_debugfs_exit_fs(struct ubifs_info *c);
+ #define dbg_debugfs_exit_fs(c)                     0
+ 
+ #endif /* !CONFIG_UBIFS_FS_DEBUG */
++
++/* The below has been back-ported from 2.6.28 */
++static inline void ___list_splice(const struct list_head *list,
++				  struct list_head *prev,
++				  struct list_head *next)
++{
++	struct list_head *first = list->next;
++	struct list_head *last = list->prev;
++
++	first->prev = prev;
++	prev->next = first;
++
++	last->next = next;
++	next->prev = last;
++}
++
++static inline void list_splice_tail(struct list_head *list,
++				struct list_head *head)
++{
++	if (!list_empty(list))
++		___list_splice(list, head->prev, head);
++}
++
+ #endif /* !__UBIFS_DEBUG_H__ */
+-- 
+1.5.4.3
+

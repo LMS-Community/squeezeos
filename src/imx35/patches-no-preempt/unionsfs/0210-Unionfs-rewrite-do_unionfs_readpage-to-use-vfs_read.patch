@@ -1,0 +1,141 @@
+From 2331d3a90414e5c4880bc83a028b580fe72538b4 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sat, 14 Jul 2007 03:36:15 -0400
+Subject: [PATCH] Unionfs: rewrite do_unionfs_readpage to use vfs_read (bugfix)
+
+In do_unionfs_readpage, we used to call the lower file system's ->readpage.
+However, some file systems (e.g., tmpfs) don't implement ->readpage, causing
+a NULL pointer dereference under certain conditions, especially under severe
+memory pressure.  This patch reimplements do_unionfs_readpage using
+vfs_read, which makes the code simpler and more reliable, as we depend on
+the VFS to do most of the hard work (even if this implementation might be a
+bit slower).
+
+This fix also makes sense because it makes the mmap code in unionfs more
+symmetric with unionfs_commit_write --- which uses vfs_write().
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/mmap.c |   86 ++++++++++++++++------------------------------------
+ 1 files changed, 27 insertions(+), 59 deletions(-)
+
+diff --git a/fs/unionfs/mmap.c b/fs/unionfs/mmap.c
+index 56937b7..f97f6cf 100644
+--- a/fs/unionfs/mmap.c
++++ b/fs/unionfs/mmap.c
+@@ -114,85 +114,53 @@ out:
+ static int unionfs_do_readpage(struct file *file, struct page *page)
+ {
+ 	int err = -EIO;
+-	struct dentry *dentry;
+-	struct file *lower_file = NULL;
+-	struct inode *inode, *lower_inode;
+-	char *page_data;
+-	struct page *lower_page;
+-	char *lower_page_data;
++	struct file *lower_file;
++	struct inode *inode;
++	mm_segment_t old_fs;
++	char *page_data = NULL;
++	loff_t offset;
+ 
+-	dentry = file->f_path.dentry;
+ 	if (UNIONFS_F(file) == NULL) {
+ 		err = -ENOENT;
+-		goto out_err;
++		goto out;
+ 	}
+ 
+ 	lower_file = unionfs_lower_file(file);
+-	inode = dentry->d_inode;
+-	lower_inode = unionfs_lower_inode(inode);
++	/* FIXME: is this assertion right here? */
++	BUG_ON(lower_file == NULL);
+ 
+-	lower_page = NULL;
+-
+-	/* find lower page (returns a locked page) */
+-	lower_page = read_cache_page(lower_inode->i_mapping,
+-				     page->index,
+-				     (filler_t *) lower_inode->i_mapping->
+-				     a_ops->readpage, (void *)lower_file);
+-
+-	if (IS_ERR(lower_page)) {
+-		err = PTR_ERR(lower_page);
+-		lower_page = NULL;
+-		goto out_release;
+-	}
++	inode = file->f_path.dentry->d_inode;
+ 
++	page_data = (char *) kmap(page);
+ 	/*
+-	 * wait for the page data to show up
+-	 * (signaled by readpage as unlocking the page)
++	 * Use vfs_read because some lower file systems don't have a
++	 * readpage method, and some file systems (esp. distributed ones)
++	 * don't like their pages to be accessed directly.  Using vfs_read
++	 * may be a little slower, but a lot safer, as the VFS does a lot of
++	 * the necessary magic for us.
+ 	 */
+-	wait_on_page_locked(lower_page);
+-	if (!PageUptodate(lower_page)) {
+-		/*
+-		 * call readpage() again if we returned from wait_on_page
+-		 * with a page that's not up-to-date; that can happen when a
+-		 * partial page has a few buffers which are ok, but not the
+-		 * whole page.
+-		 */
+-		lock_page(lower_page);
+-		err = lower_inode->i_mapping->a_ops->readpage(lower_file,
+-							      lower_page);
+-		if (err) {
+-			lower_page = NULL;
+-			goto out_release;
+-		}
+-
+-		wait_on_page_locked(lower_page);
+-		if (!PageUptodate(lower_page)) {
+-			err = -EIO;
+-			goto out_release;
+-		}
+-	}
+-
+-	/* map pages, get their addresses */
+-	page_data = (char *)kmap(page);
+-	lower_page_data = (char *)kmap(lower_page);
++	offset = lower_file->f_pos = (page->index << PAGE_CACHE_SHIFT);
++	old_fs = get_fs();
++	set_fs(KERNEL_DS);
++	err = vfs_read(lower_file, page_data, PAGE_CACHE_SIZE,
++		       &lower_file->f_pos);
++	set_fs(old_fs);
+ 
+-	memcpy(page_data, lower_page_data, PAGE_CACHE_SIZE);
++	kunmap(page);
+ 
++	if (err < 0)
++		goto out;
+ 	err = 0;
+ 
+-	kunmap(lower_page);
+-	kunmap(page);
+-
+-out_release:
+-	if (lower_page)
+-		page_cache_release(lower_page);	/* undo read_cache_page */
++	/* if vfs_read succeeded above, sync up our times */
++	unionfs_copy_attr_times(inode);
+ 
++out:
+ 	if (err == 0)
+ 		SetPageUptodate(page);
+ 	else
+ 		ClearPageUptodate(page);
+ 
+-out_err:
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

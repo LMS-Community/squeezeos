@@ -1,0 +1,52 @@
+From 9e92a6119e630c69f7dc21fde9152fae82980b34 Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 4 May 2007 14:50:01 -0400
+Subject: [PATCH] bugfix: remove defunct unionfs_put_inode method
+
+Removed old workaround code that was needed to get mmap working, is no
+longer needed with recent kernels.
+---
+ fs/unionfs/super.c |   20 --------------------
+ 1 files changed, 0 insertions(+), 20 deletions(-)
+
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 3a8d74c..901840e 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -62,25 +62,6 @@ static void unionfs_read_inode(struct inode *inode)
+ 	inode->i_mapping->a_ops = &unionfs_empty_aops;
+ }
+ 
+-static void unionfs_put_inode(struct inode *inode)
+-{
+-	/*
+-	 * This is really funky stuff:
+-	 *
+-	 * Basically, if i_count == 1, iput will then decrement it and this
+-	 * inode will be destroyed.  It is currently holding a reference to
+-	 * the hidden inode.  Therefore, it needs to release that reference
+-	 * by calling iput on the hidden inode.  iput() _will_ do it for us
+-	 * (by calling our clear_inode), but _only_ if i_nlink == 0.  The
+-	 * problem is, NFS keeps i_nlink == 1 for silly_rename'd files.  So
+-	 * we must force our i_nlink to 0 here to trick iput() into calling
+-	 * our clear_inode.
+-	 */
+-
+-	if (atomic_read(&inode->i_count) == 1)
+-		inode->i_nlink = 0;
+-}
+-
+ /*
+  * we now define delete_inode, because there are two VFS paths that may
+  * destroy an inode: one of them calls clear inode before doing everything
+@@ -963,7 +944,6 @@ out:
+ 
+ struct super_operations unionfs_sops = {
+ 	.read_inode	= unionfs_read_inode,
+-	.put_inode	= unionfs_put_inode,
+ 	.delete_inode	= unionfs_delete_inode,
+ 	.put_super	= unionfs_put_super,
+ 	.statfs		= unionfs_statfs,
+-- 
+1.5.4.3
+

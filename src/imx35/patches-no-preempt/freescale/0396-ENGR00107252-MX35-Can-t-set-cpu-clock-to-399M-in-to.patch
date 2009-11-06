@@ -1,0 +1,48 @@
+From 356f81b1c88b583a867c7ff981850a50e39ab55a Mon Sep 17 00:00:00 2001
+From: Wallace Wang <r59996@freescale.com>
+Date: Fri, 6 Feb 2009 16:20:57 +0800
+Subject: [PATCH] ENGR00107252 MX35: Can't set cpu clock to 399M in to2
+
+In MX35 TO2, cpu clock can't be set to 399M.
+
+Signed-off-by: Wallace Wang <r59996@freescale.com>
+---
+ arch/arm/mach-mx35/clock.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+Index: linux-2.6.26/arch/arm/mach-mx35/clock.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/mach-mx35/clock.c	2009-11-06 11:56:09.000000000 +0000
++++ linux-2.6.26/arch/arm/mach-mx35/clock.c	2009-11-06 13:27:26.000000000 +0000
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2009 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -15,6 +15,7 @@
+ #include <linux/spinlock.h>
+ #include <linux/delay.h>
+ #include <linux/clk.h>
++#include <linux/timer.h>
+ #include <asm/io.h>
+ #include <asm/arch/clock.h>
+ #include <asm/div64.h>
+@@ -275,14 +276,14 @@
+ 	struct cpu_wp *p;
+ 	unsigned long reg = __raw_readl(MXC_CCM_PDR0);
+ 	if ((reg & MXC_CCM_PDR0_AUTO_CON)
+-	    && (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1)) {
++	    || (cpu_is_mx35_rev(CHIP_REV_2_0) >= 1)) {
+ 		reg &= MXC_CCM_PDR0_CON_MUX_DIV_MASK;
+ 	} else {
+ 		reg &= MXC_CCM_PDR0_AUTO_MUX_DIV_MASK;
+ 	}
+ 	for (i = 0; i < cpu_wp_nr; i++) {
+ 		p = cpu_wp_tbl + cpu_curr_wp;
+-		if (p->pdr0_reg == reg)
++		if (p->pdr0_reg == (reg & 0xF0E00))
+ 			break;
+ 		cpu_curr_wp = (cpu_curr_wp + 1) % cpu_wp_nr;
+ 	}

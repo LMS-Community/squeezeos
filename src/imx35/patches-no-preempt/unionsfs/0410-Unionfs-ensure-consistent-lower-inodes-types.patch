@@ -1,0 +1,43 @@
+From e2831914331a5b99c16f21ca7a4a7ccafb23ab29 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 17:18:48 -0500
+Subject: [PATCH] Unionfs: ensure consistent lower inodes types
+
+When looking up a lower object in multiple branches, especially for
+directories, ignore any existing entries whose type is different than the
+type of the first found object (otherwise we'll be trying to, say, call
+readdir on a non-dir inode).
+
+Signed-off-by: Himanshu Kanda <hkanda@fsl.cs.sunysb.edu>
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/lookup.c |   13 +++++++++++++
+ 1 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/lookup.c b/fs/unionfs/lookup.c
+index b9ee072..755158e 100644
+--- a/fs/unionfs/lookup.c
++++ b/fs/unionfs/lookup.c
+@@ -256,6 +256,19 @@ struct dentry *unionfs_lookup_backend(struct dentry *dentry,
+ 			continue;
+ 		}
+ 
++		/*
++		 * If we already found at least one positive dentry
++		 * (dentry_count is non-zero), then we skip all remaining
++		 * positive dentries if their type is a non-dir.  This is
++		 * because only directories are allowed to stack on multiple
++		 * branches, but we have to skip non-dirs (to avoid, say,
++		 * calling readdir on a regular file).
++		 */
++		if (!S_ISDIR(lower_dentry->d_inode->i_mode) && dentry_count) {
++			dput(lower_dentry);
++			continue;
++		}
++
+ 		/* number of positive dentries */
+ 		dentry_count++;
+ 
+-- 
+1.5.4.3
+

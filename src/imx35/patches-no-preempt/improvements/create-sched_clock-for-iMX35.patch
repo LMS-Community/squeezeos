@@ -1,0 +1,110 @@
+Create an accurate timestamp for sched_clock() and printk_clock().
+
+Without this patch the tools like 'top' will display a far too low CPU-load usage.
+This is because the sched_clock() routine is used for these kind of statistics by
+the scheduler. The scheduler even uses it to schedule 'fair' between tasks.
+If this is not available, the kernel will count CPU-usage in jiffies. 
+Tasks that never use more CPU time than a jiffy continuously (without rescheduling) will
+be accounted for CPU-time 0. Using a sub-microsecond clock this administration
+will become much more accurate.
+
+For accurate timestamps in the printk logging this routine is also used.
+Usefull for detecting with logging is produced by the kernel and how much
+time there is between each line printed.
+
+Signed-off-by: Remy Bohmer <linux@bohmer.net>
+---
+ arch/arm/plat-mxc/time.c |   62 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 62 insertions(+)
+
+Index: linux-2.6.26/arch/arm/plat-mxc/time.c
+===================================================================
+--- linux-2.6.26.orig/arch/arm/plat-mxc/time.c	2009-03-11 20:58:36.000000000 +0100
++++ linux-2.6.26/arch/arm/plat-mxc/time.c	2009-03-11 21:19:31.000000000 +0100
+@@ -36,6 +36,7 @@
+ #include <linux/clocksource.h>
+ #include <linux/clockchips.h>
+ #include <linux/mtd/xip.h>
++#include <linux/sched.h> /* for sched_clock() prototype */
+ #include <asm/hardware.h>
+ #include <asm/mach/time.h>
+ 
+@@ -94,6 +95,10 @@
+ 
+ extern unsigned long clk_early_get_timer_rate(void);
+ 
++static int clocksource_initialised;
++static unsigned long long nsecs_per_clock;
++static DEFINE_RAW_SPINLOCK(sched_clock_lock);
++
+ static int mxc_gpt_set_next_event(unsigned long cycles,
+ 				  struct clock_event_device *evt)
+ {
+@@ -251,6 +256,20 @@ void __init mxc_init_time(void)
+ 	}
+ 
+ 	pr_info("MXC GPT timer initialized, rate = %lu\n", rate);
++
++	/* Calculate the time per clocktick. Needed for sched_clock() */
++	nsecs_per_clock = (1000 * 1000 * 1000) / rate;
++	if ((nsecs_per_clock * rate) != (1000 * 1000 * 1000)) {
++		unsigned int error = ((1000 * 1000 * 1000) -
++					(nsecs_per_clock * rate));
++		error /= (rate / 1000);
++		/* Clock rate should be chosen such that there no rounding errors */
++		pr_info("WARNING: Clock divider has been truncated, "
++			"clock error %u [ps] per %llu [ns]\n",
++			error, nsecs_per_clock);
++	}
++	clocksource_initialised = 1;
++
+ 	return;
+       err:
+ 	panic("Unable to initialize timer\n");
+@@ -259,3 +278,46 @@ void __init mxc_init_time(void)
+ struct sys_timer mxc_timer = {
+ 	.init = mxc_init_time,
+ };
++
++/* Overload the sched_clock() implementation, because it needs an
++ * accurate timestamp, which is very useful for tools like latency_trace,
++ * top etc. Without this, jiffies will be used, which is updated
++ * very slowly (dependant on the timertick frequency which is about
++ * 100Hz ... 1000Hz. The scheduler will NOT notice small timeslices
++ * for threads only active for a very short time, and therefor top
++ * will display bogus (much too low) CPU load for all tasks.
++ */
++unsigned long long sched_clock(void)
++{
++	unsigned long           	flags;
++	unsigned long long		cycles;
++	u32				cycles32;
++	static u32			prev_cycles32;
++	static unsigned long long	upper64;
++
++	if (clocksource_initialised) {
++		/* Transfer the 32 bits cycles to a 64 bits cycles. */
++		spin_lock_irqsave(&sched_clock_lock, flags);
++
++		cycles32 = mxc_gpt_read();
++
++		if (cycles32 < prev_cycles32) {
++			/*
++			 * Wrap around detected, or a jump in time backwards?
++			 * Ignore those.
++			 */
++			if ((prev_cycles32 - cycles32) > (1 << 16))
++				upper64 += 1LLU << 32; /* A full wrap around */
++		}
++		prev_cycles32 = cycles32;
++
++		cycles = upper64 | (unsigned long long)cycles32;
++
++		spin_unlock_irqrestore(&sched_clock_lock, flags);
++
++		return cycles * nsecs_per_clock;
++	} else {
++		return 0;
++	}
++}
++

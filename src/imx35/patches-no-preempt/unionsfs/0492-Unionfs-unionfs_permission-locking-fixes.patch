@@ -1,0 +1,33 @@
+From d07e73b70c12a765d823330ded9c13be79988ca8 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 18 Sep 2008 22:13:52 -0400
+Subject: [PATCH] Unionfs: unionfs_permission locking fixes
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index a174e55..bc357c0 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -789,6 +789,7 @@ static int unionfs_permission(struct inode *inode, int mask,
+ 	int bindex, bstart, bend;
+ 	const int is_file = !S_ISDIR(inode->i_mode);
+ 	const int write_mask = (mask & MAY_WRITE) && !(mask & MAY_READ);
++	struct inode *inode_grabbed = igrab(inode);
+ 
+ 	if (nd)
+ 		unionfs_lock_dentry(nd->path.dentry, UNIONFS_DMUTEX_CHILD);
+@@ -869,6 +870,7 @@ out:
+ 	unionfs_check_nd(nd);
+ 	if (nd)
+ 		unionfs_unlock_dentry(nd->path.dentry);
++	iput(inode_grabbed);
+ 	return err;
+ }
+ 
+-- 
+1.5.4.3
+

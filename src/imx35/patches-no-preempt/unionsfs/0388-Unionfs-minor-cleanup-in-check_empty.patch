@@ -1,0 +1,43 @@
+From 8438f11894bf03f87066ed4af50faab149304c2e Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 23 Dec 2007 16:30:19 -0500
+Subject: [PATCH] Unionfs: minor cleanup in check_empty
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/dirhelper.c |    9 +++------
+ 1 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/fs/unionfs/dirhelper.c b/fs/unionfs/dirhelper.c
+index b40090a..4b73bb6 100644
+--- a/fs/unionfs/dirhelper.c
++++ b/fs/unionfs/dirhelper.c
+@@ -182,6 +182,7 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ {
+ 	int err = 0;
+ 	struct dentry *lower_dentry = NULL;
++	struct vfsmount *mnt;
+ 	struct super_block *sb;
+ 	struct file *lower_file;
+ 	struct unionfs_rdutil_callback *buf = NULL;
+@@ -226,15 +227,11 @@ int check_empty(struct dentry *dentry, struct unionfs_dir_state **namelist)
+ 			continue;
+ 
+ 		dget(lower_dentry);
+-		unionfs_mntget(dentry, bindex);
++		mnt = unionfs_mntget(dentry, bindex);
+ 		branchget(sb, bindex);
+-		lower_file =
+-			dentry_open(lower_dentry,
+-				    unionfs_lower_mnt_idx(dentry, bindex),
+-				    O_RDONLY);
++		lower_file = dentry_open(lower_dentry, mnt, O_RDONLY);
+ 		if (IS_ERR(lower_file)) {
+ 			err = PTR_ERR(lower_file);
+-			dput(lower_dentry);
+ 			branchput(sb, bindex);
+ 			goto out;
+ 		}
+-- 
+1.5.4.3
+

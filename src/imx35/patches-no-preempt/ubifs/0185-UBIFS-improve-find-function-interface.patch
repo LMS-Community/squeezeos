@@ -1,0 +1,103 @@
+From 9a8f43f6c79094cdb8aa01b1cd4dd25a484faad4 Mon Sep 17 00:00:00 2001
+From: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+Date: Tue, 3 Mar 2009 19:22:53 +0200
+Subject: [PATCH] UBIFS: improve find function interface
+
+Make 'ubifs_find_free_space()' return offset where free space starts,
+rather than the amount of free space. This is just more appropriat
+for its caller.
+
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ fs/ubifs/find.c    |   12 ++++++------
+ fs/ubifs/journal.c |    5 ++---
+ fs/ubifs/ubifs.h   |    2 +-
+ 3 files changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/fs/ubifs/find.c b/fs/ubifs/find.c
+index 717d79c..1d54383 100644
+--- a/fs/ubifs/find.c
++++ b/fs/ubifs/find.c
+@@ -478,7 +478,7 @@ const struct ubifs_lprops *do_find_free_space(struct ubifs_info *c,
+  * ubifs_find_free_space - find a data LEB with free space.
+  * @c: the UBIFS file-system description object
+  * @min_space: minimum amount of required free space
+- * @free: contains amount of free space in the LEB on exit
++ * @offs: contains offset of where free space starts on exit
+  * @squeeze: whether to try to find space in a non-empty LEB first
+  *
+  * This function looks for an LEB with at least @min_space bytes of free space.
+@@ -490,7 +490,7 @@ const struct ubifs_lprops *do_find_free_space(struct ubifs_info *c,
+  * failed to find a LEB with @min_space bytes of free space and other a negative
+  * error codes in case of failure.
+  */
+-int ubifs_find_free_space(struct ubifs_info *c, int min_space, int *free,
++int ubifs_find_free_space(struct ubifs_info *c, int min_space, int *offs,
+ 			  int squeeze)
+ {
+ 	const struct ubifs_lprops *lprops;
+@@ -558,10 +558,10 @@ int ubifs_find_free_space(struct ubifs_info *c, int min_space, int *free,
+ 		spin_unlock(&c->space_lock);
+ 	}
+ 
+-	*free = lprops->free;
++	*offs = c->leb_size - lprops->free;
+ 	ubifs_release_lprops(c);
+ 
+-	if (*free == c->leb_size) {
++	if (*offs == 0) {
+ 		/*
+ 		 * Ensure that empty LEBs have been unmapped. They may not have
+ 		 * been, for example, because of an unclean unmount.  Also
+@@ -573,8 +573,8 @@ int ubifs_find_free_space(struct ubifs_info *c, int min_space, int *free,
+ 			return err;
+ 	}
+ 
+-	dbg_find("found LEB %d, free %d", lnum, *free);
+-	ubifs_assert(*free >= min_space);
++	dbg_find("found LEB %d, free %d", lnum, c->leb_size - *offs);
++	ubifs_assert(*offs <= c->leb_size - min_space);
+ 	return lnum;
+ 
+ out:
+diff --git a/fs/ubifs/journal.c b/fs/ubifs/journal.c
+index d8fbdb8..0ad873e 100644
+--- a/fs/ubifs/journal.c
++++ b/fs/ubifs/journal.c
+@@ -114,7 +114,7 @@ static inline void zero_trun_node_unused(struct ubifs_trun_node *trun)
+  */
+ static int reserve_space(struct ubifs_info *c, int jhead, int len)
+ {
+-	int err = 0, err1, retries = 0, avail, lnum, offs, free, squeeze;
++	int err = 0, err1, retries = 0, avail, lnum, offs, squeeze;
+ 	struct ubifs_wbuf *wbuf = &c->jheads[jhead].wbuf;
+ 
+ 	/*
+@@ -139,10 +139,9 @@ again:
+ 	 * Write buffer wasn't seek'ed or there is no enough space - look for an
+ 	 * LEB with some empty space.
+ 	 */
+-	lnum = ubifs_find_free_space(c, len, &free, squeeze);
++	lnum = ubifs_find_free_space(c, len, &offs, squeeze);
+ 	if (lnum >= 0) {
+ 		/* Found an LEB, add it to the journal head */
+-		offs = c->leb_size - free;
+ 		err = ubifs_add_bud_to_log(c, jhead, lnum, offs);
+ 		if (err)
+ 			goto out_return;
+diff --git a/fs/ubifs/ubifs.h b/fs/ubifs/ubifs.h
+index 656ba00..cd18f18 100644
+--- a/fs/ubifs/ubifs.h
++++ b/fs/ubifs/ubifs.h
+@@ -1495,7 +1495,7 @@ long long ubifs_reported_space(const struct ubifs_info *c, long long free);
+ long long ubifs_calc_available(const struct ubifs_info *c, int min_idx_lebs);
+ 
+ /* find.c */
+-int ubifs_find_free_space(struct ubifs_info *c, int min_space, int *free,
++int ubifs_find_free_space(struct ubifs_info *c, int min_space, int *offs,
+ 			  int squeeze);
+ int ubifs_find_free_leb_for_idx(struct ubifs_info *c);
+ int ubifs_find_dirty_leb(struct ubifs_info *c, struct ubifs_lprops *ret_lp,
+-- 
+1.5.4.3
+

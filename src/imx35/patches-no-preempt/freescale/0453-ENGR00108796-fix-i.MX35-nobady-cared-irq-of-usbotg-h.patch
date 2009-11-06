@@ -1,0 +1,43 @@
+From 2d3f80b353bdfcb18f91d7cac94b81a30131598a Mon Sep 17 00:00:00 2001
+From: Jun Li <r65092@freescale.com>
+Date: Tue, 3 Mar 2009 16:59:24 +0800
+Subject: [PATCH] ENGR00108796 fix i.MX35 nobady cared irq of usbotg hcd when system resume.
+
+If ehci-hcd driver is registered and wake up is not enabled, USBOTG
+generates nobady cared irq when system resume.
+
+Signed-off-by: Li Jun <r65092@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |   10 +++++-----
+ 1 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 9c72967..23bd3c9 100644
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -519,17 +519,17 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 	tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+ 	tmp |= PORT_SUSPEND;
+ 	ehci_writel(ehci, tmp, &ehci->regs->port_status[0]);
++
++	/* Disable PHY clock */
++	tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
++	tmp |= PORT_PHCD;
++	ehci_writel(ehci, tmp, &ehci->regs->port_status[0]);
+ #else
+ 	/* clear PP to cut power to the port */
+ 	tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+ 	tmp &= ~PORT_POWER;
+ 	ehci_writel(ehci, tmp, &ehci->regs->port_status[0]);
+ #endif
+-	/* Disable PHY clock */
+-	tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+-	tmp |= PORT_PHCD;
+-	ehci_writel(ehci, tmp, &ehci->regs->port_status[0]);
+-
+ 	return 0;
+ }
+ 
+-- 
+1.5.4.4
+

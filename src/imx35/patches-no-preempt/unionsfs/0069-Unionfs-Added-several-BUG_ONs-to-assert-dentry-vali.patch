@@ -1,0 +1,202 @@
+From 2ce4cab0121157fe5d2c0a822aded830742cf1a3 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 23 Mar 2007 13:07:14 -0400
+Subject: [PATCH] Unionfs: Added several BUG_ONs to assert dentry validity
+
+This should help catch races between the VFS and the branch-management code.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/inode.c  |   15 +++++++++++++++
+ fs/unionfs/rename.c |    3 +++
+ fs/unionfs/super.c  |    2 ++
+ fs/unionfs/union.h  |   13 +++++++++++++
+ fs/unionfs/unlink.c |    4 ++++
+ fs/unionfs/xattr.c  |    8 ++++++++
+ 6 files changed, 45 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/inode.c b/fs/unionfs/inode.c
+index 5c452b6..97dad8c 100644
+--- a/fs/unionfs/inode.c
++++ b/fs/unionfs/inode.c
+@@ -249,6 +249,9 @@ static int unionfs_link(struct dentry *old_dentry, struct inode *dir,
+ 	struct dentry *whiteout_dentry;
+ 	char *name = NULL;
+ 
++	BUG_ON(!is_valid_dentry(new_dentry));
++	BUG_ON(!is_valid_dentry(old_dentry));
++
+ 	double_lock_dentry(new_dentry, old_dentry);
+ 
+ 	hidden_new_dentry = unionfs_lower_dentry(new_dentry);
+@@ -373,6 +376,8 @@ static int unionfs_symlink(struct inode *dir, struct dentry *dentry,
+ 	int bindex = 0, bstart;
+ 	char *name = NULL;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	/* We start out in the leftmost branch. */
+@@ -495,6 +500,8 @@ static int unionfs_mkdir(struct inode *parent, struct dentry *dentry, int mode)
+ 	int whiteout_unlinked = 0;
+ 	struct sioq_args args;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 	bstart = dbstart(dentry);
+ 
+@@ -622,6 +629,8 @@ static int unionfs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+ 	char *name = NULL;
+ 	int whiteout_unlinked = 0;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 	bstart = dbstart(dentry);
+ 
+@@ -724,6 +733,8 @@ static int unionfs_readlink(struct dentry *dentry, char __user * buf,
+ 	int err;
+ 	struct dentry *hidden_dentry;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 	hidden_dentry = unionfs_lower_dentry(dentry);
+ 
+@@ -749,6 +760,8 @@ static void *unionfs_follow_link(struct dentry *dentry, struct nameidata *nd)
+ 	int len = PAGE_SIZE, err;
+ 	mm_segment_t old_fs;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	/* This is freed by the put_link method assuming a successful call. */
+ 	buf = kmalloc(len, GFP_KERNEL);
+ 	if (!buf) {
+@@ -908,6 +921,8 @@ static int unionfs_setattr(struct dentry *dentry, struct iattr *ia)
+ 	int i;
+ 	int copyup = 0;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 	bstart = dbstart(dentry);
+ 	bend = dbend(dentry);
+diff --git a/fs/unionfs/rename.c b/fs/unionfs/rename.c
+index c9aa040..0044492 100644
+--- a/fs/unionfs/rename.c
++++ b/fs/unionfs/rename.c
+@@ -379,6 +379,9 @@ int unionfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+ 	int err = 0;
+ 	struct dentry *wh_dentry;
+ 
++	BUG_ON(!is_valid_dentry(old_dentry));
++	BUG_ON(!is_valid_dentry(new_dentry));
++
+ 	double_lock_dentry(old_dentry, new_dentry);
+ 
+ 	if (!S_ISDIR(old_dentry->d_inode->i_mode))
+diff --git a/fs/unionfs/super.c b/fs/unionfs/super.c
+index 5d11908..ec5706b 100644
+--- a/fs/unionfs/super.c
++++ b/fs/unionfs/super.c
+@@ -129,6 +129,8 @@ static int unionfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+ 	int err	= 0;
+ 	struct super_block *sb, *hidden_sb;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	sb = dentry->d_sb;
+ 
+ 	unionfs_read_lock(sb);
+diff --git a/fs/unionfs/union.h b/fs/unionfs/union.h
+index faaa87e..b6fa0a2 100644
+--- a/fs/unionfs/union.h
++++ b/fs/unionfs/union.h
+@@ -399,6 +399,19 @@ static inline int is_robranch(const struct dentry *dentry)
+ 	return is_robranch_idx(dentry, index);
+ }
+ 
++/*
++ * Check if dentry is valid or not, as per our generation numbers.
++ * @dentry: dentry to check.
++ * Returns 1 (valid) or 0 (invalid/stale).
++ */
++static inline int is_valid_dentry(struct dentry *dentry)
++{
++	BUG_ON(!UNIONFS_D(dentry));
++	BUG_ON(!UNIONFS_SB(dentry->d_sb));
++	return (atomic_read(&UNIONFS_D(dentry)->generation) ==
++		atomic_read(&UNIONFS_SB(dentry->d_sb)->generation));
++}
++
+ /* What do we use for whiteouts. */
+ #define UNIONFS_WHPFX ".wh."
+ #define UNIONFS_WHLEN 4
+diff --git a/fs/unionfs/unlink.c b/fs/unionfs/unlink.c
+index f5b250a..dd1dd9c 100644
+--- a/fs/unionfs/unlink.c
++++ b/fs/unionfs/unlink.c
+@@ -74,6 +74,8 @@ int unionfs_unlink(struct inode *dir, struct dentry *dentry)
+ {
+ 	int err = 0;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	err = unionfs_unlink_whiteout(dir, dentry);
+@@ -122,6 +124,8 @@ int unionfs_rmdir(struct inode *dir, struct dentry *dentry)
+ 	int err = 0;
+ 	struct unionfs_dir_state *namelist = NULL;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	/* check if this unionfs directory is empty or not */
+diff --git a/fs/unionfs/xattr.c b/fs/unionfs/xattr.c
+index d57f079..6e1f4bd 100644
+--- a/fs/unionfs/xattr.c
++++ b/fs/unionfs/xattr.c
+@@ -56,6 +56,8 @@ ssize_t unionfs_getxattr(struct dentry * dentry, const char *name, void *value,
+ 	struct dentry *hidden_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	hidden_dentry = unionfs_lower_dentry(dentry);
+@@ -75,6 +77,8 @@ int unionfs_setxattr(struct dentry *dentry, const char *name, const void *value,
+ 	struct dentry *hidden_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 	hidden_dentry = unionfs_lower_dentry(dentry);
+ 
+@@ -92,6 +96,8 @@ int unionfs_removexattr(struct dentry *dentry, const char *name)
+ 	struct dentry *hidden_dentry = NULL;
+ 	int err = -EOPNOTSUPP;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 	hidden_dentry = unionfs_lower_dentry(dentry);
+ 
+@@ -110,6 +116,8 @@ ssize_t unionfs_listxattr(struct dentry * dentry, char *list, size_t size)
+ 	int err = -EOPNOTSUPP;
+ 	char *encoded_list = NULL;
+ 
++	BUG_ON(!is_valid_dentry(dentry));
++
+ 	unionfs_lock_dentry(dentry);
+ 
+ 	hidden_dentry = unionfs_lower_dentry(dentry);
+-- 
+1.5.4.3
+

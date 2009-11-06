@@ -1,0 +1,144 @@
+From dd3c5a444e3f0f16dc718332e266e0dd9bdafa89 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 23 Mar 2007 17:17:07 -0400
+Subject: [PATCH] Unionfs: Documentation updates for branch-management
+
+Describe dynamic branch-management introduced by subsequent patches.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ Documentation/filesystems/unionfs/concepts.txt |    5 ++
+ Documentation/filesystems/unionfs/issues.txt   |   22 +++++++-
+ Documentation/filesystems/unionfs/usage.txt    |   61 +++++++++++++++++++++++-
+ 3 files changed, 84 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/filesystems/unionfs/concepts.txt b/Documentation/filesystems/unionfs/concepts.txt
+index d417576..83d45b9 100644
+--- a/Documentation/filesystems/unionfs/concepts.txt
++++ b/Documentation/filesystems/unionfs/concepts.txt
+@@ -1,3 +1,6 @@
++Unionfs 2.0 CONCEPTS:
++=====================
++
+ This file describes the concepts needed by a namespace unification file
+ system.
+ 
+@@ -68,3 +71,5 @@ though to this copy. The copy must be made on a higher priority branch so
+ that lookup and readdir return this newer "version" of the file rather than
+ the original (see duplicate elimination).
+ 
++
++For more information, see <http://unionfs.filesystems.org/>.
+diff --git a/Documentation/filesystems/unionfs/issues.txt b/Documentation/filesystems/unionfs/issues.txt
+index b070175..a434fee 100644
+--- a/Documentation/filesystems/unionfs/issues.txt
++++ b/Documentation/filesystems/unionfs/issues.txt
+@@ -1,5 +1,5 @@
+-KNOWN Unionfs ISSUES:
+-=====================
++KNOWN Unionfs 2.0 ISSUES:
++=========================
+ 
+ 1. The NFS server returns -EACCES for read-only exports, instead of -EROFS.
+    This means we can't reliably detect a read-only NFS export.
+@@ -14,10 +14,26 @@ KNOWN Unionfs ISSUES:
+    introducing small VFS/MM changes that would allow a file system to handle
+    cache coherency correctly.
+ 
++   Unionfs 2.0 has a temporary workaround for this.  You can force Unionfs
++   to increase the superblock generation number, and hence purge all cached
++   Unionfs objects, which would then  be re-gotten from the lower branches.
++   This should ensure cache consistency.  To increase the generation number,
++   executed the command:
++
++	mount -t unionfs -o remount,incgen none MOUNTPOINT
++
++   Note that the older way of incrementing the generation number using an
++   ioctl, is no longer supported in Unionfs 2.0.  Ioctls in general are not
++   encouraged.  Plus, an ioctl is per-file concept, whereas the generation
++   number is a per-file-system concept.  Worse, such an ioctl requires an
++   open file, which then has to be invalidated by the very nature of the
++   generation number increase (read: the old generation increase ioctl was
++   pretty racy).
++
+ 3. Unionfs should not use lookup_one_len() on the underlying f/s as it
+    confuses NFS.  Currently, unionfs_lookup() passes lookup intents to the
+    lower file-system, this eliminates part of the problem.  The remaining
+    calls to lookup_one_len may need to be changed to pass an intent.
+ 
+ 
+-For more information, see <unionfs.filesystems.org>.
++For more information, see <http://unionfs.filesystems.org/>.
+diff --git a/Documentation/filesystems/unionfs/usage.txt b/Documentation/filesystems/unionfs/usage.txt
+index 14e0856..13fbcea 100644
+--- a/Documentation/filesystems/unionfs/usage.txt
++++ b/Documentation/filesystems/unionfs/usage.txt
+@@ -28,4 +28,63 @@ Example:
+ 	dirs=/writable_branch=rw:/read-only_branch=ro
+ 
+ 
+-For more information, see unionfs.filesystems.org.
++DYNAMIC BRANCH MANAGEMENT AND REMOUNTS
++======================================
++
++You can remount a union and change its overall mode, or reconfigure the
++branches, as follows.
++
++To downgrade a union from read-write to read-only:
++
++# mount -t unionfs -o remount,ro none MOUNTPOINT
++
++To upgrade a union from read-only to read-write:
++
++# mount -t unionfs -o remount,rw none MOUNTPOINT
++
++To delete a branch /foo, regardless where it is in the current union:
++
++# mount -t unionfs -o del=/foo none MOUNTPOINT
++
++To insert (add) a branch /foo before /bar:
++
++# mount -t unionfs -o remount,add=/bar:/foo none MOUNTPOINT
++
++To insert (add) a branch /foo (with the "rw" mode flag) before /bar:
++
++# mount -t unionfs -o remount,add=/bar:/foo=rw none MOUNTPOINT
++
++To insert (add) a branch /foo (in "rw" mode) at the very beginning (i.e., a
++new highest-priority branch), you can use the above syntax, or use a short
++hand version as follows:
++
++# mount -t unionfs -o remount,add=/foo none MOUNTPOINT
++
++To append a branch to the very end (new lowest-priority branch):
++
++# mount -t unionfs -o remount,add=:/foo none MOUNTPOINT
++
++To append a branch to the very end (new lowest-priority branch), in
++read-only mode:
++
++# mount -t unionfs -o remount,add=:/foo:ro none MOUNTPOINT
++
++Finally, to change the mode of one existing branch, say /foo, from read-only
++to read-write, and change /bar from read-write to read-only:
++
++# mount -t unionfs -o remount,mode=/foo=rw,mode=/bar=ro none MOUNTPOINT
++
++
++CACHE CONSISTENCY
++=================
++
++If you modify any file on any of the lower branches directly, while there is
++a Unionfs 2.0 mounted above any of those branches, you should tell Unionfs
++to purge its caches and re-get the objects.  To do that, you have to
++incremenet the generation number of the superblock using the following
++command:
++
++# mount -t unionfs -o remount,remount,incgen none MOUNTPOINT
++
++
++For more information, see <http://unionfs.filesystems.org/>.
+-- 
+1.5.4.3
+

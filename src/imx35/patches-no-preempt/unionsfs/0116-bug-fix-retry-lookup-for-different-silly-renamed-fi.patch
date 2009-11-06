@@ -1,0 +1,42 @@
+From a5626ff91eca9ae2947965518e4c3ca282cc299f Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@bigvaio.(none)>
+Date: Fri, 18 May 2007 01:45:18 -0400
+Subject: [PATCH] bug fix: retry lookup for different silly-renamed files
+
+When we have to copyup an open-but-unlinked file, we have to give it a
+temporary name, similar to NFS's silly-renamed files.  So we generate
+temporary file names until we find one that doesn't exist, and use it.  The
+code had a bug where if the silly-renamed file name already existed, Unionfs
+would oops upon copyup to that temp name.
+---
+ fs/unionfs/commonfops.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index d824eaa..ab92cac 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -50,6 +50,7 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 	 * the name exists in the dest branch, but it'd be nice to catch it
+ 	 * sooner than later.
+ 	 */
++retry:
+ 	tmp_dentry = NULL;
+ 	do {
+ 		char *suffix = name + nlen - countersize;
+@@ -73,8 +74,11 @@ static int copyup_deleted_file(struct file *file, struct dentry *dentry,
+ 
+ 	err = copyup_named_file(dentry->d_parent->d_inode, file, name, bstart,
+ 				bindex, file->f_dentry->d_inode->i_size);
+-	if (err)
++	if (err) {
++		if (err == -EEXIST)
++			goto retry;
+ 		goto out;
++	}
+ 
+ 	/* bring it to the same state as an unlinked file */
+ 	hidden_dentry = unionfs_lower_dentry_idx(dentry, dbstart(dentry));
+-- 
+1.5.4.3
+

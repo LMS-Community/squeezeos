@@ -1,0 +1,65 @@
+From 62e08a90e4d9c879c5390af028b4f2806cdf0c4e Mon Sep 17 00:00:00 2001
+From: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+Date: Sun, 18 Mar 2007 16:22:03 -0400
+Subject: [PATCH] Unionfs: Remove the older incgen ioctl
+
+The new remount code now has the "incgen" functionality.
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/branchman.c  |   21 ---------------------
+ fs/unionfs/commonfops.c |    6 ++----
+ 2 files changed, 2 insertions(+), 25 deletions(-)
+
+diff --git a/fs/unionfs/branchman.c b/fs/unionfs/branchman.c
+index 83d443a..6912be9 100644
+--- a/fs/unionfs/branchman.c
++++ b/fs/unionfs/branchman.c
+@@ -18,27 +18,6 @@
+ 
+ #include "union.h"
+ 
+-/* increase the superblock generation count; effectively invalidating every
+- * upper inode, dentry and file object */
+-int unionfs_ioctl_incgen(struct file *file, unsigned int cmd, unsigned long arg)
+-{
+-	struct super_block *sb;
+-	int gen;
+-
+-	sb = file->f_dentry->d_sb;
+-
+-	unionfs_write_lock(sb);
+-
+-	gen = atomic_inc_return(&UNIONFS_SB(sb)->generation);
+-
+-	atomic_set(&UNIONFS_D(sb->s_root)->generation, gen);
+-	atomic_set(&UNIONFS_I(sb->s_root->d_inode)->generation, gen);
+-
+-	unionfs_write_unlock(sb);
+-
+-	return gen;
+-}
+-
+ /* return to userspace the branch indices containing the file in question
+  *
+  * We use fd_set and therefore we are limited to the number of the branches
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 6606cba..8453f2d 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -623,10 +623,8 @@ long unionfs_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 	switch (cmd) {
+ 	case UNIONFS_IOCTL_INCGEN:
+ 		/* Increment the superblock generation count */
+-		err = -EACCES;
+-		if (!capable(CAP_SYS_ADMIN))
+-			goto out;
+-		err = unionfs_ioctl_incgen(file, cmd, arg);
++		printk("unionfs: incgen ioctl deprecated; use \"-o remount,incgen\"\n");
++		err = -ENOSYS;
+ 		break;
+ 
+ 	case UNIONFS_IOCTL_QUERYFILE:
+-- 
+1.5.4.3
+

@@ -1,0 +1,31 @@
+From 3fd5844ed73bfb7f1d6e1092ea773a83eda65a7a Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 2 Mar 2007 13:10:56 -0500
+Subject: [PATCH] fs/unionfs/: mntput in __cleanup_dentry
+
+This fixes a mnt refleak which occured during copyup when directory
+hierarchy was recreated on a writable branch.
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/unionfs/copyup.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/copyup.c b/fs/unionfs/copyup.c
+index 998cc69..e0075ca 100644
+--- a/fs/unionfs/copyup.c
++++ b/fs/unionfs/copyup.c
+@@ -548,6 +548,9 @@ static void __cleanup_dentry(struct dentry * dentry, int bindex,
+ 		if (!unionfs_lower_dentry_idx(dentry, i)->d_inode) {
+ 			dput(unionfs_lower_dentry_idx(dentry, i));
+ 			unionfs_set_lower_dentry_idx(dentry, i, NULL);
++
++			mntput(unionfs_lower_mnt_idx(dentry, i));
++			unionfs_set_lower_mnt_idx(dentry, i, NULL);
+ 		} else {
+ 			if (new_bstart < 0)
+ 				new_bstart = i;
+-- 
+1.5.4.3
+

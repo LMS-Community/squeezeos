@@ -1,0 +1,49 @@
+From 72e4e8cbe4343b120d8d9dac56a12f27a691df5a Mon Sep 17 00:00:00 2001
+From: Erez_Zadok <ezk@cs.sunysb.edu>
+Date: Sun, 29 Apr 2007 19:33:25 -0400
+Subject: [PATCH] fsstack: 4th case to do_path_lookup
+
+Signed-off-by: Josef 'Jeff' Sipek <jsipek@cs.sunysb.edu>
+---
+ fs/namei.c            |    4 ++++
+ include/linux/namei.h |    2 ++
+ 2 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/fs/namei.c b/fs/namei.c
+index db845e8..f446600 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -1155,6 +1155,10 @@ static int do_path_lookup(int dfd, const char *name,
+ 		nd->path = fs->root;
+ 		path_get(&fs->root);
+ 		read_unlock(&fs->lock);
++	} else if (flags & LOOKUP_ONE) {
++		/* nd->mnt and nd->dentry already set, just grab references */
++		mntget(nd->mnt);
++		dget(nd->dentry);
+ 	} else if (dfd == AT_FDCWD) {
+ 		read_lock(&fs->lock);
+ 		nd->path = fs->pwd;
+diff --git a/include/linux/namei.h b/include/linux/namei.h
+index a83bd12..abf0f1a 100644
+--- a/include/linux/namei.h
++++ b/include/linux/namei.h
+@@ -42,6 +42,7 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
+  *  - internal "there are more path compnents" flag
+  *  - locked when lookup done with dcache_lock held
+  *  - dentry cache is untrusted; force a real lookup
++ *  - lookup path from given dentry/vfsmount pair
+  */
+ #define LOOKUP_FOLLOW		 1
+ #define LOOKUP_DIRECTORY	 2
+@@ -49,6 +50,7 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
+ #define LOOKUP_PARENT		16
+ #define LOOKUP_NOALT		32
+ #define LOOKUP_REVAL		64
++#define LOOKUP_ONE	       128
+ /*
+  * Intent data
+  */
+-- 
+1.5.4.3
+

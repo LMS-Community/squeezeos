@@ -1,0 +1,49 @@
+From ab11806b80e2749c7d3f6c2940f2985a3108d73c Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 3 Apr 2008 13:15:59 -0400
+Subject: [PATCH] Unionfs: copy lower times in fsync/fasync only when needed
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/file.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/unionfs/file.c b/fs/unionfs/file.c
+index 1fe4c30..f14b38b 100644
+--- a/fs/unionfs/file.c
++++ b/fs/unionfs/file.c
+@@ -196,13 +196,13 @@ int unionfs_fsync(struct file *file, struct dentry *dentry, int datasync)
+ 		err = lower_inode->i_fop->fsync(lower_file,
+ 						lower_dentry,
+ 						datasync);
++		if (!err && bindex == bstart)
++			fsstack_copy_attr_times(inode, lower_inode);
+ 		mutex_unlock(&lower_inode->i_mutex);
+ 		if (err)
+ 			goto out;
+ 	}
+ 
+-	unionfs_copy_attr_times(inode);
+-
+ out:
+ 	if (!err)
+ 		unionfs_check_file(file);
+@@ -244,13 +244,13 @@ int unionfs_fasync(int fd, struct file *file, int flag)
+ 		lower_file = unionfs_lower_file_idx(file, bindex);
+ 		mutex_lock(&lower_inode->i_mutex);
+ 		err = lower_inode->i_fop->fasync(fd, lower_file, flag);
++		if (!err && bindex == bstart)
++			fsstack_copy_attr_times(inode, lower_inode);
+ 		mutex_unlock(&lower_inode->i_mutex);
+ 		if (err)
+ 			goto out;
+ 	}
+ 
+-	unionfs_copy_attr_times(inode);
+-
+ out:
+ 	if (!err)
+ 		unionfs_check_file(file);
+-- 
+1.5.4.3
+

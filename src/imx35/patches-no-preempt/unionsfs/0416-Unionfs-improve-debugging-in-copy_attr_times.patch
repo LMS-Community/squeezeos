@@ -1,0 +1,33 @@
+From 842b20a38a4179099d4ccc20bf0dbff08254ee19 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Fri, 15 Feb 2008 17:18:48 -0500
+Subject: [PATCH] Unionfs: improve debugging in copy_attr_times
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/subr.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/fs/unionfs/subr.c b/fs/unionfs/subr.c
+index 68a6280..1a40f63 100644
+--- a/fs/unionfs/subr.c
++++ b/fs/unionfs/subr.c
+@@ -247,8 +247,14 @@ void unionfs_copy_attr_times(struct inode *upper)
+ 	int bindex;
+ 	struct inode *lower;
+ 
+-	if (!upper || ibstart(upper) < 0)
++	if (!upper)
+ 		return;
++	if (ibstart(upper) < 0) {
++#ifdef CONFIG_UNION_FS_DEBUG
++		WARN_ON(ibstart(upper) < 0);
++#endif /* CONFIG_UNION_FS_DEBUG */
++		return;
++	}
+ 	for (bindex = ibstart(upper); bindex <= ibend(upper); bindex++) {
+ 		lower = unionfs_lower_inode_idx(upper, bindex);
+ 		if (!lower)
+-- 
+1.5.4.3
+

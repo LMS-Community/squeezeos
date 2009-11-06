@@ -1,0 +1,30 @@
+From 5d98c175b58577d1083c42f593ed70289e0077c8 Mon Sep 17 00:00:00 2001
+From: Erez Zadok <ezk@cs.sunysb.edu>
+Date: Thu, 18 Sep 2008 21:49:47 -0400
+Subject: [PATCH] Unionfs: don't open unhashed files
+
+Signed-off-by: Erez Zadok <ezk@cs.sunysb.edu>
+---
+ fs/unionfs/commonfops.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/fs/unionfs/commonfops.c b/fs/unionfs/commonfops.c
+index 51f10a2..7711f93 100644
+--- a/fs/unionfs/commonfops.c
++++ b/fs/unionfs/commonfops.c
+@@ -601,6 +601,12 @@ int unionfs_open(struct inode *inode, struct file *file)
+ 		goto out_nofree;
+ 	}
+ 
++	/* don't open unhashed/deleted files */
++	if (d_deleted(dentry)) {
++		err = -ENOENT;
++		goto out_nofree;
++	}
++
+ 	file->private_data =
+ 		kzalloc(sizeof(struct unionfs_file_info), GFP_KERNEL);
+ 	if (unlikely(!UNIONFS_F(file))) {
+-- 
+1.5.4.3
+

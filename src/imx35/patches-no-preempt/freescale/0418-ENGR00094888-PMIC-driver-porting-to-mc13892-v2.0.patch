@@ -1,0 +1,156 @@
+From f1a75ec386998088b038037fd76351b7e63277d8 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Tue, 17 Feb 2009 16:17:47 +0800
+Subject: [PATCH] ENGR00094888 PMIC driver porting to mc13892 v2.0
+
+PMIC driver porting to mc13892 v2.0
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ arch/arm/configs/imx35_3stack_defconfig |    5 +--
+ arch/arm/mach-mx35/mx35_3stack.c        |    3 ++
+ drivers/regulator/mc13892/reg-mc13892.c |   34 +++++++++++++++++++++++-------
+ 3 files changed, 31 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/configs/imx35_3stack_defconfig b/arch/arm/configs/imx35_3stack_defconfig
+index 23bc462..452af55 100644
+--- a/arch/arm/configs/imx35_3stack_defconfig
++++ b/arch/arm/configs/imx35_3stack_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux kernel version: 2.6.26
+-# Fri Feb 13 16:01:04 2009
++# Mon Feb 16 15:42:28 2009
+ #
+ CONFIG_ARM=y
+ CONFIG_SYS_SUPPORTS_APM_EMULATION=y
+@@ -1025,7 +1025,6 @@ CONFIG_BACKLIGHT_CLASS_DEVICE=y
+ # CONFIG_BACKLIGHT_CORGI is not set
+ CONFIG_BACKLIGHT_MXC=y
+ CONFIG_BACKLIGHT_MXC_IPU=y
+-CONFIG_BACKLIGHT_MXC_MC13892=y
+ 
+ #
+ # Display device support
+@@ -1406,7 +1405,7 @@ CONFIG_MXC_PMIC_I2C=y
+ #
+ CONFIG_MXC_MC13892_ADC=y
+ CONFIG_MXC_MC13892_RTC=y
+-CONFIG_MXC_MC13892_LIGHT=y
++# CONFIG_MXC_MC13892_LIGHT is not set
+ # CONFIG_MXC_MC13892_BATTERY is not set
+ # CONFIG_MXC_MC13892_CONNECTIVITY is not set
+ CONFIG_MXC_MC13892_POWER=y
+diff --git a/arch/arm/mach-mx35/mx35_3stack.c b/arch/arm/mach-mx35/mx35_3stack.c
+index d5b2294..799ba38 100644
+--- a/arch/arm/mach-mx35/mx35_3stack.c
++++ b/arch/arm/mach-mx35/mx35_3stack.c
+@@ -689,6 +689,9 @@ static int __init mxc_init_pmic(void)
+ 		power_key_event.func = (void *)power_on_evt_handler;
+ 		pmic_event_subscribe(EVENT_PWRONI, power_key_event);
+ 
++		/* set SW2 hi bit = "0" and keep default value = 1350*/
++		pmic_write(REG_SW_1, 0x45431E);
++
+ 		pmic_read_reg(REG_POWER_CTL2, &value, 0xffffff);
+ 		/* Bit 11 (STANDBYSECINV): Active Low */
+ 		value |= 0x00800;
+diff --git a/drivers/regulator/mc13892/reg-mc13892.c b/drivers/regulator/mc13892/reg-mc13892.c
+index 74fbc78..f9d88c0 100644
+--- a/drivers/regulator/mc13892/reg-mc13892.c
++++ b/drivers/regulator/mc13892/reg-mc13892.c
+@@ -62,7 +62,7 @@ enum {
+ enum {
+ 	VPLL_1_05V = 0,
+ 	VPLL_1_25V,
+-	VPLL_1_65V,
++	VPLL_1_50V_1_65V,
+ 	VPLL_1_80V,
+ } regulator_voltage_vpll;
+ 
+@@ -284,6 +284,9 @@ enum {
+ #define SWXHI_ON	1
+ #define SWXHI_OFF	0
+ 
++void pmic_get_revision(pmic_version_t *ver);
++static unsigned int mc13892_revision;
++
+ static int mc13892_get_sw_hi_bit(int sw)
+ {
+ 	unsigned int register_val = 0;
+@@ -698,14 +701,19 @@ static int mc13892_vpll_set_voltage(struct regulator *reg, int uV)
+ {
+ 	unsigned int register_val = 0, register_mask = 0;
+ 	unsigned int register1;
+-	int voltage, mV = uV / 1000;
++	int voltage, volt_rev, mV = uV / 1000;
++
++	if (mc13892_revision >= 20)
++		volt_rev = 1500;
++	else
++		volt_rev = 1650;
+ 
+ 	if ((mV >= 1050) && (mV < 1250))
+ 		voltage = VPLL_1_05V;
+-	else if ((mV >= 1250) && (mV < 1650))
++	else if ((mV >= 1250) && (mV < volt_rev))
+ 		voltage = VPLL_1_25V;
+-	else if ((mV >= 1650) && (mV < 1800))
+-		voltage = VPLL_1_65V;
++	else if ((mV >= volt_rev) && (mV < 1800))
++		voltage = VPLL_1_50V_1_65V;
+ 	else
+ 		voltage = VPLL_1_80V;
+ 
+@@ -719,11 +727,16 @@ static int mc13892_vpll_set_voltage(struct regulator *reg, int uV)
+ static int mc13892_vpll_get_voltage(struct regulator *reg)
+ {
+ 	unsigned int register_val = 0;
+-	int voltage = 0, mV = 0;
++	int volt_rev, voltage = 0, mV = 0;
+ 
+ 	CHECK_ERROR(pmic_read_reg(REG_SETTING_0, &register_val, PMIC_ALL_BITS));
+ 	voltage = BITFEXT(register_val, VPLL);
+ 
++	if (mc13892_revision >= 20)
++		volt_rev = 1500;
++	else
++		volt_rev = 1650;
++
+ 	switch (voltage) {
+ 	case VPLL_1_05V:
+ 		mV = 1050;
+@@ -731,8 +744,8 @@ static int mc13892_vpll_get_voltage(struct regulator *reg)
+ 	case VPLL_1_25V:
+ 		mV = 1250;
+ 		break;
+-	case VPLL_1_65V:
+-		mV = 1650;
++	case VPLL_1_50V_1_65V:
++		mV = volt_rev;
+ 		break;
+ 	case VPLL_1_80V:
+ 		mV = 1800;
+@@ -1968,6 +1981,7 @@ static struct mc13892_regulator reg_mc13892[] = {
+ 
+ int reg_mc13892_probe(void)
+ {
++	pmic_version_t ver;
+ 	int ret11 = 0;
+ 	int i = 0;
+ 	int register_val = 0, register_mask = 0;
+@@ -1989,6 +2003,10 @@ int reg_mc13892_probe(void)
+ 			return ret11;
+ 		}
+ 	}
++
++	pmic_get_revision(&ver);
++	mc13892_revision = ver.revision;
++
+ 	/* Set the STANDBYSECINV bit, so that STANDBY pin is
+ 	 * interpreted as active low.
+ 	 */
+-- 
+1.5.4.4
+
