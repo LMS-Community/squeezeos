@@ -4,7 +4,7 @@ LICENSE = "GPL"
 PV = "7.4+svnr${SRCREV}"
 PR = "r16"
 
-RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl libclass-xsaccessor-array-perl"
+RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
 RDEPENDS += "libdigest-sha1-perl libjson-xs-perl libhtml-parser-perl"
 RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-syck-perl libgd-perl"
