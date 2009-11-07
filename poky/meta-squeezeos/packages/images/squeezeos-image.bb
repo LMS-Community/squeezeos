@@ -18,5 +18,3 @@ IMAGE_INSTALL += "patch procps alsa-utils-aplay alsa-utils-amixer"
 # Simple NTP client
 IMAGE_INSTALL += "msntp"
 
-# NTFS support
-IMAGE_INSTALL += "ntfs-3g"
