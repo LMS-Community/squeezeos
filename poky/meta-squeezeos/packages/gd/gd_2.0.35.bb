@@ -2,9 +2,11 @@ SECTION = "libs"
 LICENSE = "GD"
 DESCRIPTION = "gd is a library used to create PNG, JPEG, or WBMP images."
 DEPENDS = "libpng jpeg zlib freetype"
-PR = "r3"
+PR = "r4"
 
-SRC_URI = "http://www.libgd.org/releases/gd-${PV}.tar.gz"
+SRC_URI = "http://www.libgd.org/releases/gd-${PV}.tar.gz \
+           file://gd-jpeg-scaling.patch;patch=1"
+
 S = "${WORKDIR}/gd-${PV}"
 
 inherit autotools binconfig gettext
