@@ -1,9 +1,10 @@
 require samba.inc
 
-PR = "r9"
+PR = "r10"
 
 SRC_URI += "file://config-lfs.patch;patch=1 \
 	   file://smb.conf.dist \
+	   file://smbusers \
 	   file://status \
 	   file://smbpasswd \
 	   file://samba \
@@ -28,6 +29,9 @@ do_install() {
 	# Install configuration file
 	install -m 0755 -d "${D}${sysconfdir}/samba"
 	install -m 0644 ${WORKDIR}/smb.conf.dist ${D}${sysconfdir}/samba/smb.conf.dist
+
+	# Install user mapping file (contains root = "Squeezebox")
+	install -m 0644 ${WORKDIR}/smbusers ${D}${sysconfdir}/samba/smbusers
 
 	# Install the enabled/disabled status file. 
 	install -m 0644 ${WORKDIR}/status ${D}${sysconfdir}/samba/status
