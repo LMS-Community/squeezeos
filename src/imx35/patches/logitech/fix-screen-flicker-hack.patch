@@ -1,7 +1,7 @@
 Index: linux-2.6.26/drivers/video/mxc/mxcfb.c
 ===================================================================
---- linux-2.6.26.orig/drivers/video/mxc/mxcfb.c	2009-11-04 14:52:54.000000000 +0000
-+++ linux-2.6.26/drivers/video/mxc/mxcfb.c	2009-11-04 14:55:41.000000000 +0000
+--- linux-2.6.26.orig/drivers/video/mxc/mxcfb.c	2009-11-13 09:57:34.000000000 +0000
++++ linux-2.6.26/drivers/video/mxc/mxcfb.c	2009-11-13 10:09:26.000000000 +0000
 @@ -488,6 +488,7 @@
  	case MXCFB_WAIT_FOR_VSYNC:
  		{
@@ -18,31 +18,19 @@ Index: linux-2.6.26/drivers/video/mxc/mxcfb.c
  			break;
  		}
  #ifdef CONFIG_FB_MXC_TVOUT
-@@ -818,7 +820,11 @@
- 	base *= (var->bits_per_pixel) / 8;
- 	base += info->fix.smem_start;
+Index: linux-2.6.26/drivers/mxc/ipu/ipu_common.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/ipu/ipu_common.c	2009-11-13 10:08:04.000000000 +0000
++++ linux-2.6.26/drivers/mxc/ipu/ipu_common.c	2009-11-13 10:08:22.000000000 +0000
+@@ -640,9 +640,11 @@
  
-+#ifndef CONFIG_MACH_FAB4
-+	/* see comment below */
- 	down(&mxc_fbi->flip_sem);
-+	printk("DOWN!\n");
-+#endif
- 
- 	spin_lock_irqsave(&mxc_fbi->fb_lock, lock_flags);
- 
-@@ -830,8 +836,15 @@
- 				      mxc_fbi->cur_ipu_buf, base) == 0) {
- 		ipu_select_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
- 				  mxc_fbi->cur_ipu_buf);
-+#ifndef CONFIG_MACH_FAB4
-+		/* it's possible were missing an irq here, and that can
-+		 * cause the screen to flicker. the application design
-+		 * means this check should not be required, so we need
-+		 * to test without this.
-+		 */
- 		ipu_clear_irq(mxc_fbi->ipu_ch_irq);
- 		ipu_enable_irq(mxc_fbi->ipu_ch_irq);
-+#endif
+ 	if (bufNum == 0) {
+ 		/*Mark buffer 0 as ready. */
++		__raw_writel(0, IPU_CHA_BUF1_RDY);
+ 		__raw_writel(1UL << dma_chan, IPU_CHA_BUF0_RDY);
  	} else {
- 		dev_err(info->device,
- 			"Error updating SDC buf %d to address=0x%08lX\n",
+ 		/*Mark buffer 1 as ready. */
++		__raw_writel(0, IPU_CHA_BUF0_RDY);
+ 		__raw_writel(1UL << dma_chan, IPU_CHA_BUF1_RDY);
+ 	}
+ 	return 0;
