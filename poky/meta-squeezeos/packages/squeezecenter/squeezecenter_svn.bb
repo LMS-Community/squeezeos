@@ -34,9 +34,14 @@ do_install() {
 	
 	mv ${D}/${prefix}/squeezecenter/HTML ${D}/${prefix}/squeezecenter/HTML.tmp
 	mkdir -p ${D}/${prefix}/squeezecenter/HTML/Default/html/images
-	for i in radio.png cover.png playlistclear.png playlistsave.png playall.png; do
+	mkdir -p ${D}/${prefix}/squeezecenter/HTML/EN/html/images
+	for i in radio.png cover.png playlistclear.png playlistsave.png; do
 		cp ${D}/${prefix}/squeezecenter/HTML.tmp/Default/html/images/$i ${D}/${prefix}/squeezecenter/HTML/Default/html/images
 	done
+	for i in playall.png; do
+		cp ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/images/$i ${D}/${prefix}/squeezecenter/HTML/EN/html/images
+	done
+
 	mv ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/errors ${D}/${prefix}/squeezecenter/HTML/Default/html
 	rm -r ${D}/${prefix}/squeezecenter/HTML.tmp
 	
