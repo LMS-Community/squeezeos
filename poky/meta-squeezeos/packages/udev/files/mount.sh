@@ -20,12 +20,19 @@ done
 
 automount() {	
 	name="`basename "$DEVNAME"`"
+	fstype="`/lib/udev/vol_id --type "$DEVNAME"`"
 
 	! test -d "/media/$name" && mkdir -p "/media/$name"
 	
-	if ! $MOUNT -t auto $DEVNAME "/media/$name"
+	if [ "$fstype" = "ntfs" ]; then
+		MOUNT="/usr/bin/ntfs-3g"
+	else
+		MOUNT="/bin/mount -t auto"
+	fi
+	
+	if ! $MOUNT $DEVNAME "/media/$name"
 	then
-		#logger "mount.sh/automount" "$MOUNT -t auto $DEVNAME \"/media/$name\" failed!"
+		#logger "mount.sh/automount" "$MOUNT $DEVNAME \"/media/$name\" failed!"
 		rm_dir "/media/$name"
 	else
 		logger "mount.sh/automount" "Auto-mount of [/media/$name] successful"
