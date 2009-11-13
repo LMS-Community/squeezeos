@@ -1,7 +1,7 @@
 DESCRIPTION = "Devel::NYTProf - Powerful feature-rich perl source code profiler"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r11"
+PR = "r12"
 DEPENDS = "zlib"
 
 SRC_URI = "http://search.cpan.org/CPAN/authors/id/T/TI/TIMB/Devel-NYTProf-${PV}.tar.gz \

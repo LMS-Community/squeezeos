@@ -1,7 +1,7 @@
 DESCRIPTION = "Sub::Name - (re)name a sub"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r1"
+PR = "r2"
 
 SRC_URI = "http://search.cpan.org/CPAN/authors/id/X/XM/XMATH/Sub-Name-${PV}.tar.gz"
 

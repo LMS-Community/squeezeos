@@ -1,7 +1,7 @@
 DESCRIPTION = "JSON::XS - JSON serialising/deserialising, done correctly and fast"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r1"
+PR = "r2"
 
 SRC_URI = "http://backpan.perl.org/authors/id/M/ML/MLEHMANN/JSON-XS-${PV}.tar.gz"
 

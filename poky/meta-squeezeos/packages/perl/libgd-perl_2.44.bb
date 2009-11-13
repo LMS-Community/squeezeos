@@ -1,7 +1,7 @@
 DESCRIPTION = "GD - Interface to Gd Graphics Library"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r2"
+PR = "r3"
 
 DEPENDS = "gd"
 

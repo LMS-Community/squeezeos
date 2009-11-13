@@ -1,7 +1,7 @@
 DESCRIPTION = "XML::Parser::Expat - Low level access to James Clark's expat XML parser"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r3"
+PR = "r4"
 
 DEPENDS = "expat"
 

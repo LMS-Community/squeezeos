@@ -1,7 +1,7 @@
 DESCRIPTION = "Template - Front-end module to Template Toolkit"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r2"
+PR = "r3"
 
 SRC_URI = "http://search.cpan.org/CPAN/authors/id/A/AB/ABW/Template-Toolkit-${PV}.tar.gz"
 

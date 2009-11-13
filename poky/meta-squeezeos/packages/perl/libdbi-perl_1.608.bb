@@ -1,7 +1,7 @@
 DESCRIPTION = "DBI - Database indpendent interface for Perl"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r4"
+PR = "r5"
 
 SRC_URI = "http://search.cpan.org/CPAN/authors/id/T/TI/TIMB/DBI-${PV}.tar.gz"
 

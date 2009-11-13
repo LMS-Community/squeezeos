@@ -2,7 +2,7 @@ DESCRIPTION = "Audio::Scan - Fast C scanning of audio file metadata"
 SECTION = "libs"
 LICENSE = "GPL"
 PV = "svnr${SRCREV}"
-PR = "r7"
+PR = "r8"
 DEPENDS = "libid3tag"
 
 SRC_URI = "svn://svn.slimdevices.com/repos/opensource/trunk;proto=http;module=Audio-Scan"
