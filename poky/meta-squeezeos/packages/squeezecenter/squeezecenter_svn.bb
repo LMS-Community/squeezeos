@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.4+svnr${SRCREV}"
-PR = "r17"
+PR = "r18"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -38,7 +38,7 @@ do_install() {
 	for i in radio.png cover.png playlistclear.png playlistsave.png; do
 		cp ${D}/${prefix}/squeezecenter/HTML.tmp/Default/html/images/$i ${D}/${prefix}/squeezecenter/HTML/Default/html/images
 	done
-	for i in playall.png; do
+	for i in playall.png favorites.png; do
 		cp ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/images/$i ${D}/${prefix}/squeezecenter/HTML/EN/html/images
 	done
 
