@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.4+svnr${SRCREV}"
-PR = "r18"
+PR = "r19"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -53,6 +53,7 @@ do_install() {
 	# Remove duplicate modules under CPAN that were installed system-wide
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/arch
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Audio
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Class/XSAccessor*
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Compress
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/DBI.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/DBI
