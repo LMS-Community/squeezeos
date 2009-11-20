@@ -21,6 +21,18 @@ SRC_URI = "${SQUEEZECENTER_SCM};module=embedded \
 	
 S = "${WORKDIR}/embedded"
 
+# This should match the list in Slim::Utils::OS::SqueezeOS::skipPlugins
+# Actual included plugins determined by INCLUDED_PLUGINS list below
+EXCLUDED_PLUGINS  = "Amazon Classical Deezer DigitalInput Extensions InfoBrowser"
+EXCLUDED_PLUGINS += "iTunes JiveExtras LineIn LineOut LMA Mediafly MP3tunes MusicMagic"
+EXCLUDED_PLUGINS += "Napster NetTest Pandora Podcast PreventStandby Queen Rescan RS232"
+EXCLUDED_PLUGINS += "RSSNews Slacker SlimTris Snow TT Visualizer xPL"
+
+INCLUDED_PLUGINS  = "AppGallery AudioScrobbler Base.pm CLI DateTime Facebook Favorites"
+INCLUDED_PLUGINS += "Flickr InternetRadio LastFM Live365 MyApps OPMLBased.pm"
+INCLUDED_PLUGINS += "OPMLGeneric RadioTime RandomPlay RhapsodyDirect SavePlaylist"
+INCLUDED_PLUGINS += "Sirius SongScanner Sounds"
+
 dirs755 = "${sysconfdir}/init.d \
 	${sysconfdir}/squeezecenter ${sysconfdir}/squeezecenter/prefs ${sysconfdir}/squeezecenter/cache"
 
@@ -32,6 +44,7 @@ do_install() {
 	mv squeezecenter-noCPAN/* ${D}/${prefix}/squeezecenter
 	rm -r ${D}/${prefix}/squeezecenter/Bin
 	
+	# Deal with images
 	mv ${D}/${prefix}/squeezecenter/HTML ${D}/${prefix}/squeezecenter/HTML.tmp
 	mkdir -p ${D}/${prefix}/squeezecenter/HTML/Default/html/images
 	mkdir -p ${D}/${prefix}/squeezecenter/HTML/EN/html/images
@@ -44,6 +57,14 @@ do_install() {
 
 	mv ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/errors ${D}/${prefix}/squeezecenter/HTML/Default/html
 	rm -r ${D}/${prefix}/squeezecenter/HTML.tmp
+	
+	# Only include limited set of plugins
+	mv ${D}/${prefix}/squeezecenter/Slim/Plugin ${D}/${prefix}/squeezecenter/Slim/Plugin.tmp
+	mkdir ${D}/${prefix}/squeezecenter/Slim/Plugin
+	for i in ${INCLUDED_PLUGINS}; do
+		mv ${D}/${prefix}/squeezecenter/Slim/Plugin.tmp/$i ${D}/${prefix}/squeezecenter/Slim/Plugin
+	done
+	rm -r ${D}/${prefix}/squeezecenter/Slim/Plugin.tmp
 	
 	# Leave firmware version files in place, just remove the binaries
 	rm -r ${D}/${prefix}/squeezecenter/Firmware/*.bin
