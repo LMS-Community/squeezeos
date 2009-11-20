@@ -149,6 +149,7 @@ do_install() {
 		install -m 0755 -d ${D}$d
 	done
 	install -m 0755 ${WORKDIR}/squeezecenter ${D}${sysconfdir}/init.d/squeezecenter	
+	install -m 0755 ${WORKDIR}/media-watcher ${D}${sysconfdir}/init.d/media-watcher
 }
 
 FILES_${PN} += "${prefix}"
