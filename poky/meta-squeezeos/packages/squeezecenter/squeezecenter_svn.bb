@@ -66,6 +66,10 @@ do_install() {
 	done
 	rm -r ${D}/${prefix}/squeezecenter/Slim/Plugin.tmp
 	
+	# Remove unneeded Slim modules
+	rm -r ${D}/${prefix}/squeezecenter/Slim/Utils/ServiceManager*
+	rm -r ${D}/${prefix}/squeezecenter/Slim/GUI
+	
 	# Leave firmware version files in place, just remove the binaries
 	rm -r ${D}/${prefix}/squeezecenter/Firmware/*.bin
 	
@@ -117,18 +121,22 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Time/localtime.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Time/tm.pm
 	
-	# Save even more by removing modules SC on Fab4 won't need
+	# Save even more by removing CPAN modules SC on Fab4 won't need
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Archive             # plugins only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Imager*             # win32 only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/I18N                # web only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Net/UPnP* 
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/PAR*                # plugins only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Proc/Background/Win32.pm
-	rm -r ${D}/${prefix}/squeezecenter/CPAN/Template*
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Template*			# web only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Test
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/XML/NamespaceSupport.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/XML/SAX*
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/XML/Writer.pm
+	
+	# Save even more by removing lib(CPAN) modules SC on Fab4 won't need
+	rm -r ${D}/${prefix}/squeezecenter/lib/MPEG					# SB1 & SliMP3 only
+	rm -r ${D}/${prefix}/squeezecenter/lib/Template				# web only
 
 	# HTML files
 	rm -r ${D}/${prefix}/squeezecenter/*.html
