@@ -17,7 +17,8 @@ RDEPENDS += "libdevel-nytprof-perl"
 # BROKEN: libencode-detect-perl
 
 SRC_URI = "${SQUEEZECENTER_SCM};module=embedded \
-	file://squeezecenter"
+	file://squeezecenter \
+	file://media-watcher"
 	
 S = "${WORKDIR}/embedded"
 
