@@ -1,46 +1,61 @@
 #!/bin/sh
 
 BASE=/usr/squeezecenter
+PID=/var/run/squeezecenter.pid
 
 # Some stuff does not seem to work without this
 cd $BASE
 
 case "$1" in
-    start)
-	echo "Starting SqueezeCenter"
+	start)
+		if [ -s $PID ] && kill -0 $(cat $PID)
+		then
+			echo "Squeezebox Server is already running"
+			exit 1
+		fi
+		
+		echo "Starting SqueezeCenter"
 	
-	$BASE/slimserver.pl --pidfile /var/run/squeezecenter.pid --noweb --notranscoding --nosb1slimp3sync --noinfolog --nodebuglog --nostatistics &
-	;;
+		$BASE/slimserver.pl --noweb --notranscoding --nosb1slimp3sync --noinfolog --nodebuglog --nostatistics &
+		echo $! > $PID
+		;;
 
-    stop)
-	echo "Stopping SqueezeCenter"
+	stop)
+		if [ -s $PID ] && kill -0 $(cat $PID)
+		then
+			echo "Stopping Squeezebox Server"
 
-	killall -q slimserver.pl
-	rm -f /var/run/squeezecenter.pid
-	;;
+			if [ -s $PID ]; then
+				/bin/kill $(cat $PID)
 
-    rescan)
-	$0 stop
+				/bin/rm $PID
+			fi
+		else
+			echo "Squeezebox Server is not running"
+		fi
+		;;
+
+	rescan)
+		$0 stop
 	
-	echo "Running scanner"
-	(
-		$BASE/scanner.pl --rescan --json /etc/squeezecenter/scan.json --noinfolog --nodebuglog --nostatistics
-	
-		$0 start
-	) &
-	;;
+		echo "Running Squeezebox Server scanner"
+		(
+			$BASE/scanner.pl --rescan --json /etc/squeezecenter/scan.json --noinfolog --nodebuglog --nostatistics
+			$0 start
+		) &
+		;;
 
-    restart)
-	(
-	$0 stop
-	sleep 2
-	$0 start
-	) &
-	;;
+	restart)
+		(
+			$0 stop
+			sleep 2
+			$0 start
+		) &
+		;;
 
-    *)
-	echo "Usage: $0 {start|stop|rescan|restart}"
-	exit 1
+	*)
+		echo "Usage: $0 {start|stop|rescan|restart}"
+		exit 1
 esac
 
 exit 0
