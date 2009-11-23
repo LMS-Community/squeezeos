@@ -29,7 +29,7 @@ automount() {
 		MOUNT="/usr/bin/ntfs-3g"
 	elif [ "$fstype" = "vfat" ]; then
 		# See http://lxr.linux.no/linux/Documentation/filesystems/vfat.txt
-		MOUNT_OPTIONS="-o rw,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,utf8=1"
+		MOUNT_OPTIONS="-o rw,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,utf8=1,shortname=mixed"
 	fi
 	
 	if ! $MOUNT $DEVNAME "/media/$name" $MOUNT_OPTIONS
