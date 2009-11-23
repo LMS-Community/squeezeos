@@ -2,6 +2,7 @@
 
 BASE=/usr/squeezecenter
 PID=/var/run/squeezecenter.pid
+SCANNERPID=/var/run/scanner.pid
 
 # Some stuff does not seem to work without this
 cd $BASE
@@ -35,12 +36,25 @@ case "$1" in
 		fi
 		;;
 
+	stopscan)
+		if [ -s $SCANNERPID ] && kill -0 $(cat $SCANNERPID)
+		then
+			echo "Stopping Scanner"
+			if [ -s $SCANNERPID ]; then
+				/bin/kill $(cat $SCANNERPID)
+
+				/bin/rm $SCANNERPID
+			fi
+		else
+			echo "Scanner is not running"
+		fi	
+		;;
 	rescan)
 		$0 stop
 	
 		echo "Running Squeezebox Server scanner"
 		(
-			$BASE/scanner.pl --rescan --json /etc/squeezecenter/scan.json --noinfolog --nodebuglog --nostatistics
+			$BASE/scanner.pl --pid $SCANNERPID --rescan --json /etc/squeezecenter/scan.json --noinfolog --nodebuglog --nostatistics
 			$0 start
 		) &
 		;;
@@ -54,7 +68,7 @@ case "$1" in
 		;;
 
 	*)
-		echo "Usage: $0 {start|stop|rescan|restart}"
+		echo "Usage: $0 {start|stop|rescan|stopscan|restart}"
 		exit 1
 esac
 
