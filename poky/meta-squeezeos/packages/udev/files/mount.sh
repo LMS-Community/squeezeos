@@ -5,9 +5,10 @@
 # Attempt to mount any added block devices and umount any removed devices
 
 
-MOUNT="/bin/mount"
+MOUNT="/bin/mount -t auto"
 PMOUNT="/usr/bin/pmount"
 UMOUNT="/bin/umount"
+MOUNT_OPTIONS=""
 
 for line in `grep -v ^# /etc/udev/mount.blacklist`
 do
@@ -26,11 +27,12 @@ automount() {
 	
 	if [ "$fstype" = "ntfs" ]; then
 		MOUNT="/usr/bin/ntfs-3g"
-	else
-		MOUNT="/bin/mount -t auto"
+	elif [ "$fstype" = "vfat" ]; then
+		# See http://lxr.linux.no/linux/Documentation/filesystems/vfat.txt
+		MOUNT_OPTIONS="-o rw,fmask=0022,dmask=0022,codepage=437,iocharset=iso8859-1,utf8=1"
 	fi
 	
-	if ! $MOUNT $DEVNAME "/media/$name"
+	if ! $MOUNT $DEVNAME "/media/$name" $MOUNT_OPTIONS
 	then
 		#logger "mount.sh/automount" "$MOUNT $DEVNAME \"/media/$name\" failed!"
 		rm_dir "/media/$name"
