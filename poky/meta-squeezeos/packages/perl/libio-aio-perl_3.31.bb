@@ -15,5 +15,5 @@ FILES_${PN} = "${PERLLIBDIRS}/auto/IO/AIO/* \
                ${PERLLIBDIRS}"
 
 cpan_do_configure_prepend () {
-	mv ${WORKDIR}/libio-aio-perl-config.h ${S}/libeio/config.h	
+	cp ${WORKDIR}/libio-aio-perl-config.h ${S}/libeio/config.h	
 }
