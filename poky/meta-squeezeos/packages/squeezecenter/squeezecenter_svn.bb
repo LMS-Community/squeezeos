@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.4+svnr${SRCREV}"
-PR = "r23"
+PR = "r24"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -17,8 +17,7 @@ RDEPENDS += "libdevel-nytprof-perl"
 # BROKEN: libencode-detect-perl
 
 SRC_URI = "${SQUEEZECENTER_SCM};module=embedded \
-	file://squeezecenter \
-	file://media-watcher"
+	file://squeezecenter 
 	
 S = "${WORKDIR}/embedded"
 
@@ -150,7 +149,6 @@ do_install() {
 		install -m 0755 -d ${D}$d
 	done
 	install -m 0755 ${WORKDIR}/squeezecenter ${D}${sysconfdir}/init.d/squeezecenter	
-	install -m 0755 ${WORKDIR}/media-watcher ${D}${sysconfdir}/init.d/media-watcher
 }
 
 FILES_${PN} += "${prefix}"
