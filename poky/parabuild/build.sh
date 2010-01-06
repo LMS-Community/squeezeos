@@ -19,9 +19,6 @@ source poky-init-build-env
 if [ -f $PARABUILD_ENV_SCRIPT ]
 then
 	source $PARABUILD_ENV_SCRIPT
-else
-	echo "ERROR: No $PARABUILD_ENV_SCRIPT found. Can Not Continue"
-	exit 1
 fi
 
 echo "*** Clean cache and squeezeplay ***"
@@ -60,7 +57,6 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Make build use all available CPUs
 echo "BB_NUMBER_THREADS = $CPUCOUNT
-# DL_DIR = $HOME/.poky_dl_dir - commented out because it creates dangerous disk space situations
 PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
 
 # Build firmware images, multiple machines can be built here
