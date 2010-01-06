@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-PR = "r6"
+PR = "r7"
 
 PROVIDES = "marvell-gspi-module"
 
