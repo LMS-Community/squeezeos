@@ -19,9 +19,6 @@ source poky-init-build-env
 if [ -f $PARABUILD_ENV_SCRIPT ]
 then
 	source $PARABUILD_ENV_SCRIPT
-else
-	echo "ERROR: No $PARABUILD_ENV_SCRIPT found. Can Not Continue"
-	exit 1
 fi
 
 echo "*** Clean cache and squeezeplay ***"
