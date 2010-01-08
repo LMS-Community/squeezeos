@@ -1,7 +1,7 @@
 DESCRIPTION = "EV - perl interface to libev, a high performance full-featured event loop"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r1"
+PR = "r2"
 
 SRC_URI = "http://backpan.perl.org/authors/id/M/ML/MLEHMANN/EV-${PV}.tar.gz"
 
