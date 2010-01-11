@@ -1,8 +1,8 @@
 DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
-PV = "7.4+svnr${SRCREV}"
-PR = "r26"
+PV = "7.5+svnr${SRCREV}"
+PR = "r27"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"

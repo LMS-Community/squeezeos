@@ -14,8 +14,8 @@ PROVIDES = "\
 	glibc-thread-db \
 	virtual/linux-libc-headers "
 RPROVIDES = "glibc-utils libsegfault glibc-thread-db"
-PACKAGES_DYNAMIC = "glibc-gconv-*"
-PR = "r1"
+PACKAGES_DYNAMIC = "glibc-gconv-* locale-binary-*"
+PR = "r2"
 
 SRC_URI = "http://www.codesourcery.com/public/gnu_toolchain/arm-none-linux-gnueabi/arm-${PV}-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.bz2 \
 	file://SUPPORTED"
@@ -227,14 +227,13 @@ python package_do_split_gconvs () {
 
 	def output_locale_binary(name, locale, encoding):
 		target_arch = bb.data.getVar("TARGET_ARCH", d, 1)
-		qemu = "qemu-%s" % target_arch
-		pkgname = 'locale-base-' + legitimize_package_name(name)
+		pkgname = 'locale-binary-' + legitimize_package_name(name)
 		m = re.match("(.*)\.(.*)", name)
 		if m:
 			glibc_name = "%s.%s" % (m.group(1), m.group(2).lower().replace("-",""))
 		else:
 			glibc_name = name
-		bb.data.setVar('RDEPENDS_%s' % pkgname, legitimize_package_name('glibc-binary-localedata-%s' % glibc_name), d)
+		# bb.data.setVar('RDEPENDS_%s' % pkgname, legitimize_package_name('glibc-binary-localedata-%s' % glibc_name), d)
 		rprovides = 'virtual-locale-%s' % legitimize_package_name(name)
 		m = re.match("(.*)_(.*)", name)
 		if m:
@@ -243,18 +242,19 @@ python package_do_split_gconvs () {
 		bb.data.setVar('ALLOW_EMPTY_%s' % pkgname, '1', d)
 		bb.data.setVar('PACKAGES', '%s %s' % (pkgname, bb.data.getVar('PACKAGES', d, 1)), d)
 
-		treedir = os.path.join(bb.data.getVar("WORKDIR", d, 1), "locale-tree")
-		path = bb.data.getVar("PATH", d, 1)
-		i18npath = os.path.join(treedir, datadir, "i18n")
-
-		localedef_opts = "--force --old-style --no-archive --prefix=%s --inputfile=%s/i18n/locales/%s --charmap=%s %s" % (treedir, datadir, locale, encoding, name)
-		cmd = "PATH=\"%s\" I18NPATH=\"%s\" %s -L %s %s/bin/localedef %s" % (path, i18npath, qemu, treedir, treedir, localedef_opts)
-		bb.note("generating locale %s (%s)" % (locale, encoding))
-		if os.system(cmd):
-			raise bb.build.FuncFailed("localedef returned an error (command was %s)." % cmd)
+		bb.note("assuming binary locale %s (%s) already generated" % (locale, encoding))
 
 	def output_locale(name, locale, encoding):
-		output_locale_source(name, locale, encoding)
+		use_bin = bb.data.getVar("ENABLE_BINARY_LOCALE_GENERATION", d, 1)
+		if use_bin:
+			output_locale_binary(name, locale, encoding)
+		else:
+			output_locale_source(name, locale, encoding)
+
+	use_bin = bb.data.getVar("ENABLE_BINARY_LOCALE_GENERATION", d, 1)
+	if use_bin:
+		bb.note("preparing tree for binary locale generation")
+		bb.build.exec_func("do_prep_locale_tree", d)
 
 	# Reshuffle names so that UTF-8 is preferred over other encodings
 	non_utf8 = []
@@ -275,6 +275,14 @@ python package_do_split_gconvs () {
 	if non_utf8 != []:
 		bb.note("the following locales are supported only in legacy encodings:")
 		bb.note("  " + " ".join(non_utf8))
+
+	use_bin = bb.data.getVar("ENABLE_BINARY_LOCALE_GENERATION", d, 1)
+	if use_bin:
+		bb.note("generation of binary locales packages")
+		do_split_packages(d, binary_locales_dir, file_regex='(.*)', output_pattern='locale-binary-%s', description='binary locale definition for %s', extra_depends='', allow_dirs=True)
+	else:
+		bb.note("binary locales disabled. this may break i18n!")
+
 }
 
 # We want to do this indirection so that we can safely 'return'

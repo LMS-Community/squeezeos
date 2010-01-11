@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 PARABUILD_ENV_SCRIPT="/home/parabuild/private-env-7.5.sh"
 CPUCOUNT=`cat /proc/cpuinfo | grep processor | wc -l`
