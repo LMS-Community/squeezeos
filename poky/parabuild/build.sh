@@ -59,10 +59,10 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 echo "BB_NUMBER_THREADS = $CPUCOUNT
 BB_GENERATE_MIRROR_TARBALLS = 0
 
-DL_DIR = /opt/parabuild/etc/builds/poky_dl_dir 
-CVSDIR = /opt/parabuild/etc/builds/poky_cvs_dir
-GITDIR = /opt/parabuild/etc/builds/poky_git_dir
-SVNDIR = /opt/parabuild/etc/builds/poky_svn_dir
+DL_DIR = /opt/parabuild/etc/build/poky_dl_dir 
+CVSDIR = /opt/parabuild/etc/build/poky_cvs_dir
+GITDIR = /opt/parabuild/etc/build/poky_git_dir
+SVNDIR = /opt/parabuild/etc/build/poky_svn_dir
 
 PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
 
