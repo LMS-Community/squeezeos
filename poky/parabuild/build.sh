@@ -58,6 +58,7 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 # Make build use all available CPUs
 echo "BB_NUMBER_THREADS = $CPUCOUNT
 DL_DIR = /opt/parabuild/etc/builds/poky_dl_dir 
+BB_GENERATE_MIRROR_TARBALLS = 0
 PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
 
 # Build firmware images, multiple machines can be built here
