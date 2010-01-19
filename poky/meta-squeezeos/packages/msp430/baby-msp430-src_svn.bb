@@ -21,6 +21,9 @@ do_install() {
 	install -m 0644 ${S}/msp430-0001.txt ${INSTALL_DIR}/msp430-0001.txt
 	install -m 0644 ${S}/msp430-0002.txt ${INSTALL_DIR}/msp430-0002.txt
 	install -m 0644 ${S}/msp430-0003.txt ${INSTALL_DIR}/msp430-0003.txt
+	install -m 0644 ${S}/msp430-0003.txt ${INSTALL_DIR}/msp430-0004.txt
+	install -m 0644 ${S}/msp430-0003.txt ${INSTALL_DIR}/msp430-0005.txt
+	install -m 0644 ${S}/msp430-0003.txt ${INSTALL_DIR}/msp430-0006.txt
 }
 
 PACKAGES = "baby-msp430"
