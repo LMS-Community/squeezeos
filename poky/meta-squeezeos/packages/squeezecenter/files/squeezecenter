@@ -6,6 +6,7 @@ LANG=en_US.utf8; export LANG
 
 PID=/var/run/squeezecenter.pid
 SCANNERPID=/var/run/scanner.pid
+RESIZERPID=/var/run/gdresized.pid
 
 # Some stuff does not seem to work without this
 cd $BASE
@@ -27,11 +28,27 @@ case "$1" in
 		# XXX I've disabled --noinfolog and --nodebuglog for now, we will need logging for debugging
 		nice -n 5 $BASE/slimserver.pl --charset utf8 --noweb --notranscoding --nosb1slimp3sync --nostatistics --logfile syslog &
 		echo $! > $PID
+		
+		$0 startresizer
+		;;
+		
+	startresizer)
+		if [ -s $RESIZERPID ] && kill -0 $(cat $RESIZERPID)
+		then
+			echo "Artwork Resizer is already running"
+			exit 1
+		fi
+		
+		echo "Starting Artwork Resizer"
+		
+		nice -n 10 $BASE/gdresized.pl &
+		echo $! > $RESIZERPID
 		;;
 
 	stop)
 		$0 stopscan
 		$0 stopserver
+		$0 stopresizer
 		;;
 
 	stopserver)
@@ -62,6 +79,21 @@ case "$1" in
 			echo "Scanner is not running"
 		fi	
 		;;
+		
+	stopresizer)
+		if [ -s $RESIZERPID ] && kill -0 $(cat $RESIZERPID)
+		then
+			echo "Stopping Artwork Resizer"
+			if [ -s $RESIZERPID ]; then
+				/bin/kill $(cat $RESIZERPID)
+				
+				/bin/rm $RESIZERPID
+			fi
+		else
+			echo "Artwork Resizer is not running"
+		fi
+		;;
+		
 	rescan)
 		$0 restart
 	
