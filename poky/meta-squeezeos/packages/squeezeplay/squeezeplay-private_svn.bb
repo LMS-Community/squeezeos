@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay - Private code"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r12"
+PR = "r13"
 
 # don't use thumb for decoders
 ARM_INSTRUCTION_SET = "arm"
