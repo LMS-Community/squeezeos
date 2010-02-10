@@ -79,7 +79,7 @@ done
 
 # QA: Check version numbers match
 SQUEEZEOS_VERSION=`cat tmp-${MACHINE}/rootfs/etc/squeezeos.version | perl -nle 'print if s/^[\d\.]+\sr(\d+)$/$1/'`
-SQUEEZEPLAY_VERSION=`strings tmp-${MACHINE}/rootfs/usr/bin/jive | perl -nle 'print if s/^[\d\.]+\sr(\d+)$/$1/'`
+SQUEEZEPLAY_VERSION=`strings tmp-${MACHINE}/rootfs/usr/bin/jive | perl -nle 'print if s/^(?:Squeezeplay )?[\d\.]+\sr(\d+)$/$1/'`
 
 echo "SQUEEZEOS_VERSION=${SQUEEZEOS_VERSION}"
 echo "SQUEEZEPLAY_VERSION=${SQUEEZEPLAY_VERSION}"
