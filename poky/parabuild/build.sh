@@ -56,7 +56,8 @@ fi
 echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Make build use all available CPUs
-echo "BB_NUMBER_THREADS = $CPUCOUNT
+# - don't - awy 20100211200Z
+# echo "BB_NUMBER_THREADS = $CPUCOUNT
 BB_GENERATE_MIRROR_TARBALLS = 0
 
 DL_DIR = /opt/parabuild/etc/build/poky_dl_dir 
@@ -64,7 +65,8 @@ CVSDIR = /opt/parabuild/etc/build/poky_cvs_dir
 GITDIR = /opt/parabuild/etc/build/poky_git_dir
 SVNDIR = /opt/parabuild/etc/build/poky_svn_dir
 
-PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
+# - don't - awy 20100211200Z
+#PARALLEL_MAKE = \"-j $CPUCOUNT\" " >> conf/local.conf
 
 # Build firmware images, multiple machines can be built here
 echo "*** Building ***"
