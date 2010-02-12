@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-PR = "r4"
+PR = "r5"
 
 PROVIDES = "marvell-wlan-tools"
 
