@@ -22,6 +22,10 @@ FILES_wpa-supplicant-cli = "/usr/sbin/wpa_cli"
 
 RRECOMMENDS_${PN} = "wpa-supplicant-passphrase wpa-supplicant-cli"
 
+# With the csl2009q3 and high optimization it fails. 'arm' instruction set to be safe
+ARM_INSTRUCTION_SET = "arm"
+FULL_OPTIMIZATION = "-O1 -ggdb"
+
 do_configure () {
         install -m 0755 ${WORKDIR}/defconfig-gnutls  .config
 }
