@@ -6,7 +6,7 @@ ls#! /bin/sh
 #
 
 echo sh Configure -des \
-        -Doptimize=-O2 \
+        -Doptimize='' \
         -Dmyhostname=localhost \
         -Dperladmin=root@localhost \
         -Dcc=gcc \

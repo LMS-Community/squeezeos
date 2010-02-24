@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-PR = "r4"
+PR = "r5"
 
 PROVIDES = "marvell-wlan-tools"
 
@@ -13,6 +13,10 @@ SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686 \
 "
 
 S = "${WORKDIR}/src_gspi8686"
+
+# With the csl2009q3 and high optimization it fails. 'arm' instruction set to be safe
+ARM_INSTRUCTION_SET = "arm"
+FULL_OPTIMIZATION = "-O1 -ggdb"
 
 CFLAGS_prepend += "-I${S}/os/linux"
 CFLAGS_prepend += "-I${S}/wlan"

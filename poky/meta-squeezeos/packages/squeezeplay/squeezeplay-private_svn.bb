@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay - Private code"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r12"
+PR = "r13"
 
 # don't use thumb for decoders
 ARM_INSTRUCTION_SET = "arm"
@@ -23,6 +23,15 @@ EXTRA_OECONF_fab4 = "--disable-shared --enable-wma --enable-aac --enable-chiral"
 # Enable extra AAC experimental optimizations
 #CFLAGS_prepend_fab4 = "-DIMX31"
 #CFLAGS_prepend_baby = "-DIMX25"
+
+# We need to override the optimization for the build of the WMA fft.c module
+# because we get bad code generation with any optimization enabled.
+# Override CFLAGS here so that we can pass the desired flags via the environment (TARGET_CFLAGS)
+# at compilation time instead of autoconf building them into the Makefile at configure time;
+# Makefile.am now uses TARGET_CFLAGS and TARGET_CFLAGS_WMAFFT
+# -pass-exit-codes is just a dummy value so that configure does not generate defaults
+CFLAGS = -pass-exit-codes
+export TARGET_CFLAGS_WMAFFT = ${TARGET_CFLAGS} -O0
 
 do_stage() {
 	autotools_stage_all

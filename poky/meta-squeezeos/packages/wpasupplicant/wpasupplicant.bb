@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "GNU GPL"
 
 PV = "0.6.9"
-PR = "r4"
+PR = "r5"
 
 PROVIDES = "wpasupplicant"
 
@@ -16,6 +16,10 @@ SRC_URI = "http://hostap.epitest.fi/releases/wpa_supplicant-${PV}.tar.gz \
 S = "${WORKDIR}/wpa_supplicant-${PV}/wpa_supplicant"
 
 inherit autotools
+
+# With the csl2009q3 and high optimization it fails. 'arm' instruction set to be safe
+ARM_INSTRUCTION_SET = "arm"
+FULL_OPTIMIZATION = "-O1 -ggdb"
 
 do_configure () {
 	install -m 0644 ${WORKDIR}/defconfig ${S}/.config

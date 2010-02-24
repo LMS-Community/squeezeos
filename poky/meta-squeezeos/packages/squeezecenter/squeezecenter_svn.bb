@@ -25,12 +25,12 @@ S = "${WORKDIR}/embedded"
 # Actual included plugins determined by INCLUDED_PLUGINS list below
 EXCLUDED_PLUGINS  = "Amazon Classical Deezer DigitalInput Extensions InfoBrowser"
 EXCLUDED_PLUGINS += "iTunes JiveExtras LineIn LineOut LMA Mediafly MP3tunes MusicMagic"
-EXCLUDED_PLUGINS += "Napster NetTest Pandora Podcast PreventStandby Queen Rescan RS232"
+EXCLUDED_PLUGINS += "Napster NetTest Pandora Podcast PreventStandby Queen RhapsodyDirect Rescan RS232"
 EXCLUDED_PLUGINS += "RSSNews Slacker SlimTris Snow TT Visualizer xPL"
 
 INCLUDED_PLUGINS  = "AppGallery AudioScrobbler Base.pm CLI DateTime Facebook Favorites"
-INCLUDED_PLUGINS += "Flickr InternetRadio LastFM Live365 MyApps OPMLBased.pm"
-INCLUDED_PLUGINS += "OPMLGeneric RadioTime RandomPlay RhapsodyDirect SavePlaylist"
+INCLUDED_PLUGINS += "Flickr InternetRadio LastFM Live365 MyApps SN OPMLBased.pm"
+INCLUDED_PLUGINS += "OPMLGeneric RadioTime RandomPlay SavePlaylist"
 INCLUDED_PLUGINS += "Sirius SongScanner Sounds"
 
 dirs755 = "${sysconfdir}/init.d \

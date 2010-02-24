@@ -1,6 +1,6 @@
 require samba.inc
 
-PR = "r10"
+PR = "r11"
 
 SRC_URI += "file://config-lfs.patch;patch=1 \
 	   file://smb.conf.dist \
