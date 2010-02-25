@@ -22,16 +22,29 @@ if [ -f /etc/hostname ]; then
 fi
 
 # Start syslogd
-if [ -e /media/*/log ]; then
-	# log and core files to media
-	LOG_DIR=`echo /media/*/log`
+#First search to see if there are any log directories under /media/*/. If the log directory exist, then there are
+#two possibilities. The log directory is part of the USB/SD that is created by the user of those devices OR the directory
+#is created on the flash to keep larger log files.
+#One way of keeping a longer log files is simply creating the log directory on /media manually: 
+#                 #mkdir /media/mylogs
+#                 #mkdir /media/mylogs/log/
 
-	echo "Starting syslogd (to $LOG_DIR)"
-	/sbin/syslogd -S -s1000 -O $LOG_DIR/messages
+#LOG_DIRS included all the potentail directoris. LOG_DIR is the one that is the top of the list
+LOG_DIRS=`find /media/ -name log -mindepth 1 -maxdepth 2`
+LOG_DIR=`echo $LOG_DIRS | awk '{print $1}'`
+
+#if the LOG_DIR exists, then syslogd logs go to that directory.
+if [ "$LOG_DIR" != "" ]; then
+	# log and core files to media
+        echo "Starting syslogd to \"$LOG_DIR\""
+
+        #each log file will be 10MB and the maximum number of log files will be 6. The 60MB maximum size
+        #should enable the logging of the events on the flash with no conrern for filling out the flash at the moment. 
+        /sbin/syslogd -S -s10240 -O $LOG_DIR/messages -b 6 
 
 	(cd /var/log; /bin/ln -sf $LOG_DIR/messages messages)
 
-	echo "Enabling core files (to $LOG_DIR)"
+	echo "Enabling core files to \"$LOG_DIR\""
 	echo "$LOG_DIR/core-%e" > /proc/sys/kernel/core_pattern
 	ulimit -c unlimited
 else
