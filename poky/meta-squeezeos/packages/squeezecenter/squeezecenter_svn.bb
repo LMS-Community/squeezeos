@@ -17,7 +17,8 @@ RDEPENDS += "libdevel-nytprof-perl"
 # BROKEN: libencode-detect-perl
 
 SRC_URI = "${SQUEEZECENTER_SCM};module=embedded \
-	file://squeezecenter"
+	file://squeezecenter \
+	file://custom-convert.conf"
 	
 S = "${WORKDIR}/embedded"
 
@@ -163,6 +164,7 @@ do_install() {
 		install -m 0755 -d ${D}$d
 	done
 	install -m 0755 ${WORKDIR}/squeezecenter ${D}${sysconfdir}/init.d/squeezecenter	
+	install -m 0755 ${WORKDIR}/custom-convert.conf ${D}/${prefix}/squeezecenter/custom-convert.conf	
 }
 
 FILES_${PN} += "${prefix}"
