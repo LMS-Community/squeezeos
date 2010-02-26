@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.5+svnr${SRCREV}"
-PR = "r28"
+PR = "r29"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -23,15 +23,29 @@ S = "${WORKDIR}/embedded"
 
 # This should match the list in Slim::Utils::OS::SqueezeOS::skipPlugins
 # Actual included plugins determined by INCLUDED_PLUGINS list below
-EXCLUDED_PLUGINS  = "Amazon Classical Deezer DigitalInput Extensions InfoBrowser"
-EXCLUDED_PLUGINS += "iTunes JiveExtras LineIn LineOut LMA Mediafly MP3tunes MusicMagic"
-EXCLUDED_PLUGINS += "Napster NetTest Pandora Podcast PreventStandby Queen RhapsodyDirect Rescan RS232"
-EXCLUDED_PLUGINS += "RSSNews Slacker SlimTris Snow TT Visualizer xPL"
+EXCLUDED_PLUGINS = ""
+INCLUDED_PLUGINS = ""
 
-INCLUDED_PLUGINS  = "AppGallery AudioScrobbler Base.pm CLI DateTime Facebook Favorites"
-INCLUDED_PLUGINS += "Flickr InternetRadio LastFM Live365 MyApps SN OPMLBased.pm"
-INCLUDED_PLUGINS += "OPMLGeneric RadioTime RandomPlay SavePlaylist"
-INCLUDED_PLUGINS += "Sirius SongScanner Sounds"
+# Apps
+INCLUDED_PLUGINS += "Amazon Classical Deezer InfoBrowser RSSNews Podcast"
+INCLUDED_PLUGINS += "LMA Mediafly MP3tunes Napster Pandora Slacker Queen"
+INCLUDED_PLUGINS += "Facebook Flickr LastFM Live365 RadioTime RhapsodyDirect"
+INCLUDED_PLUGINS += "Sirius Sounds"
+
+# Core features
+INCLUDED_PLUGINS += "CLI DateTime Favorites InternetRadio AudioScrobbler SongScanner"
+INCLUDED_PLUGINS += "Base.pm OPMLBased.pm OPMLGeneric AppGallery MyApps"
+INCLUDED_PLUGINS += "RandomPlay SavePlaylist"
+
+# ip3k features
+INCLUDED_PLUGINS += "DigitalInput LineIn LineOut"
+EXCLUDED_PLUGINS += "RS232 Visualizer SlimTris Snow NetTest"
+
+# SqueezePlay applets/extras
+EXCLUDED_PLUGINS += "Extensions JiveExtras"
+
+# Desktop stuff
+EXCLUDED_PLUGINS += "iTunes MusicMagic PreventStandby Rescan TT xPL"
 
 dirs755 = "${sysconfdir}/init.d \
 	${sysconfdir}/squeezecenter ${sysconfdir}/squeezecenter/prefs ${sysconfdir}/squeezecenter/cache"
