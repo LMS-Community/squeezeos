@@ -7,6 +7,9 @@ PRIORITY = "optional"
 DEPENDS = "virtual/db perl-native grep-native"
 PR = "r2"
 
+# We want Perl to be as fast as possible, reset the default optimization flags
+FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
+
 # Major part of version
 PVM = "5.10"
 
