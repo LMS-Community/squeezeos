@@ -2,7 +2,7 @@ DESCRIPTION = "Audio::Scan - Fast C scanning of audio file metadata"
 SECTION = "libs"
 LICENSE = "GPL"
 PV = "svnr${SRCREV}"
-PR = "r9"
+PR = "r10"
 DEPENDS = "libid3tag"
 
 # We want Perl to be as fast as possible, reset the default optimization flags

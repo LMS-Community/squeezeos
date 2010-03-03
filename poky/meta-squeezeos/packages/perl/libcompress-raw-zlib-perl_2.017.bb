@@ -1,7 +1,7 @@
 DESCRIPTION = "Compress::Raw::Zlib - Low-Level Interface to zlib compression library"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r12"
+PR = "r13"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"

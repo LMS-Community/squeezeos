@@ -1,7 +1,7 @@
 DESCRIPTION = "Digest::SHA1 - Perl interface to the SHA-1 algorithm"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r15"
+PR = "r16"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
