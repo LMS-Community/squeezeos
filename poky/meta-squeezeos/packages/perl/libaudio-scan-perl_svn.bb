@@ -2,13 +2,14 @@ DESCRIPTION = "Audio::Scan - Fast C scanning of audio file metadata"
 SECTION = "libs"
 LICENSE = "GPL"
 PV = "svnr${SRCREV}"
-PR = "r10"
+PR = "r11"
 DEPENDS = "libid3tag"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
-SRC_URI = "svn://svn.slimdevices.com/repos/opensource/trunk;proto=http;module=Audio-Scan"
+# Pinned to r586 (0.62)
+SRC_URI = "svn://svn.slimdevices.com/repos/opensource/trunk;proto=http;module=Audio-Scan;rev=586"
 
 S = "${WORKDIR}/Audio-Scan"
 
