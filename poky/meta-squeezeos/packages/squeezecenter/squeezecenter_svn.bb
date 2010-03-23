@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.5+svnr${SRCREV}"
-PR = "r32"
+PR = "r33"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -37,7 +37,7 @@ EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser"
 # Core features
 INCLUDED_PLUGINS += "CLI DateTime Favorites InternetRadio AudioScrobbler SongScanner"
 INCLUDED_PLUGINS += "Base.pm OPMLBased.pm OPMLGeneric AppGallery MyApps"
-INCLUDED_PLUGINS += "RandomPlay SavePlaylist"
+INCLUDED_PLUGINS += "RandomPlay SavePlaylist SN"
 
 # ip3k features
 INCLUDED_PLUGINS += "DigitalInput LineIn LineOut"
