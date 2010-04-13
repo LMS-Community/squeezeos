@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r35"
+PR = "r36"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -20,7 +20,7 @@ SRC_URI = "${SQUEEZECENTER_SCM};module=trunk \
 	file://squeezecenter \
 	file://custom-convert.conf"
 	
-S = "${WORKDIR}/embedded"
+S = "${WORKDIR}/trunk"
 
 # This should match the list in Slim::Utils::OS::SqueezeOS::skipPlugins
 # Actual included plugins determined by INCLUDED_PLUGINS list below

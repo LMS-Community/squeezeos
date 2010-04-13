@@ -1,8 +1,8 @@
 DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
-PV = "7.4+svnr${SRCREV}"
-PR = "r13"
+PV = "7.6+svnr${SRCREV}"
+PR = "r14"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl libclass-xsaccessor-array-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -16,10 +16,10 @@ RDEPENDS += "libdevel-nytprof-perl"
 
 # BROKEN: libencode-detect-perl
 
-SRC_URI = "${SQUEEZECENTER_SCM};module=embedded \
+SRC_URI = "${SQUEEZECENTER_SCM};module=trunk \
 	file://squeezecenter"
 	
-S = "${WORKDIR}/embedded"
+S = "${WORKDIR}/trunk"
 
 dirs755 = "${sysconfdir}/init.d \
 	${sysconfdir}/squeezecenter ${sysconfdir}/squeezecenter/prefs ${sysconfdir}/squeezecenter/cache"
