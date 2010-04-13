@@ -1,8 +1,8 @@
 DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
-PV = "7.5+svnr${SRCREV}"
-PR = "r34"
+PV = "7.6+svnr${SRCREV}"
+PR = "r35"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -16,7 +16,7 @@ RDEPENDS += "libdevel-nytprof-perl"
 
 # BROKEN: libencode-detect-perl
 
-SRC_URI = "${SQUEEZECENTER_SCM};module=embedded \
+SRC_URI = "${SQUEEZECENTER_SCM};module=trunk \
 	file://squeezecenter \
 	file://custom-convert.conf"
 	
