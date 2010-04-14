@@ -2,15 +2,15 @@ DESCRIPTION = "Audio::Scan - Fast C scanning of audio file metadata"
 SECTION = "libs"
 LICENSE = "GPL"
 PV = "svnr${SRCREV}"
-PR = "r13"
+PR = "r14"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
 # This should match the version currently listed in SBS's modules.conf file
-SRC_URI = "svn://svn.slimdevices.com/repos/opensource/tags/Audio-Scan;proto=http;module=0.75"
+SRC_URI = "svn://svn.slimdevices.com/repos/opensource/tags/Audio-Scan;proto=http;module=0.77"
 
-S = "${WORKDIR}/0.75"
+S = "${WORKDIR}/0.77"
 
 inherit cpan
 
