@@ -10,7 +10,7 @@ FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-reg
 # This should match the version currently listed in SBS's modules.conf file
 SRC_URI = "svn://svn.slimdevices.com/repos/opensource/tags/Audio-Scan;proto=http;module=0.81"
 
-S = "${WORKDIR}/0.79"
+S = "${WORKDIR}/0.81"
 
 inherit cpan
 
