@@ -69,7 +69,12 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Build firmware images, multiple machines can be built here
 echo "*** Building ***"
-run_bitbake "squeezeos-image"
+if [ "x${SQUEEZEOS_DEBUG}" != "x" ]
+then
+	run_bitbake "squeezeos-image-debug"
+else
+	run_bitbake "squeezeos-image"
+fi
 
 # Do not leave the source code on the build machine, cleanup private modules
 for PKG in 'marvell-wlan-tools-src' 'marvell-gspi-module-src' 'marvell-wps-src' 'squeezeplay-private'
