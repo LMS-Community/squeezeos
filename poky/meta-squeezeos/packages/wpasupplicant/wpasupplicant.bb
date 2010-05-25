@@ -17,7 +17,7 @@ S = "${WORKDIR}/wpa_supplicant-${PV}/wpa_supplicant"
 
 inherit autotools
 
-# With the csl2009q3 and high optimization it fails. 'arm' instruction set to be safe
+# With the csl2010q1 and high optimization it fails. 'arm' instruction set to be safe
 ARM_INSTRUCTION_SET = "arm"
 FULL_OPTIMIZATION = "-O1 -ggdb"
 

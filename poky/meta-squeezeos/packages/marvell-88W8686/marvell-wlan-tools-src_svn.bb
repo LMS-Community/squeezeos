@@ -14,7 +14,7 @@ SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=src_gspi8686 \
 
 S = "${WORKDIR}/src_gspi8686"
 
-# With the csl2009q3 and high optimization it fails. 'arm' instruction set to be safe
+# With the csl2010q1 and high optimization it fails. 'arm' instruction set to be safe
 ARM_INSTRUCTION_SET = "arm"
 FULL_OPTIMIZATION = "-O1 -ggdb"
 
