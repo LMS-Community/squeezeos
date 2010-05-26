@@ -2,12 +2,14 @@ DESCRIPTION = "FLAC"
 SECTION = "libs"
 LICENSE = "Xiph"
 
-PR = "r6"
+PR = "r7"
 
 SRC_URI="${SOURCEFORGE_MIRROR}/flac/flac-${PV}.tar.gz \
 	 file://bitreader-1.2.1.patch;patch=1 \
 	 file://compile-fix.patch;patch=1 \
          file://arm-asm.patch;patch=1"
+
+ARM_INSTRUCTION_SET = "arm"
 
 S = "${WORKDIR}/flac-${PV}"
 

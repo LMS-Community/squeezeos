@@ -16,6 +16,8 @@ SRC_URI = "${SQUEEZEPLAY_SCM};module=squeezeplay \
 
 S = "${WORKDIR}/squeezeplay"
 
+ARM_INSTRUCTION_SET = "arm"
+
 inherit autotools
 
 EXTRA_OECONF = "--disable-portaudio --enable-fsync-workaround"
