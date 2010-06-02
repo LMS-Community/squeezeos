@@ -5,7 +5,10 @@ LICENSE = "LGPL"
 BV = "1.2.5"
 
 PV = "${BV}+svnr${SRCREV}"
-PR = "r2"
+PR = "r3"
+
+# SDL has the hottest functions in the system, and Thumb is much slower for these
+ARM_INSTRUCTION_SET = "arm"
 
 SRC_URI="${SQUEEZEPLAY_SCM};module=SDL_image-${BV}"
 
