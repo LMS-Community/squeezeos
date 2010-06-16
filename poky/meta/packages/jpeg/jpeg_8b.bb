@@ -5,20 +5,14 @@ PRIORITY = "required"
 
 DEPENDS = "libtool-cross"
 
-PR = "r6"
+PR = "r7"
 
 SRC_URI = "http://www.ijg.org/files/jpegsrc.v${PV}.tar.gz \
-	   file://debian.patch;patch=1 \
-	   file://ldflags.patch;patch=1 \
-	   file://paths.patch;patch=1 \
-	   file://libtool_tweak.patch;patch=1"
+	file://silent_rules.patch;patch=1"
 
 inherit autotools 
 
 EXTRA_OECONF="--enable-static --enable-shared"
-EXTRA_OEMAKE='"LIBTOOL=${STAGING_BINDIR_NATIVE}/${HOST_SYS}-libtool"'
-
-CFLAGS_append = " -D_REENTRANT"
 
 do_configure_prepend () {
 	rm -f ${S}/ltconfig
