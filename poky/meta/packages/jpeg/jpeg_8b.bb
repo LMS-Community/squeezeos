@@ -5,7 +5,7 @@ PRIORITY = "required"
 
 DEPENDS = "libtool-cross"
 
-PR = "r7"
+PR = "r8"
 
 SRC_URI = "http://www.ijg.org/files/jpegsrc.v${PV}.tar.gz \
 	file://silent_rules.patch;patch=1"
@@ -13,6 +13,8 @@ SRC_URI = "http://www.ijg.org/files/jpegsrc.v${PV}.tar.gz \
 inherit autotools 
 
 EXTRA_OECONF="--enable-static --enable-shared"
+
+ARM_INSTRUCTION_SET = "arm"
 
 do_configure_prepend () {
 	rm -f ${S}/ltconfig

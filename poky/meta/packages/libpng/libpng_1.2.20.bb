@@ -4,10 +4,12 @@ LICENSE = "libpng"
 SECTION = "libs"
 DEPENDS = "zlib"
 PRIORITY = "required"
-PR = "r6"
+PR = "r7"
 
 SRC_URI = "${SOURCEFORGE_MIRROR}/libpng/libpng-${PV}.tar.bz2 \
            file://makefile_fix.patch;patch=1"
+
+ARM_INSTRUCTION_SET = "arm"
 
 inherit autotools binconfig pkgconfig
 
