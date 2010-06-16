@@ -4,7 +4,7 @@ LICENSE = "libpng"
 SECTION = "libs"
 DEPENDS = "zlib"
 PRIORITY = "required"
-PR = "r7"
+PR = "r8"
 
 SRC_URI = "${SOURCEFORGE_MIRROR}/libpng/libpng-${PV}.tar.bz2 \
            file://makefile_fix.patch;patch=1"
