@@ -2,10 +2,16 @@ DESCRIPTION = "SqueezePlay - Private code"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r13"
+PR = "r14"
 
 # don't use thumb for decoders
 ARM_INSTRUCTION_SET = "arm"
+
+# Optimize more
+FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
+
+# For profiling:
+#FULL_OPTIMIZATION = "-fexpensive-optimizations -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
 DEPENDS += "libsdl lua axtls"
 
@@ -18,7 +24,7 @@ inherit autotools
 EXTRA_OECONF = "--disable-shared --enable-wma --enable-aac"
 # --enable-profiling"
 
-EXTRA_OECONF_fab4 = "--disable-shared --enable-wma --enable-aac --enable-chiral"
+EXTRA_OECONF_fab4 = "--disable-shared --enable-wma --enable-aac --enable-chiral --enable-arm" 
 
 # Enable extra AAC experimental optimizations
 #CFLAGS_prepend_fab4 = "-DIMX31"
