@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay - Private code"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r14"
+PR = "r15"
 
 # don't use thumb for decoders
 ARM_INSTRUCTION_SET = "arm"
@@ -21,10 +21,10 @@ S = "${WORKDIR}/squeezeplay_private"
 
 inherit autotools
 
-EXTRA_OECONF = "--disable-shared --enable-wma --enable-aac"
+EXTRA_OECONF = "--disable-shared --enable-wma --enable-aac --enable-arm"
 # --enable-profiling"
 
-EXTRA_OECONF_fab4 = "--disable-shared --enable-wma --enable-aac --enable-chiral --enable-arm" 
+EXTRA_OECONF_fab4 = "--disable-shared --enable-wma --enable-aac --enable-arm --enable-chiral" 
 
 # Enable extra AAC experimental optimizations
 #CFLAGS_prepend_fab4 = "-DIMX31"
