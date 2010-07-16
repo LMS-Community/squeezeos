@@ -22,8 +22,16 @@ COMPATIBLE_MACHINE = "(fab4)"
 # the kernel patches are managed by quilt, and checked into svn. modify patch
 # to simply apply the patchset using quilt.
 do_patch() {
+# For a normal release build:
 	cp -r ${WORKDIR}/${LINUX_ARCH}/patches ${S}
 	cd ${S}
+
+# Uncomment these 4 lines for oprofile-able image, and comment above 2 lines
+#	cp -r ${WORKDIR}/${LINUX_ARCH}/patches-no-preempt ${S}
+#	cd ${S}
+#	rm -rf patches
+#	mv patches-no-preempt patches
+
 	quilt push -a
 }
 
