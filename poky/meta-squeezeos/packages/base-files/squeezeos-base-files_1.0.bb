@@ -3,7 +3,7 @@ SECTION = "base"
 PRIORITY = "required"
 LICENSE = "GPL"
 
-PR = "r118"
+PR = "r119"
 
 SRC_URI = " \
 	file://asound.conf \
@@ -58,6 +58,7 @@ SRC_URI_append_baby = " \
 	file://blupdate \
 	file://redboot-baby-0001.bin \
 	file://redboot-baby-0002.bin \
+	file://rcS_init_msp430.patch;patch=1 \
 	"
 
 S = "${WORKDIR}"
