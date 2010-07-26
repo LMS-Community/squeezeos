@@ -1,0 +1,180 @@
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_programmer.c	2010-07-09 15:52:20.371826002 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_programmer.c	2010-07-09 16:52:28.976447158 -0700
+@@ -234,10 +234,72 @@
+ 	return NULL;
+ }
+ 
++/*
++        Resets the MSP430. This means the date/time kept on MSP430 gets lost after this call.
++*/
+ 
+-static void msp430_programmer_firmware(const struct firmware *fw, void *context)
++void msp430_reset ( void )
++{
++        unsigned long flags;
++
++        msp430_request_gpio();
++        local_irq_save(flags);
++
++        msp430_start_charge_pump();
++        mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 0);
++        udelay(1000);
++        mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 1);
++
++        local_irq_restore(flags);
++        msp430_release_gpio();
++
++        /* allow the microcontroller time to settle */
++        msleep(MSP430_SETTLE_DELAY_MS);
++}
++
++/*
++        Returns the firmware revision that is running on MSP430 by issuing i2c commands.
++*/
++
++int msp430_firmwar_version (struct i2c_client *client)
++{
++        int ret;
++        int version;
++        char val[3];
++
++
++        version = -1;
++        ret = i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val);
++        if ( ret <= 0 )
++        {
++                printk ( KERN_ERR "Failed to issue the i2c read block command to MSP430\n" );
++                return -1;
++        }
++        if ( val[0] != I2C_ID_VALUE)
++        {
++                printk( KERN_ERR "Read invalid value from the MSP430. value read is 0x%x, expecting 0x%x\n", val[0], I2C_ID_VALUE);
++                return -1;
++        }
++
++        if (i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val) > 0)
++        {
++                version = (val[1] << 8) | val[0];
++        }
++        else
++        {
++                printk ( KERN_INFO "Failed to fetch the version information from the device\n" );
++        }
++
++        return version;
++}
++
++/*
++	Programs the MSP430 firmware if needed.
++	If the version that is running on MSP430 is the same as the one we have there is no need to program it.
++*/
++
++static void msp430_program_firmware(struct i2c_client *client, const struct firmware *fw)
+ {
+-        struct i2c_client *client = context;
+         struct msp430_i2c_data *data = i2c_get_clientdata(client);
+ 	struct ti_txt *txt;
+  	unsigned long flags;
+@@ -258,34 +320,20 @@
+ 
+ 	/* check msp430 firmware */
+ 	tries =  0;
+-	while (tries++ < 2) {
+-		if ((i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val) <= 0)
+-		    || val[0] != I2C_ID_VALUE) {
+-			printk("Couldn't read msp ID register, resetting mcu\n");
+-			mcu_version = -1;
+-
+-			msp430_request_gpio();
+-			local_irq_save(flags);
+-
+-			msp430_start_charge_pump();
+-			mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 0);
+-			udelay(1000);
+-			mxc_set_gpio_dataout  (msp430_programmer_state->sbwtdio_res, 1);
+-
+-			local_irq_restore(flags);
+-			msp430_release_gpio();
+-
+-			/* allow the microcontroller time to settle */
+-			msleep(MSP430_SETTLE_DELAY_MS);
++	while (tries++ < 2)
++	{
++		/*
++			Fetch the MSP430 version information.
++			If the version information is valid then nothing to be done.
++			If not then reset the MSP430.
++		*/
+ 
+-			continue;
++		mcu_version = msp430_firmwar_version ( client ); 
+ 
+-		} else if (i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val) > 0) {
+-			mcu_version = (val[1] << 8) | val[0];
++		if ( mcu_version > 0 )
+ 			break;
+-		} else {
+-			mcu_version = -1;
+-		}
++
++		msp430_reset ();
+ 	}
+ 
+ 	/* is an upgrade needed? */
+@@ -347,12 +395,12 @@
+ 	/* verify firmware is running */
+ 	if (!i2c_smbus_read_i2c_block_data(client, I2C_ID_REGISTER, 1, val)
+ 	    || val[0] != I2C_ID_VALUE) {
+-		printk("msp430: firmware programming failed, bad id\n");
++		printk( KERN_INFO "msp430: firmware programming failed, bad id\n");
+ 		goto err;
+ 	}
+ 
+ 	if (!i2c_smbus_read_i2c_block_data(client, I2C_VERSION_REGISTER, 2, val)) {
+-		printk("msp430: firmware programming failed, bad version\n");
++		printk( KERN_INFO "msp430: firmware programming failed, bad version\n");
+ 		goto err;
+ 	}
+ 	mcu_version = (val[1] << 8) | val[0];
+@@ -372,13 +420,21 @@
+ void msp430_programmer_upgrade(struct i2c_client *client)
+ {
+         struct msp430_i2c_data *data = i2c_get_clientdata(client);
++	const struct firmware *fw;
++	int retval;
+ 
+ 	snprintf(data->firmware, sizeof(data->firmware), "msp430-%04d.txt", system_rev);
+-	printk(KERN_INFO "Requesting msp430 firmware %s\n", data->firmware);
++	printk(KERN_INFO "Requesting msp430 firmware %s(version 0.1)\n", data->firmware);
+ 
+-	request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
+-				data->firmware, &client->dev,
+-				client, msp430_programmer_firmware);
++
++	retval = request_firmware(&fw, data -> firmware, &client->dev);
++        if (retval) {
++                printk (KERN_ERR "%s:%d-can't get firmware\n", __FUNCTION__, __LINE__);
++        }
++	else
++	{
++		msp430_program_firmware ( client, fw );
++	}
+ }
+ 
+ 
+Index: linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c
+===================================================================
+--- linux-2.6.26.orig/drivers/mxc/baby/msp430/msp430_i2c.c	2010-07-09 16:37:34.375816047 -0700
++++ linux-2.6.26/drivers/mxc/baby/msp430/msp430_i2c.c	2010-07-09 16:38:29.935972555 -0700
+@@ -492,9 +492,6 @@
+ 	/* initialize the programmer */
+ 	msp430_programmer_probe(client);
+ 
+-	/* request firmware upgrade (if needed) */
+-	msp430_programmer_upgrade(client);
+-
+ 	/* register power off handler */
+ 	pm_power_off = msp430_power_off;
+ 
