@@ -59,6 +59,8 @@ SRC_URI_append_baby = " \
 	file://redboot-baby-0001.bin \
 	file://redboot-baby-0002.bin \
 	file://rcS_init_msp430.patch;patch=1 \
+	file://watchdog_conf.patch;patch=1 \
+        file://rcS_monitor_msp430.patch;patch=1 \
 	"
 
 S = "${WORKDIR}"

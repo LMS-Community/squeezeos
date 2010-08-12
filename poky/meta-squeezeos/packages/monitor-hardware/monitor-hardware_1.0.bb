@@ -14,6 +14,8 @@ S = ${WORKDIR}
 
 do_install() {
 	install -m 0755 -d ${D}${sbindir}
+	install -m 0755 -d ${D}${sysconfdir}
+	install -m 0755 -d ${D}${sysconfdir}/init.d
 	install -m 0755 ${WORKDIR}/monitor_msp430 ${D}${sbindir}/monitor_msp430
-	install -m 0755 ${WORKDIR}/monitor_msp430.sh ${D}${etcdir}/monitor_msp430.sh
+	install -m 0755 ${WORKDIR}/monitor_msp430.sh ${D}${sysconfdir}/init.d/monitor_msp430.sh
 }
