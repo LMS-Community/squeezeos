@@ -2,7 +2,7 @@ DESCRIPTION = "monitor hardware"
 SECTION = "base"
 LICENSE = "GPL"
 
-PR = "r1"
+PR = "r2"
 
 SRC_URI=" \
 	file://Makefile \
