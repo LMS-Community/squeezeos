@@ -56,10 +56,12 @@ void monitor_msp430 ( void )
                 else
                 {
                         ret = read ( fd, buf, sizeof ( buf )); 
+#ifdef DEBUG
                         if ( ret > 0 )
                                 fprintf ( stdout, "The data read from the fw is %d%d\n", buf[0], buf[1] );
                         else
                                 fprintf ( stderr, "Failed to read from the device %s, error ( %s )\n", MSP430_FW_I2C_DEV, strerror ( errno ));
+#endif
                         close ( fd );
                 }
 

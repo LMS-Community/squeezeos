@@ -10,7 +10,7 @@ case "$1" in
 
 	echo "Monitoring MSP430"
 
-	(cd /usr/bin; /usr/bin/monitor_msp430) &
+	(cd /usr/bin; /usr/sbin/monitor_msp430) &
 	echo $! > /var/run/monitor_msp430.pid
 	;;
 
