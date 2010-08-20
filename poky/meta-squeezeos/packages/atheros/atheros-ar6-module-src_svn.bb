@@ -3,7 +3,7 @@ SECTION = "base"
 LICENSE = "binary only"
 
 PV = "1.0"
-PR = "r18"
+PR = "r19"
 
 PROVIDES = "atheros-ar6-module"
 
@@ -16,6 +16,7 @@ SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=atheros \
 	 file://atheros_scan_hidden_ssid.patch;patch=1 \
 	 file://change-ar6k-semaphore-type.patch;patch=1 \
 	 file://atheros_disable_tcmd.patch;patch=1 \
+	 file://atheros_shorter_scan_list_cache_timeout.patch;patch=1 \
 	 file://wlan \
 	 file://athwlan.bin \
 	 file://calData_ar6102_15dBm.bin \
