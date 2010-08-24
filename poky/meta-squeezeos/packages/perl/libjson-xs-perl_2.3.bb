@@ -1,7 +1,7 @@
 DESCRIPTION = "JSON::XS - JSON serialising/deserialising, done correctly and fast"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r5"
+PR = "r6"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
