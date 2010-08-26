@@ -1,0 +1,66 @@
+--- AR6kSDK.build_sw.62/host/os/linux/ar6000_drv.c.orig	2010-08-17 13:11:42.000000000 +0200
++++ AR6kSDK.build_sw.62/host/os/linux/ar6000_drv.c	2010-08-25 19:26:52.000000000 +0200
+@@ -2451,6 +2451,16 @@ ar6000_disconnect_event(AR_SOFTC_T *ar, 
+ {
+     A_UINT8 i;
+ 
++    if (NO_NETWORK_AVAIL != reason) {
++        union iwreq_data wrqu;        
++        A_MEMZERO(&wrqu, sizeof(wrqu));
++        A_MEMCPY(wrqu.addr.sa_data, "\x00\x00\x00\x00\x00\x00", IEEE80211_ADDR_LEN);
++        wrqu.addr.sa_family = ARPHRD_ETHER;
++
++        /* Send disconnect event to supplicant */
++        wireless_send_event(ar->arNetDev, SIOCGIWAP, &wrqu, NULL);
++    }
++
+     A_PRINTF("AR6000 disconnected");
+     if (bssid[0] || bssid[1] || bssid[2] || bssid[3] || bssid[4] || bssid[5]) {
+         A_PRINTF(" from %2.2x:%2.2x:%2.2x:%2.2x:%2.2x:%2.2x ",
+@@ -2467,7 +2477,7 @@ ar6000_disconnect_event(AR_SOFTC_T *ar, 
+         }
+         AR_DEBUG_PRINTF("%2.2x ", assocInfo[i]);
+     }
+-    AR_DEBUG_PRINTF("\n");
++    A_PRINTF("\n");
+     /*
+      * If the event is due to disconnect cmd from the host, only they the target
+      * would stop trying to connect. Under any other condition, target would
+@@ -2488,6 +2498,37 @@ ar6000_disconnect_event(AR_SOFTC_T *ar, 
+             return;
+         }
+     }
++
++    if ((TRUE == ar->arConnected) && (reason == NO_NETWORK_AVAIL))
++    {
++        bss_t *pWmiSsidnode = NULL;
++
++        /* remove the current associated bssid node */
++        wmi_free_node (ar->arWmi, bssid);
++
++        /*
++         * In case any other same SSID nodes are present
++         * remove it, since those nodes also not available now
++         */
++        do
++        {
++            /*
++             * Find the nodes based on SSID and remove it
++             * NOTE :: This case will not work out for Hidden-SSID
++             */
++            pWmiSsidnode = wmi_find_Ssidnode (ar->arWmi, ar->arSsid, ar->arSsidLen, FALSE, TRUE);
++
++            if (pWmiSsidnode)
++            {
++                wmi_free_node (ar->arWmi, pWmiSsidnode->ni_macaddr);
++            }
++
++        }while (pWmiSsidnode);
++
++        ar6000_init_profile_info(ar);
++        wmi_disconnect_cmd(ar->arWmi);
++    }
++
+     ar->arConnected = FALSE;
+ 
+     if( (reason != CSERV_DISCONNECT) || (reconnect_flag != 1) ) {
