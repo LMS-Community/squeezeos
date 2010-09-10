@@ -2,7 +2,7 @@ DESCRIPTION = "Audio::Scan - Fast C scanning of audio file metadata"
 SECTION = "libs"
 LICENSE = "GPL"
 PV = "svnr${SRCREV}"
-PR = "r21"
+PR = "r22"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
