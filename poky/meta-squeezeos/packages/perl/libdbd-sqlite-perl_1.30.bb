@@ -6,6 +6,8 @@ PR = "r15"
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
+ARM_INSTRUCTION_SET = "arm"
+
 DEPENDS = "libdbi-perl libdbd-sqlite-perl-native"
 DEPENDS = "libdbi-perl libdbi-perl-native sqlite3"
 

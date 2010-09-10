@@ -7,6 +7,8 @@ PR = "r21"
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
+ARM_INSTRUCTION_SET = "arm"
+
 # This should match the version currently listed in SBS's modules.conf file
 SRC_URI = "svn://svn.slimdevices.com/repos/opensource/tags/Audio-Scan;proto=http;module=0.85"
 

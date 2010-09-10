@@ -6,6 +6,8 @@ PR = "r7"
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
+ARM_INSTRUCTION_SET = "arm"
+
 SRC_URI = "http://search.cpan.org/CPAN/authors/id/T/TI/TIMB/DBI-${PV}.tar.gz"
 
 S = "${WORKDIR}/DBI-${PV}"
