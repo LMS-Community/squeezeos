@@ -16,4 +16,6 @@ S = "${WORKDIR}/Image-Scale-${PV}"
 
 inherit cpan
 
+export INCLUDE = ${STAGING_LIBDIR}/../include
+
 FILES_${PN} = "${PERLLIBDIRS}"
