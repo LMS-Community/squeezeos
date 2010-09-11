@@ -19,9 +19,7 @@ SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=atheros \
 	 file://atheros_shorter_scan_list_cache_timeout.patch;patch=1 \
 	 file://atheros_send_disconnect_event.patch;patch=1 \
 	 file://wlan \
-	 file://athwlan.bin \
 	 file://calData_ar6102_15dBm.bin \
-	 file://data.patch.hw2_0.bin \
 	 file://loadAR6000l.sh \
 "
 
