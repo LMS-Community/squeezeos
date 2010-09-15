@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r37"
+PR = "r38"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -102,7 +102,7 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Digest
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Encode
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/EV.pm
-	rm -r ${D}/${prefix}/squeezecenter/CPAN/GD*
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Font
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/Parser.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/Entities.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/Filter.pm
@@ -110,6 +110,7 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/LinkExtor.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/PullParser.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/TokeParser.pm
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Image
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/JSON/XS.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/JSON/XS/Boolean.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/XML/Parser.pm       # Note: must keep custom Encodings
