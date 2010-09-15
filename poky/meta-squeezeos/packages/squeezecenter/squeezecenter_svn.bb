@@ -2,12 +2,12 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r38"
+PR = "r39"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
 RDEPENDS += "libdigest-sha1-perl libjson-xs-perl libhtml-parser-perl"
-RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-syck-perl libgd-perl"
+RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-syck-perl"
 RDEPENDS += "libev-perl libio-aio-perl libimage-scale-perl"
 RDEPENDS += "liblinux-inotify2-perl libaudio-scan-perl libsub-name-perl"
 
