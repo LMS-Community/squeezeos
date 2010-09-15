@@ -140,7 +140,6 @@ do_install() {
 	
 	# Save even more by removing CPAN modules SC on Fab4 won't need
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Archive             # plugins only
-	rm -r ${D}/${prefix}/squeezecenter/CPAN/Imager*             # win32 only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/I18N                # web only
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Net/UPnP* 
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/PAR*                # plugins only
