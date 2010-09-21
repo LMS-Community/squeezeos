@@ -1,7 +1,7 @@
 DESCRIPTION = "Image::Scale - Fast, high-quality fixed-point image resizing"
 SECTION = "libs"
 LICENSE = "GPL"
-PR = "r3"
+PR = "r4"
 
 DEPENDS = "jpeg libpng giflib"
 
