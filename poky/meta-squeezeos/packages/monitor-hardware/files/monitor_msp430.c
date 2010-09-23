@@ -27,6 +27,10 @@
 
 #define MSP430_FW_I2C_DEV             "/sys/bus/i2c/drivers/msp430/1-0010/fw"
 #define MAX_CONSECUTIVE_FAIL_COUNT    30
+#define MODULE_NAME                   "MONITOR_MSP430"
+
+
+//#define DEBUG
 
 /*!
         Monitors the MSP430 by reading its firmware revision. This causes i2c issues to the MSP430 to read the information.
@@ -46,20 +50,36 @@ void monitor_msp430 ( void )
 
         while ( 1 )
         {
+                /*
+                        To make sure that the MSP430 is functional open and read from the MSP430_FW_I2C_DEV device.
+                        If we open the device only once and issue read commands there are times that we get stale data.
+                        That is the reason we open the device every time. Since this action is done only once every
+                        second there should not be any overhead. 
+                */
+
                 sleep ( 1 );
                 fd = open ( MSP430_FW_I2C_DEV, O_RDONLY );
                 if ( fd < 0 )
                 {
-                        fprintf ( stderr, "Failed to open the device %s, error ( %s )\n", MSP430_FW_I2C_DEV, strerror ( errno ));
+                        fprintf ( stderr, "%s: Failed to open the device %s, error ( %s )\n", MODULE_NAME, MSP430_FW_I2C_DEV, strerror ( errno ));
                         ret = -1;
                 }
                 else
                 {
                         ret = read ( fd, buf, sizeof ( buf )); 
+#ifdef DEBUG
                         if ( ret > 0 )
-                                fprintf ( stdout, "The data read from the fw is %d%d\n", buf[0], buf[1] );
+                        {
+                                /*
+                                        Firmware version has a newline at the end. Remove that as well.
+                                */
+
+                                buf[ret-1] = 0;
+                                fprintf ( stdout, "%s: %d bytes read from the device. The data read from the fw is %s\n", MODULE_NAME, ret, buf );
+                        }
                         else
-                                fprintf ( stderr, "Failed to read from the device %s, error ( %s )\n", MSP430_FW_I2C_DEV, strerror ( errno ));
+                                fprintf ( stderr, "%s: Failed to read from the device %s, error ( %s )\n", MODULE_NAME, MSP430_FW_I2C_DEV, strerror ( errno ));
+#endif
                         close ( fd );
                 }
 
@@ -78,7 +98,7 @@ void monitor_msp430 ( void )
 
                         if ( consecutive_fail_count > MAX_CONSECUTIVE_FAIL_COUNT )
                         {
-                                fprintf ( stdout, "Too many consecutive communication failure to MSP430. Consider it failed\n" );
+                                fprintf ( stdout, "%s: Too many consecutive communication failure to MSP430. Consider it failed\n", MODULE_NAME );
                                 break;
                         }
                 }

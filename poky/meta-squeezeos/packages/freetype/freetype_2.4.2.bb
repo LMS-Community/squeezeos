@@ -13,6 +13,8 @@ LIBTOOL = "${S}/builds/unix/${HOST_SYS}-libtool"
 EXTRA_OEMAKE = "'LIBTOOL=${LIBTOOL}'"
 EXTRA_OECONF = "--without-zlib"
 
+# XXX should disable some FreeType options we don't need
+
 do_configure() {
 	cd builds/unix
 	libtoolize --force --copy
