@@ -31,7 +31,7 @@ INCLUDED_PLUGINS = ""
 INCLUDED_PLUGINS += "Amazon Classical Deezer"
 INCLUDED_PLUGINS += "LMA Mediafly MP3tunes Napster Pandora Slacker Queen"
 INCLUDED_PLUGINS += "Facebook Flickr LastFM Live365 RadioTime RhapsodyDirect"
-INCLUDED_PLUGINS += "Sirius Sounds"
+INCLUDED_PLUGINS += "Sirius Sounds WiMP"
 EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser"
 
 # Core features
