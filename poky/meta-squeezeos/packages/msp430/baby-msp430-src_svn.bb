@@ -2,7 +2,7 @@ DESCRIPTION = "baby msp430 firmware"
 LICENSE = "Confidential"
 
 PV = "svnr${SRCREV}"
-PR="r9"
+PR="r10"
 
 PROVIDES = "baby-msp430"
 
