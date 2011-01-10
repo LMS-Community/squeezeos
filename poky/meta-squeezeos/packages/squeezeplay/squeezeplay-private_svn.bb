@@ -2,12 +2,12 @@ DESCRIPTION = "SqueezePlay - Private code"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r13"
+PR = "r16"
 
 # don't use thumb for decoders
 ARM_INSTRUCTION_SET = "arm"
 
-DEPENDS += "libsdl lua axtls"
+DEPENDS += "libsdl lua axtls libspotify"
 
 SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=squeezeplay_private"
 
