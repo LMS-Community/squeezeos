@@ -67,8 +67,8 @@ do_install() {
 	for i in radio.png cover.png playlistclear.png playlistclear_40x40_m.png playlistsave.png playlistsave_40x40_m.png; do
 		cp ${D}/${prefix}/squeezecenter/HTML.tmp/Default/html/images/$i ${D}/${prefix}/squeezecenter/HTML/Default/html/images
 	done
-	for i in playall.png; do
-		cp ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/images/$i ${D}/${prefix}/squeezecenter/HTML/EN/html/images
+	for i in artists genres years newmusic albums musicfolder search playall; do
+		cp ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/images/$i.png ${D}/${prefix}/squeezecenter/HTML/EN/html/images
 	done
 
 	mv ${D}/${prefix}/squeezecenter/HTML.tmp/EN/html/errors ${D}/${prefix}/squeezecenter/HTML/Default/html
