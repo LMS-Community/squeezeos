@@ -6,7 +6,7 @@ SECTION = "libs"
 LICENSE = "copyright"
 
 PV = "0.1+svnr${SRCREV}"
-#PR="r0"
+PR="r1"
 
 DEPENDS = "lua squeezeplay"
 
@@ -15,7 +15,7 @@ SRC_URI="${SQUEEZEPLAY_SCM};module=luartmp-squeezeplay"
 S = "${WORKDIR}/luartmp-squeezeplay"
 
 do_compile() {
-	${CC} -I${STAGING_INCDIR}/squeezeplay -I${STAGING_INCDIR}/squeezeplay/ui -I${STAGING_INC}/lua -I${STAGING_INC}/SDL -shared rtmp.c -o rtmp.so
+	${CC} -I${STAGING_INCDIR}/squeezeplay -I${STAGING_INCDIR}/squeezeplay/ui -I${STAGING_INCDIR}/lua -I${STAGING_INCDIR}/SDL -shared rtmp.c -o rtmp.so
 }
 
 do_install() {
