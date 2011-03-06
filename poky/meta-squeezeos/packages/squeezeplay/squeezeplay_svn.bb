@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezePlay"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r23"
+PR = "r24"
 
 DEPENDS += "libsdl libsdl-ttf libsdl-gfx libsdl-image"
 DEPENDS += "lua lua-native luatolua++"
@@ -38,6 +38,8 @@ do_stage() {
 	install -d ${STAGING_INCDIR}/squeezeplay/ui
 	install -d ${STAGING_INCDIR}/squeezeplay/audio
 	install -m 0644 src/log.h ${STAGING_INCDIR}/squeezeplay/log.h
+	install -m 0644 src/config.h ${STAGING_INCDIR}/squeezeplay/config.h
+	install -m 0644 src/common.h ${STAGING_INCDIR}/squeezeplay/common.h
 	install -m 0644 src/types.h ${STAGING_INCDIR}/squeezeplay/types.h
 	install -m 0644 src/ui/jive.h ${STAGING_INCDIR}/squeezeplay/ui/jive.h
 	install -m 0644 src/audio/fifo.h ${STAGING_INCDIR}/squeezeplay/audio/fifo.h

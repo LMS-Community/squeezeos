@@ -2,9 +2,9 @@ DESCRIPTION = "SqueezePlay - SqueezeOS specific code"
 LICENSE = "Logitech Public Source License"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r3"
+PR = "r4"
 
-DEPENDS += "squeezeplay"
+DEPENDS += "squeezeplay luartmp"
 
 SRC_URI="${SQUEEZEPLAY_SCM};module=squeezeplay_squeezeos"
 
