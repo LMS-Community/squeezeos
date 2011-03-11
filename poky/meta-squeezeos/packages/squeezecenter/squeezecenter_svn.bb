@@ -16,11 +16,13 @@ RDEPENDS += "libdevel-nytprof-perl"
 
 # BROKEN: libencode-detect-perl
 
-SRC_URI = "${SQUEEZECENTER_SCM};module=trunk \
+SQUEEZECENTER_SVN_MODULE ?= "trunk"
+
+SRC_URI = "${SQUEEZECENTER_SCM};module=${SQUEEZECENTER_SVN_MODULE} \
 	file://squeezecenter \
 	file://custom-convert.conf"
 	
-S = "${WORKDIR}/trunk"
+S = "${WORKDIR}/${SQUEEZECENTER_SVN_MODULE}"
 
 # This should match the list in Slim::Utils::OS::SqueezeOS::skipPlugins
 # Actual included plugins determined by INCLUDED_PLUGINS list below
