@@ -19,3 +19,15 @@ inherit cpan
 
 FILES_${PN}-doc = "${PERLLIBDIRS}/*.pod"
 FILES_${PN} = "${PERLLIBDIRS}"
+
+cpan_do_install() {
+        # from cpan class
+        if [ yes = "yes" ]; then
+                oe_runmake install_vendor
+        fi
+
+        # Remove unnecessary large source files
+        rm -rf ${D}/${prefix}/lib/perl5/auto/share/dist/DBD-SQLite
+}
+
+
