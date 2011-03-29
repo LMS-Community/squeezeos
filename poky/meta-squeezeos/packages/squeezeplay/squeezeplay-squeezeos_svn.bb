@@ -4,7 +4,7 @@ LICENSE = "Logitech Public Source License"
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
 PR = "r4"
 
-DEPENDS += "squeezeplay luartmp"
+DEPENDS += "squeezeplay"
 
 SRC_URI="${SQUEEZEPLAY_SCM};module=squeezeplay_squeezeos"
 

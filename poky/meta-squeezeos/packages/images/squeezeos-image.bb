@@ -18,3 +18,5 @@ IMAGE_INSTALL += "patch procps alsa-utils-aplay alsa-utils-amixer"
 # Simple NTP client
 IMAGE_INSTALL += "msntp"
 
+# Add rtmp.so which is built outside squeezeplay
+IMAGE_INSTALL += "liblua5.1-luartmp"
