@@ -1,7 +1,7 @@
 DESCRIPTION = "DBD::SQLite - SQLite driver for the Perl5 Database Interface (DBI)"
 SECTION = "libs"
 LICENSE = "Artistic|GPL"
-PR = "r16"
+PR = "r17"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
