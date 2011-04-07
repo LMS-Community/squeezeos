@@ -2,13 +2,13 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r14"
+PR = "r15"
 
-RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl libclass-xsaccessor-array-perl"
+RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
 RDEPENDS += "libdigest-sha1-perl libjson-xs-perl libhtml-parser-perl"
-RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-syck-perl libgd-perl"
-RDEPENDS += "libev-perl"
+RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-syck-perl"
+RDEPENDS += "libev-perl libio-aio-perl libimage-scale-perl"
 RDEPENDS += "liblinux-inotify2-perl libaudio-scan-perl libsub-name-perl"
 
 # For performance measures
@@ -16,10 +16,13 @@ RDEPENDS += "libdevel-nytprof-perl"
 
 # BROKEN: libencode-detect-perl
 
-SRC_URI = "${SQUEEZECENTER_SCM};module=trunk \
-	file://squeezecenter"
+SQUEEZECENTER_SVN_MODULE ?= "trunk"
+
+SRC_URI = "${SQUEEZECENTER_SCM};module=${SQUEEZECENTER_SVN_MODULE} \
+	file://squeezecenter \
+	file://custom-convert.conf"
 	
-S = "${WORKDIR}/trunk"
+S = "${WORKDIR}/${SQUEEZECENTER_SVN_MODULE}"
 
 dirs755 = "${sysconfdir}/init.d \
 	${sysconfdir}/squeezecenter ${sysconfdir}/squeezecenter/prefs ${sysconfdir}/squeezecenter/cache"
@@ -35,6 +38,7 @@ do_install() {
 	# Remove duplicate modules under CPAN that were installed system-wide
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/arch
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Audio
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Class/XSAccessor*
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Compress
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/DBI.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/DBI
@@ -42,7 +46,7 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Digest
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Encode
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/EV.pm
-	rm -r ${D}/${prefix}/squeezecenter/CPAN/GD*
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Font
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/Parser.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/Entities.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/Filter.pm
@@ -50,6 +54,7 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/LinkExtor.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/PullParser.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/HTML/TokeParser.pm
+	rm -r ${D}/${prefix}/squeezecenter/CPAN/Image
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/JSON/XS.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/JSON/XS/Boolean.pm
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/XML/Parser.pm       # Note: must keep custom Encodings
@@ -89,6 +94,7 @@ do_install() {
 		install -m 0755 -d ${D}$d
 	done
 	install -m 0755 ${WORKDIR}/squeezecenter ${D}${sysconfdir}/init.d/squeezecenter	
+	install -m 0755 ${WORKDIR}/custom-convert.conf ${D}/${prefix}/squeezecenter/custom-convert.conf
 }
 
 FILES_${PN} += "${prefix}"
