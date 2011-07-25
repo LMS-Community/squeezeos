@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r39"
+PR = "r40"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -33,7 +33,7 @@ INCLUDED_PLUGINS = ""
 INCLUDED_PLUGINS += "Amazon Classical Deezer"
 INCLUDED_PLUGINS += "LMA Mediafly MP3tunes Napster Pandora Slacker"
 INCLUDED_PLUGINS += "Facebook Flickr LastFM Live365 RadioTime RhapsodyDirect"
-INCLUDED_PLUGINS += "Sirius Sounds WiMP SpotifyLogi"
+INCLUDED_PLUGINS += "Sirius Sounds WiMP SpotifyLogi Orange"
 EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser"
 
 # Core features
