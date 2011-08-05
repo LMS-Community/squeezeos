@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r39"
+PR = "r41"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -33,7 +33,7 @@ INCLUDED_PLUGINS = ""
 INCLUDED_PLUGINS += "Amazon Classical Deezer"
 INCLUDED_PLUGINS += "LMA Mediafly MP3tunes Napster Pandora Slacker"
 INCLUDED_PLUGINS += "Facebook Flickr LastFM Live365 RadioTime RhapsodyDirect"
-INCLUDED_PLUGINS += "Sirius Sounds WiMP SpotifyLogi"
+INCLUDED_PLUGINS += "Sirius Sounds WiMP SpotifyLogi Orange"
 EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser"
 
 # Core features
@@ -159,6 +159,9 @@ do_install() {
 	# HTML files
 	rm -r ${D}/${prefix}/squeezecenter/*.html
 	find ${D}/${prefix}/squeezecenter/Slim/Plugin -name '*.html' -exec rm -r {} \;
+
+	# ICU big-endian file
+	rm -r ${D}/${prefix}/squeezecenter/icudt46b.dat
 
 	echo "rev: ${SRCREV}" > ${D}/${prefix}/squeezecenter/build.txt
 	echo "repo: ${SRC_URI}" >> ${D}/${prefix}/squeezecenter/build.txt
