@@ -2,7 +2,7 @@ DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
 PV = "7.6+svnr${SRCREV}"
-PR = "r41"
+PR = "r42"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
@@ -160,8 +160,8 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/*.html
 	find ${D}/${prefix}/squeezecenter/Slim/Plugin -name '*.html' -exec rm -r {} \;
 
-	# ICU big-endian file
-	rm -r ${D}/${prefix}/squeezecenter/icudt46b.dat
+	# ICU files (no ICU support for TinySC)
+	rm -r ${D}/${prefix}/squeezecenter/icudt46*.dat
 
 	echo "rev: ${SRCREV}" > ${D}/${prefix}/squeezecenter/build.txt
 	echo "repo: ${SRC_URI}" >> ${D}/${prefix}/squeezecenter/build.txt
