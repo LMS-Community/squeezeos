@@ -1,13 +1,13 @@
 DESCRIPTION = "SqueezeCenter"
 LICENSE = "GPL"
 
-PV = "7.6+svnr${SRCREV}"
-PR = "r46"
+PV = "7.7+svnr${SRCREV}"
+PR = "r47"
 
 RDEPENDS += "perl perl-modules libcompress-raw-zlib-perl libclass-xsaccessor-perl"
 RDEPENDS += "libdbi-perl sqlite3 libdbd-sqlite-perl"
 RDEPENDS += "libdigest-sha1-perl libjson-xs-perl libhtml-parser-perl"
-RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-syck-perl"
+RDEPENDS += "libtemplate-toolkit-perl libxml-parser-perl libyaml-libyaml-perl"
 RDEPENDS += "libev-perl libio-aio-perl libimage-scale-perl"
 RDEPENDS += "liblinux-inotify2-perl libaudio-scan-perl libsub-name-perl"
 
@@ -34,7 +34,7 @@ INCLUDED_PLUGINS += "Amazon Classical Deezer"
 INCLUDED_PLUGINS += "LMA Mediafly MP3tunes Napster Pandora Slacker"
 INCLUDED_PLUGINS += "Facebook Flickr LastFM Live365 RadioTime RhapsodyDirect"
 INCLUDED_PLUGINS += "Sirius Sounds WiMP SpotifyLogi Orange"
-EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser"
+EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser UPnP"
 
 # Core features
 INCLUDED_PLUGINS += "CLI DateTime Favorites InternetRadio AudioScrobbler SongScanner"
