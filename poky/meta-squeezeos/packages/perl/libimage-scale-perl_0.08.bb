@@ -1,7 +1,7 @@
 DESCRIPTION = "Image::Scale - Fast, high-quality fixed-point image resizing"
 SECTION = "libs"
 LICENSE = "GPL"
-PR = "r6"
+PR = "r7"
 
 DEPENDS = "jpeg libpng giflib"
 
@@ -17,5 +17,6 @@ S = "${WORKDIR}/Image-Scale-${PV}"
 inherit cpan
 
 export INCLUDE = ${STAGING_INCDIR}
+export LDFLAGS = "-L${STAGING_LIBDIR}"
 
 FILES_${PN} = "${PERLLIBDIRS}"
