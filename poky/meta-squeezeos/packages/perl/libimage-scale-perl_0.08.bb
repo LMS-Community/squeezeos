@@ -3,7 +3,7 @@ SECTION = "libs"
 LICENSE = "GPL"
 PR = "r8"
 
-# XXX This requires these libraries to be installed at /usr/local/lib on the build machine
+# XXX This requires these libraries to be installed at /usr/lib on the build machine
 # Need Makefile.PL changes to support cross-compilation library location
 DEPENDS = "jpeg libpng giflib"
 
