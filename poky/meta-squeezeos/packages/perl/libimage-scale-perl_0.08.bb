@@ -1,8 +1,10 @@
 DESCRIPTION = "Image::Scale - Fast, high-quality fixed-point image resizing"
 SECTION = "libs"
 LICENSE = "GPL"
-PR = "r7"
+PR = "r8"
 
+# XXX This requires these libraries to be installed at /usr/local/lib on the build machine
+# Need Makefile.PL changes to support cross-compilation library location
 DEPENDS = "jpeg libpng giflib"
 
 ARM_INSTRUCTION_SET = "arm"
@@ -17,6 +19,5 @@ S = "${WORKDIR}/Image-Scale-${PV}"
 inherit cpan
 
 export INCLUDE = ${STAGING_INCDIR}
-export LDFLAGS = "-L${STAGING_LIBDIR}"
 
 FILES_${PN} = "${PERLLIBDIRS}"
