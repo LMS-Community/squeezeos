@@ -1,7 +1,7 @@
 DESCRIPTION = "MP3::Cut::Gapless - Split an MP3 file without gaps (based on pcutmp3)"
 SECTION = "libs"
 LICENSE = "GPL"
-PR = "r1"
+PR = "r2"
 
 # We want Perl to be as fast as possible, reset the default optimization flags
 FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
