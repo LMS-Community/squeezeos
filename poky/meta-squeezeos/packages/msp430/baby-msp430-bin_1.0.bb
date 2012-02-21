@@ -1,7 +1,7 @@
 DESCRIPTION = "baby msp430 firmware"
 LICENSE = "Confidential"
 
-PR="r43"
+PR="r44"
 
 PROVIDES = "baby-msp430"
 
@@ -20,6 +20,7 @@ do_install() {
 	install -m 0644 ${WORKDIR}/msp430-0003.txt ${INSTALL_DIR}/msp430-0004.txt
 	install -m 0644 ${WORKDIR}/msp430-0003.txt ${INSTALL_DIR}/msp430-0005.txt
 	install -m 0644 ${WORKDIR}/msp430-0003.txt ${INSTALL_DIR}/msp430-0006.txt
+	install -m 0644 ${WORKDIR}/msp430-0003.txt ${INSTALL_DIR}/msp430-0007.txt
 }
 
 PACKAGES = "baby-msp430"
