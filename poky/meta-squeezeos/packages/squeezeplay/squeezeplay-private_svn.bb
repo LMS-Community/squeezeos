@@ -13,7 +13,7 @@ FULL_OPTIMIZATION = "-fexpensive-optimizations -fomit-frame-pointer -frename-reg
 # For profiling:
 #FULL_OPTIMIZATION = "-fexpensive-optimizations -frename-registers -O2 -ggdb -feliminate-unused-debug-types"
 
-DEPENDS += "libsdl lua axtls openssl gmp libspotify"
+DEPENDS += "libsdl lua axtls openssl gmp beecrypt libspotify"
 
 SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=squeezeplay_private"
 
