@@ -6,9 +6,9 @@ generators, public key cryptography and a plethora of other \
 routines."
 SECTION = "libs/network"
 PRIORITY = "optional"
-DEPENDS = "libtfm"
+DEPENDS = "libtommath"
 LICENSE = "PD"
-PR = "r0"
+PR = "r1"
 
 ARM_INSTRUCTION_SET = "arm"
 
