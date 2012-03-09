@@ -8,7 +8,7 @@ SECTION = "libs/network"
 PRIORITY = "optional"
 DEPENDS = "libtommath"
 LICENSE = "PD"
-PR = "r2"
+PR = "r3"
 
 ARM_INSTRUCTION_SET = "arm"
 
