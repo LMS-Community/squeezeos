@@ -2,7 +2,7 @@ DESCRIPTION = "TomsFastMath is a fast public domain, open source, large integer 
 SECTION = "libs/network"
 PRIORITY = "optional"
 LICENSE = "PD"
-PR = "r1"
+PR = "r2"
 
 ARM_INSTRUCTION_SET = "arm"
 
@@ -11,8 +11,6 @@ SRC_URI = "http://libtom.org/files/tfm-${PV}.tar.bz2"
 S = "${WORKDIR}/tomsfastmath-${PV}"
 
 inherit autotools
-
-EXTRA_OEMAKE = "library"
 
 do_stage() {
 	oe_libinstall -a libtfm ${STAGING_LIBDIR}/
