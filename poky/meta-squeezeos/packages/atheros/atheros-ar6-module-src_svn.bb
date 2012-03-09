@@ -10,7 +10,7 @@ PROVIDES = "atheros-ar6-module"
 DEPENDS = "virtual/kernel"
 #RDEPENDS = "wireless-tools"
 
-SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=atheros \
+SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=atheros/AR6kSDK.build_sw.62 \
 	 file://AR6kSDK.build_sw.62.baby.patch;patch=1 \
 	 file://BMI_read_mem_failure.patch;patch=1 \
 	 file://atheros_scan_hidden_ssid.patch;patch=1 \
