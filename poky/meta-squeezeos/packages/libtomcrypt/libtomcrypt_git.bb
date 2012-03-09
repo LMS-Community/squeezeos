@@ -8,13 +8,13 @@ SECTION = "libs/network"
 PRIORITY = "optional"
 DEPENDS = "libtommath"
 LICENSE = "PD"
-PR = "r4"
+PR = "r5"
 
 ARM_INSTRUCTION_SET = "arm"
 
 SRC_URI = "git://github.com/libtom/libtomcrypt.git;protocol=git;tag=5c9fa403ff5f0d465afa04f10e2e33b3fb3cb69d"
 
-S = "${WORKDIR}/libtomcrypt/"
+S = "${WORKDIR}/git/"
 
 inherit autotools
 
