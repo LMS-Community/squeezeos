@@ -8,7 +8,7 @@ SECTION = "libs/network"
 PRIORITY = "optional"
 DEPENDS = "libtommath"
 LICENSE = "PD"
-PR = "r1"
+PR = "r2"
 
 ARM_INSTRUCTION_SET = "arm"
 
@@ -16,7 +16,7 @@ SRC_URI = "http://libtom.org/files/crypt-${PV}.tar.bz2"
 
 inherit autotools
 
-CFLAGS_prepend = "-DTFM_DESC -DUSE_TFM"
+CFLAGS_prepend = "-DLTM_DESC -DUSE_LTM"
 
 EXTRA_OEMAKE = "library"
 
