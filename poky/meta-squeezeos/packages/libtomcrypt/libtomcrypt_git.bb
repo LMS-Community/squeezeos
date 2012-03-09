@@ -12,7 +12,9 @@ PR = "r2"
 
 ARM_INSTRUCTION_SET = "arm"
 
-SRC_URI = "http://libtom.org/files/crypt-${PV}.tar.bz2"
+SRC_URI = "git://github.com/libtom/libtomcrypt.git;protocol=git"
+
+S = "${WORKDIR}/libtomcrypt/"
 
 inherit autotools
 
