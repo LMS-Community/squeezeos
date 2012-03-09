@@ -2,11 +2,13 @@ DESCRIPTION = "TomsFastMath is a fast public domain, open source, large integer 
 SECTION = "libs/network"
 PRIORITY = "optional"
 LICENSE = "PD"
-PR = "r0"
+PR = "r1"
 
 ARM_INSTRUCTION_SET = "arm"
 
 SRC_URI = "http://libtom.org/files/tfm-${PV}.tar.bz2"
+
+S = "${WORKDIR}/tomsfastmath-${PV}"
 
 inherit autotools
 
