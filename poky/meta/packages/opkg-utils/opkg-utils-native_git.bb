@@ -1,4 +1,4 @@
-require opkg-utils_svn.bb
+require opkg-utils_git.bb
 
 RDEPENDS = ""
 

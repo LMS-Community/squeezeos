@@ -5,10 +5,10 @@ LICENSE = "GPL"
 RDEPENDS = "python"
 PR = "r2"
 
-SRC_URI = "svn://svn.openmoko.org/trunk/src/host/;module=opkg-utils;proto=http"
+SRC_URI = "git://git.yoctoproject.org/opkg-utils;protocol=git"
 
-S = "${WORKDIR}/opkg-utils"
+S = "${WORKDIR}/git"
 
 inherit autotools_stage
 
-S = "${WORKDIR}/opkg-utils"
+S = "${WORKDIR}/git"
