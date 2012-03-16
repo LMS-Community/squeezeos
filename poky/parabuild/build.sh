@@ -56,7 +56,8 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Make build use all available CPUs
 (
-	echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
+	# Disable parallel package builds while trying to isolate problem (leaving parallel make)
+	# echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
 	echo BB_GENERATE_MIRROR_TARBALLS = \"0\"
 
 	echo DL_DIR = \"/opt/parabuild/etc/build/poky_dl_dir\" 
