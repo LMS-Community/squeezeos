@@ -6,9 +6,15 @@ LICENSE = "GPL"
 DEPENDS = "curl gpgme"
 PV = "0.0+svnr${SRCREV}"
 
-SRC_URI = "svn://opkg.googlecode.com/svn;module=trunk;proto=http \
-           file://fix_prototype.patch;patch=1"
+# opkg-fix-gcc-warnings.patch: the patch is already upstreamed and could be
+#                              taken out once okpg is updated to new repo
+#                              http://opkg.googlecode.com/svn/trunk
+#                              with rev >= 150
 
-S = "${WORKDIR}/trunk"
+SRC_URI = "http://downloads.slimdevices.com/poky-cache/opkg-utils_svn.openmoko.org_.trunk.src.host._4534_.tar.gz \
+           file://fix_prototype.patch;patch=1 \
+           file://opkg-fix-gcc-warnings.patch;patch=1"
+
+S = "${WORKDIR}/opkg"
 
 inherit autotools_stage pkgconfig
