@@ -53,9 +53,27 @@ class Git(Fetch):
             ud.tag = tag
 
         if not ud.tag or ud.tag == "master":
-            ud.tag = self.latest_revision(url, ud, d)	
-
-        ud.localfile = data.expand('git_%s%s_%s.tar.gz' % (ud.host, ud.path.replace('/', '.'), ud.tag), d)
+            ud.tag = self.latest_revision(url, ud, d)
+        
+        if 'repopath' in ud.parm:
+            ud.subdir = "%s" % (ud.parm['repopath'])
+        else:
+            ud.subdir = ""
+    
+        if 'module' in ud.parm:
+            if ud.subdir != "":
+                ud.subdir = os.path.join(ud.subdir, ud.parm['module'])
+            else:
+                ud.subdir = ud.parm['module']
+        else:
+            ud.subdir = ""
+	
+        if ud.subdir != "":
+            tagDir = "%s_%s" % (ud.subdir, ud.tag)
+        else:
+            tagDir = ud.tag
+    
+        ud.localfile = data.expand('git_%s%s_%s.tar.gz' % (ud.host, ud.path.replace('/', '.'), tagDir.replace('/', '.')), d)
 
         return os.path.join(data.getVar("DL_DIR", d, True), ud.localfile)
 
@@ -79,6 +97,9 @@ class Git(Fetch):
 
         coname = '%s' % (ud.tag)
         codir = os.path.join(repodir, coname)
+        
+        """ A single repodir can be used for multiple checkouts. Protect against corruption. """
+        lf = bb.utils.lockfile("%s.%s" % (repofile, '.lock'))
 
         if not os.path.exists(repodir):
             if Fetch.try_mirror(d, repofilename):    
@@ -106,10 +127,19 @@ class Git(Fetch):
         if os.path.exists(codir):
             bb.utils.prunedir(codir)
 
+        if ud.subdir != "":
+            readpathspec = ":%s" % (ud.subdir)
+            subdir = os.path.basename(ud.subdir)
+        else:
+            readpathspec = ""
+            subdir = "git"
+
         bb.mkdirhier(codir)
         os.chdir(repodir)
-        runfetchcmd("git read-tree %s" % (ud.tag), d)
-        runfetchcmd("git checkout-index -q -f --prefix=%s -a" % (os.path.join(codir, "git", "")), d)
+        runfetchcmd("git read-tree %s%s" % (ud.tag, readpathspec), d)
+        runfetchcmd("git checkout-index -q -f --prefix=%s -a" % (os.path.join(codir, subdir, "")), d)
+
+        bb.utils.unlockfile(lf)
 
         os.chdir(codir)
         bb.msg.note(1, bb.msg.domain.Fetcher, "Creating tarball of git checkout")
