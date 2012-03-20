@@ -56,9 +56,7 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 # Make build use all available CPUs
 (
-	# Disable all parallel build while trying to isolate problem
-	
-	# echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
+	echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
 	echo BB_GENERATE_MIRROR_TARBALLS = \"0\"
 
 	echo DL_DIR = \"/opt/parabuild/etc/build/poky_dl_dir\" 
@@ -66,7 +64,7 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 	echo GITDIR = \"/opt/parabuild/etc/build/poky_git_dir\"
 	echo SVNDIR = \"/opt/parabuild/etc/build/poky_svn_dir\"
 
-	#echo PARALLEL_MAKE = \"-j $CPUCOUNT\" 
+	echo PARALLEL_MAKE = \"-j $CPUCOUNT\" 
 ) >> conf/local.conf
 
 # Build firmware images, multiple machines can be built here
