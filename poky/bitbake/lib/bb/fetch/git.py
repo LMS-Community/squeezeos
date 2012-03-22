@@ -138,12 +138,19 @@ class Git(Fetch):
         os.chdir(repodir)
         runfetchcmd("git read-tree %s%s" % (ud.tag, readpathspec), d)
         runfetchcmd("git checkout-index -q -f --prefix=%s -a" % (os.path.join(codir, subdir, "")), d)
+        count = runfetchcmd("git rev-list %s -- | wc -l" % (ud.tag), d, True)
 
         bb.utils.unlockfile(lf)
 
         os.chdir(codir)
+
+        bb.msg.note(1, bb.msg.domain.Fetcher, "Checkins count: %s" % count)
+        f = open(os.path.join(subdir, '.git_revision_count'), 'w')
+        f.write(count)
+        f.close()
+
         bb.msg.note(1, bb.msg.domain.Fetcher, "Creating tarball of git checkout")
-        runfetchcmd("tar -czf %s %s" % (ud.localpath, os.path.join(".", "*") ), d)
+        runfetchcmd("tar -czf %s %s" % (ud.localpath,  os.path.join(".", "*") ), d)
 
         os.chdir(repodir)
         bb.utils.prunedir(codir)
