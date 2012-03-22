@@ -96,6 +96,8 @@ class Git(Fetch):
         repodir = os.path.join(data.expand('${GITDIR}', d), gitsrcname)
 
         coname = '%s' % (ud.tag)
+        if ud.subdir != "":
+            coname = '%s_%s' % (coname, ud.subdir.replace('/', '.'))
         codir = os.path.join(repodir, coname)
         
         """ A single repodir can be used for multiple checkouts. Protect against corruption. """
