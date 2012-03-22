@@ -15,7 +15,7 @@ function run_bitbake {
 echo "*** Setting poky environment ***"
 source poky-init-build-env
 
-if [ -f $PARABUILD_ENV_SCRIPT ]
+if [ -f "$PARABUILD_ENV_SCRIPT" ]
 then
 	source $PARABUILD_ENV_SCRIPT
 fi
