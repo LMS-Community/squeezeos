@@ -26,7 +26,7 @@ do_squeezeos_image() {
 	cd ${tmpdir}
 	md5sum zImage${IMAGE_SQUEEZEOS_EXTRA_VERSION} root.cramfs  > upgrade.md5
 
-	VERSION=${DISTRO_RELEASE}_r${SQUEEZEOS_REVISION}
+	VERSION=${DISTRO_RELEASE}_r${@squeezeos_squeezeplay_revision(d)}
 
 	# Create zip
 	rm -f ${DEPLOY_DIR_IMAGE}/${MACHINE}_${VERSION}.bin
@@ -43,6 +43,7 @@ do_squeezeos_image() {
 addtask squeezeos_image after do_rootfs before do_build
 
 squeezeos_version() {
-	echo "${DISTRO_RELEASE} r${SQUEEZEOS_REVISION}" > ${IMAGE_ROOTFS}/etc/squeezeos.version
+	echo "${DISTRO_RELEASE} r${@squeezeos_squeezeplay_revision(d)}" > ${IMAGE_ROOTFS}/etc/squeezeos.version
 	echo `whoami`@`hostname` `date` >> ${IMAGE_ROOTFS}/etc/squeezeos.version
+	echo "Base build revision: " ${METADATA_REVISION} >> ${IMAGE_ROOTFS}/etc/squeezeos.version
 }

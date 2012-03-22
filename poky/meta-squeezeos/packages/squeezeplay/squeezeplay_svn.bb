@@ -28,10 +28,51 @@ EXTRA_OECONF_append_baby = " --enable-screen-rotation"
 DEPENDS += "${@base_conditional('ENABLE_SPPRIVATE', 'yes', 'squeezeplay-private', '', d)}"
 EXTRA_OECONF += "${@base_conditional('ENABLE_SPPRIVATE', 'yes', '--with-spprivate', '', d)}"
 
-CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_RELEASE}\\" -DSQUEEZEPLAY_REVISION=\\"${SQUEEZEOS_REVISION}\\"'
+CFLAGS_prepend = '-DSQUEEZEPLAY_RELEASE=\\"${DISTRO_RELEASE}\\" -DSQUEEZEPLAY_REVISION=\\"${@squeezeos_squeezeplay_revision(d)}\\"'
 
 EXTRA_OEMAKE = "all lua-lint"
 
+python do_make_squeezeos_squeezeplay_revision() {
+	import bb, os
+	
+	# 4 cases to consider: SqueezeOS and SqueezePlay could each have come from
+	# either subversion or git. Use length of revision string and presence
+	# of subversion (.svn) directory and .git_revision_count file to decide.
+	
+	osRevision = bb.data.getVar('SQUEEZEOS_REVISION', d, 1)
+	if len(osRevision) > 8:	# assume a git revision hash
+		s = os.popen("cd %s; git rev-list %s -- | wc -l" % (bb.data.getVar('OEROOT', d, 1), bb.data.getVar('METADATA_REVISION', d, 1))).read().strip()
+		osrev = "%05d" % int(s)
+	else:
+		osrev = osRevision
+
+	
+	os.chdir(bb.data.getVar('S', d, 1))
+	if os.path.exists('.svn'):
+		if len(osRevision) > 8:	# assume a git revision hash
+			# OS=git, SP=svn
+			sprev = os.popen("svn info | sed -n 's/^Revision: //p' | head -1").read().strip()
+		else:
+			# OS=svn, S=svn
+			# Assume (require) same repository
+			sprev = ""
+	elif os.path.exists('.git_revision_count'):
+		sprev = open(os.path.join(bb.data.getVar('S', d, 1), '.git_revision_count'), 'r').readline().strip()
+	else:
+		# SP type unknown - just use OS revision
+		sprev = ""
+		
+	staging = bb.data.getVar('STAGING_DIR_TARGET', d, 1)
+	bb.mkdirhier(staging)
+	revision = "%s%s" % (sprev, osrev)
+	open(os.path.join(staging, 'squeezeos_squeezeplay_revision'), 'w').write("%s\n" % revision)
+}
+
+addtask make_squeezeos_squeezeplay_revision after do_unpack before do_configure
+
+def squeezeos_squeezeplay_revision(d):
+	import bb, os
+	return open(os.path.join(bb.data.getVar('STAGING_DIR_TARGET', d, 1), 'squeezeos_squeezeplay_revision'), 'r').readline().strip()
 
 do_stage() {
 	install -d ${STAGING_INCDIR}/squeezeplay
