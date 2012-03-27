@@ -58,6 +58,9 @@ python do_make_squeezeos_squeezeplay_revision() {
 			sprev = ""
 	elif os.path.exists('.git_revision_count'):
 		sprev = open(os.path.join(bb.data.getVar('S', d, 1), '.git_revision_count'), 'r').readline().strip()
+		if (len(osrev) < 9):
+			osrev = "%d" % (int(osrev) + int(sprev) + 10000)
+			sprev = ""
 	else:
 		# SP type unknown - just use OS revision
 		sprev = ""
