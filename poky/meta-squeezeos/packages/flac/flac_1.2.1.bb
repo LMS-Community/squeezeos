@@ -2,7 +2,9 @@ DESCRIPTION = "FLAC"
 SECTION = "libs"
 LICENSE = "Xiph"
 
-PR = "r7"
+DEPENDS = "libogg"
+
+PR = "r8"
 
 SRC_URI="${SOURCEFORGE_MIRROR}/flac/flac-${PV}.tar.gz \
 	 file://bitreader-1.2.1.patch;patch=1 \
@@ -16,7 +18,9 @@ S = "${WORKDIR}/flac-${PV}"
 inherit autotools gettext
 
 CFLAGS_prepend = "-DFLAC__CPU_ARM "
-EXTRA_OECONF = "--disable-ogg --disable-xmms-plugin --enable-static"
+EXTRA_OECONF = "--with-ogg-libraries=${STAGING_LIBDIR} \
+	        --with-ogg-includes=${STAGING_INCDIR} \
+	        --disable-xmms-plugin --enable-static"
 
 do_stage() {
 	autotools_stage_all
