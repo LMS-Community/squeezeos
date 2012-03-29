@@ -43,6 +43,14 @@ else
 	cp conf/local.conf.sample conf/local.conf
 fi
 
+for i in DISTRO_VERSION DISTRO_RELEASE SQUEEZEOS_SVN SQUEEZEPLAY_SCM SQUEEZECENTER_SCM SQUEEZECENTER_SVN_MODULE
+do
+	if [ "x${!i}" != "x" ]
+	then
+			echo "$i = \"${!i}\""
+	fi
+done >> conf/local.conf
+
 # Check if a machine type exists
 if [ "x${MACHINE}" != "x" ]
 then
