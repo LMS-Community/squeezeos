@@ -2,7 +2,7 @@ DESCRIPTION = "Marvell 88W8686 gspi wlan drivers"
 SECTION = "base"
 LICENSE = "binary only"
 
-PR = "r8"
+PR = "r9"
 
 PROVIDES = "marvell-gspi-module"
 
