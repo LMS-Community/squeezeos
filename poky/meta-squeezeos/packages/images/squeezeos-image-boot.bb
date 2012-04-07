@@ -5,6 +5,8 @@ PR = "r1"
 
 inherit image squeezeos-upgrade-image
 
+do_rootfs[depends] += "squeezeplay:do_make_squeezeos_squeezeplay_revision"
+
 IMAGE_INSTALL += " \
 	squeezeos-base-files \
 	busybox \
