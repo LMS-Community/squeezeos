@@ -26,8 +26,8 @@ echo "*** Clean cache and squeezeplay ***"
 rm -rf tmp-${MACHINE}/cache
 rm -rf tmp/cache
 
-# Clean squeezeplay to ensure that the firmware revision number is correct
-run_bitbake "squeezeplay -c clean" > /dev/null
+# Clean squeezeplay to ensure that the firmware revision number is correct (ignore errors)
+run_bitbake "squeezeplay -c clean" > /dev/null 2>&1
 
 echo "*** Update the local.conf file ***"
 if [ "x${SQUEEZEOS_PRIVATE_SVN}" != "x" ]
@@ -84,11 +84,11 @@ else
 	run_bitbake "squeezeos-image"
 fi
 
-# Do not leave the source code on the build machine, cleanup private modules
+# Do not leave the source code on the build machine, cleanup private modules (ignore errors)
 for PKG in 'marvell-wlan-tools-src' 'marvell-gspi-module-src' 'marvell-wps-src' 'squeezeplay-private'
 do
 	echo "*** Cleaning $PKG ***"
-	run_bitbake "$PKG -c clean -f"
+	run_bitbake "$PKG -c clean -f" >/dev/null 2>&1
 done
 
 # QA: Check version numbers match
