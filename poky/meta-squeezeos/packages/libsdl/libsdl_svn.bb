@@ -22,6 +22,8 @@ S = "${WORKDIR}/SDL-${BV}"
 
 inherit autotools binconfig
 
+PARALLEL_MAKE = ""
+
 EXTRA_OECONF = "--enable-audio --enable-video --enable-events --disable-joystick --disable-cdrom --enable-threads -enable-timers --enable-file --enable-loadso --disable-oss --disable-alsa --disable-esd --disable-arts --disable-video-x11 --disable-video-directfb --enable-clock_gettime"
 
 autotools_do_configure() {
