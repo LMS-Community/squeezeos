@@ -12,7 +12,7 @@ else
         exit 1
 fi
 
-TMPDIR="${PARABUILD_BUILD_DIR}/build/tmp-${MACHINE}"
+TMPDIR="tmp-${MACHINE}"
 
 if [ -d ${TMPDIR}/work ]
 then
