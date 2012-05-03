@@ -1,0 +1,77 @@
+Index: opkg/libopkg/opkg_conf.c
+===================================================================
+--- opkg/libopkg/opkg_conf.c	(revision 193)
++++ opkg/libopkg/opkg_conf.c	(revision 196)
+@@ -647,22 +647,21 @@
+ 
+ int opkg_conf_write_status_files(opkg_conf_t *conf)
+ {
+-     pkg_dest_list_elt_t *iter;
+      pkg_dest_t *dest;
+      pkg_vec_t *all;
+      pkg_t *pkg;
+      register int i;
+      int err;
++     FILE * status_file=NULL;
+ 
+      if (conf->noaction)
+ 	  return 0;
+-     for (iter = conf->pkg_dest_list.head; iter; iter = iter->next) {
+-	  dest = iter->data;
+-	  dest->status_file = fopen(dest->status_file_tmp_name, "w");
+-	  if (dest->status_file == NULL) {
+-	       fprintf(stderr, "%s: Can't open status file: %s for writing: %s\n",
+-		       __FUNCTION__, dest->status_file_name, strerror(errno));
+-	  }
++
++     dest = conf->pkg_dest_list.head->data;
++     status_file = fopen(dest->status_file_tmp_name, "w");
++     if (status_file == NULL) {
++         fprintf(stderr, "%s: Can't open status file: %s for writing: %s\n",
++                 __FUNCTION__, dest->status_file_tmp_name, strerror(errno));
+      }
+ 
+      all = pkg_vec_alloc();
+@@ -686,29 +685,25 @@
+ 		       __FUNCTION__, pkg->name);
+ 	       continue;
+ 	  }
+-	  if (pkg->dest->status_file) {
+-	       pkg_print_status(pkg, pkg->dest->status_file);
++	  if (status_file) {
++	       pkg_print_status(pkg, status_file);
+ 	  }
+      }
+ 
+      pkg_vec_free(all);
+ 
+-     for (iter = conf->pkg_dest_list.head; iter; iter = iter->next) {
+-	  dest = iter->data;
+-	  if (dest->status_file) {
+-	       err = ferror(dest->status_file);
+-	       fclose(dest->status_file);
+-	       dest->status_file = NULL;
+-	       if (!err) {
+-		    file_move(dest->status_file_tmp_name, dest->status_file_name);
+-	       } else {
+-		    fprintf(stderr, "%s: ERROR: An error has occurred writing %s, "
+-			    "retaining old %s\n", __FUNCTION__, 
+-			    dest->status_file_tmp_name, dest->status_file_name);
+-	       }
+-	  }
++     if (status_file) {
++         err = ferror(status_file);
++         fclose(status_file);
++         if (!err) {
++             file_move(dest->status_file_tmp_name, dest->status_file_name);
++         } else {
++             fprintf(stderr, "%s: ERROR: An error has occurred writing %s, "
++                     "retaining old %s\n", __FUNCTION__,
++                     dest->status_file_tmp_name, dest->status_file_name);
++         }
++         status_file = NULL;
+      }
+-
+      return 0;
+ }
+ 
