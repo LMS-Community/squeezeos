@@ -55,13 +55,12 @@ dirs755 = "${sysconfdir}/init.d \
 	${sysconfdir}/squeezecenter ${sysconfdir}/squeezecenter/prefs ${sysconfdir}/squeezecenter/cache"
 
 do_install() {
-	${S}/buildme.pl --build tarball --buildDir ${WORKDIR}/tmp --sourceDir ${S} --destDir ${WORKDIR} --destName squeezecenter --noCPAN
-	cd ${D}
-	tar -xzf ${WORKDIR}/squeezecenter-noCPAN.tgz
 	mkdir -p ${D}/${prefix}/squeezecenter
-	mv squeezecenter-noCPAN/* ${D}/${prefix}/squeezecenter
-	rm -r ${D}/${prefix}/squeezecenter/Bin
+	# This just does what buildme.pl would have done, plus a bit more exclusion; revision.txt is made later
+	tar -C ${S}/server -cf - --exclude-vcs --anchored --exclude=./CPAN/arch --exclude=./Bin . | tar -C ${D}/${prefix}/squeezecenter -xf -
 	
+	cd ${D}
+
 	# Deal with images
 	mv ${D}/${prefix}/squeezecenter/HTML ${D}/${prefix}/squeezecenter/HTML.tmp
 	mkdir -p ${D}/${prefix}/squeezecenter/HTML/Default/html/images
@@ -94,7 +93,6 @@ do_install() {
 	rm -r ${D}/${prefix}/squeezecenter/Graphics/CODE2000.*
 
 	# Remove duplicate modules under CPAN that were installed system-wide
-	rm -r ${D}/${prefix}/squeezecenter/CPAN/arch
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Audio
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Class/XSAccessor*
 	rm -r ${D}/${prefix}/squeezecenter/CPAN/Compress
@@ -165,6 +163,9 @@ do_install() {
 
 	echo "rev: ${SRCREV}" > ${D}/${prefix}/squeezecenter/build.txt
 	echo "repo: ${SRC_URI}" >> ${D}/${prefix}/squeezecenter/build.txt
+	
+	echo "${SRCREV}" > ${D}/${prefix}/squeezecenter/revision.txt
+	date >>${D}/${prefix}/squeezecenter/revision.txt
 	
 	for d in ${dirs755}; do
 		install -m 0755 -d ${D}$d
