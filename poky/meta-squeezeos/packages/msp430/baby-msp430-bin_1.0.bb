@@ -1,7 +1,7 @@
 DESCRIPTION = "baby msp430 firmware"
 LICENSE = "Confidential"
 
-PR="r44"
+PR="r45"
 
 PROVIDES = "baby-msp430"
 
