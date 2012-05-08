@@ -16,13 +16,11 @@ RDEPENDS += "libdevel-nytprof-perl"
 
 # BROKEN: libencode-detect-perl
 
-SQUEEZECENTER_SVN_MODULE ?= "trunk"
-
-SRC_URI = "${SQUEEZECENTER_SCM};module=${SQUEEZECENTER_SVN_MODULE} \
+SRC_URI = "${SQUEEZECENTER_SCM} \
 	file://squeezecenter \
 	file://custom-convert.conf"
 	
-S = "${WORKDIR}/${SQUEEZECENTER_SVN_MODULE}"
+S = "${WORKDIR}/git"
 
 # This should match the list in Slim::Utils::OS::SqueezeOS::skipPlugins
 # Actual included plugins determined by INCLUDED_PLUGINS list below
@@ -57,7 +55,7 @@ dirs755 = "${sysconfdir}/init.d \
 do_install() {
 	mkdir -p ${D}/${prefix}/squeezecenter
 	# This just does what buildme.pl would have done, plus a bit more exclusion; revision.txt is made later
-	tar -C ${S}/server -cf - --exclude=.svn --exclude=.git --exclude=./CPAN/arch --exclude=./Bin . | tar -C ${D}/${prefix}/squeezecenter -xf -
+	tar -C ${S} -cf - --exclude=.svn --exclude=.git --exclude=./CPAN/arch --exclude=./Bin . | tar -C ${D}/${prefix}/squeezecenter -xf -
 	
 	cd ${D}
 
