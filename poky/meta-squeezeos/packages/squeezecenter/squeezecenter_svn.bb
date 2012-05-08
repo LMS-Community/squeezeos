@@ -57,7 +57,7 @@ dirs755 = "${sysconfdir}/init.d \
 do_install() {
 	mkdir -p ${D}/${prefix}/squeezecenter
 	# This just does what buildme.pl would have done, plus a bit more exclusion; revision.txt is made later
-	tar -C ${S}/server -cf - --exclude-vcs --anchored --exclude=./CPAN/arch --exclude=./Bin . | tar -C ${D}/${prefix}/squeezecenter -xf -
+	tar -C ${S}/server -cf - --exclude=.svn --exclude=.git --exclude=./CPAN/arch --exclude=./Bin . | tar -C ${D}/${prefix}/squeezecenter -xf -
 	
 	cd ${D}
 
