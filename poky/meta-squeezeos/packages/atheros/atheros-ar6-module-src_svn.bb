@@ -23,7 +23,7 @@ SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=atheros/AR6kSDK.build_sw.62 \
 	 file://loadAR6000l.sh \
 "
 
-S = "${WORKDIR}/atheros/AR6kSDK.build_sw.62"
+S = "${WORKDIR}/AR6kSDK.build_sw.62"
 
 inherit module-base
 
