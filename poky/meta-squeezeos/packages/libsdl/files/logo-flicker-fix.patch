@@ -1,0 +1,332 @@
+Index: SDL-1.2.13/src/video/SDL_video.c
+===================================================================
+--- SDL-1.2.13.orig/src/video/SDL_video.c	2012-05-16 11:26:17.085220934 -0700
++++ SDL-1.2.13/src/video/SDL_video.c	2012-05-16 11:42:55.417218923 -0700
+@@ -709,8 +709,10 @@
+ 		video->offset_y = 0;
+ 		mode->offset = 0;
+ 		SDL_SetClipRect(mode, NULL);
++#ifndef LOGO_FLICKER_FIX
+ 		SDL_ClearSurface(mode);
+ 
++#endif
+ 		/* Now adjust the offsets to match the desired mode */
+ 		video->offset_x = (mode->w-width)/2;
+ 		video->offset_y = (mode->h-height)/2;
+Index: SDL-1.2.13/src/video/fbcon/SDL_fbevents.c
+===================================================================
+--- SDL-1.2.13.orig/src/video/fbcon/SDL_fbevents.c	2012-05-16 11:26:04.997218610 -0700
++++ SDL-1.2.13/src/video/fbcon/SDL_fbevents.c	2012-05-16 17:32:03.112720859 -0700
+@@ -51,6 +51,10 @@
+ 
+ #include "SDL_fbelo.h"
+ 
++#ifdef LOGO_FLICKER_FIX
++#include <linux/input.h>
++#endif
++
+ #ifndef GPM_NODE_FIFO
+ #define GPM_NODE_FIFO	"/dev/gpmdata"
+ #endif
+@@ -234,18 +238,30 @@
+ void FB_CloseKeyboard(_THIS)
+ {
+ 	if ( keyboard_fd >= 0 ) {
++#ifndef LOGO_FLICKER_FIX
+ 		FB_LeaveGraphicsMode(this);
++#endif
+ 		if ( keyboard_fd > 0 ) {
+ 			close(keyboard_fd);
+ 		}
+ 	}
+ 	keyboard_fd = -1;
++
++#ifdef LOGO_FLICKER_FIX
++	if ( keyboard1_fd >= 0 ) {
++		if ( keyboard1_fd > 0 ) {
++			close(keyboard1_fd);
++		}
++	}
++	keyboard1_fd = -1;
++#endif
+ }
+ 
+ int FB_OpenKeyboard(_THIS)
+ {
+ 	/* Open only if not already opened */
+  	if ( keyboard_fd < 0 ) {
++#ifndef LOGO_FLICKER_FIX
+ 		static const char * const tty0[] = { "/dev/tty0", "/dev/vc/0", NULL };
+ 		static const char * const vcs[] = { "/dev/vc/%d", "/dev/tty%d", NULL };
+ 		int i, tty0_fd;
+@@ -309,6 +325,97 @@
+ 		  }
+ 		}
+ 
++#else /*LOGO_FLICKER_FIX*/
++		static const char * const tty0[] = { "/dev/tty0", "/dev/vc/0", NULL };
++		static const char * const vcs[] = { "/dev/vc/%d", "/dev/tty%d", NULL };
++		int i, tty0_fd;
++		int tmp_fd = -1;
++
++		/* Try to query for a free virtual terminal */
++		tty0_fd = -1;
++		for ( i=0; tty0[i] && (tty0_fd < 0); ++i ) {
++			tty0_fd = open(tty0[i], O_WRONLY, 0);
++		}
++		if ( tty0_fd < 0 ) {
++			tty0_fd = dup(0); /* Maybe stdin is a VT? */
++		}
++		ioctl(tty0_fd, VT_OPENQRY, &current_vt);
++		close(tty0_fd);
++		if ( (geteuid() == 0) && (current_vt > 0) ) {
++			for ( i=0; vcs[i] && (tmp_fd < 0); ++i ) {
++				char vtpath[12];
++
++				SDL_snprintf(vtpath, SDL_arraysize(vtpath), vcs[i], current_vt);
++				tmp_fd = open(vtpath, O_RDWR, 0);
++#ifdef DEBUG_KEYBOARD
++				fprintf(stderr, "vtpath = %s, fd = %d\n",
++					vtpath, tmp_fd);
++#endif /* DEBUG_KEYBOARD */
++				char str[64];
++				
++				if (tmp_fd > 0) {
++					sprintf(str, "echo -e '\033[9;0]' > %s", vtpath);
++					system(str);
++				}
++
++				/* This needs to be our controlling tty
++				   so that the kernel ioctl() calls work
++				*/
++				if ( tmp_fd >= 0 ) {
++					tty0_fd = open("/dev/tty", O_RDWR, 0);
++					if ( tty0_fd >= 0 ) {
++						ioctl(tty0_fd, TIOCNOTTY, 0);
++						close(tty0_fd);
++					}
++				}
++			}
++		}
++
++		if ( ioctl(tmp_fd, KDSETMODE, KD_GRAPHICS) < 0 ) {
++			FB_CloseKeyboard(this);
++			SDL_SetError("Unable to set keyboard in graphics mode");
++			return(-1);
++		}
++		/* Prevent switching the virtual terminal */
++		ioctl(tmp_fd, VT_LOCKSWITCH, 1);
++
++		keyboard_fd = -1;
++		keyboard1_fd = -1;
++
++#define BITS_PER_LONG (sizeof(long) * 8)
++#define NBITS(x) ((((x)-1)/BITS_PER_LONG)+1)
++#define OFF(x)  ((x)%BITS_PER_LONG)
++#define BIT(x)  (1UL<<OFF(x))
++#define LONG(x) ((x)/BITS_PER_LONG)
++#define test_bit(bit, array)	((array[LONG(bit)] >> OFF(bit)) & 1)
++
++		for (i=0; i<10; i++ ) {
++			int fd;
++			char devname[20];
++			unsigned long evbit[40];	
++
++			snprintf(devname, sizeof(devname), "/dev/input/event%d", i);
++			fd = open(devname, O_RDWR | O_NONBLOCK);
++			if (fd == -1) {
++				continue;
++			}
++
++			if (ioctl(fd, EVIOCGBIT(0, EV_MAX), &evbit) < 0) {
++				close(fd);
++				continue;
++			}
++
++			if (!test_bit(EV_KEY, evbit)) {
++				continue;
++			}
++
++			if (keyboard_fd == -1) {
++				keyboard_fd = fd;
++			} else {
++				keyboard1_fd = fd;
++			}
++		}
++#endif
+ 		/* Set up keymap */
+ 		FB_vgainitkeymaps(keyboard_fd);
+  	}
+@@ -982,13 +1089,60 @@
+ 	SDL_mutexV(hw_lock);
+ }
+ 
++#ifdef LOGO_FLICKER_FIX
++static void handle_keyboard(_THIS, int kn)
++#else
+ static void handle_keyboard(_THIS)
++#endif
+ {
+ 	unsigned char keybuf[BUFSIZ];
+ 	int i, nread;
+ 	int pressed;
+ 	int scancode;
+ 	SDL_keysym keysym;
++
++#ifdef LOGO_FLICKER_FIX
++	struct input_event ev;
++	long event_timestamp;
++
++	nread = read( (kn ? keyboard1_fd:keyboard_fd), &ev, sizeof(struct input_event));
++	if (nread < 0) {
++		return;
++	}
++
++	scancode = (int)ev.code;
++
++	keysym.scancode = scancode;
++	keysym.mod = 0;
++	keysym.unicode = 0;
++
++	switch(scancode) {
++		case 59: keysym.sym = 282;break;
++		case 60: keysym.sym = 283;break;
++		case 61: keysym.sym = 284;break;
++
++		case 62: keysym.sym = 285;break;
++		case 63: keysym.sym = 286;break;
++		case 64: keysym.sym = 287;break;
++
++		case 102: keysym.sym = 278;break;
++		case 142: keysym.sym = 344;break;
++		case  78: keysym.sym = 270;break;
++		case 105: keysym.sym = 276;break;
++
++		case 106: keysym.sym = 275;break;
++
++		case 165: keysym.sym = 329;break;
++		case 164: keysym.sym = 346;break;
++		case 163: keysym.sym = 330;break;
++		case 207: keysym.sym = 327;break;
++
++		case 113: keysym.sym = 325;break;
++		case 116: keysym.sym = 320;break;
++	}
++
++	posted += SDL_PrivateKeyboard(ev.value, &keysym);
++#else
+ 	nread = read(keyboard_fd, keybuf, BUFSIZ);
+ 	for ( i = 0; i<nread; ++i ) {
+ 		if ( ((keybuf[i] == 0) || keybuf[i] == 128) && (nread-i >= 2) && keybuf[i + 1] == 129) {
+@@ -1039,6 +1193,7 @@
+ 			break;
+ 		}
+ 	}
++#endif
+ }
+ 
+ void FB_PumpEvents(_THIS)
+@@ -1070,6 +1225,14 @@
+ 				max_fd = keyboard_fd;
+ 			}
+ 		}
++#ifdef LOGO_FLICKER_FIX
++		if ( keyboard1_fd >= 0 ) {
++			FD_SET(keyboard1_fd, &fdset);
++			if ( max_fd < keyboard1_fd ) {
++				max_fd = keyboard1_fd;
++			}
++		}
++#endif
+ 		if ( mouse_fd >= 0 ) {
+ 			FD_SET(mouse_fd, &fdset);
+ 			if ( max_fd < mouse_fd ) {
+@@ -1079,9 +1242,20 @@
+ 		if ( select(max_fd+1, &fdset, NULL, NULL, &zero) > 0 ) {
+ 			if ( keyboard_fd >= 0 ) {
+ 				if ( FD_ISSET(keyboard_fd, &fdset) ) {
++#ifdef LOGO_FLICKER_FIX
++					handle_keyboard(this, 0);
++#else
+ 					handle_keyboard(this);
++#endif
+ 				}
+ 			}
++#ifdef LOGO_FLICKER_FIX
++			if ( keyboard1_fd >= 0 ) {
++				if ( FD_ISSET(keyboard1_fd, &fdset) ) {
++					handle_keyboard(this, 1);
++				}
++			}
++#endif
+ 			if ( mouse_fd >= 0 ) {
+ 				if ( FD_ISSET(mouse_fd, &fdset) ) {
+ 					handle_mouse(this);
+Index: SDL-1.2.13/src/video/fbcon/SDL_fbvideo.c
+===================================================================
+--- SDL-1.2.13.orig/src/video/fbcon/SDL_fbvideo.c	2012-05-16 11:25:57.505218843 -0700
++++ SDL-1.2.13/src/video/fbcon/SDL_fbvideo.c	2012-05-16 13:32:47.436720782 -0700
+@@ -931,10 +931,12 @@
+ 	char *surfaces_mem;
+ 	int surfaces_len;
+ 
++#ifndef LOGO_FLICKER_FIX
+ 	/* Set the terminal into graphics mode */
+ 	if ( FB_EnterGraphicsMode(this) < 0 ) {
+ 		return(NULL);
+ 	}
++#endif
+ 
+ 	/* Restore the original palette */
+ 	FB_RestorePalette(this);
+@@ -948,8 +950,13 @@
+ 	fprintf(stderr, "Printing original vinfo:\n");
+ 	print_vinfo(&vinfo);
+ #endif
++#ifndef LOGO_FLICKER_FIX
+ 	if ( (vinfo.xres != width) || (vinfo.yres != height) ||
+ 	     (vinfo.bits_per_pixel != bpp) || (flags & SDL_DOUBLEBUF) ) {
++#else
++	if ( (vinfo.xres != width) || (vinfo.yres != height) ||
++	     (vinfo.bits_per_pixel != bpp)) {
++#endif
+ 		vinfo.activate = FB_ACTIVATE_NOW;
+ 		vinfo.accel_flags = 0;
+ 		vinfo.bits_per_pixel = bpp;
+Index: SDL-1.2.13/src/video/fbcon/SDL_fbvideo.h
+===================================================================
+--- SDL-1.2.13.orig/src/video/fbcon/SDL_fbvideo.h	2012-05-16 11:26:01.093220961 -0700
++++ SDL-1.2.13/src/video/fbcon/SDL_fbvideo.h	2012-05-16 11:41:43.112746666 -0700
+@@ -60,6 +60,9 @@
+ 	int current_vt;
+ 	int saved_vt;
+ 	int keyboard_fd;
++#ifdef LOGO_FLICKER_FIX
++	int keyboard1_fd;
++#endif
+ 	int saved_kbd_mode;
+ 	struct termios saved_kbd_termios;
+ 
+@@ -99,6 +102,9 @@
+ #define current_vt		(this->hidden->current_vt)
+ #define saved_vt		(this->hidden->saved_vt)
+ #define keyboard_fd		(this->hidden->keyboard_fd)
++#ifdef LOGO_FLICKER_FIX
++#define keyboard1_fd		(this->hidden->keyboard1_fd)
++#endif
+ #define saved_kbd_mode		(this->hidden->saved_kbd_mode)
+ #define saved_kbd_termios	(this->hidden->saved_kbd_termios)
+ #define mouse_fd		(this->hidden->mouse_fd)
+Index: SDL-1.2.13/src/video/SDL_sysvideo.h
+===================================================================
+--- SDL-1.2.13.orig/src/video/SDL_sysvideo.h	2012-05-16 11:50:29.472970835 -0700
++++ SDL-1.2.13/src/video/SDL_sysvideo.h	2012-05-16 11:50:41.520721013 -0700
+@@ -37,6 +37,8 @@
+ #include "SDL_opengl.h"
+ #endif /* SDL_VIDEO_OPENGL */
+ 
++#define LOGO_FLICKER_FIX
++
+ /* The SDL video driver */
+ typedef struct SDL_VideoDevice SDL_VideoDevice;
+ 
