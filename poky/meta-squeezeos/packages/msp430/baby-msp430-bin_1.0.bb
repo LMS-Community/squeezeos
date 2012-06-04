@@ -8,6 +8,7 @@ PROVIDES = "baby-msp430"
 SRC_URI=" \
 	file://msp430-0001.txt \
 	file://msp430-0003.txt \
+	file://msp430-0008.txt \
 	"
 
 do_install() {
