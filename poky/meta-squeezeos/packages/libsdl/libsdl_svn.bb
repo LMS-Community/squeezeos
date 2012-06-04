@@ -17,6 +17,7 @@ SRC_URI = " \
 	${SQUEEZEPLAY_SCM};module=SDL-${BV} \
 	file://fbvideo-no-timings.patch;patch=1 \
 	file://logo-flicker-fix.patch;patch=1 \
+	file://cursor-blink.patch;patch=1 \
 	"
 
 S = "${WORKDIR}/SDL-${BV}"
