@@ -14,6 +14,11 @@ fi
 
 TMPDIR="tmp-${MACHINE}"
 
+# [AWY] I think maybe it is necessary to run the bitbake clean tasks
+# below even when we do not yet have a TMPDIR because it sets up
+# some pre-requisite state.
+mkdir -p ${TMPDIR}/work
+
 if [ -d ${TMPDIR}/work ]
 then
 	echo "Cleaning out squeezeos-image and squeezeplay"
