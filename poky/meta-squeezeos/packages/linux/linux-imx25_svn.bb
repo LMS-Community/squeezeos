@@ -5,7 +5,7 @@ LICENSE = "GPL"
 LINUX_ARCH = imx25
 LINUX_VERSION = "2.6.26"
 PV = "${LINUX_VERSION}+${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r8"
+PR = "r9"
 
 
 inherit kernel
