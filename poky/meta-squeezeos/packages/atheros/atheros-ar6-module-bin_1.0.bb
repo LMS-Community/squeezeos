@@ -2,7 +2,7 @@ DESCRIPTION = "Atheros AR6 sdio wlan driver"
 SECTION = "base"
 LICENSE = "binary only"
 
-PR = "r20"
+PR = "r21"
 
 PROVIDES = "atheros-ar6-module"
 
@@ -46,7 +46,9 @@ do_install() {
 	install -m 0755 ${WORKDIR}/loadAR6000l.sh ${INSTALL_DIR}/loadAR6000l.sh
 
 	install -m 0755 -d ${D}${sysconfdir}/init.d
-	install -m 0755 ${WORKDIR}/wlan ${D}${sysconfdir}/init.d/wlan
+## The wlan script file is copied in the atheros-ar63-module-bin_1.0.bb recipe.
+## It will select the proper driver according to board revision.
+#	install -m 0755 ${WORKDIR}/wlan ${D}${sysconfdir}/init.d/wlan
 }
 
 
