@@ -2,7 +2,7 @@ DESCRIPTION = "Atheros AR63 sdio wlan driver"
 SECTION = "base"
 LICENSE = "binary only"
 
-PR = "r2"
+PR = "r3"
 
 PROVIDES = "atheros-ar63-module"
 
@@ -16,7 +16,7 @@ SRC_URI=" \
 	 file://eeprom \
 	 file://athwlan.bin \
 	 file://data.patch.hw3_0.bin \
-	 file://calData_ar6233_golden_bin_12132011.bin \
+	 file://calData_WB44-030-D0400_spur_enabled_040312.bin \
 	 file://otp.bin \
 	 file://loadAR6000l.sh \
 	 file://wlan \
@@ -44,7 +44,7 @@ do_install() {
 	install -m 0644 ${WORKDIR}/otp.bin ${INSTALL_DIR}/otp.bin
 
 	# scripts
-	install -m 0644 ${WORKDIR}/calData_ar6233_golden_bin_12132011.bin ${INSTALL_DIR}/calData_ar6233_golden_bin_12132011.bin
+	install -m 0644 ${WORKDIR}/calData_WB44-030-D0400_spur_enabled_040312.bin ${INSTALL_DIR}/calData_WB44-030-D0400_spur_enabled_040312.bin
 	install -m 0755 ${WORKDIR}/loadAR6000l.sh ${INSTALL_DIR}/loadAR6000l.sh
 
 	install -m 0755 -d ${D}${sysconfdir}/init.d
