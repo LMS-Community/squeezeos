@@ -16,7 +16,7 @@ SRC_URI=" \
 	 file://eeprom \
 	 file://athwlan.bin \
 	 file://data.patch.hw3_0.bin \
-	 file://calData_WB44-030-D0400_spur_enabled_040312.bin \
+	 file://calData_WB44_030_D0400_spur_enabled_040312_2G_Only.bin \
 	 file://otp.bin \
 	 file://loadAR6000l.sh \
 	 file://wlan \
@@ -44,7 +44,7 @@ do_install() {
 	install -m 0644 ${WORKDIR}/otp.bin ${INSTALL_DIR}/otp.bin
 
 	# scripts
-	install -m 0644 ${WORKDIR}/calData_WB44-030-D0400_spur_enabled_040312.bin ${INSTALL_DIR}/calData_WB44-030-D0400_spur_enabled_040312.bin
+	install -m 0644 ${WORKDIR}/calData_WB44_030_D0400_spur_enabled_040312_2G_Only.bin ${INSTALL_DIR}/calData_WB44_030_D0400_spur_enabled_040312_2G_Only.bin
 	install -m 0755 ${WORKDIR}/loadAR6000l.sh ${INSTALL_DIR}/loadAR6000l.sh
 
 	install -m 0755 -d ${D}${sysconfdir}/init.d
