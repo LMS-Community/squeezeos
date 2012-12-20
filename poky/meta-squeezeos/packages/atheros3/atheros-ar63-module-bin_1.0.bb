@@ -2,7 +2,7 @@ DESCRIPTION = "Atheros AR63 sdio wlan driver"
 SECTION = "base"
 LICENSE = "binary only"
 
-PR = "r3"
+PR = "r4"
 
 PROVIDES = "atheros-ar63-module"
 
