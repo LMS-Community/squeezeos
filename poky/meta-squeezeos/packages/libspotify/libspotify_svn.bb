@@ -3,7 +3,7 @@ SECTION = "libs"
 LICENSE = "Confidential"
 
 PV = "${DISTRO_VERSION}+svnr${SRCREV}"
-PR = "r7"
+PR = "r8"
 
 # XXX this can be public later
 SRC_URI="${SQUEEZEOS_PRIVATE_SVN};module=libspotify"
