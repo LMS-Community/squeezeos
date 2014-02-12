@@ -64,7 +64,7 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 (
 	# Make build use all available CPUs
-	echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
+	###echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
 	echo BB_GENERATE_MIRROR_TARBALLS = \"0\"
 	echo PARALLEL_MAKE = \"-j $CPUCOUNT\" 
 
