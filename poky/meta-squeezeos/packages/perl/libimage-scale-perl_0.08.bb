@@ -1,7 +1,7 @@
 DESCRIPTION = "Image::Scale - Fast, high-quality fixed-point image resizing"
 SECTION = "libs"
 LICENSE = "GPL"
-PR = "r8"
+PR = "r9"
 
 # XXX This requires these libraries to be installed at /usr/lib on the build machine
 # Need Makefile.PL changes to support cross-compilation library location
