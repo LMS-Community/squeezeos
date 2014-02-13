@@ -9,7 +9,7 @@ DOUBLECPUCOUNT=`echo "$CPUCOUNT * 2" | bc`
 
 # Function to make sure we call bitbake the same way everywhere
 function run_bitbake {
-	bitbake -vvv $*
+	bitbake -D -vvv $*
 }
 
 echo "*** Setting poky environment ***"
