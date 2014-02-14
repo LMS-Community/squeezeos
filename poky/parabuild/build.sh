@@ -9,7 +9,7 @@ DOUBLECPUCOUNT=`echo "$CPUCOUNT * 2" | bc`
 
 # Function to make sure we call bitbake the same way everywhere
 function run_bitbake {
-	bitbake -D -vvv $*
+	bitbake -vvv $*
 }
 
 echo "*** Setting poky environment ***"
@@ -64,9 +64,9 @@ echo "INHERIT += \"rm_work\"" >> conf/local.conf
 
 (
 	# Make build use all available CPUs
-	###echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
+	echo BB_NUMBER_THREADS = \"$CPUCOUNT\"
 	echo BB_GENERATE_MIRROR_TARBALLS = \"0\"
-	###echo PARALLEL_MAKE = \"-j $CPUCOUNT\" 
+	echo PARALLEL_MAKE = \"-j $CPUCOUNT\" 
 
 	echo DL_DIR = \"/opt/parabuild/etc/build/poky_dl_dir\" 
 	echo CVSDIR = \"/opt/parabuild/etc/build/poky_cvs_dir\"
