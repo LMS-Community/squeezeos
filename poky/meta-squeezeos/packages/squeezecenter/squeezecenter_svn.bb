@@ -30,9 +30,9 @@ INCLUDED_PLUGINS = ""
 # Apps
 INCLUDED_PLUGINS += "Amazon Classical Deezer"
 INCLUDED_PLUGINS += "LMA MP3tunes Pandora Slacker"
-INCLUDED_PLUGINS += "Facebook Flickr LastFM Live365 RadioTime RhapsodyDirect"
+INCLUDED_PLUGINS += "Flickr LastFM Live365 RadioTime RhapsodyDirect"
 INCLUDED_PLUGINS += "Sirius Sounds WiMP SpotifyLogi Orange MOG"
-EXCLUDED_PLUGING += "RSSNews Podcast InfoBrowser UPnP"
+EXCLUDED_PLUGINS += "RSSNews Podcast InfoBrowser UPnP"
 
 # Core features
 INCLUDED_PLUGINS += "CLI DateTime Favorites InternetRadio AudioScrobbler SongScanner"

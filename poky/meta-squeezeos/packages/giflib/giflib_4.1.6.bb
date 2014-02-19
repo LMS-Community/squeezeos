@@ -2,7 +2,7 @@ DESCRIPTION = "GIF Library"
 HOMEPAGE = "http://sourceforge.net/projects/giflib/"
 LICENSE = "giflib"
 SECTION = "libs"
-PR = "r1"
+PR = "r3"
 
 SRC_URI = "${SOURCEFORGE_MIRROR}/giflib/giflib-${PV}.tar.bz2"
 
